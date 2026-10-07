@@ -36,8 +36,9 @@ if (-not (Test-Path $cmake)) { throw "CMake not found: install Visual Studio wit
 
 Step "PS2Recomp submodule"
 git -C $root submodule update --init --recursive; Check "git submodule update"
-git -C (Join-Path $root "PS2Recomp") apply --reverse --check (Join-Path $root "patches\ps2recomp-runtime.diff") 2>$null
-if ($LASTEXITCODE -ne 0) {
+# Apply the runtime patch to a clean submodule; local work in progress there is left alone.
+git -C (Join-Path $root "PS2Recomp") diff --quiet
+if ($LASTEXITCODE -eq 0) {
     git -C (Join-Path $root "PS2Recomp") apply (Join-Path $root "patches\ps2recomp-runtime.diff"); Check "applying runtime patch"
 }
 

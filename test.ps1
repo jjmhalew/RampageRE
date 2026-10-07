@@ -11,6 +11,7 @@ if (-not (Test-Path $exe)) { throw "Build first: .\build.ps1" }
 Get-Process ps2EntryRunner -ErrorAction SilentlyContinue | Stop-Process -Force
 $out = Join-Path $root "build\test.out"
 $err = Join-Path $root "build\test.err"
+$env:PS2X_AUTOPRESS = "1"
 $p = Start-Process -FilePath $exe -ArgumentList "RAMPAGE.ELF" -WorkingDirectory (Join-Path $root "build\disc") `
     -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
 if ($p.WaitForExit($Seconds * 1000)) { "exited with code $($p.ExitCode)" } else { $p | Stop-Process -Force; "still running after $Seconds s (stopped)" }

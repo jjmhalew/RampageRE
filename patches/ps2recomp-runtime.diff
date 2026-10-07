@@ -1,5 +1,92 @@
+diff --git a/ps2xIOP/include/ps2x/iop/iop_host.h b/ps2xIOP/include/ps2x/iop/iop_host.h
+index 1eceb08..f6bba2e 100644
+--- a/ps2xIOP/include/ps2x/iop/iop_host.h
++++ b/ps2xIOP/include/ps2x/iop/iop_host.h
+@@ -3,6 +3,8 @@
+ #include "ps2x/iop/iop_types.h"
+ 
+ #include <array>
++#include <functional>
++#include <vector>
+ #include <cstddef>
+ #include <cstdint>
+ #include <string>
+@@ -118,6 +120,29 @@ namespace ps2x::iop
+                                          uint32_t a3,
+                                          uint32_t *resultAddress) = 0;
+ 
++        // IOP -> EE RPC: is an EE server registered for this sid?
++        [[nodiscard]] virtual bool hasEeRpcServer(uint32_t sid) const
++        {
++            (void)sid;
++            return false;
++        }
++
++        // IOP -> EE RPC: run the EE server function for `sid` with `send` as its input. The host calls
++        // `done` with the first `receiveSize` bytes of the server's reply once the EE side has run it.
++        virtual bool callEeRpc(uint32_t sid,
++                               uint32_t function,
++                               std::vector<uint8_t> send,
++                               uint32_t receiveSize,
++                               std::function<void(const std::vector<uint8_t> &)> done)
++        {
++            (void)sid;
++            (void)function;
++            (void)send;
++            (void)receiveSize;
++            (void)done;
++            return false;
++        }
++
+         // Deliver an IOP -> EE SIF command packet. The default keeps hosts
+         // which do not emulate the EE command dispatcher source-compatible.
+         virtual bool sendSifCommand(uint32_t commandId,
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.cpp b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+index 4832d8f..c923a20 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.cpp
++++ b/ps2xIOP/src/emulator/core/iop_kernel.cpp
+@@ -524,6 +524,26 @@ namespace ps2x::iop::detail
+         return true;
+     }
+ 
++    bool IopKernel::waitInternalEventFlag(int id, uint32_t bits, uint32_t mode, IopCpuState &cpu)
++    {
++        const auto event = m_eventFlags.find(id);
++        if (event == m_eventFlags.end() || m_currentThread == nullptr)
++            return false;
++        if (eventSatisfied(event->second, bits, mode))
++        {
++            if ((mode & 0x10u) != 0u)
++                event->second.bits = 0u;
++            return true;
++        }
++        m_currentThread->state = IopThreadState::EventFlag;
++        m_currentThread->waitId = id;
++        m_currentThread->waitBits = bits;
++        m_currentThread->waitMode = mode;
++        m_currentThread->waitResultAddress = 0u;
++        cpu.yielded = true;
++        return true;
++    }
++
+     bool IopKernel::dispatchEventImport(uint16_t ordinal, IopCpuState &cpu)
+     {
+         const auto setV0 = [&](int32_t value)
+diff --git a/ps2xIOP/src/emulator/core/iop_kernel.h b/ps2xIOP/src/emulator/core/iop_kernel.h
+index 4977102..4303b42 100644
+--- a/ps2xIOP/src/emulator/core/iop_kernel.h
++++ b/ps2xIOP/src/emulator/core/iop_kernel.h
+@@ -56,6 +56,8 @@ namespace ps2x::iop::detail
+ 
+         [[nodiscard]] int createInternalEventFlag(uint32_t attr, uint32_t option, uint32_t bits);
+         [[nodiscard]] bool setInternalEventFlag(int id, uint32_t bits);
++        // Puts the current thread to sleep until the event flag matches (WaitEventFlag for HLE services).
++        bool waitInternalEventFlag(int id, uint32_t bits, uint32_t mode, IopCpuState &cpu);
+ 
+         void sleepCurrent(IopCpuState &cpu);
+         void delayCurrentUntil(uint64_t wakeCycle, IopCpuState &cpu);
 diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
-index e5f63a9..6419245 100644
+index e5f63a9..9f1ebb4 100644
 --- a/ps2xIOP/src/emulator/iop_emulator.cpp
 +++ b/ps2xIOP/src/emulator/iop_emulator.cpp
 @@ -1,3 +1,4 @@
@@ -7,7 +94,7 @@ index e5f63a9..6419245 100644
  #include "iop_emulator.h"
  #include "imports/iop_cdvd.h"
  #include "core/iop_cpu.h"
-@@ -237,7 +238,24 @@ namespace ps2x::iop::detail
+@@ -237,7 +238,26 @@ namespace ps2x::iop::detail
              Missing,
          };
  
@@ -17,9 +104,11 @@ index e5f63a9..6419245 100644
 +            const uint32_t a0 = cpu.gpr[4], a1 = cpu.gpr[5], a2 = cpu.gpr[6], a3 = cpu.gpr[7];
 +            const ImportDisposition result = dispatchImportInner(call, cpu);
 +            static int traced = 0;
++            const bool sifcmd = iequals(call.library, "sifcmd");
 +            const bool interesting = iequals(call.library, "cdvdman") || iequals(call.library, "ioman") ||
-+                                     iequals(call.library, "sifman") || result == ImportDisposition::Missing;
-+            if (interesting && traced++ < 300)
++                                     iequals(call.library, "sifman") || sifcmd || result == ImportDisposition::Missing;
++            static int tracedSifcmd = 0;
++            if (interesting && (sifcmd ? tracedSifcmd++ < 200 : traced++ < 300))
 +            {
 +                fprintf(stderr, "[iop-import] %s:%u(0x%x, 0x%x, 0x%x, 0x%x) -> 0x%x%s\n", call.library.c_str(),
 +                        static_cast<unsigned>(call.ordinal), a0, a1, a2, a3, cpu.gpr[2],
@@ -32,6 +121,106 @@ index e5f63a9..6419245 100644
          {
              const uint32_t a0 = cpu.gpr[4];
              auto setV0 = [&](uint32_t value)
+diff --git a/ps2xIOP/src/emulator/services/iop_rpc.cpp b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+index cf4fdc6..d240698 100644
+--- a/ps2xIOP/src/emulator/services/iop_rpc.cpp
++++ b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+@@ -21,6 +21,7 @@ namespace ps2x::iop::detail
+     void IopRpcBridge::reset()
+     {
+         m_servers.clear();
++        m_eeClients.clear();
+         m_nextDmaId = 1u;
+         m_sifInitialized = false;
+     }
+@@ -148,10 +149,63 @@ namespace ps2x::iop::detail
+         case 10:
+         case 11:
+         case 14: // InitRpc
+-        case 15:
+-        case 16:
+             setV0(0);
+             return true;
++        case 15: // sceSifBindRpc(client, sid, mode): bind to a server on the EE
++        {
++            // SifRpcClientData_t: hdr (16 bytes), command, buf, cbuf, end_function, end_param, server (+0x24)
++            const uint32_t client = cpu.gpr[4];
++            const uint32_t sid = cpu.gpr[5];
++            if (client != 0u && m_host.hasEeRpcServer(sid))
++            {
++                EeRpcClient &state = m_eeClients[client];
++                state.sid = sid;
++                if (state.eventFlag == 0)
++                    state.eventFlag = m_kernel.createInternalEventFlag(0u, 0u, 0u);
++                m_memory.write32(client + 0x24u, 0x80000000u | (sid & 0x7FFFFFFFu)); // any non-zero server
++            }
++            else if (client != 0u)
++            {
++                m_memory.write32(client + 0x24u, 0u); // not there yet: the caller retries
++            }
++            setV0(0);
++            return true;
++        }
++        case 16: // sceSifCallRpc(client, fno, mode, send, ssize, recv, rsize, end_func, end_param)
++        {
++            const uint32_t client = cpu.gpr[4];
++            const uint32_t function = cpu.gpr[5];
++            const uint32_t mode = cpu.gpr[6];
++            const uint32_t send = cpu.gpr[7];
++            const uint32_t sp = cpu.gpr[29];
++            const uint32_t sendSize = m_memory.read32(sp + 0x10u);
++            const uint32_t receive = m_memory.read32(sp + 0x14u);
++            const uint32_t receiveSize = m_memory.read32(sp + 0x18u);
++            const auto it = m_eeClients.find(client);
++            if (it == m_eeClients.end())
++            {
++                setV0(static_cast<uint32_t>(-1));
++                return true;
++            }
++
++            std::vector<uint8_t> data(sendSize);
++            if (sendSize != 0u && !m_memory.readRam(send, data.data(), data.size()))
++                data.clear();
++
++            const int eventFlag = it->second.eventFlag;
++            const bool queued = m_host.callEeRpc(
++                it->second.sid, function, std::move(data), receiveSize,
++                [this, receive, receiveSize, eventFlag](const std::vector<uint8_t> &reply)
++                {
++                    if (receive != 0u && !reply.empty())
++                        (void)m_memory.writeRam(receive, reply.data(), std::min<size_t>(reply.size(), receiveSize));
++                    (void)m_kernel.setInternalEventFlag(eventFlag, 1u);
++                });
++            setV0(queued ? 0u : static_cast<uint32_t>(-1));
++            if (queued && (mode & 1u) == 0u) // blocking call: sleep until the EE server has replied
++                (void)m_kernel.waitInternalEventFlag(eventFlag, 1u, 0x10u, cpu);
++            return true;
++        }
+         case 12: // sceSifSendCmd
+         case 13: // isceSifSendCmd
+         {
+diff --git a/ps2xIOP/src/emulator/services/iop_rpc.h b/ps2xIOP/src/emulator/services/iop_rpc.h
+index a4286ba..a48786d 100644
+--- a/ps2xIOP/src/emulator/services/iop_rpc.h
++++ b/ps2xIOP/src/emulator/services/iop_rpc.h
+@@ -68,10 +68,17 @@ namespace ps2x::iop::detail
+             uint32_t queue = 0;
+         };
+ 
++        struct EeRpcClient
++        {
++            uint32_t sid = 0;
++            int eventFlag = 0; // the calling IOP thread sleeps on this until the EE server has replied
++        };
++
+         IopHost &m_host;
+         IopMemory &m_memory;
+         IopKernel &m_kernel;
+         std::unordered_map<uint32_t, RpcServer> m_servers;
++        std::unordered_map<uint32_t, EeRpcClient> m_eeClients; // IOP client data address -> EE server
+         uint32_t m_nextDmaId = 1u;
+         bool m_sifInitialized = false;
+     };
 diff --git a/ps2xRuntime/include/ps2_call_list.h b/ps2xRuntime/include/ps2_call_list.h
 index 94a6fa1..787d362 100644
 --- a/ps2xRuntime/include/ps2_call_list.h
@@ -56,6 +245,84 @@ index 94a6fa1..787d362 100644
      X(sceDeci2Close)                          \
      X(sceDeci2ExLock)                         \
      X(sceDeci2ExRecv)                         \
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index 0f19c9f..5bb1bc4 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -597,11 +597,68 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+     return _mm_set1_epi64x(static_cast<long long>(value));
+ }
+ 
+-#define PS2_PMFHL_LW(hi, lo) _mm_unpacklo_epi64(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi))
+-#define PS2_PMFHL_UW(hi, lo) _mm_unpackhi_epi64(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi))
+-#define PS2_PMFHL_SLW(hi, lo) _mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi))
+-#define PS2_PMFHL_LH(hi, lo) _mm_shuffle_epi32(_mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi)), _MM_SHUFFLE(3, 1, 2, 0))
+-#define PS2_PMFHL_SH(hi, lo) _mm_shufflehi_epi16(_mm_shufflelo_epi16(_mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi)), _MM_SHUFFLE(3, 1, 2, 0)), _MM_SHUFFLE(3, 1, 2, 0))
++// PMFHL reads the 128-bit HI/LO pair: (hi, lo) are bits 0-63 and (hi1, lo1) bits 64-127.
++// Word i of LO is lo.w0, lo.w1, lo1.w0, lo1.w1 (the same for HI).
++inline uint32_t ps2_word_of(uint64_t low, uint64_t high, int index)
++{
++    const uint64_t half = index < 2 ? low : high;
++    return static_cast<uint32_t>((index & 1) ? (half >> 32) : half);
++}
++
++inline int32_t ps2_saturate_s32(int64_t value)
++{
++    return value > INT32_MAX ? INT32_MAX : (value < INT32_MIN ? INT32_MIN : static_cast<int32_t>(value));
++}
++
++inline int16_t ps2_saturate_s16(int32_t value)
++{
++    return value > INT16_MAX ? INT16_MAX : (value < INT16_MIN ? INT16_MIN : static_cast<int16_t>(value));
++}
++
++// PMFHL.LW: rd.w = { LO.w0, HI.w0, LO.w2, HI.w2 }
++inline __m128i ps2_pmfhl_lw(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    return _mm_set_epi32(static_cast<int>(ps2_word_of(hi, hi1, 2)), static_cast<int>(ps2_word_of(lo, lo1, 2)),
++                         static_cast<int>(ps2_word_of(hi, hi1, 0)), static_cast<int>(ps2_word_of(lo, lo1, 0)));
++}
++
++// PMFHL.UW: rd.w = { LO.w1, HI.w1, LO.w3, HI.w3 }
++inline __m128i ps2_pmfhl_uw(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    return _mm_set_epi32(static_cast<int>(ps2_word_of(hi, hi1, 3)), static_cast<int>(ps2_word_of(lo, lo1, 3)),
++                         static_cast<int>(ps2_word_of(hi, hi1, 1)), static_cast<int>(ps2_word_of(lo, lo1, 1)));
++}
++
++// PMFHL.SLW: rd.d = { sat32(HI.w0:LO.w0), sat32(HI.w2:LO.w2) }, sign-extended to 64 bits
++inline __m128i ps2_pmfhl_slw(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    const int64_t d0 = static_cast<int64_t>((static_cast<uint64_t>(ps2_word_of(hi, hi1, 0)) << 32) | ps2_word_of(lo, lo1, 0));
++    const int64_t d1 = static_cast<int64_t>((static_cast<uint64_t>(ps2_word_of(hi, hi1, 2)) << 32) | ps2_word_of(lo, lo1, 2));
++    return _mm_set_epi64x(ps2_saturate_s32(d1), ps2_saturate_s32(d0));
++}
++
++// PMFHL.LH: rd.h = { LO.h0, LO.h2, HI.h0, HI.h2, LO.h4, LO.h6, HI.h4, HI.h6 } (the low halfword of each word)
++inline __m128i ps2_pmfhl_lh(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    auto h = [&](uint64_t a, uint64_t b, int word) { return static_cast<short>(ps2_word_of(a, b, word) & 0xFFFFu); };
++    return _mm_set_epi16(h(hi, hi1, 3), h(hi, hi1, 2), h(lo, lo1, 3), h(lo, lo1, 2),
++                         h(hi, hi1, 1), h(hi, hi1, 0), h(lo, lo1, 1), h(lo, lo1, 0));
++}
++
++// PMFHL.SH: rd.h = sat16 of { LO.w0, LO.w1, HI.w0, HI.w1, LO.w2, LO.w3, HI.w2, HI.w3 }
++inline __m128i ps2_pmfhl_sh(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    auto s = [&](uint64_t a, uint64_t b, int word) { return ps2_saturate_s16(static_cast<int32_t>(ps2_word_of(a, b, word))); };
++    return _mm_set_epi16(s(hi, hi1, 3), s(hi, hi1, 2), s(lo, lo1, 3), s(lo, lo1, 2),
++                         s(hi, hi1, 1), s(hi, hi1, 0), s(lo, lo1, 1), s(lo, lo1, 0));
++}
++
++// The generated code calls these as PS2_PMFHL_xx(ctx->hi, ctx->lo); ctx is in scope there.
++#define PS2_PMFHL_LW(hi, lo) ps2_pmfhl_lw((hi), (lo), ctx->hi1, ctx->lo1)
++#define PS2_PMFHL_UW(hi, lo) ps2_pmfhl_uw((hi), (lo), ctx->hi1, ctx->lo1)
++#define PS2_PMFHL_SLW(hi, lo) ps2_pmfhl_slw((hi), (lo), ctx->hi1, ctx->lo1)
++#define PS2_PMFHL_LH(hi, lo) ps2_pmfhl_lh((hi), (lo), ctx->hi1, ctx->lo1)
++#define PS2_PMFHL_SH(hi, lo) ps2_pmfhl_sh((hi), (lo), ctx->hi1, ctx->lo1)
+ 
+ // FPU (COP1) operations
+ #define FPU_SET_ACC(ctx, res) (ctx->f_acc = res)
 diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
 index ea86a9c..0ae770a 100644
 --- a/ps2xRuntime/include/runtime/ps2_memory.h
@@ -252,6 +519,66 @@ index d467c4b..9dcd27e 100644
          size = sanitizeMemTransferSize(size, "memcpy");
  
          uint32_t copied = 0u;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 44eaef4..15d0b82 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -2164,6 +2164,16 @@ namespace ps2_stubs
+         const uint32_t availableBytes = getRegU32(ctx, 6);
+         const uint32_t ringBaseAddr = getRegU32(ctx, 7);
+         const uint32_t ringSize = readAbiArg4(rdram, ctx);
++        if (entryIdx < 12u)
++        {
++            // Rampage bring-up: what does the PSS ring hold?
++            const uint8_t *p = getConstMemPtr(rdram, dataAddr);
++            std::fprintf(stderr, "[mpeg] demux #%u mpeg=0x%x data=0x%x avail=0x%x ring=0x%x size=0x%x bytes=",
++                         entryIdx, mpegAddr, dataAddr, availableBytes, ringBaseAddr, ringSize);
++            for (int i = 0; p && i < 16; ++i)
++                std::fprintf(stderr, "%02x", p[i]);
++            std::fprintf(stderr, "%c", 10);
++        }
+ 
+         std::vector<MpegStreamCallbackEvent> callbackEvents;
+         std::vector<uint32_t> completedMpegIds;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+index b50a4cf..5babebb 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
+@@ -1,3 +1,5 @@
++#include <cmath>
++#include <cstdlib>
+ #include "Common.h"
+ #include "Pad.h"
+ 
+@@ -166,6 +168,15 @@ namespace ps2_stubs
+ 
+             setButton(state, kPadBtnStart, IsKeyDown(KEY_ENTER));
+             setButton(state, kPadBtnSelect, IsKeyDown(KEY_RIGHT_SHIFT));
++
++            // Bring-up aid: PS2X_AUTOPRESS=1 taps Start and Cross in turn, so unattended runs get past menus.
++            static const bool s_autoPress = std::getenv("PS2X_AUTOPRESS") != nullptr;
++            if (s_autoPress)
++            {
++                const double t = std::fmod(GetTime(), 6.0);
++                setButton(state, kPadBtnStart, t >= 2.0 && t < 2.3);
++                setButton(state, kPadBtnCross, t >= 5.0 && t < 5.3);
++            }
+             setButton(state, kPadBtnL3, IsKeyDown(KEY_LEFT_CONTROL));
+             setButton(state, kPadBtnR3, IsKeyDown(KEY_RIGHT_CONTROL));
+ 
+@@ -637,6 +648,12 @@ namespace ps2_stubs
+         }
+ 
+         ps2TraceGuestRangeWrite(rdram, dataAddr, 32u, "scePadRead", ctx);
++        {
++            static int s_padReads = 0;
++            if (++s_padReads == 1 || s_padReads % 600 == 0)
++                std::cerr << "[pad] scePadRead #" << s_padReads << " port=" << port << " ra=0x" << std::hex
++                          << getRegU32(ctx, 31) << std::dec << std::endl;
++        }
+         if (!readPadPortData(port, slot, runtime, data, dataAddr))
+         {
+             setReturnS32(ctx, 0);
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp
 index 561d619..6ecb314 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp
@@ -393,8 +720,20 @@ index b4bb7cb..b0bd1bd 100644
 +    void fioDread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 +    void fioDclose(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
  }
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+index d6b7549..c8cf300 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+@@ -157,6 +157,7 @@ struct RpcServerState
+ {
+     uint32_t sid = 0;
+     uint32_t sd_ptr = 0; // PS2 address
++    uint32_t gp = 0;     // $gp of the registering thread, for IOP -> EE calls into the server
+ };
+ 
+ struct RpcClientState
 diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
-index 07fcd29..ead4cb3 100644
+index 07fcd29..0d68f7d 100644
 --- a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
 @@ -1,3 +1,4 @@
@@ -435,6 +774,15 @@ index 07fcd29..ead4cb3 100644
      {
          std::lock_guard<std::recursive_mutex> rpcCallLock(g_sif_call_rpc_mutex);
  
+@@ -785,7 +811,7 @@ namespace ps2_syscalls
+                 }
+             }
+ 
+-            g_rpc_servers[sid] = {sid, sdPtr};
++            g_rpc_servers[sid] = {sid, sdPtr, getRegU32(ctx, 28)};
+             for (auto &entry : g_rpc_clients)
+             {
+                 if (entry.second.sid == sid)
 diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
 index 9614016..656910b 100644
 --- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
@@ -448,6 +796,137 @@ index 9614016..656910b 100644
  
              PS2_IF_AGRESSIVE_LOGS({
                  std::cerr << "[SetupHeap]"
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 5658928..a067ca1 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1,3 +1,4 @@
++#include <unordered_set>
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/gs/gs_cpu_backend.h"
+ #include "ps2_log.h"
+@@ -1575,6 +1576,33 @@ void GS::vertexKick(bool drawing)
+     if (drawing && m_backend)
+     {
+         GSPrimitiveBatch batch = buildDrawBatch(needed);
++        {
++            // Rampage bring-up: sample draws (every 2000th) with their render state.
++            static uint64_t s_draws = 0;
++            static std::unordered_set<uint64_t> s_seen;
++            const GSContext &sc = batch.state.context;
++            const uint64_t signature = (static_cast<uint64_t>(batch.state.prim.type) << 60) ^
++                                       (static_cast<uint64_t>(batch.state.prim.tme) << 59) ^
++                                       (static_cast<uint64_t>(batch.state.prim.abe) << 58) ^
++                                       (static_cast<uint64_t>(sc.frame.fbp) << 44) ^ (static_cast<uint64_t>(sc.frame.psm) << 38) ^
++                                       (static_cast<uint64_t>(sc.tex0.tbp0) << 20) ^ (static_cast<uint64_t>(sc.tex0.psm) << 14) ^
++                                       (static_cast<uint64_t>(batch.vertices[0].g) << 6) ^ batch.vertices[0].r;
++            ++s_draws;
++            if (s_seen.size() < 150 && s_seen.insert(signature).second)
++            {
++                const GSContext &c = batch.state.context;
++                const GSVertex &v0 = batch.vertices[0];
++                const GSVertex &v1 = batch.vertices[needed > 1 ? 1 : 0];
++                std::fprintf(stderr,
++                             "[draw] #%llu prim=%u tme=%u abe=%u ctxt=%u fbp=0x%x fbw=%u psm=0x%x fbmsk=0x%x scissor=%u,%u-%u,%u "
++                             "test=0x%llx v0=(%.1f,%.1f) v1=(%.1f,%.1f) rgba=%u,%u,%u,%u tbp=0x%x tpsm=0x%x tw=%u th=%u%c",
++                             static_cast<unsigned long long>(s_draws), static_cast<unsigned>(batch.state.prim.type),
++                             batch.state.prim.tme, batch.state.prim.abe, batch.state.prim.ctxt, c.frame.fbp, c.frame.fbw,
++                             c.frame.psm, c.frame.fbmsk, c.scissor.x0, c.scissor.y0, c.scissor.x1, c.scissor.y1,
++                             static_cast<unsigned long long>(c.test), v0.x, v0.y, v1.x, v1.y, v0.r, v0.g, v0.b, v0.a,
++                             c.tex0.tbp0, c.tex0.psm, c.tex0.tw, c.tex0.th, 10);
++            }
++        }
+         updatePreferredDisplaySourceForDraw(batch);
+         m_backend->Submit(batch);
+         recordDrawDebugEventUnlocked(needed);
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.cpp b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+index 8d46e03..c22b784 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
++++ b/ps2xRuntime/src/lib/ps2_iop_host.cpp
+@@ -517,6 +517,66 @@ bool PS2IopHostAdapter::sendSifCommand(uint32_t commandId,
+                                          packetSize);
+ }
+ 
++bool PS2IopHostAdapter::hasEeRpcServer(uint32_t sid) const
++{
++    std::lock_guard<std::mutex> lock(g_rpc_mutex);
++    const auto it = g_rpc_servers.find(sid);
++    return it != g_rpc_servers.end() && it->second.sd_ptr != 0u;
++}
++
++// IOP -> EE RPC: the EE server function runs as a scheduler invocation; its return value points at the
++// reply, of which the IOP caller gets `receiveSize` bytes.
++bool PS2IopHostAdapter::callEeRpc(uint32_t sid,
++                                  uint32_t function,
++                                  std::vector<uint8_t> send,
++                                  uint32_t receiveSize,
++                                  std::function<void(const std::vector<uint8_t> &)> done)
++{
++    RpcServerState server{};
++    {
++        std::lock_guard<std::mutex> lock(g_rpc_mutex);
++        const auto it = g_rpc_servers.find(sid);
++        if (it == g_rpc_servers.end() || it->second.sd_ptr == 0u)
++            return false;
++        server = it->second;
++    }
++
++    uint8_t *rdram = m_runtime.memory().getRDRAM();
++    auto *sd = reinterpret_cast<t_SifRpcServerData *>(getMemPtr(rdram, server.sd_ptr));
++    if (!sd || !m_runtime.hasFunction(sd->func))
++        return false;
++    if (sd->buf != 0u && !send.empty())
++    {
++        if (uint8_t *destination = getMemPtr(rdram, sd->buf))
++            std::memcpy(destination, send.data(), send.size());
++    }
++    sd->rpc_number = static_cast<int>(function);
++    sd->size = static_cast<int>(send.size());
++
++    GuestInvocation invocation{};
++    invocation.kind = GuestInvocationKind::RpcCallback;
++    invocation.context.pc = sd->func;
++    SET_GPR_U32(&invocation.context, 4, function);
++    SET_GPR_U32(&invocation.context, 5, sd->buf);
++    SET_GPR_U32(&invocation.context, 6, static_cast<uint32_t>(send.size()));
++    SET_GPR_U32(&invocation.context, 28, server.gp);
++    SET_GPR_U32(&invocation.context, 29, 0u); // the scheduler supplies the invocation stack
++    SET_GPR_U32(&invocation.context, 31, 0u);
++    invocation.onComplete = [this, receiveSize, done = std::move(done)](const R5900Context &completed, R5900Context &)
++    {
++        std::vector<uint8_t> reply;
++        const uint32_t result = getRegU32(&completed, 2);
++        if (receiveSize != 0u && result != 0u)
++        {
++            if (const uint8_t *source = getConstMemPtr(m_runtime.memory().getRDRAM(), result))
++                reply.assign(source, source + receiveSize);
++        }
++        done(reply);
++    };
++    m_runtime.eeScheduler().queueInvocation(std::move(invocation));
++    return true;
++}
++
+ void PS2IopHostAdapter::log(ps2x::iop::LogLevel level, std::string_view message)
+ {
+     const char *prefix = "[ps2xIOP]";
+diff --git a/ps2xRuntime/src/lib/ps2_iop_host.h b/ps2xRuntime/src/lib/ps2_iop_host.h
+index 89d8576..394dec0 100644
+--- a/ps2xRuntime/src/lib/ps2_iop_host.h
++++ b/ps2xRuntime/src/lib/ps2_iop_host.h
+@@ -83,6 +83,12 @@ public:
+                              uint32_t a3,
+                              uint32_t *resultAddress) override;
+     bool sendSifCommand(uint32_t commandId, const void *packet, size_t packetSize) override;
++    bool hasEeRpcServer(uint32_t sid) const override;
++    bool callEeRpc(uint32_t sid,
++                   uint32_t function,
++                   std::vector<uint8_t> send,
++                   uint32_t receiveSize,
++                   std::function<void(const std::vector<uint8_t> &)> done) override;
+ 
+     void log(ps2x::iop::LogLevel level, std::string_view message) override;
+ 
 diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
 index 37b6a4d..6342259 100644
 --- a/ps2xRuntime/src/lib/ps2_memory.cpp
@@ -668,10 +1147,10 @@ index 37b6a4d..6342259 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
-index 45cb9d2..befda22 100644
+index 45cb9d2..251e04a 100644
 --- a/ps2xRuntime/src/lib/ps2_runtime.cpp
 +++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
-@@ -2446,6 +2446,21 @@ void PS2Runtime::run()
+@@ -2446,6 +2446,43 @@ void PS2Runtime::run()
          }
          EndDrawing();
  
@@ -680,19 +1159,81 @@ index 45cb9d2..befda22 100644
 +        if ((++s_statusFrame % 600u) == 0u)
 +        {
 +            const GSRegisters &gs = m_memory.gs();
-+            std::cerr << "[status] frame=" << s_statusFrame << std::hex
++            extern std::atomic<uint64_t> g_rampageMscalCount;
++            extern std::atomic<uint64_t> g_rampageXgkickCount;
++            std::cerr << "[status] mscal=" << g_rampageMscalCount.load() << " xgkick=" << g_rampageXgkickCount.load();
++            std::cerr << " frame=" << s_statusFrame << std::hex
 +                      << " pc=0x" << m_debugPc.load(std::memory_order_relaxed)
 +                      << " ra=0x" << m_debugRa.load(std::memory_order_relaxed)
-+                      << " dispfb1=0x" << gs.dispfb1 << " display1=0x" << gs.display1 << std::dec
++                      << " pmode=0x" << gs.pmode << " dispfb1=0x" << gs.dispfb1 << " display1=0x" << gs.display1
++                      << " dispfb2=0x" << gs.dispfb2 << " display2=0x" << gs.display2 << " bgcolor=0x" << gs.bgcolor << " smode2=0x" << gs.smode2 << std::dec
 +                      << " dma=" << m_memory.dmaStartCount() << " gif=" << m_memory.gifCopyCount()
 +                      << " gsw=" << m_memory.gsWriteCount() << " vif=" << m_memory.vifWriteCount()
 +                      << " threads=" << m_eeScheduler->snapshot().threads.size() << std::endl;
-+            TakeScreenshot(TextFormat("shot_%03d.png", static_cast<int>(s_statusFrame / 600u)));
++            for (const auto &t : m_eeScheduler->snapshot().threads)
++            {
++                std::cerr << "  [thread] id=" << t.id << std::hex << " entry=0x" << t.entry << " pc=0x" << t.pc
++                          << " ra=0x" << t.ra << std::dec << " status=" << static_cast<int>(t.status)
++                          << " wait=" << static_cast<int>(t.waitReason) << " waitId=" << t.waitId
++                          << " prio=" << t.currentPriority << std::endl;
++            }
++            // the guest frame only, without the debug UI on top
++            if (const uint8_t *vram = m_memory.getGSVRAM())
++            {
++                if (std::FILE *dump = std::fopen("vram.bin", "wb"))
++                {
++                    std::fwrite(vram, 1, 4u * 1024u * 1024u, dump);
++                    std::fclose(dump);
++                }
++            }
++            Image frame = LoadImageFromTexture(frameTex);
++            ExportImage(frame, TextFormat("shot_%03d.png", static_cast<int>(s_statusFrame / 600u)));
++            UnloadImage(frame);
 +        }
 +
          if (WindowShouldClose())
          {
              RUNTIME_LOG("[run] window close requested, breaking out of loop");
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index b02c7ca..2f67c2c 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,4 +1,6 @@
+ // Based on Blackline Interactive implementation
++#include <atomic>
++std::atomic<uint64_t> g_rampageMscalCount{0}; // Rampage bring-up counter
+ #include "runtime/ps2_memory.h"
+ #include <cstring>
+ 
+@@ -416,6 +418,7 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 vif1_regs.tops = (vif1_regs.base + vif1_regs.ofst) & 0x3FFu;
+             vif1_regs.stat ^= (1u << 7); // toggle DBF
+ 
++            ++g_rampageMscalCount; // Rampage bring-up counter
+             if (m_vu1MscalCallback)
+                 m_vu1MscalCallback(startPC, runTop, runItop);
+             continue;
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+index bd75bba..b4d3b35 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -1,3 +1,4 @@
++#include <atomic>
+ #include "runtime/ps2_vu1.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #include "runtime/gs/gs_frontend.h"
+@@ -926,8 +927,11 @@ void VU1Interpreter::finishXgkick()
+     m_xgkick.active = false;
+ }
+ 
++std::atomic<uint64_t> g_rampageXgkickCount{0}; // Rampage bring-up counter
++
+ void VU1Interpreter::startXgkick(uint32_t qwordAddress)
+ {
++    ++g_rampageXgkickCount;
+     if (m_unit != Unit::VU1 || !m_activeVuData || m_activeVuDataSize < 16u)
+         return;
+ 
 diff --git a/ps2xRuntime/src/runner/register_functions.cpp b/ps2xRuntime/src/runner/register_functions.cpp
 index 85cc2e3..6d644dc 100644
 --- a/ps2xRuntime/src/runner/register_functions.cpp
