@@ -12,6 +12,7 @@ A full C++ build takes about 30 minutes.
 param(
     [string]$Iso,
     [switch]$Run,
+    [switch]$Quick,
     [string]$Config = "Release"
 )
 $ErrorActionPreference = "Stop"
@@ -48,23 +49,25 @@ if ($Iso) {
 $elf = Join-Path $disc "SLES_538.00"
 if (-not (Test-Path $elf)) { throw "No extracted disc in build\disc. Run: .\build.ps1 -Iso <your Rampage ISO>" }
 
-Step "Splitting ELF"
-python (Join-Path $root "tools\split_elf.py") $elf (Join-Path $disc "RAMPAGE.ELF"); Check "split_elf"
+if (-not $Quick) {
+    Step "Splitting ELF"
+    python (Join-Path $root "tools\split_elf.py") $elf (Join-Path $disc "RAMPAGE.ELF"); Check "split_elf"
 
-Step "Configuring CMake"
-& $cmake -S (Join-Path $root "PS2Recomp") -B $cmakeDir -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -Wno-dev | Out-Null; Check "cmake configure"
-& $cmake --build $cmakeDir --config $Config --parallel --target ps2_recomp -- /nodeReuse:false /v:minimal | Out-Null; Check "building ps2_recomp"
+    Step "Configuring CMake"
+    & $cmake -S (Join-Path $root "PS2Recomp") -B $cmakeDir -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -Wno-dev | Out-Null; Check "cmake configure"
+    & $cmake --build $cmakeDir --config $Config --parallel --target ps2_recomp -- /nodeReuse:false /v:minimal | Out-Null; Check "building ps2_recomp"
 
-Step "Recompiling to C++"
-$runner = Join-Path $runtime "src\runner"
-Get-ChildItem $runner -Filter *.cpp | Where-Object Name -ne "register_functions.cpp" | Remove-Item -Force
-Push-Location $root
-try {
-    & (Join-Path $cmakeDir "ps2xRecomp\$Config\ps2_recomp.exe") "recomp\config.toml" *> (Join-Path $build "recomp.log"); Check "ps2_recomp (see build\recomp.log)"
-} finally { Pop-Location }
-Move-Item -Force (Join-Path $runner "ps2_recompiled_*.h") (Join-Path $runtime "include")
-# MSBuild does not notice regenerated sources inside unity bundles, so drop the old objects
-Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $cmakeDir "ps2xRuntime\ps2EntryRunner.dir\$Config\unity_*.obj")
+    Step "Recompiling to C++"
+    $runner = Join-Path $runtime "src\runner"
+    Get-ChildItem $runner -Filter *.cpp | Where-Object Name -ne "register_functions.cpp" | Remove-Item -Force
+    Push-Location $root
+    try {
+        & (Join-Path $cmakeDir "ps2xRecomp\$Config\ps2_recomp.exe") "recomp\config.toml" *> (Join-Path $build "recomp.log"); Check "ps2_recomp (see build\recomp.log)"
+    } finally { Pop-Location }
+    Move-Item -Force (Join-Path $runner "ps2_recompiled_*.h") (Join-Path $runtime "include")
+    # MSBuild does not notice regenerated sources inside unity bundles, so drop the old objects
+    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $cmakeDir "ps2xRuntime\ps2EntryRunner.dir\$Config\unity_*.obj")
+}
 
 Step "Building ps2EntryRunner (about 30 minutes the first time)"
 & $cmake $cmakeDir | Out-Null; Check "cmake reconfigure"

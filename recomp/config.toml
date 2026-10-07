@@ -257,6 +257,10 @@ stubs = [
   "vfprintf@0x00330808",
   "realloc_r@0x0032BA98",
   "ret0@0x0014B290",
+  "memalign_r@0x003293E8", # _memalign_r trims chunks with newlib arithmetic, but malloc/free are runtime stubs
+  "sceDopen@0x0014D688", # directory listing on the host; the native version needs the IOP fileio server
+  "sceDread@0x0014D8B8", # directory listing on the host
+  "sceDclose@0x0014D750", # directory listing on the host
 ]
 
 # Guest functions without runtime handlers that may be referenced by address.
@@ -417,9 +421,6 @@ entry_points = [
   "sceMkdir@0x0014D0E0",
   "sceFormat@0x0014D2B8",
   "sceAddDrv@0x0014D538",
-  "sceDopen@0x0014D688",
-  "sceDclose@0x0014D750",
-  "sceDread@0x0014D8B8",
   "sceGetstat@0x0014DA10",
   "sceChstat@0x0014DBC8",
   "sceRename@0x0014DE18",
