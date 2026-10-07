@@ -1,0 +1,58 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp
+index b1083af..025fcaa 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp
+@@ -15,17 +15,20 @@ namespace ps2_stubs
+ 
+     void sceFsSemExit(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        TODO_NAMED("sceFsSemExit", rdram, ctx, runtime);
++        // File I/O is handled on the host, so the IOP file-system semaphores are not needed.
++        setReturnS32(ctx, 0);
+     }
+ 
+     void sceFsSemInit(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        TODO_NAMED("sceFsSemInit", rdram, ctx, runtime);
++        // File I/O is handled on the host, so the IOP file-system semaphores are not needed.
++        setReturnS32(ctx, 0);
+     }
+ 
+     void sceFsSigSema(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        TODO_NAMED("sceFsSigSema", rdram, ctx, runtime);
++        // File I/O is handled on the host, so the IOP file-system semaphores are not needed.
++        setReturnS32(ctx, 0);
+     }
+ 
+     void close(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/LibC.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/LibC.cpp
+index d467c4b..9dcd27e 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/LibC.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/LibC.cpp
+@@ -92,6 +92,11 @@ namespace ps2_stubs
+         uint32_t destAddr = getRegU32(ctx, 4); // $a0
+         uint32_t srcAddr = getRegU32(ctx, 5);  // $a1
+         uint32_t size = getRegU32(ctx, 6);     // $a2
++        if (size > PS2_RAM_SIZE)
++        {
++            std::cerr << "[memcpy] bad size from ra=0x" << std::hex << getRegU32(ctx, 31)
++                      << " dst=0x" << destAddr << " src=0x" << srcAddr << std::dec << std::endl;
++        }
+         size = sanitizeMemTransferSize(size, "memcpy");
+ 
+         uint32_t copied = 0u;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp
+index 561d619..6ecb314 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Unimplemented.cpp
+@@ -43,7 +43,7 @@ namespace ps2_stubs
+                   << ", $a2=0x" << getRegU32(ctx, 6)
+                   << ", $a3=0x" << getRegU32(ctx, 7) << std::dec << std::endl;
+ 
+-        //TODO maybe a macro to disable the exception and just return an success just to see it where goes.
+-        throw std::runtime_error("Unimplemented PS2 stub called: " + stubName);
++        // Keep running so bring-up can see how far the game gets; the warning above names the stub.
++        setReturnS32(ctx, 0);
+     }
+ }

@@ -1,0 +1,9 @@
+# Build output and the extracted disc (game files never go in this repo)
+build/
+*.iso
+*.bin
+*.cue
+SLES_*
+*.ELF
+*.VOL
+__pycache__/
