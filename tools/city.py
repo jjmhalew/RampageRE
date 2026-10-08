@@ -12,11 +12,18 @@ Building geometry (game units; one cell is 5 x 5, Z up, the street is towards -Y
   grid of tiles (column = window style, row = damage state). A storey lists width + 2 * depth tile columns:
   left side (back to front), front (left to right), right side (front to back).
 
+People and traffic (the blocks' ActorInstance| and TrafficDef, see "Spawns" in docs/FORMAT_BDP.md):
+  an actor stands at its Location in the state its template's DefaultAnim names (ActorAnimShape|<state>: model
+  and clip), playing that clip in a loop. Traffic runs on two lanes, as 0x332D90 spawns it: front y = -12.5
+  towards +x, rear y = -7.5 towards -x, x from -75 to 75 at 15 units/s; the vehicles are a fixed sample of the
+  block's VehicleDef mix (the game picks them at random), so the loop shows the kind of traffic, not a recording.
+
 Usage: python tools/city.py VOLDIR CITY OUTDIR        e.g. tools/city.py build/vol Chicago build/gltf
        writes OUTDIR/CITY/<block>.gltf for every block, with the textures in OUTDIR/CITY/textures
 """
 import collections
 import os
+import random
 import sys
 
 import anim
@@ -28,6 +35,11 @@ CELL = 5.0
 GROUND_FLOOR = 6.0
 STOREY = 3.0
 SHEET_TILE = 0.25
+# traffic (0x332D90): lanes, direction (+1 = towards +x), turn of the model in degrees
+LANES = (('front', -12.5, 1, -90.0, 1), ('rear', -7.5, -1, 90.0, 2))  # last: the NoFront/NoRearTraffic bit
+LANE_END = 75.0
+TRAFFIC_SPEED = 15.0
+SPAWN_INTERVAL = 3.5  # the release timers start at 2 + 3 * rand seconds
 
 
 class Books:
@@ -92,6 +104,10 @@ class Group:
         v = self.values(key)
         return v[0] if v else default
 
+    def prefixed(self, prefix):
+        """Own records whose name starts with prefix: list elements "Type|" and typed keys "Type|Name"."""
+        return [self.convert(kind, value) for kind, name, value in self.records if name.startswith(prefix)]
+
     def items(self):
         """Unnamed list elements of this group (Location's x, y, z; a ShapeSet's names; a Floor's tiles)."""
         return [self.convert(kind, value) for kind, name, value in self.records if (kind >> 8) & 0xFF == 2]
@@ -147,6 +163,7 @@ class CityExporter:
         self.template_books = [self.world.get('ObjectTemplateBook'), self.world.get('WeaponsTemplateBook'),
                                city + '_Props', city + '_buildings']
         self.missing = collections.Counter()
+        self.actors = self.vehicles = 0
 
     def template(self, name):
         for book in self.template_books:
@@ -178,6 +195,71 @@ class CityExporter:
             self.missing[f'{name} (no shape)'] += 1
             return
         self.place_model(assets, g, shape, parent, [base[k] + xyz[k] for k in range(3)], rot)
+
+    def place_actor(self, assets, g, inst, parent):
+        """A person standing in the block (ActorInstance|), in its template's default state, its clip looping."""
+        name = inst.get('Name')
+        t = self.template(name) if name else None
+        if t is None:
+            self.missing[f'actor {name}'] += 1
+            return
+        state = t.get('DefaultAnim')
+        look = t.get(f'ActorAnimShape|{state}') or t.get('ActorAnimShape|Idle')
+        clip_name = look.get('Anim|AnimName') if look else None
+        clip = self.models.clip_by_name.get(clip_name.lower()) if clip_name else None
+        shape = (look.get('Shape|ShapeName') if look else None) or t.get('Shape|ShapeName') or t.get('Shape|Shape')
+        if not shape and clip:
+            shape = clip.skeleton_name  # the clip's own node tree
+        loc = inst.get('Location')
+        xyz = [float(v) for v in loc.items()] if isinstance(loc, Group) else [0.0, 0.0, 0.0]
+        placed = self.models.add(g, assets, shape, parent, xyz, inst.get('ZRotation')) if shape else None
+        if placed is None:
+            self.missing[f'actor {name} ({shape})'] += 1
+            return
+        _, joints = placed
+        if clip and clip.bones == len(joints):
+            anim.add_animation(g, f'{name} {clip_name} loop', clip.duration, anim.keyframe_channels(clip, joints))
+        else:
+            self.models.loop(g, shape, joints)
+        self.actors += 1
+
+    def traffic(self, assets, g, block, block_name, parent):
+        """Vehicles driving along the two lanes, as one looping clip."""
+        td = block.get('TrafficDef')
+        if td is None:
+            return
+        mix = [(v.get('Frequency', 0.0), v.get('OTRef|Name')) for v in td.values('VehicleDef|')]
+        mix = [(f, n) for f, n in mix if f > 0 and n]
+        if not mix:
+            return
+        rng = random.Random(block_name)
+        period = 2 * LANE_END / TRAFFIC_SPEED  # one crossing, 10 s
+        per_lane = max(1, min(round(period / SPAWN_INTERVAL), td.get('MaxVehicles', 7) // 2))
+        channels = []
+        off = (1 if td.get('NoFrontTraffic') else 0) | (2 if td.get('NoRearTraffic') else 0)
+        for lane, y, direction, turn, bit in LANES:
+            if off & bit:
+                continue
+            for k in range(per_lane):
+                vehicle = rng.choices([n for _, n in mix], [f for f, _ in mix])[0]
+                t = self.template(vehicle)
+                shape = t.get('Shape|Shape') if t else None
+                placed = self.models.add(g, assets, shape, parent, (0.0, y, 0.0), turn) if shape else None
+                if placed is None:
+                    self.missing[f'vehicle {vehicle} ({shape})'] += 1
+                    continue
+                root, _ = placed
+                # starts k / per_lane of the way along, wraps around at the end
+                f0 = k / per_lane
+                x = lambda f: direction * (-LANE_END + 2 * LANE_END * f)
+                times = [0.0, 1.0 - f0, min(1.0 - f0 + 1e-4, 1.0), 1.0] if f0 else [0.0, 1.0]
+                values = [x(f0), x(1.0), x(0.0), x(f0)] if f0 else [x(0.0), x(1.0)]
+                if f0 and times[2] >= 1.0:
+                    times, values = times[:2], values[:2]
+                channels.append((root, 'translation', times, [(v, y, 0.0) for v in values]))
+                self.vehicles += 1
+        if channels:
+            anim.add_animation(g, 'traffic loop', period, channels)
 
     def building(self, assets, g, inst, row_offset, parent):
         t = self.template(inst.get('TemplateName'))
@@ -224,6 +306,11 @@ class CityExporter:
         for key in ('ObjectInstance|', 'AttackObjectInstance|', 'XObjectInstance|'):
             for inst in block.values(key):
                 self.place_object(assets, g, inst, root)
+        # people there from the start (SpawnedItem = 1: one that comes after an earlier one is gone)
+        for inst in block.prefixed('ActorInstance|'):
+            if not inst.get('SpawnedItem'):
+                self.place_actor(assets, g, inst, root)
+        self.traffic(assets, g, block, block_name, root)
         os.makedirs(self.out, exist_ok=True)
         g.save(os.path.join(self.out, block_name + '.gltf'))
         return len(block.values('BuildingInstance|'))
@@ -242,8 +329,9 @@ def main():
     voldir, city, out = sys.argv[1:]
     x = CityExporter(voldir, city, out)
     for block in x.blocks():
+        actors, vehicles = x.actors, x.vehicles
         n = x.block(block)
-        print(f'{block}: {n} buildings')
+        print(f'{block}: {n} buildings, {x.actors - actors} people, {x.vehicles - vehicles} vehicles')
     if x.missing:
         print('not placed (no model found):', ', '.join(f'{k} x{v}' for k, v in x.missing.most_common(12)))
 

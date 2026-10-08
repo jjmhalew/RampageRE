@@ -33,6 +33,7 @@ archive, and runs its front-end menu loop with VU1 rendering, but the picture is
 | All 7 cities assembled block by block in glTF (buildings with generated facades, street objects) | ✅ |
 | Skeletons and animations (60 skeletons, 5,379 animations): all 30 monsters animated in glTF | ✅ |
 | City models with node trees (people, vehicles, bosses) with their clips; moving props loop in the blocks | ✅ |
+| People and traffic in the blocks (379 people, 375 vehicles; lanes from the game's traffic code) | ✅ |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.

@@ -443,6 +443,7 @@ class Models:
     def __init__(self, bundle):
         self.b = bundle
         self.trees, self.raws, self.clips = {}, {}, collections.defaultdict(list)
+        self.clip_by_name = {}
         items = list(bundle.items(0))
         for e, a, _ in items:
             if e.type == 3:
@@ -456,6 +457,7 @@ class Models:
             else:
                 clip = Animation(a, bundle.names)
                 self.clips[self.key(clip.skeleton_name)].append((anim_name(bundle.name(e.name)), clip))
+                self.clip_by_name[anim_name(bundle.name(e.name)).lower()] = clip
 
     @staticmethod
     def key(name):

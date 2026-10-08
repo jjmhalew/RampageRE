@@ -232,6 +232,9 @@ specular, ...), u16 name index of the texture at 0x38 (0 = no texture). 1,412 of
 texture; the rest have none or name an `.ifl` animation (a text list of frame images and durations) or another
 material.
 
+A mesh part's material name index does not always name a material: 3,768 of the 6,292 parts do, the other 2,524
+name a texture entry (type 9) directly (people, the city backdrops, many props).
+
 ## Property books (type 22)
 Most of the game's design data: the city layout, building templates, AI spawn rules, challenges, monster
 upgrades, camera settings, object templates. All 28 books decode (224,218 lines with `tools/prb.py`).
@@ -296,6 +299,34 @@ cloud band does not move in its RawAnim (29 identical segments); its drift must 
 `tools/anim.py VOLDIR --models CITY OUTDIR` exports every animated tree model of a city (people, vehicles,
 bosses) with all its clips to `OUTDIR/CITY/models`.
 
+### Spawns
+A block definition also says who is in the street (names found through the property name table at 0x3F5990;
+the block loader is 0x302AF0):
+
+| Group | | Read by |
+|---|---|---|
+| `ActorInstance\|SP_n` (typed) or `ActorInstance\|` | a person at `Location` (template `Name`). `SpawnsItem0 = "SP_m"` names the one that takes its place when it is gone; those have `SpawnedItem = 1` and are not there at the start | 0x304450 |
+| `TrafficDef` | `MaxVehicles` (7 if absent), `MinReleaseTime`, `NoFrontTraffic`, `NoRearTraffic`, and one `VehicleDef\|` per vehicle type with `Frequency` and `OTRef\|Name` (template) | 0x334240 into the AI manager at 0x4D7800 (`gAIMgr`) |
+| `AIDef` | `AIInstance\|`: attackers (tanks, SWAT, helicopters) with `MinDelay`, `OffsetDelay`, `RespawnDelay`, `MaxOccurances`, `FriendChance` | 0x3350F0 |
+| `Occupants` | `FillRate`, `NonMilitaryRate`, `OccupantInstance\|` (template, `Frequency`): the people who appear in windows | 0x3196F0 |
+
+An actor template (in `Objects1_Props`) gives its states as `ActorAnimShape|<state>` groups, each with the model
+(`Shape|ShapeName`, else the template's own `Shape|ShapeName`) and the clip (`Anim|AnimName`, a keyframed
+animation of that model's node tree); `DefaultAnim` names the state it starts in (`Idle`, `Walk`, `WindowEmerge`).
+
+Traffic (0x332D90, called from the AI manager's update 0x3333F0): a vehicle drives a straight line at 15 units/s,
+either from x = 75 to −75 at y = 41 × slot − 7.5 (the rear lane, turned +90°) or from −75 to 75 at
+y = 41 × slot − 12.5 (the front lane, turned −90°); slot is the block's place among the loaded blocks.
+`NoFrontTraffic` / `NoRearTraffic` switch a lane off; two release timers start at 2 + 3 × rand seconds (probably
+one per lane), and the type is picked at random by `Frequency`. `Vehicle.bsf` takes a vehicle off at the end of its line.
+`Traffic.bsf` adds two crowds when a block becomes active: 4–8 people of the block's occupant types
+(`<Occupant>Runner`) around (−14, 0.5) and (8, −3), running 50 units towards −y.
+
+`tools/city.py` places the actors that are there from the start, each looping the clip of its default state, and
+a looping traffic clip: per open lane, round(10 s / 3.5 s) = 3 vehicles (at most `MaxVehicles` / 2) spread evenly
+along the line, their types drawn by `Frequency` with a fixed seed per block. All 7 cities: 379 people, 375
+vehicles, every template resolved. The traffic is a fair sample of what the game spawns, not a recording of it.
+
 Not reproduced yet: the facade layout is inferred (it looks right in all cities, not checked against the game),
-vertex lighting (`LightingData`), where the game spawns people, vehicles and AI, and some backdrop planes come out
-white.
+vertex lighting (`LightingData`), the timed and random spawns (attackers, window occupants, crowds), and the
+people's walking routes (`WalkingAroundPerson.bsf`).

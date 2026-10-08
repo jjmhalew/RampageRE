@@ -267,10 +267,13 @@ class BundleAssets:
         return self.textures[name_index]
 
     def material(self, name_index):
+        """A part names a material (type 6, 3,768 parts) or directly a texture (type 9, 2,524 parts)."""
         png = None
         mat = self.by_name.get(name_index)
         if mat and mat[0].type == 6:
             png = self.texture(struct.unpack_from('<H', mat[1], 0x38)[0])
+        elif mat and mat[0].type == 9:
+            png = self.texture(name_index)
         return self.g.material(name_index, self.clean(name_index), png)
 
     def mesh(self, entry, skinned=False):
