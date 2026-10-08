@@ -11,6 +11,8 @@ python tools/bdp.py build/vol/George.cmp              # list the entries
 python tools/bdp.py build/vol/George.cmp outdir       # extract each entry's data blocks
 python tools/bdp.py --verify build/vol                # parse all 117: every byte is a known structure or padding
 python tools/tex.py --all build/vol build/textures    # all 1,428 textures as PNG
+python tools/mesh.py --verify build/vol               # all 5,577 meshes: every part agrees with its header
+python tools/mesh.py build/vol/George.cmp build/gltf  # glTF with materials and textures (viewer/index.html)
 ```
 
 ## In the game
@@ -52,22 +54,22 @@ asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other 
 ## Entry types
 | Type | Count | What | data / data2 |
 |---|---|---|---|
-| 0 | 5,547 | sub-mesh (`MESH\|material`) | header / geometry |
+| 0 | 5,547 | mesh (`MODEL\|object`), see below | header / vertices |
 | 2 | 327 | raw file: `.bsf` scripts (269, all identical to the ones in `RAMPAGE.VOL`), `.ifl`, `.fdf` (font metrics), `MONSTER_DATA` | file / – |
 | 3 | 615 | skeleton | |
 | 4 | 5,379 | animation | |
-| 6 | 1,893 | material | |
+| 6 | 1,893 | material, see below | |
 | 9 | 1,428 | texture | header / pixels (see below) |
 | 13 | 1,275 | palette (`.pal`) | header / 256 colours |
-| 16 | 2,119 | `.pwk` | |
-| 17 | 30 | skinned mesh section | header / geometry |
+| 16 | 2,119 | `.pwk`: model description; holds u16 name indices of the model's materials, 0xFFFF terminated (probably) | |
+| 17 | 30 | skinned mesh (monster bodies), see below | header / vertices |
 | 20 | 297 | GUI image description (text) | |
 | 22 | 28 | properties (`.prb`: `camera.prb`, `<City>_Props.prb`) | |
-| 23 | 13 | localised text (`.loc`) | |
+| 23 | 13 | text (`.loc`): names of city blocks, challenge texts | |
 | 24 | 43 | GUI layout (`.ifc`) | |
 | 25 | 44 | cloth | |
 
-Types 0, 3, 4, 6, 16, 17, 20, 22–25 are named from their entry names and sizes; their contents are not decoded yet.
+Types 3, 4, 20, 22, 24 and 25 are named from their entry names and sizes; their contents are not decoded yet.
 
 ## Textures (type 9) and palettes (type 13)
 Texture data, 0x104 bytes:
@@ -87,3 +89,41 @@ Palette data2: 256 RGBA colours in the GS CSM1 order (entries 8–15 and 16–23
 0x80 is opaque. Fonts and some effects name `_Alpha8` (white, alpha 0–255) or `_Intensity8` (grey ramp), palettes
 the engine makes itself; they are not stored in any bundle. PSMCT32 alpha is also 0x80 = opaque; PSMCT16 is
 5:5:5:1.
+
+## Meshes (types 0 and 17)
+A mesh is one or more parts; each part has one material and one strip of vertices (a *section*).
+
+Type 0 data: u32 part count, 7 × f32 bounds, then 0x50 bytes per part from 0x20. Type 17 data: u16 part count,
+u16 bone count, u32 name index of every bone the mesh uses, 3 × u32, then 0x58 bytes per part.
+
+| Part record | Type 0 | Type 17 |
+|---|---|---|
+| u32 strip length − 2 (vertex count − 2) | +0x00 | +0x00 |
+| u16 material name index | +0x0A | +0x38 |
+| f32 bounding box (min, max) | +0x14 | +0x08 |
+| u32 offset of the section block, from the record | +0x3C | +0x40 |
+| u32 offset of the section descriptor, from the record | +0x40 | +0x44 |
+| u32 offset of the bone palette, from the record | | +0x48 |
+
+Section descriptor: u32 vertex count, u32 ?, u32 vertex format, u32 0, u32 offset in data2, u32 size. In data2
+the vertices are separate streams, each starting on a 16-byte boundary, in this order:
+
+| Format bit | Stream | Per vertex |
+|---|---|---|
+| (always) | position | 4 × f32: x, y, z, w. Rigid: w = 1.0 if the vertex closes a triangle, 0.0 if it starts a strip. Skinned (0x08): w is u16 weight of the first bone (4.12), u8 bone 0 × 4, u8 bone 1 × 4 |
+| 0x010 | normal | 3 × s8, u8: skinned 0x7F = closes a triangle, 0 = starts a strip |
+| 0x040 | colour | 4 × u8 RGBA, 0x80 = 1.0 |
+| 0x100 | texture coordinates | 2 × s16, 4.12 fixed point |
+
+Formats in use: 0x112 (most sections), 0x102, 0x152, 0x142, 0x12 and 0x118 (skinned). 0x02 is set on almost every
+section; its meaning is not known. Triangles follow the PS2 strip rule: every vertex flagged "closes" makes a
+triangle with the two before it, winding alternating along the strip. Rigid meshes are often preceded in data2
+by a u16 list ended by 0xFFFF (probably edge or shadow data). Positions are in the model's space: monster bodies
+are in their bind pose (George in a T-pose), city pieces each at their own origin, so placing them needs the
+level layout (not found yet; probably in the `.prb` property trees).
+
+## Materials (type 6)
+0x90 bytes: u16 own name index, u16 layer count?, u16 flags, ..., f32 colours from 0x08 (diffuse, ambient,
+specular, ...), u16 name index of the texture at 0x38 (0 = no texture). 1,412 of the 1,695 materials name a
+texture; the rest have none or name an `.ifl` animation (a text list of frame images and durations) or another
+material.

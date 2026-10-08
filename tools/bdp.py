@@ -113,6 +113,11 @@ def gaps(bundle):
     return out
 
 
+def safe_name(name):
+    """Entry name usable as a file name (monster bundles prefix names with "\x13000")."""
+    return ''.join('_' if c in '<>:"/\\|?*' or ord(c) < 32 else c for c in name.lstrip('\x13'))
+
+
 def main():
     args = sys.argv[1:]
     if len(args) == 2 and args[0] == '--verify':
@@ -148,7 +153,7 @@ def main():
             os.makedirs(args[1], exist_ok=True)
             for s in range(SEGMENTS):
                 for e, a, d2 in b.items(s):
-                    base = os.path.join(args[1], f'{s}_{e.index:03}_{b.name(e.name).replace("/", "_")}.t{e.type}')
+                    base = os.path.join(args[1], f'{s}_{e.index:03}_{safe_name(b.name(e.name))}.t{e.type}')
                     if a:
                         open(base, 'wb').write(a)
                     if d2:
