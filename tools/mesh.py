@@ -9,7 +9,8 @@ Mesh entry data (little endian, see docs/FORMAT_BDP.md):
   section descriptor: u32 vertex count, u32 ?, u32 vertex format, u32 0, u32 offset in data2, u32 size
 The vertices are in data2 as separate streams, each starting on a 16-byte boundary, in this order:
   position        4 x f32: x, y, z, w (always present) Rigid: w is 1.0 = this vertex closes a triangle, 0.0 = it starts a strip.
-                  Skinned: w is u16 weight (4.12, of the first bone), u8 bone 0 x 4, u8 bone 1 x 4.
+                  Skinned: w is u16 weight (4.12, of the first bone), u8 bone 0 x 4, u8 bone 1 x 4; the bones are
+                  node indices of the skeleton (tools/anim.py) and the positions are in the bind pose's model space.
   0x010 normal    3 x s8, u8 (skinned: 0x7F = closes a triangle, 0 = starts a strip)
   0x040 colour    4 x u8 RGBA, 0x80 = 1.0
   0x100 uv        2 x s16, 4.12 fixed point
@@ -147,8 +148,8 @@ class Gltf:
         return len(self.doc['bufferViews']) - 1
 
     def accessor(self, values, kind, ctype=5126, target=34962, minmax=False):
-        width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[kind]
-        code = {5126: 'f', 5125: 'I', 5123: 'H'}[ctype]
+        width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}[kind]
+        code = {5126: 'f', 5125: 'I', 5123: 'H', 5121: 'B'}[ctype]
         flat = [c for v in values for c in (v if width > 1 else (v,))]
         acc = {'bufferView': self.blob(struct.pack(f'<{len(flat)}{code}', *flat), target), 'componentType': ctype,
                'count': len(values), 'type': kind}
@@ -172,8 +173,9 @@ class Gltf:
         self.material_index[key] = len(self.doc['materials']) - 1
         return self.material_index[key]
 
-    def mesh(self, name, prims):
-        """prims: [(material index, section)]. Returns the mesh index, or None if nothing is drawn."""
+    def mesh(self, name, prims, skinned=False):
+        """prims: [(material index, section)]. Returns the mesh index, or None if nothing is drawn.
+        skinned: write the vertex bones (skeleton node indices) and weights as JOINTS_0 / WEIGHTS_0."""
         out = []
         for mat, s in prims:
             tris = triangles(s)
@@ -186,6 +188,10 @@ class Gltf:
                 attrs['TEXCOORD_0'] = self.accessor(s.uvs, 'VEC2')
             if s.colours:
                 attrs['COLOR_0'] = self.accessor(s.colours, 'VEC4')
+            if skinned and s.bones:
+                attrs['JOINTS_0'] = self.accessor([(b0, b1, 0, 0) for b0, b1 in s.bones], 'VEC4', 5121)
+                attrs['WEIGHTS_0'] = self.accessor([(min(w, 1.0), 1.0 - min(w, 1.0), 0.0, 0.0) for w in s.weights],
+                                                   'VEC4')
             idx = self.accessor([i for t in tris for i in t], 'SCALAR', 5125, 34963)
             out.append({'attributes': attrs, 'indices': idx, 'material': mat})
         if not out:
@@ -217,7 +223,10 @@ class Gltf:
         with open(os.path.splitext(path)[0] + '.bin', 'wb') as f:
             f.write(self.bin)
         with open(path, 'w') as f:
-            json.dump(self.doc, f, indent=1)
+            if len(self.doc['accessors']) < 5000:
+                json.dump(self.doc, f, indent=1)
+            else:  # animated models: tens of thousands of accessors
+                json.dump(self.doc, f, separators=(',', ':'))
 
 
 class BundleAssets:
@@ -263,10 +272,11 @@ class BundleAssets:
             png = self.texture(struct.unpack_from('<H', mat[1], 0x38)[0])
         return self.g.material(name_index, self.clean(name_index), png)
 
-    def mesh(self, entry):
+    def mesh(self, entry, skinned=False):
         e, a, d2 = entry
         parts = read_mesh(e.type, a, d2)
-        return self.g.mesh(self.clean(e.name), [(self.material(p.material), s) for p in parts for s in p.sections])
+        return self.g.mesh(self.clean(e.name), [(self.material(p.material), s) for p in parts for s in p.sections],
+                           skinned)
 
     def model(self, name):
         """glTF mesh indices of a model (all its "MODEL|object" meshes), by name with or without .pwk."""

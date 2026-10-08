@@ -24,6 +24,7 @@
 <div id="panel">
   <label>Model <select id="file"></select></label>
   <label><input type="checkbox" id="wire"> wireframe</label>
+  <label id="animrow" hidden>Animation <select id="anim"></select></label>
   <div id="info">Export with <code>tools/mesh.py</code> or <code>tools/city.py</code> into build/gltf, serve the repository root.</div>
 </div>
 <script type="module">
@@ -41,11 +42,22 @@ scene.background = new THREE.Color(0x1d1f23);
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100000);
 const controls = new OrbitControls(camera, renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 2.5));
-let current = null;
+let current = null, mixer = null, clips = [];
+const clock = new THREE.Clock();
+const animSelect = document.getElementById('anim');
+animSelect.onchange = () => play(animSelect.value);
+function play(name) {
+  if (!mixer) return;
+  mixer.stopAllAction();
+  const clip = clips.find(c => c.name === name);
+  if (clip) mixer.clipAction(clip).play();
+}
 
 const params = new URLSearchParams(location.search);
-const files = (params.get('files') || 'George,Chicago/CG01_Block1,Chicago/CG02_Block2,Chicago/CG03_Block3').split(',');
+const files = (params.get('files') ||
+  'monsters/George,monsters/Lizzie,monsters/Ralph,Chicago/CG01_Block1,NewYork/NY10_Empire_State,George').split(',');
 const select = document.getElementById('file');
+if (params.get('file') && !files.includes(params.get('file'))) files.unshift(params.get('file'));
 for (const f of files) select.add(new Option(f, f));
 select.value = params.get('file') || files[0];
 select.onchange = () => load(select.value);
@@ -57,14 +69,27 @@ function load(name) {
   new GLTFLoader().load(`../build/gltf/${name}.gltf`, gltf => {
     if (current) scene.remove(current);
     current = gltf.scene;
+    clips = gltf.animations;
+    mixer = clips.length ? new THREE.AnimationMixer(current) : null;
+    animSelect.innerHTML = '';
+    for (const c of clips) animSelect.add(new Option(c.name, c.name));
+    document.getElementById('animrow').hidden = !clips.length;
+    if (clips.length) {
+      animSelect.value = params.get('anim') || (clips.find(c => /^SKELETON_\d+_IDLE(_SHORT)?$/.test(c.name)) || clips[0]).name;
+      play(animSelect.value);
+    }
     current.traverse(o => { if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace; });
     scene.add(current);
     // frame the scene without the sky and backdrop around a city block
     const box = new THREE.Box3();
+    current.updateMatrixWorld(true);
     current.traverse(o => {
       let sky = false;
       for (let p = o; p; p = p.parent) if (/backdrop|skydome/i.test(p.name)) sky = true;
-      if (o.isMesh && !sky) box.expandByObject(o);
+      if (!o.isMesh || sky) return;
+      // skinned vertices are in the bind pose's model space, under the (Y-up) mesh node
+      if (o.isSkinnedMesh) box.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+      else box.expandByObject(o);
     });
     if (box.isEmpty()) box.setFromObject(current);
     const size = box.getSize(new THREE.Vector3()).length();
@@ -74,7 +99,8 @@ function load(name) {
     camera.near = size / 1000; camera.far = size * 10; camera.updateProjectionMatrix();
     let tris = 0;
     current.traverse(o => { if (o.isMesh) tris += o.geometry.index.count / 3; });
-    document.getElementById('info').textContent = `${name}: ${gltf.scene.children.length} meshes, ${tris} triangles`;
+    document.getElementById('info').textContent =
+      `${name}: ${tris} triangles` + (clips.length ? `, ${clips.length} animations` : '');
   }, undefined, err => { document.getElementById('info').textContent = `${name}: ${err.message || err}`; });
 }
 load(select.value);
@@ -82,7 +108,12 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (mixer) mixer.update(dt);
+  controls.update();
+  renderer.render(scene, camera);
+});
 </script>
 </body>
 </html>

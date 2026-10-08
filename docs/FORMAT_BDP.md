@@ -58,8 +58,8 @@ asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other 
 |---|---|---|---|
 | 0 | 5,547 | mesh (`MODEL\|object`), see below | header / vertices |
 | 2 | 327 | raw file: `.bsf` scripts (269, all identical to the ones in `RAMPAGE.VOL`), `.ifl`, `.fdf` (font metrics), `MONSTER_DATA` | file / – |
-| 3 | 615 | skeleton | |
-| 4 | 5,379 | animation | |
+| 3 | 615 | node tree; with a bind pose (byte 3 of the entry = 1) a skeleton, see below | |
+| 4 | 5,379 | animation: 4,764 keyframed, 615 sampled (one per node tree), see below | |
 | 6 | 1,893 | material, see below | |
 | 9 | 1,428 | texture | header / pixels (see below) |
 | 13 | 1,275 | palette (`.pal`) | header / 256 colours |
@@ -69,9 +69,9 @@ asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other 
 | 22 | 28 | property book (`.prb`), see below | |
 | 23 | 13 | text (`.loc`): names of city blocks, challenge texts | |
 | 24 | 43 | GUI layout (`.ifc`) | |
-| 25 | 44 | cloth | |
+| 25 | 44 | cloth simulation settings (hair, whiskers, ...) | |
 
-Types 3, 4, 20, 24 and 25 are named from their entry names and sizes; their contents are not decoded yet.
+Types 20, 24 and 25 are named from their entry names and sizes; their contents are not decoded yet.
 
 ## Textures (type 9) and palettes (type 13)
 Texture data, 0x104 bytes:
@@ -112,7 +112,7 @@ the vertices are separate streams, each starting on a 16-byte boundary, in this 
 
 | Format bit | Stream | Per vertex |
 |---|---|---|
-| (always) | position | 4 × f32: x, y, z, w. Rigid: w = 1.0 if the vertex closes a triangle, 0.0 if it starts a strip. Skinned (0x08): w is u16 weight of the first bone (4.12), u8 bone 0 × 4, u8 bone 1 × 4 |
+| (always) | position | 4 × f32: x, y, z, w. Rigid: w = 1.0 if the vertex closes a triangle, 0.0 if it starts a strip. Skinned (0x08): w is u16 weight of the first bone (4.12), u8 bone 0 × 4, u8 bone 1 × 4 (skeleton node indices) |
 | 0x010 | normal | 3 × s8, u8: skinned 0x7F = closes a triangle, 0 = starts a strip |
 | 0x040 | colour | 4 × u8 RGBA, 0x80 = 1.0 |
 | 0x100 | texture coordinates | 2 × s16, 4.12 fixed point |
@@ -123,6 +123,96 @@ triangle with the two before it, winding alternating along the strip. Rigid mesh
 by a u16 list ended by 0xFFFF (probably edge or shadow data). Positions are in the model's space: monster bodies
 are in their bind pose (George in a T-pose), city pieces each at their own origin, so placing them needs the
 level layout from the property books (below).
+
+## Skeletons (type 3) and animations (type 4)
+Both are used in place, like the property books. `tools/anim.py --verify` parses all 615 node trees and 5,379
+animations and checks that their parts follow each other to the last byte, that every keyframed animation has
+one translation and one rotation track per bone in bone order, and that the bind pose chained from the root
+gives back the stored inverse bind matrices (largest difference 2.7e-6).
+
+**Node tree / skeleton** (0x1A8110: NodeTree, vtable 0x444D30, or Skeleton, vtable 0x444E60; offsets fixed up
+by 0x195730 and 0x19E070). The 60 skeletons are the 30 monsters' (in `<Monster>.cmp` and `<Monster>_anims.cmp`);
+the other 555 trees are the node hierarchies of city models.
+
+| Offset | Type | |
+|---|---|---|
+| 0x00 | 0x1C bytes | runtime object (vtable, reference count, ...) |
+| 0x1C | u32 | offset of the first node: 0x3C, or 0x40 on a skeleton |
+| 0x20 | u32 | node count |
+| 0x24 | u32 | tree depth in levels (one more on skeletons): the size of the walk stack |
+| 0x28 | u32 | entry size |
+| 0x2C | u32 | offset of the node table, one u32 offset per node |
+| 0x30 | u32 | offset of the nodes sorted by name index (0x19A270 binary searches it by name) |
+| 0x34 | u32 | mirror pair count |
+| 0x38 | u32 | offset of the mirror table, 0 = none: u16 per node, the left/right pairs first, then the centre nodes |
+| 0x3C | u32 | skeleton only: offset of the bind pose, 0x50 bytes per node |
+
+Node: i32 index, i32 parent (−1 = root), u32 child count, u32 name index, u32 offset of every child. Nodes are
+in depth-first order, so a parent always comes before its children.
+
+Bind pose record: u32 0, f32[12] inverse bind matrix (rows: x, y, z axis and translation; row vectors), f32[3]
+translation relative to the parent, f32[4] rotation relative to the parent as x, y, z, w. The rotation is for
+row vectors: for column vectors (glTF) use its conjugate (−x, −y, −z, w).
+
+The monsters are 3ds Max Biped rigs (`Bip01 Pelvis`, `Bip01 L Thigh`, ...; George has 56 nodes including 20
+face bones and a `Lift_Node`). The bones of the skinned mesh's vertices are indices into this node list, not
+into the mesh's own bone list.
+
+**Animation** header (0x196730 picks the class by the kind):
+
+| Offset | Type | |
+|---|---|---|
+| 0x1C | f32 | duration in seconds |
+| 0x20 | u32 | kind: 2 = KeyInterpAnim (vtable 0x444C30), 1 = RawAnim (vtable 0x444DF0) |
+| 0x24 | u32 | entry size |
+| 0x28 | u16, u16 | name index of the skeleton (replaced by a pointer at load), 0 |
+
+*KeyInterpAnim* (every monster and prop animation; fixed up by 0x190720):
+
+| Offset | Type | |
+|---|---|---|
+| 0x2C | u32 | bone count (= the skeleton's nodes) |
+| 0x30 | u32 | bone count again |
+| 0x34 | u32 | offset of the channel mask, 2 bits per bone padded to 4 bytes; always all set |
+| 0x38 | u32 | offset of the translation tracks |
+| 0x3C | u32 | offset of the rotation tracks |
+| 0x40 | u32 | runtime work size, 136 bytes per bone |
+
+Translation track (read by 0x191860), one per bone in bone order: f32[3] scale, u8 bone, u8 key count, u8 key
+count − 1, u8 0, then 8 bytes per key: u16 time, s16 x, y, z. Value = s16 × scale × f32 0x38000100 (about 1/32768).
+
+Rotation track (0x191C50), one per bone, not aligned: u8 bone, u8 key count, then 8 bytes per key: u16 time,
+s16 a, b, c. Decoded by 0x192010:
+
+- x, y, z = (a >> 3, b >> 3, c >> 3) × f32 0x39800801 (about 1/4096);
+- r = (a & 3) << 6 | (b & 7) << 3 | (c & 7), negative if a & 4: a small correction to w;
+- w = √(1 − (x² + y² + z² + r × f32 0x3B808081 × f32 0x39DD7E7C)), or 0 with x, y, z normalised if that is
+  negative;
+- w is negated if bit 0 of the time is set.
+
+The quaternion is in the same row-vector convention as the bind pose. Key times are (time & 0xFFFE) / 65534 of
+the duration. A track without keys falls back to the bind pose (there are none in the shipped data); between
+keys translations are interpolated linearly and rotations spherically. In a body animation about a quarter of
+the tracks have a single key.
+
+*RawAnim* (exactly one per node tree, with the same name; fixed up by 0x19C700): 0x2C u32 record count,
+0x30 offset of the record table (one offset per record, sorted by bone), 0x34 offset of the first record.
+Record: u32 bone, f32 ?, u32 translation key count, u32 rotation key count, f32 0, f32 1, f32 1 (on all 8,173
+records), u32 offset of the translation keys (from the record; 6 × f32 each: the translation, then three values
+not decoded yet), u32 offset of the rotation keys (9 × f32 each: the quaternion, then five values not decoded
+yet). The next record follows the rotation keys. 261 RawAnims have one key per node; the others animate some
+nodes with up to 65 keys (city props, not played yet). On the 60 monster skeletons the first key equals the bind
+pose exactly.
+
+**Monster names.** Animations are shared by skeleton type and prefixed with it (`SKELETON_1_WALK2` for George's
+ape skeleton, `SKELETON_2_...` for Ralph). `<MONSTER>_HEAD_*` move the face and head bones (87 of the 330 also
+the spine) and leave the rest in the bind pose, so they are probably layered over a body animation. From the
+names (not checked in the code): `FACE_*` are climbing on the front of a building, `SIDE_L_*` on its side,
+`GROUND_*`, `IDLE` and `WALK2` on the street.
+
+`tools/anim.py VOLDIR --all OUTDIR` writes every monster as one glTF with its skinned mesh, the skeleton as
+joints and all its animations. The cloth meshes (hair, whiskers: type 0 meshes in the monster bundle, simulated by
+the game from the type 25 settings) are bound vertex by vertex to the nearest bone instead.
 
 ## Materials (type 6)
 0x90 bytes: u16 own name index, u16 layer count?, u16 flags, ..., f32 colours from 0x08 (diffuse, ambient,
