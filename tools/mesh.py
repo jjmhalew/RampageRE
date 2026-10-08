@@ -22,6 +22,7 @@ Usage: python tools/mesh.py --verify VOLDIR                check every mesh's tr
 import base64
 import collections
 import json
+import math
 import os
 import struct
 import sys
@@ -123,9 +124,13 @@ def triangles(section):
 # ---------------------------------------------------------------- glTF
 
 class Gltf:
+    """glTF 2.0 writer. The game is Z-up; everything hangs under a root node that turns it Y-up."""
+
     def __init__(self):
-        self.doc = {'asset': {'version': '2.0', 'generator': 'RampageRE tools/mesh.py'}, 'scene': 0,
-                    'scenes': [{'nodes': []}], 'nodes': [], 'meshes': [], 'materials': [], 'textures': [],
+        self.doc = {'asset': {'version': '2.0', 'generator': 'RampageRE tools'}, 'scene': 0,
+                    'scenes': [{'nodes': [0]}],
+                    'nodes': [{'name': 'Z up', 'rotation': [-0.70710678, 0.0, 0.0, 0.70710678]}],
+                    'meshes': [], 'materials': [], 'textures': [],
                     'images': [], 'samplers': [{'wrapS': 10497, 'wrapT': 10497}], 'accessors': [],
                     'bufferViews': [], 'buffers': []}
         self.bin = bytearray()
@@ -167,8 +172,8 @@ class Gltf:
         self.material_index[key] = len(self.doc['materials']) - 1
         return self.material_index[key]
 
-    def add_mesh(self, name, prims):
-        """prims: [(material index, section)]"""
+    def mesh(self, name, prims):
+        """prims: [(material index, section)]. Returns the mesh index, or None if nothing is drawn."""
         out = []
         for mat, s in prims:
             tris = triangles(s)
@@ -184,10 +189,24 @@ class Gltf:
             idx = self.accessor([i for t in tris for i in t], 'SCALAR', 5125, 34963)
             out.append({'attributes': attrs, 'indices': idx, 'material': mat})
         if not out:
-            return
+            return None
         self.doc['meshes'].append({'name': name, 'primitives': out})
-        self.doc['nodes'].append({'name': name, 'mesh': len(self.doc['meshes']) - 1})
-        self.doc['scenes'][0]['nodes'].append(len(self.doc['nodes']) - 1)
+        return len(self.doc['meshes']) - 1
+
+    def node(self, name, mesh=None, translation=None, rotation_z=None, parent=0):
+        """A node under `parent` (the root by default); rotation_z in degrees about the game's Z axis."""
+        n = {'name': name}
+        if mesh is not None:
+            n['mesh'] = mesh
+        if translation and any(translation):
+            n['translation'] = [float(c) for c in translation]
+        if rotation_z:
+            half = math.radians(rotation_z) / 2
+            n['rotation'] = [0.0, 0.0, math.sin(half), math.cos(half)]
+        self.doc['nodes'].append(n)
+        index = len(self.doc['nodes']) - 1
+        self.doc['nodes'][parent].setdefault('children', []).append(index)
+        return index
 
     def save(self, path):
         base = os.path.splitext(os.path.basename(path))[0]
@@ -201,35 +220,76 @@ class Gltf:
             json.dump(self.doc, f, indent=1)
 
 
+class BundleAssets:
+    """Materials, textures and models of one bundle, written into a Gltf on first use."""
+
+    def __init__(self, bundle, gltf, out, texdir):
+        self.b = bundle
+        self.g = gltf
+        self.items = list(bundle.items(0))
+        self.by_name = {e.name: (e, a, d2) for e, a, d2 in self.items}
+        self.palettes = {e.name: (e, a, d2) for e, a, d2 in self.items if e.type == 13}
+        self.palettes.update({i: n for i, n in enumerate(bundle.names) if n in tex.BUILTIN})
+        self.out, self.texdir = out, texdir
+        self.models = collections.defaultdict(list)  # lower-case model name -> mesh entries ("MODEL|object")
+        for e, a, d2 in self.items:
+            if e.type in (0, 17):
+                self.models[self.clean(e.name).split('|')[0].lower()].append((e, a, d2))
+        self.model_meshes = {}
+        self.textures = {}
+
+    def clean(self, name_index):
+        return self.b.name(name_index).lstrip('\x13')
+
+    def texture(self, name_index):
+        """Relative PNG path of a texture entry (written once), or None."""
+        if name_index not in self.textures:
+            png = None
+            entry = self.by_name.get(name_index)
+            if entry and entry[0].type == 9:
+                os.makedirs(os.path.join(self.out, self.texdir), exist_ok=True)
+                file = bdp.safe_name(self.b.name(name_index)) + '.png'
+                path = os.path.join(self.out, self.texdir, file)
+                if not os.path.exists(path):
+                    tex.image(entry[1], entry[2], self.palettes).save(path)
+                png = f'{self.texdir}/{file}'
+            self.textures[name_index] = png
+        return self.textures[name_index]
+
+    def material(self, name_index):
+        png = None
+        mat = self.by_name.get(name_index)
+        if mat and mat[0].type == 6:
+            png = self.texture(struct.unpack_from('<H', mat[1], 0x38)[0])
+        return self.g.material(name_index, self.clean(name_index), png)
+
+    def mesh(self, entry):
+        e, a, d2 = entry
+        parts = read_mesh(e.type, a, d2)
+        return self.g.mesh(self.clean(e.name), [(self.material(p.material), s) for p in parts for s in p.sections])
+
+    def model(self, name):
+        """glTF mesh indices of a model (all its "MODEL|object" meshes), by name with or without .pwk."""
+        key = name.lower()
+        if key.endswith('.pwk'):
+            key = key[:-4]
+        if key not in self.model_meshes:
+            self.model_meshes[key] = [m for m in (self.mesh(x) for x in self.models.get(key, [])) if m is not None]
+        return self.model_meshes[key]
+
+
 def export(bundle_path, out):
     with open(bundle_path, 'rb') as f:
         b = bdp.Bundle(f.read())
-    items = list(b.items(0))
-    by_name = {e.name: (e, a, d2) for e, a, d2 in items}
-    palettes = {e.name: (e, a, d2) for e, a, d2 in items if e.type == 13}
-    palettes.update({i: n for i, n in enumerate(b.names) if n in tex.BUILTIN})
     stem = os.path.splitext(os.path.basename(bundle_path))[0]
-    texdir = os.path.join(out, stem + '_textures')
     g = Gltf()
-
-    def material(name_index):
-        png = None
-        mat = by_name.get(name_index)
-        if mat and mat[0].type == 6:
-            tex_entry = by_name.get(struct.unpack_from('<H', mat[1], 0x38)[0])
-            if tex_entry and tex_entry[0].type == 9:
-                os.makedirs(texdir, exist_ok=True)
-                file = bdp.safe_name(b.name(tex_entry[0].name)) + '.png'
-                if not os.path.exists(os.path.join(texdir, file)):
-                    tex.image(tex_entry[1], tex_entry[2], palettes).save(os.path.join(texdir, file))
-                png = f'{stem}_textures/{file}'
-        return g.material(name_index, b.name(name_index).lstrip('\x13'), png)
-
+    assets = BundleAssets(b, g, out, stem + '_textures')
     count = 0
-    for e, a, d2 in items:
-        if e.type in (0, 17):
-            parts = read_mesh(e.type, a, d2)
-            g.add_mesh(b.name(e.name).lstrip('\x13'), [(material(p.material), s) for p in parts for s in p.sections])
+    for entry in assets.items:
+        if entry[0].type in (0, 17):
+            m = assets.mesh(entry)
+            if m is not None:
+                g.node(assets.clean(entry[0].name), m)
             count += 1
     os.makedirs(out, exist_ok=True)
     g.save(os.path.join(out, stem + '.gltf'))

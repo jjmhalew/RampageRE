@@ -14,6 +14,7 @@ python tools/tex.py --all build/vol build/textures    # all 1,428 textures as PN
 python tools/mesh.py --verify build/vol               # all 5,577 meshes: every part agrees with its header
 python tools/mesh.py build/vol/George.cmp build/gltf  # glTF with materials and textures (viewer/index.html)
 python tools/prb.py build/vol/Chicago_Props.bdp       # a property book as a readable tree
+python tools/city.py build/vol Chicago build/gltf     # every block of a city as a glTF scene
 ```
 
 ## In the game
@@ -170,3 +171,22 @@ objects at a `Location` (x, y, z) relative to the building. The buildings are pl
 X, in a front row (0) and a back row (1). `<City>_buildings.prb` defines the templates (`CG1_4x1`): width, depth,
 floors (`Floor|` with ground, middle and top floor shapes, damaged variants), texture sheet, debris effects
 (`.edf`) and the script (`DefaultBuilding.bsf`).
+
+### Assembling a block (`tools/city.py`)
+All seven cities export (Chicago, New York, San Francisco, Los Angeles, Las Vegas, London, Hong Kong: one glTF per
+block, every building and object model found). Game units, Z up, the street towards −Y; one cell is 5 × 5:
+- the block's ground shape, the city's day backdrop (`*_Backdrop`) and sky (`*_Skydome_Main`) at the origin;
+- a building's centre is at x = `LeftEdgeXPos` + width × 2.5, y = `Row` × `BackRowOffset`;
+- the ground-floor shape (`ShapeSet|GroundFloorShapes`, 6 high) at z 0, then storeys 2..n (`Floor|` entries; the
+  template name is width × storeys, `CG2_2x7`) 3 high each, then the top shape (`ShapeSet|TopFloorShapes`);
+- upper storeys have no mesh: the facade is built from the `TextureSheet`, a 4 × 4 grid of tiles (column =
+  window style, row = damage state, 0 intact). Each `Floor|` lists width + 2 × depth tile columns: left side
+  (back to front), front (left to right), right side (front to back); the back is never seen. A floor's
+  `Skeleton` (`Damaged10x20_00.pwk`) is the interior shown once the building is damaged;
+- objects (`ObjectInstance|`, `AttackObjectInstance|`, ...) at their `Location`, turned by `ZRotation` degrees;
+  objects inside a `BuildingInstance|` are relative to the building. `Name` is a template in the
+  `ObjectTemplateBook` (`Objects1_Props`), whose `Shape|Shape` names the model; templates inherit through
+  `ParentPropertySet = "Group:Book"`.
+
+Not reproduced yet: the facade layout is inferred (it looks right in all cities, not checked against the game),
+vertex lighting (`LightingData`), people, vehicles and AI spawns, and some backdrop planes come out white.
