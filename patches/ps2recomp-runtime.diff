@@ -1483,15 +1483,24 @@ index f0ad507..3410ebf 100644
      {
          return samplePoint(static_cast<int>(texUf), static_cast<int>(texVf));
 diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
-index 5658928..37ebe4d 100644
+index 5658928..ba5c79f 100644
 --- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
-@@ -1,3 +1,4 @@
+@@ -1,10 +1,13 @@
 +#include <unordered_set>
  #include "runtime/gs/gs_frontend.h"
  #include "runtime/gs/gs_cpu_backend.h"
  #include "ps2_log.h"
-@@ -647,6 +648,27 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ #include "runtime/ps2_memory.h"
+ #include <atomic>
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
++#include <cstdlib>
+ #include <cstdio>
+ #include <cstring>
+ #include <iostream>
+@@ -647,6 +650,27 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
      if (tryProcessNativeImageUploadPacket(data, sizeBytes))
          return;
  
@@ -1519,7 +1528,7 @@ index 5658928..37ebe4d 100644
      PS2_IF_AGRESSIVE_LOGS({
          const uint32_t packetIndex = s_debugGifPacketCount.fetch_add(1, std::memory_order_relaxed);
          if (packetIndex < 48u)
-@@ -1067,6 +1089,24 @@ void GS::writeRegister(uint8_t regAddr, uint64_t value)
+@@ -1067,6 +1091,24 @@ void GS::writeRegister(uint8_t regAddr, uint64_t value)
  
  void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
  {
@@ -1544,7 +1553,7 @@ index 5658928..37ebe4d 100644
      const bool interestingReg =
          regAddr == GS_REG_PRIM ||
          regAddr == GS_REG_RGBAQ ||
-@@ -1320,6 +1360,21 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1320,6 +1362,21 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
      {
          int ci = (regAddr == GS_REG_ALPHA_2) ? 1 : 0;
          m_ctx[ci].alpha = value;
@@ -1566,7 +1575,7 @@ index 5658928..37ebe4d 100644
          break;
      }
      case GS_REG_TEST_1:
-@@ -1575,6 +1630,37 @@ void GS::vertexKick(bool drawing)
+@@ -1575,6 +1632,50 @@ void GS::vertexKick(bool drawing)
      if (drawing && m_backend)
      {
          GSPrimitiveBatch batch = buildDrawBatch(needed);
@@ -1582,14 +1591,25 @@ index 5658928..37ebe4d 100644
 +                                       (static_cast<uint64_t>(sc.tex0.tbp0) << 20) ^ (static_cast<uint64_t>(sc.tex0.psm) << 14) ^
 +                                       (static_cast<uint64_t>(batch.vertices[0].g) << 6) ^ batch.vertices[0].r;
 +            ++s_draws;
-+            if (s_seen.size() < 150 && s_seen.insert(signature).second)
++            // PS2X_DRAWLOG_AT=<seconds>: start a fresh sample of 400 draws at that time (e.g. in game).
++            static const double s_logAt = std::getenv("PS2X_DRAWLOG_AT") ? std::atof(std::getenv("PS2X_DRAWLOG_AT")) : -1.0;
++            static const auto s_start = std::chrono::steady_clock::now();
++            static size_t s_cap = 150;
++            if (s_logAt >= 0.0 && s_cap == 150 &&
++                std::chrono::duration<double>(std::chrono::steady_clock::now() - s_start).count() >= s_logAt)
++            {
++                s_seen.clear();
++                s_cap = 400;
++                std::fprintf(stderr, "[draw] --- fresh sample at draw #%llu ---\n", static_cast<unsigned long long>(s_draws));
++            }
++            if (s_seen.size() < s_cap && s_seen.insert(signature).second)
 +            {
 +                const GSContext &c = batch.state.context;
 +                const GSVertex &v0 = batch.vertices[0];
 +                const GSVertex &v1 = batch.vertices[needed > 1 ? 1 : 0];
 +                std::fprintf(stderr,
 +                             "[draw] #%llu prim=%u tme=%u abe=%u ctxt=%u fbp=0x%x fbw=%u psm=0x%x fbmsk=0x%x scissor=%u,%u-%u,%u "
-+                             "test=0x%llx v0=(%.1f,%.1f,z=%.0f) v1=(%.1f,%.1f) rgba=%u,%u,%u,%u tbp=0x%x tpsm=0x%x tw=%u th=%u cbp=0x%x xyoff=%u,%u zbp=0x%x zpsm=0x%x zmsk=%u tex1=0x%llx alpha=0x%llx cpsm=%u csm=%u tcc=%u tfx=%u texa=%u/%u/%u%c",
++                             "test=0x%llx v0=(%.1f,%.1f,z=%.0f) v1=(%.1f,%.1f) rgba=%u,%u,%u,%u tbp=0x%x tpsm=0x%x tw=%u th=%u cbp=0x%x xyoff=%u,%u zbp=0x%x zpsm=0x%x zmsk=%u tex1=0x%llx alpha=0x%llx cpsm=%u csm=%u tcc=%u tfx=%u texa=%u/%u/%u fge=%u fog=%u fst=%u iip=%u stq=%.3f,%.3f,%.3f uv=%u,%u fogcol=%u,%u,%u%c",
 +                             static_cast<unsigned long long>(s_draws), static_cast<unsigned>(batch.state.prim.type),
 +                             batch.state.prim.tme, batch.state.prim.abe, batch.state.prim.ctxt, c.frame.fbp, c.frame.fbw,
 +                             c.frame.psm, c.frame.fbmsk, c.scissor.x0, c.scissor.y0, c.scissor.x1, c.scissor.y1,
@@ -1598,7 +1618,9 @@ index 5658928..37ebe4d 100644
 +                             static_cast<unsigned>(c.xyoffset.ofx), static_cast<unsigned>(c.xyoffset.ofy),
 +                             c.zbuf.zbp, c.zbuf.psm, static_cast<unsigned>(c.zbuf.zmask),
 +                             static_cast<unsigned long long>(c.tex1), static_cast<unsigned long long>(c.alpha), c.tex0.cpsm, c.tex0.csm, c.tex0.tcc, c.tex0.tfx,
-+                             batch.state.texa.ta0, static_cast<unsigned>(batch.state.texa.aem), batch.state.texa.ta1, 10);
++                             batch.state.texa.ta0, static_cast<unsigned>(batch.state.texa.aem), batch.state.texa.ta1,
++                             batch.state.prim.fge, v0.fog, batch.state.prim.fst, batch.state.prim.iip, v0.s, v0.t, v0.q,
++                             static_cast<unsigned>(v0.u), static_cast<unsigned>(v0.v), batch.state.fogR, batch.state.fogG, batch.state.fogB, 10);
 +            }
 +        }
          updatePreferredDisplaySourceForDraw(batch);

@@ -115,6 +115,15 @@ What is still wrong or missing:
 - the frame rate is low (about 8 game frames per second with the interpreted VU1);
 - no audio.
 
+Black ground, first findings (`PS2X_DRAWLOG_AT=215` with `-ToGameplay` samples 400 in-game draws): every
+textured draw that the game lights arrives at the GS with vertex colour `0,0,0,0` and `TFX=MODULATE`, so
+texture x 0 = black. That is the ground, the lower parts of the buildings and the people (black
+silhouettes). Draws with `TFX=DECAL` (upper building walls) and the untextured ones with real colours look
+right. Fog is on (`FOGCOL` 121,152,227) and decoded correctly. The libvu0 light helpers
+(`sceVu0NormalLightMatrix`/`LightColorMatrix`) are not called by the game, so the zero colours come from the
+game's own lighting: the light data it uploads to VU1 or the VU1 lighting micro code. Next: trace one lit
+mesh with `PS2X_VUTRACE=1` and look at the colour registers and the light block in VU1 data memory.
+
 How the GUI renders: VU1 microprogram at 0x14d8/0xf70 transforms GUI vertices with a matrix at VU data
 0x89..0x8c (built on the EE with libvu0, see `sceVu0MulMatrix` above) and kicks packed `XYZF2` triangle
 strips. `tools/vudis.py` disassembles VU micro code and decodes `PS2X_VUTRACE=1` traces (`build/disc/vutrace.txt`,
@@ -147,7 +156,8 @@ files played through `GuiQuad::setVideo`.
   (`PS2X_INPUT`), `-ToGameplay` plays into the first level. With the status line:
   `[thread]` lines with a heuristic stack backtrace (`[stack]`), a VIF1 opcode histogram (`[vifops]`),
   `PS2X_WATCH=0x4d51f0,gp-0x70a4,...` prints guest words (absolute or relative to the main thread's
-  `$gp`) and `PS2X_DUMPRAM=1` writes the EE RAM to `build/disc/ram.bin`.
+  `$gp`) and `PS2X_DUMPRAM=1` writes the EE RAM to `build/disc/ram.bin`. `PS2X_DRAWLOG_AT=<seconds>` restarts the `[draw]` sample (render state, fog,
+  STQ/UV per distinct draw) at that time, e.g. once in game.
 - IOP: `[iop-import]` traces every IOP import (60 lines per import), `[iopthreads]` dumps IOP threads,
   semaphores and event flags every ~10 s of IOP time, `[cdread]` names the host file of every CD read.
 
