@@ -13,6 +13,7 @@ python tools/bdp.py --verify build/vol                # parse all 117: every byt
 python tools/tex.py --all build/vol build/textures    # all 1,428 textures as PNG
 python tools/mesh.py --verify build/vol               # all 5,577 meshes: every part agrees with its header
 python tools/mesh.py build/vol/George.cmp build/gltf  # glTF with materials and textures (viewer/index.html)
+python tools/prb.py build/vol/Chicago_Props.bdp       # a property book as a readable tree
 ```
 
 ## In the game
@@ -64,12 +65,12 @@ asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other 
 | 16 | 2,119 | `.pwk`: model description; holds u16 name indices of the model's materials, 0xFFFF terminated (probably) | |
 | 17 | 30 | skinned mesh (monster bodies), see below | header / vertices |
 | 20 | 297 | GUI image description (text) | |
-| 22 | 28 | properties (`.prb`: `camera.prb`, `<City>_Props.prb`) | |
+| 22 | 28 | property book (`.prb`), see below | |
 | 23 | 13 | text (`.loc`): names of city blocks, challenge texts | |
 | 24 | 43 | GUI layout (`.ifc`) | |
 | 25 | 44 | cloth | |
 
-Types 3, 4, 20, 22, 24 and 25 are named from their entry names and sizes; their contents are not decoded yet.
+Types 3, 4, 20, 24 and 25 are named from their entry names and sizes; their contents are not decoded yet.
 
 ## Textures (type 9) and palettes (type 13)
 Texture data, 0x104 bytes:
@@ -120,10 +121,52 @@ section; its meaning is not known. Triangles follow the PS2 strip rule: every ve
 triangle with the two before it, winding alternating along the strip. Rigid meshes are often preceded in data2
 by a u16 list ended by 0xFFFF (probably edge or shadow data). Positions are in the model's space: monster bodies
 are in their bind pose (George in a T-pose), city pieces each at their own origin, so placing them needs the
-level layout (not found yet; probably in the `.prb` property trees).
+level layout from the property books (below).
 
 ## Materials (type 6)
 0x90 bytes: u16 own name index, u16 layer count?, u16 flags, ..., f32 colours from 0x08 (diffuse, ambient,
 specular, ...), u16 name index of the texture at 0x38 (0 = no texture). 1,412 of the 1,695 materials name a
 texture; the rest have none or name an `.ifl` animation (a text list of frame images and durations) or another
 material.
+
+## Property books (type 22)
+Most of the game's design data: the city layout, building templates, AI spawn rules, challenges, monster
+upgrades, camera settings, object templates. All 28 books decode (224,218 lines with `tools/prb.py`).
+
+The game uses a book in place: 0x1B00E0 puts a `PropertyBook` object (vtable 0x445380) over the entry data and
+0x1B0170 turns the offsets into pointers. 0x1AFC80 builds the same structure from a *text* book (it skips
+whitespace and `//` comments), so the books were written as text.
+
+| Offset | Type | |
+|---|---|---|
+| 0x00 | 0x1C bytes | room for the runtime object (vtable, ...) |
+| 0x1C | u32 | number of top-level groups |
+| 0x20 | u32 | size |
+| 0x24 | u32 | offset of the group table: a u32 offset per group |
+
+**Group:** u32 0, u32 name index, u32 record count, u32 ?, u32 header size (0x14), then 12-byte records
+`{u32 kind, u32 name index, u32 value}`.
+
+| `kind & 0xFF` | Value |
+|---|---|
+| 0 | int |
+| 1 | float |
+| 2 | name index (strings, references to other entries such as `"ChicagoBlocks_01.pwk"`) |
+| 3 | group, at this offset from the start of the containing group |
+
+| `(kind >> 8) & 0xFF` | Record |
+|---|---|
+| 0 | plain (`Row = 1`) |
+| 1 | typed key `Type\|Name` (`BlockDef\|CG01_Block1`); `kind >> 16` = length of `Type` |
+| 2 | list element without a name (the x, y, z of a `Location`); the name index is a placeholder |
+| 3 | list element of a type `Type\|` (`BuildingInstance\|`); `kind >> 16` = length of `Type` |
+
+### City layout
+`<City>_Props.prb` has a `WorldData` group: `BlockData.BlockList` names the city blocks in order (`CG01_Block1`
+...), and each `BlockDef|<block>` holds the ground shape (`Shape|GroundShape = "ChicagoBlocks_01.pwk"`),
+`BackRowOffset`, the spawn rules (`AIDef`: tanks, SWAT, helicopters with delays), the block's challenge, and the
+buildings: `BuildingInstance| { LeftEdgeXPos = -42  Row = 1  TemplateName = "CG1_4x1" }`, with signs and other
+objects at a `Location` (x, y, z) relative to the building. The buildings are placed side-scroller style along
+X, in a front row (0) and a back row (1). `<City>_buildings.prb` defines the templates (`CG1_4x1`): width, depth,
+floors (`Floor|` with ground, middle and top floor shapes, damaged variants), texture sheet, debris effects
+(`.edf`) and the script (`DefaultBuilding.bsf`).

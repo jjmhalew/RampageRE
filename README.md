@@ -29,7 +29,8 @@ archive, and runs its front-end menu loop with VU1 rendering, but the picture is
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
 | Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |
 | Meshes and materials to glTF (5,577 meshes), three.js viewer | ✅ |
-| City layout, skeletons and animations | next |
+| Property books (`.prb`: city layout, buildings, AI, challenges), 28/28 decoded | ✅ |
+| Assemble cities in glTF, skeletons and animations | next |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -60,6 +61,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/bdp.py` | lists and extracts bundle entries (`--verify`: all 117 bundles fully accounted for) |
 | `tools/tex.py` | exports bundle textures to PNG |
 | `tools/mesh.py` | exports bundle meshes with materials and textures as glTF (`--verify`: all 5,577 meshes) |
+| `tools/prb.py` | prints property books (design data) as readable trees |
 | `viewer/index.html` | three.js viewer for the exported glTF (serve the repository root) |
 | `tools/refs.py` | finds the code that references an address (strings, tables) |
 | `tools/iso9660.py` | extracts a PS2 disc image |
