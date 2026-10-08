@@ -16,8 +16,8 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 ## Status
 
 **Early bring-up, not playable yet.** The recompiled game starts on Windows and reaches the front-end main
-menu: legal screen, autosave notice, intro movies (decoded, still too dark), attract mode, CAMPAIGN menu and
-profile entry. Text still has grey boxes behind it and it runs slowly. See
+menu: legal screen, autosave notice, intro movies, attract mode, CAMPAIGN menu and profile entry. It runs
+slowly and without sound for now. See
 [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
 
 | Step | |
@@ -29,8 +29,8 @@ profile entry. Text still has grey boxes behind it and it runs slowly. See
 | zlib asset loading, data archive mounted, menu loop | ✅ |
 | Graphics (GS / VU1): legal screen, GUI (autosave notice) | ✅ |
 | Game scripts compile and run in the recompiled game (shell, attract mode) | ✅ |
-| Movies (`.pss`) decode and play to the end | ✅ (pictures too dark) |
-| Front end: attract mode, main menu, profile entry | ✅ (glyphs have grey boxes) |
+| Movies (`.pss`) decode and play | ✅ |
+| Front end: attract mode, main menu, profile entry | ✅ |
 | Into a game (campaign) | ❌ |
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
 | Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |

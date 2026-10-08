@@ -104,14 +104,16 @@ deleted, the shell stayed in state 1 (memory card check) forever and only the le
 | DMA chain tags with ADDR bit 31 (SPR: data in scratchpad) were read from main RAM (the generic chain code masked the bit, the MFIFO drain kept it), so VIF1 parsed EE code as VIF commands and PATH3 stayed masked | the SPR bit maps the address to the scratchpad |
 | libmpeg runs stream callbacks (`sceMpegAddStrCallback`) inside `sceMpegDemuxPss`; the runtime queued them for later. Rampage copies the video into its own ring in that callback and parses the sequence header right after the demux, so it read the previous movie's bytes and asked for 25 MB | the demux stubs run the callbacks before returning (`invokeCurrentSequence`) |
 
+| the GIF keeps a path's tag open across transfers; the runtime started every PATH2/PATH3 transfer as a new packet. Rampage sends an A+D tag with one `DIRECT` and the blend template (ALPHA, TEST) through the next DMA REF, so ALPHA_1 was read as a GIF tag and stayed 0x1 (inverted blend: grey boxes behind text, near-black movies) | `GifArbiter::submit` keeps each path's open tag and continues it in the next transfer (this replaces the VIF-side IMAGE continuation) |
+
 ## Current blocker
-The game now gets from boot through the legal screen, the autosave notice, the Midway and Pipeworks movies and
-the attract mode into the front end: the main menu (CAMPAIGN) is drawn over the monster artwork, and the
-autopressed Cross opens the profile name entry. What is still wrong:
-- movie pictures are decoded but show up almost black;
-- text glyphs have grey boxes behind them (font texture alpha / CLUT);
-- the frame rate is low (about 8 game frames per second with the interpreted VU1).
-Next: the glyph alpha, then play into a game (campaign needs a profile; the autopress types "AAAA").
+The game boots through the legal screen, the autosave notice, the Midway and Pipeworks movies and the attract
+mode into the front end, with correct blending: the main menu (CAMPAIGN) over the monster artwork and the
+profile name entry (the autopressed Cross types "AAAA"). What is still wrong or missing:
+- the frame rate is low (about 8 game frames per second with the interpreted VU1);
+- no audio;
+- unattended tests cannot navigate menus yet (the autopress only taps Start and Cross).
+Next: a scripted input sequence for test runs, then play into a game.
 
 How the GUI renders: VU1 microprogram at 0x14d8/0xf70 transforms GUI vertices with a matrix at VU data
 0x89..0x8c (built on the EE with libvu0, see `sceVu0MulMatrix` above) and kicks packed `XYZF2` triangle

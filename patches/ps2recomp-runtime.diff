@@ -1483,7 +1483,7 @@ index f0ad507..3410ebf 100644
      {
          return samplePoint(static_cast<int>(texUf), static_cast<int>(texVf));
 diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
-index 5658928..3ec97ca 100644
+index 5658928..37ebe4d 100644
 --- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 @@ -1,3 +1,4 @@
@@ -1491,7 +1491,82 @@ index 5658928..3ec97ca 100644
  #include "runtime/gs/gs_frontend.h"
  #include "runtime/gs/gs_cpu_backend.h"
  #include "ps2_log.h"
-@@ -1575,6 +1576,36 @@ void GS::vertexKick(bool drawing)
+@@ -647,6 +648,27 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+     if (tryProcessNativeImageUploadPacket(data, sizeBytes))
+         return;
+ 
++    {
++        // RAMPAGE-DEBUG: dump packets that carry TEST = 0x51001 (the blend templates)
++        static int s_dumps = 0;
++        if (s_dumps < 3)
++        {
++            for (uint32_t off = 0; off + 16u <= sizeBytes; off += 16u)
++            {
++                if (loadLE64(data + off) == 0x51001ull && data[off + 8] == 0x47u)
++                {
++                    ++s_dumps;
++                    std::fprintf(stderr, "[gifdump] size=%u test at +0x%x\n", sizeBytes, off);
++                    const uint32_t from = (off >= 0x40u) ? off - 0x40u : 0u;
++                    for (uint32_t q = from; q + 16u <= sizeBytes && q < off + 0x40u; q += 16u)
++                        std::fprintf(stderr, "  [gq +0x%03x] %016llx %016llx\n", q, static_cast<unsigned long long>(loadLE64(data + q)),
++                                     static_cast<unsigned long long>(loadLE64(data + q + 8)));
++                    break;
++                }
++            }
++        }
++    }
++
+     PS2_IF_AGRESSIVE_LOGS({
+         const uint32_t packetIndex = s_debugGifPacketCount.fetch_add(1, std::memory_order_relaxed);
+         if (packetIndex < 48u)
+@@ -1067,6 +1089,24 @@ void GS::writeRegister(uint8_t regAddr, uint64_t value)
+ 
+ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+ {
++    {
++        // RAMPAGE-DEBUG: where do the blend templates (ALPHA_1 = 0x44 ...) go?
++        static int s_logged = 0;
++        if ((value == 0x44u || regAddr == 0x47u || regAddr == 0x1Bu) && s_logged < 24)
++        {
++            static uint64_t s_seen[24][2];
++            bool known = false;
++            for (int k = 0; k < s_logged; ++k)
++                known = known || (s_seen[k][0] == regAddr && s_seen[k][1] == value);
++            if (!known)
++            {
++                s_seen[s_logged][0] = regAddr;
++                s_seen[s_logged][1] = value;
++                ++s_logged;
++                std::fprintf(stderr, "[gsreg] reg=0x%02x value=0x%llx\n", regAddr, static_cast<unsigned long long>(value));
++            }
++        }
++    }
+     const bool interestingReg =
+         regAddr == GS_REG_PRIM ||
+         regAddr == GS_REG_RGBAQ ||
+@@ -1320,6 +1360,21 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+     {
+         int ci = (regAddr == GS_REG_ALPHA_2) ? 1 : 0;
+         m_ctx[ci].alpha = value;
++        if (const char *forced = std::getenv("PS2X_ALPHA_OVERRIDE")) // RAMPAGE-DEBUG experiment
++            m_ctx[ci].alpha = std::strtoull(forced, nullptr, 0);
++        {
++            // RAMPAGE-DEBUG: distinct ALPHA values
++            static uint64_t s_seen[32] = {};
++            static int s_n = 0;
++            bool known = false;
++            for (int k = 0; k < s_n; ++k)
++                known = known || s_seen[k] == (value | (static_cast<uint64_t>(ci) << 62));
++            if (!known && s_n < 32)
++            {
++                s_seen[s_n++] = value | (static_cast<uint64_t>(ci) << 62);
++                std::fprintf(stderr, "[alpha] ctx%d = 0x%llx\n", ci, static_cast<unsigned long long>(value));
++            }
++        }
+         break;
+     }
+     case GS_REG_TEST_1:
+@@ -1575,6 +1630,37 @@ void GS::vertexKick(bool drawing)
      if (drawing && m_backend)
      {
          GSPrimitiveBatch batch = buildDrawBatch(needed);
@@ -1514,7 +1589,7 @@ index 5658928..3ec97ca 100644
 +                const GSVertex &v1 = batch.vertices[needed > 1 ? 1 : 0];
 +                std::fprintf(stderr,
 +                             "[draw] #%llu prim=%u tme=%u abe=%u ctxt=%u fbp=0x%x fbw=%u psm=0x%x fbmsk=0x%x scissor=%u,%u-%u,%u "
-+                             "test=0x%llx v0=(%.1f,%.1f,z=%.0f) v1=(%.1f,%.1f) rgba=%u,%u,%u,%u tbp=0x%x tpsm=0x%x tw=%u th=%u cbp=0x%x xyoff=%u,%u zbp=0x%x zpsm=0x%x zmsk=%u tex1=0x%llx alpha=0x%llx%c",
++                             "test=0x%llx v0=(%.1f,%.1f,z=%.0f) v1=(%.1f,%.1f) rgba=%u,%u,%u,%u tbp=0x%x tpsm=0x%x tw=%u th=%u cbp=0x%x xyoff=%u,%u zbp=0x%x zpsm=0x%x zmsk=%u tex1=0x%llx alpha=0x%llx cpsm=%u csm=%u tcc=%u tfx=%u texa=%u/%u/%u%c",
 +                             static_cast<unsigned long long>(s_draws), static_cast<unsigned>(batch.state.prim.type),
 +                             batch.state.prim.tme, batch.state.prim.abe, batch.state.prim.ctxt, c.frame.fbp, c.frame.fbw,
 +                             c.frame.psm, c.frame.fbmsk, c.scissor.x0, c.scissor.y0, c.scissor.x1, c.scissor.y1,
@@ -1522,12 +1597,146 @@ index 5658928..3ec97ca 100644
 +                             c.tex0.tbp0, c.tex0.psm, c.tex0.tw, c.tex0.th, c.tex0.cbp,
 +                             static_cast<unsigned>(c.xyoffset.ofx), static_cast<unsigned>(c.xyoffset.ofy),
 +                             c.zbuf.zbp, c.zbuf.psm, static_cast<unsigned>(c.zbuf.zmask),
-+                             static_cast<unsigned long long>(c.tex1), static_cast<unsigned long long>(c.alpha), 10);
++                             static_cast<unsigned long long>(c.tex1), static_cast<unsigned long long>(c.alpha), c.tex0.cpsm, c.tex0.csm, c.tex0.tcc, c.tex0.tfx,
++                             batch.state.texa.ta0, static_cast<unsigned>(batch.state.texa.aem), batch.state.texa.ta1, 10);
 +            }
 +        }
          updatePreferredDisplaySourceForDraw(batch);
          m_backend->Submit(batch);
          recordDrawDebugEventUnlocked(needed);
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+index c289ba0..837f93a 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
+@@ -1,5 +1,7 @@
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #include <algorithm>
++#include <array>
++#include <unordered_map>
+ #include <cstring>
+ 
+ GifArbiter::GifArbiter(ProcessPacketFn processFn)
+@@ -18,17 +20,117 @@ bool GifArbiter::isImagePacket(const uint8_t *data, uint32_t sizeBytes)
+     return flg == 2u;
+ }
+ 
++namespace
++{
++    // The GIF keeps each path's current tag across transfers: a PATH2/PATH3 transfer can end before
++    // the tag's data does (Rampage sends an A+D tag with one DIRECT and the ALPHA/TEST qwords from a
++    // template through the next DMA REF), and the next transfer on that path continues the tag.
++    // State is kept here (not in the header) per arbiter and path.
++    struct GifPathTagState
++    {
++        bool open = false;
++        uint64_t tagLo = 0;
++        uint64_t tagHi = 0;
++        uint32_t remainingQw = 0;
++    };
++
++    std::unordered_map<const GifArbiter *, std::array<GifPathTagState, 4>> g_gifPathTags;
++
++    uint32_t gifTagPayloadQw(uint64_t tagLo)
++    {
++        const uint32_t nloop = static_cast<uint32_t>(tagLo & 0x7FFFu);
++        const uint32_t flg = static_cast<uint32_t>((tagLo >> 58) & 0x3u);
++        uint32_t nreg = static_cast<uint32_t>((tagLo >> 60) & 0xFu);
++        if (nreg == 0u)
++            nreg = 16u;
++        if (flg == 0u)
++            return nloop * nreg;
++        if (flg == 1u)
++            return (nloop * nreg + 1u) / 2u;
++        return nloop; // IMAGE (and the disabled format 3)
++    }
++}
++
+ void GifArbiter::submit(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool path2DirectHl)
+ {
+     if (!data || sizeBytes < 16 || !m_processFn)
+         return;
+ 
++    std::vector<uint8_t> bytes;
++    GifPathTagState &state = g_gifPathTags[this][static_cast<size_t>(pathId) & 3u];
++    uint32_t off = 0;
++    if (pathId != GifPathId::Path1 && state.open)
++    {
++        // Continue the open tag: give this part its own tag for the loops it carries.
++        const uint32_t flg = static_cast<uint32_t>((state.tagLo >> 58) & 0x3u);
++        uint32_t nreg = static_cast<uint32_t>((state.tagLo >> 60) & 0xFu);
++        if (nreg == 0u)
++            nreg = 16u;
++        uint32_t takeQw = std::min<uint32_t>(state.remainingQw, sizeBytes / 16u);
++        uint32_t loops = takeQw;
++        if (flg == 0u)
++        {
++            loops = takeQw / nreg;
++            takeQw = loops * nreg;
++        }
++        else if (flg == 1u)
++        {
++            loops = (takeQw * 2u) / nreg;
++            takeQw = (loops * nreg + 1u) / 2u;
++        }
++        if (loops > 0u)
++        {
++            const bool last = takeQw >= state.remainingQw;
++            uint64_t tagLo = state.tagLo & ~(0x7FFFull | (1ull << 15) | (1ull << 46)); // NLOOP, EOP, PRE
++            tagLo |= static_cast<uint64_t>(loops & 0x7FFFu);
++            if (last)
++                tagLo |= state.tagLo & (1ull << 15);
++            bytes.resize(16u);
++            std::memcpy(bytes.data(), &tagLo, 8);
++            std::memcpy(bytes.data() + 8, &state.tagHi, 8);
++            bytes.insert(bytes.end(), data, data + takeQw * 16u);
++            off = takeQw * 16u;
++            state.remainingQw -= takeQw;
++            if (state.remainingQw == 0u)
++                state.open = false;
++        }
++        else
++        {
++            state.open = false; // a partial PACKED loop: give up on the continuation
++        }
++    }
++
++    // Walk the tags of the rest and remember one that this transfer leaves unfinished.
++    if (pathId != GifPathId::Path1)
++    {
++        uint32_t pos = off;
++        while (pos + 16u <= sizeBytes)
++        {
++            uint64_t tagLo = 0, tagHi = 0;
++            std::memcpy(&tagLo, data + pos, 8);
++            std::memcpy(&tagHi, data + pos + 8, 8);
++            const uint32_t payloadQw = gifTagPayloadQw(tagLo);
++            const uint32_t availableQw = (sizeBytes - pos - 16u) / 16u;
++            if (payloadQw > availableQw)
++            {
++                state.open = true;
++                state.tagLo = tagLo;
++                state.tagHi = tagHi;
++                state.remainingQw = payloadQw - availableQw;
++                break;
++            }
++            pos += 16u + payloadQw * 16u;
++        }
++    }
++    bytes.insert(bytes.end(), data + off, data + sizeBytes);
++    if (bytes.size() < 16u)
++        return;
++
+     GifArbiterPacket pkt;
+     pkt.pathId = pathId;
+     pkt.path2DirectHl = (pathId == GifPathId::Path2) && path2DirectHl;
+-    pkt.path3Image = (pathId == GifPathId::Path3) && isImagePacket(data, sizeBytes);
+-    pkt.data.resize(sizeBytes);
+-    std::memcpy(pkt.data.data(), data, sizeBytes);
++    pkt.path3Image = (pathId == GifPathId::Path3) && isImagePacket(bytes.data(), static_cast<uint32_t>(bytes.size()));
++    pkt.data = std::move(bytes);
+     m_queue.push_back(std::move(pkt));
+ }
+ 
 diff --git a/ps2xRuntime/src/lib/ps2_iop_host.cpp b/ps2xRuntime/src/lib/ps2_iop_host.cpp
 index 8d46e03..c22b784 100644
 --- a/ps2xRuntime/src/lib/ps2_iop_host.cpp
@@ -2141,7 +2350,7 @@ index 45cb9d2..b50292e 100644
          {
              RUNTIME_LOG("[run] window close requested, breaking out of loop");
 diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
-index b02c7ca..375a456 100644
+index b02c7ca..22dfd19 100644
 --- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
 +++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
 @@ -1,5 +1,29 @@
@@ -2346,56 +2555,45 @@ index b02c7ca..375a456 100644
              if (m_vu1Code && destAddr < PS2_VU1_CODE_SIZE && mpgBytes > 0)
              {
                  uint32_t copyBytes = mpgBytes;
-@@ -490,17 +569,44 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -490,30 +569,15 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
              uint32_t qwCount = imm;
              if (qwCount == 0)
                  qwCount = 65536;
-+            if (pos + qwCount * 16u > sizeBytes)
-+            {
-+                carryFrom(pos - 4u);
-+                return;
-+            }
-             const uint32_t availableQw = (sizeBytes - pos) / 16u;
-             const bool truncated = qwCount > availableQw;
-             if (qwCount > availableQw)
-                 qwCount = availableQw;
- 
+-            const uint32_t availableQw = (sizeBytes - pos) / 16u;
+-            const bool truncated = qwCount > availableQw;
+-            if (qwCount > availableQw)
+-                qwCount = availableQw;
+-
 -            if (qwCount > 0)
-+            const bool directHl = (opcode == VIF_DIRECTHL);
-+            uint32_t payloadPos = pos;
-+            uint32_t payloadQw = qwCount;
-+            // An IMAGE transfer started by an earlier DIRECT continues in this DIRECT's payload (the GIF
-+            // keeps its PATH2 state between packets); give the continuation its own IMAGE tag.
-+            if (m_vif1PendingPath2ImageQwc != 0u && payloadQw > 0u)
-+            {
-+                const uint32_t chunkQw = std::min<uint32_t>(m_vif1PendingPath2ImageQwc, payloadQw);
-+                std::vector<uint8_t> imagePacket(16u + static_cast<size_t>(chunkQw) * 16u, 0u);
-+                const uint64_t imageTag =
-+                    static_cast<uint64_t>(chunkQw & 0x7FFFu) |
-+                    ((m_vif1PendingPath2ImageQwc == chunkQw) ? (1ull << 15) : 0ull) |
-+                    (static_cast<uint64_t>(kGifFmtImage) << 58);
-+                std::memcpy(imagePacket.data(), &imageTag, sizeof(imageTag));
-+                std::memcpy(imagePacket.data() + 16u, data + payloadPos, static_cast<size_t>(chunkQw) * 16u);
-+                submitGifPacket(GifPathId::Path2, imagePacket.data(), static_cast<uint32_t>(imagePacket.size()), true, m_vif1PendingPath2DirectHl);
-+                m_vif1PendingPath2ImageQwc -= chunkQw;
-+                if (m_vif1PendingPath2ImageQwc == 0u)
-+                    m_vif1PendingPath2DirectHl = false;
-+                payloadPos += chunkQw * 16u;
-+                payloadQw -= chunkQw;
-+            }
-+
-+            if (payloadQw > 0)
++            if (pos + qwCount * 16u > sizeBytes)
              {
 -                const bool directHl = (opcode == VIF_DIRECTHL);
 -                submitGifPacket(GifPathId::Path2, data + pos, qwCount * 16, true, directHl);
-+                submitGifPacket(GifPathId::Path2, data + payloadPos, payloadQw * 16, true, directHl);
- 
+-
 -                const uint32_t pendingImageQw = pendingGifImageQwc(data + pos, qwCount * 16u);
-+                const uint32_t pendingImageQw = pendingGifImageQwc(data + payloadPos, payloadQw * 16u);
-                 if (pendingImageQw != 0u)
-                 {
-                     m_vif1PendingPath2ImageQwc = pendingImageQw;
-@@ -565,6 +671,11 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+-                if (pendingImageQw != 0u)
+-                {
+-                    m_vif1PendingPath2ImageQwc = pendingImageQw;
+-                    m_vif1PendingPath2DirectHl = directHl;
+-                }
+-            }
+-
+-            pos += qwCount * 16;
+-            if (truncated)
+-            {
+-                pos = sizeBytes;
+-                break;
++                carryFrom(pos - 4u);
++                return;
+             }
++            // A GIF tag left open by an earlier DIRECT (an IMAGE transfer, or A+D registers that come
++            // from the next DMA tag) is continued by the GIF arbiter, which keeps PATH2's tag state.
++            submitGifPacket(GifPathId::Path2, data + pos, qwCount * 16u, true, opcode == VIF_DIRECTHL);
++            pos += qwCount * 16u;
+             continue;
+         }
+         else if ((opcode & 0x60) == 0x60)
+@@ -565,6 +629,11 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
  
              uint32_t totalBytes = sourceVectorCount * bytesPerVector;
              totalBytes = (totalBytes + 3) & ~3u;
