@@ -245,6 +245,7 @@ class BundleAssets:
             if e.type in (0, 17):
                 self.models[self.clean(e.name).split('|')[0].lower()].append((e, a, d2))
         self.model_meshes = {}
+        self.meshes = {}
         self.textures = {}
 
     def clean(self, name_index):
@@ -273,10 +274,13 @@ class BundleAssets:
         return self.g.material(name_index, self.clean(name_index), png)
 
     def mesh(self, entry, skinned=False):
+        """glTF mesh index of a mesh entry (written once), or None if it draws nothing."""
         e, a, d2 = entry
-        parts = read_mesh(e.type, a, d2)
-        return self.g.mesh(self.clean(e.name), [(self.material(p.material), s) for p in parts for s in p.sections],
-                           skinned)
+        if (e.index, skinned) not in self.meshes:
+            parts = read_mesh(e.type, a, d2)
+            self.meshes[e.index, skinned] = self.g.mesh(
+                self.clean(e.name), [(self.material(p.material), s) for p in parts for s in p.sections], skinned)
+        return self.meshes[e.index, skinned]
 
     def model(self, name):
         """glTF mesh indices of a model (all its "MODEL|object" meshes), by name with or without .pwk."""

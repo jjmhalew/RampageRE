@@ -197,12 +197,24 @@ the tracks have a single key.
 
 *RawAnim* (exactly one per node tree, with the same name; fixed up by 0x19C700): 0x2C u32 record count,
 0x30 offset of the record table (one offset per record, sorted by bone), 0x34 offset of the first record.
-Record: u32 bone, f32 ?, u32 translation key count, u32 rotation key count, f32 0, f32 1, f32 1 (on all 8,173
-records), u32 offset of the translation keys (from the record; 6 × f32 each: the translation, then three values
-not decoded yet), u32 offset of the rotation keys (9 × f32 each: the quaternion, then five values not decoded
-yet). The next record follows the rotation keys. 261 RawAnims have one key per node; the others animate some
-nodes with up to 65 keys (city props, not played yet). On the 60 monster skeletons the first key equals the bind
-pose exactly.
+Record: u32 bone, f32 ? (not decoded), u32 translation segment count, u32 rotation segment count, f32 start 0,
+f32 end 1, f32 1 / (end − start) = 1 (on all 8,173 records), u32 offset of the translation segments (from the
+record), u32 offset of the rotation segments; the next record follows the rotation segments.
+
+The n segments of a track split the clip evenly: at time t (0..1) segment k = ⌊t × n⌋ runs with
+f = t × n − k (0x19D020). A translation segment (0x19CEC0) is f32[3] p, f32[3] d: value p + d × f. A rotation
+segment (0x19D0A0, 0x167DE0) is f32[4] q0, f32[4] q1, f32 angle a: value normalise(q0 × cos(a f) + q1 × sin(a f)),
+or normalise(q0 + q1 × f) when a is 0, a slerp worked out in advance. Every segment ends where the next one
+starts (largest difference 5.9e-7 over all 85,801), so sampling the segment ends and slerping between them gives
+the same motion. On the 60 monster skeletons the first segment starts at the bind pose exactly.
+
+**Node-tree models.** Every tree has a model of the same name, and the model's mesh objects (`MODEL|object`)
+are named after its nodes (on 84 of Chicago's 90 trees all of them; the rest go on the root). Their vertices
+are in their node's space, so a model is drawn by placing each node at its RawAnim pose; the city export does
+that for every placed model. In the cities the trees are people (`Naked_Male_Held`, `Police_SWAT_WindowEmerge`,
+... with their keyframed clips `Running`, `Falling`, `WindowLook`), vehicles (`Helicopter`, `FireTruck`, `Tank_Sherman`),
+bosses (`SaucerBoss`, `Blimp`), the fountain and the sky. A tree named after a pose (`Naked_Male_Held`) has
+that pose as its RawAnim.
 
 **Monster names.** Animations are shared by skeleton type and prefixed with it (`SKELETON_1_WALK2` for George's
 ape skeleton, `SKELETON_2_...` for Ralph). `<MONSTER>_HEAD_*` move the face and head bones (87 of the 330 also
@@ -278,5 +290,12 @@ block, every building and object model found). Game units, Z up, the street towa
   `ObjectTemplateBook` (`Objects1_Props`), whose `Shape|Shape` names the model; templates inherit through
   `ParentPropertySet = "Group:Book"`.
 
+Models with a node tree are placed node by node (see "Node-tree models"); one whose RawAnim moves (the
+helicopter's rotors, the fountain) gets it as a looping clip `<model> loop`, which the viewer plays. The sky's
+cloud band does not move in its RawAnim (29 identical segments); its drift must come from elsewhere.
+`tools/anim.py VOLDIR --models CITY OUTDIR` exports every animated tree model of a city (people, vehicles,
+bosses) with all its clips to `OUTDIR/CITY/models`.
+
 Not reproduced yet: the facade layout is inferred (it looks right in all cities, not checked against the game),
-vertex lighting (`LightingData`), people, vehicles and AI spawns, and some backdrop planes come out white.
+vertex lighting (`LightingData`), where the game spawns people, vehicles and AI, and some backdrop planes come out
+white.

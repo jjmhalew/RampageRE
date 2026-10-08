@@ -31,7 +31,8 @@ archive, and runs its front-end menu loop with VU1 rendering, but the picture is
 | Meshes and materials to glTF (5,577 meshes), three.js viewer | ✅ |
 | Property books (`.prb`: city layout, buildings, AI, challenges), 28/28 decoded | ✅ |
 | All 7 cities assembled block by block in glTF (buildings with generated facades, street objects) | ✅ |
-| Skeletons and animations (60 skeletons, 4,764 animations): all 30 monsters animated in glTF | ✅ |
+| Skeletons and animations (60 skeletons, 5,379 animations): all 30 monsters animated in glTF | ✅ |
+| City models with node trees (people, vehicles, bosses) with their clips; moving props loop in the blocks | ✅ |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -63,7 +64,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/tex.py` | exports bundle textures to PNG |
 | `tools/mesh.py` | exports bundle meshes with materials and textures as glTF (`--verify`: all 5,577 meshes) |
 | `tools/city.py` | assembles a city's blocks (ground, buildings, street objects) into glTF scenes |
-| `tools/anim.py` | skeletons and animations: exports each monster as an animated, skinned glTF (`--verify`: all 615 node trees and 5,379 animations) |
+| `tools/anim.py` | skeletons and animations: exports each monster as an animated, skinned glTF, and a city's people, vehicles and bosses with their clips (`--verify`: all 615 node trees and 5,379 animations) |
 | `tools/prb.py` | prints property books (design data) as readable trees |
 | `viewer/index.html` | three.js viewer for the exported glTF, plays animations (serve the repository root) |
 | `tools/refs.py` | finds the code that references an address (strings, tables) |

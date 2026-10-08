@@ -73,8 +73,12 @@ function load(name) {
     mixer = clips.length ? new THREE.AnimationMixer(current) : null;
     animSelect.innerHTML = '';
     for (const c of clips) animSelect.add(new Option(c.name, c.name));
-    document.getElementById('animrow').hidden = !clips.length;
-    if (clips.length) {
+    // a city block's clips are the props' own loops (rotors, fountains): play them all together
+    const loops = clips.length && clips.every(c => / loop$/.test(c.name));
+    document.getElementById('animrow').hidden = !clips.length || loops;
+    if (loops) {
+      for (const c of clips) mixer.clipAction(c).play();
+    } else if (clips.length) {
       animSelect.value = params.get('anim') || (clips.find(c => /^SKELETON_\d+_IDLE(_SHORT)?$/.test(c.name)) || clips[0]).name;
       play(animSelect.value);
     }

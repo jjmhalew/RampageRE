@@ -66,8 +66,9 @@ class Bundle:
         """(entry, data bytes, data2 bytes) of one segment."""
         s = self.segments[segment]
         for e, r in zip(s.entries, s.records):
-            a = self.data[s.data_offset + r.data_offset:][:r.data_size] if r.data_size else b''
-            b = self.data[s.data2_offset + r.data2_offset:][:r.data2_size] if r.data2_size else b''
+            at, at2 = s.data_offset + r.data_offset, s.data2_offset + r.data2_offset
+            a = self.data[at:at + r.data_size] if r.data_size else b''
+            b = self.data[at2:at2 + r.data2_size] if r.data2_size else b''
             yield e, a, b
 
     def name(self, index):

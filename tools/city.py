@@ -19,6 +19,7 @@ import collections
 import os
 import sys
 
+import anim
 import bdp
 import mesh
 import prb
@@ -141,6 +142,7 @@ class CityExporter:
         with open(os.path.join(voldir, self.books.files[city.lower() + '.bdp']), 'rb') as f:
             self.bundle = bdp.Bundle(f.read())
         self.name_index = {n.lower(): i for i, n in enumerate(self.bundle.names)}
+        self.models = anim.Models(self.bundle)
         self.world = self.books.group(city + '_Props', 'WorldData')
         self.template_books = [self.world.get('ObjectTemplateBook'), self.world.get('WeaponsTemplateBook'),
                                city + '_Props', city + '_buildings']
@@ -155,14 +157,15 @@ class CityExporter:
         return None
 
     def place_model(self, assets, g, name, parent, translation=(0, 0, 0), rotation=None):
-        meshes = assets.model(name)
-        if not meshes:
+        """The model with its node hierarchy (helicopters, the sky's cloud band, ...); a model that moves on its
+        own gets its RawAnim as a looping clip."""
+        placed = self.models.add(g, assets, name, parent, translation, rotation)
+        if placed is None:
             self.missing[name] += 1
             return None
-        node = g.node(name, None, translation, rotation, parent)
-        for m in meshes:
-            g.node(g.doc['meshes'][m]['name'], m, parent=node)
-        return node
+        root, joints = placed
+        self.models.loop(g, name, joints)
+        return root
 
     def place_object(self, assets, g, inst, parent, base=(0.0, 0.0, 0.0)):
         name = inst.get('Name')

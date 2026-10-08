@@ -38,13 +38,18 @@ Animation (type 4; 0x196730 makes a KeyInterpAnim, vtable 0x444C30, when the kin
   translations are interpolated linearly and rotations spherically.
   RawAnim (one per node tree, same name; on skeletons the first key is the bind pose; fixed up by 0x19C700):
   0x2C  u32  record count  0x30  u32  offset of the record table (sorted by bone)  0x34  u32  first record
-  Record: u32 bone, f32 ?, u32 translation keys, u32 rotation keys, f32 0, f32 1, f32 1, u32 offset of the
-    translation keys (6 x f32: translation, then 3 not decoded), u32 offset of the rotation keys (9 x f32:
-    quaternion, then 5 not decoded); the next record follows the rotation keys.
+  Record: u32 bone, f32 ?, u32 translation segments, u32 rotation segments, f32 start 0, f32 end 1, f32 1 / (end -
+    start) = 1, u32 offset of the translation segments, u32 offset of the rotation segments; the next record
+    follows. n segments split the clip evenly: at time t segment k = int(t * n) runs with f = t * n - k.
+  Translation segment (0x19CEC0): f32[3] p, f32[3] d; value = p + d * f.
+  Rotation segment (0x19D0A0, 0x167DE0): f32[4] q0, f32[4] q1, f32 angle a; value = normalise(q0 cos(a f) +
+    q1 sin(a f)), or normalise(q0 + q1 f) when a is 0 (a slerp worked out in advance). Segments join up.
 
 Usage: python tools/anim.py --verify VOLDIR                check every skeleton and animation
        python tools/anim.py VOLDIR MONSTER OUTDIR            write OUTDIR/MONSTER.gltf: mesh, skeleton, animations
        python tools/anim.py VOLDIR --all OUTDIR              every monster (each NAME with NAME.cmp + NAME_anims.cmp)
+       python tools/anim.py VOLDIR --models BUNDLE OUTDIR    every animated node-tree model of BUNDLE (people,
+                                                             vehicles, bosses, ...) to OUTDIR/BUNDLE/models
 """
 import collections
 import math
@@ -58,6 +63,7 @@ import mesh
 Node = collections.namedtuple('Node', 'index parent name children')
 Pose = collections.namedtuple('Pose', 'inverse_bind translation rotation')
 Track = collections.namedtuple('Track', 'bone times values')  # times 0..1 of the duration
+RawTrack = collections.namedtuple('RawTrack', 'value translations rotations')  # value: the f32 at +4, not decoded
 
 
 def f32(bits):
@@ -197,7 +203,7 @@ class Animation:
 
 
 class RawAnim:
-    """A RawAnim: per node the first translation and rotation key (on skeletons, the bind pose)."""
+    """A RawAnim: per node, translation and rotation segments spread evenly over the clip."""
 
     def __init__(self, data, names):
         self.duration, self.kind, self.size, self.skeleton, count, table, first = struct.unpack_from(
@@ -213,14 +219,66 @@ class RawAnim:
         for o in offsets:
             if o != at:
                 raise ValueError(f'RawAnim record at {o:#x}, expected {at:#x}')
-            bone, length, nt, nr, zero, one, one2, t_at, r_at = struct.unpack_from('<IfIIfffII', data, at)
-            if t_at != 0x24 or r_at != 0x24 + 24 * nt:
+            bone, value, nt, nr, start, stop, scale, t_at, r_at = struct.unpack_from('<IfIIfffII', data, at)
+            if t_at != 0x24 or r_at != 0x24 + 24 * nt or not nt or not nr:
                 raise ValueError(f'RawAnim record at {at:#x}: keys at {t_at:#x} / {r_at:#x}')
-            t = struct.unpack_from('<6f', data, at + t_at)
-            q = struct.unpack_from('<9f', data, at + r_at)
-            self.records[bone] = (length, nt, nr, (zero, one, one2), t, q)
+            if (start, stop, scale) != (0.0, 1.0, 1.0):
+                raise ValueError(f'RawAnim record at {at:#x}: times {start}, {stop}, {scale}')
+            translations = []
+            for k in range(nt):
+                v = struct.unpack_from('<6f', data, at + t_at + 24 * k)
+                translations.append((v[:3], v[3:]))
+            rotations = []
+            for k in range(nr):
+                v = struct.unpack_from('<9f', data, at + r_at + 36 * k)
+                rotations.append((v[:4], v[4:8], v[8]))
+            self.records[bone] = RawTrack(value, translations, rotations)
             at += r_at + 36 * nr
         self.end = at
+
+    def samples(self, bone):
+        """(times, translations, times, rotations) of a node at its segment ends (times 0..1); long rotation
+        segments are split so that a shortest-path slerp between the samples follows the game's arc."""
+        track = self.records[bone]
+        n = len(track.translations)
+        t_times = [k / n for k in range(n + 1)]
+        t_values = [p for p, _ in track.translations]
+        p, d = track.translations[-1]
+        t_values.append(tuple(p[i] + d[i] for i in range(3)))
+        n = len(track.rotations)
+        r_times, r_values = [], []
+        for k, key in enumerate(track.rotations):
+            parts = max(1, math.ceil(abs(key[2]) / (math.pi / 4)))
+            for j in range(parts):
+                r_times.append((k + j / parts) / n)
+                r_values.append(raw_rotation(key, j / parts))
+        r_times.append(1.0)
+        r_values.append(raw_rotation(track.rotations[-1], 1.0))
+        return t_times, t_values, r_times, r_values
+
+    def moving(self):
+        for bone in self.records:
+            _, tv, _, rv = self.samples(bone)
+            if any(max(abs(a - b) for a, b in zip(v, tv[0])) > 1e-5 for v in tv) or \
+                    any(max(abs(a - b) for a, b in zip(v, rv[0])) > 1e-5 for v in rv):
+                return True
+        return False
+
+
+def raw_rotation(key, f):
+    """Rotation segment (q0, q1, angle) at fraction f, as 0x167DE0 does it."""
+    q0, q1, angle = key
+    if f < f32(0x3A83126F):
+        return tuple(q0)
+    if f > f32(0x3F7FBE77):
+        f = 1.0
+    if angle == 0.0:
+        q = [q0[i] + q1[i] * f for i in range(4)]
+    else:
+        c, s_ = math.cos(angle * f), math.sin(angle * f)
+        q = [q0[i] * c + q1[i] * s_ for i in range(4)]
+    norm = math.sqrt(sum(c * c for c in q))
+    return tuple(c / norm for c in q)
 
 
 def bundle_items(path):
@@ -231,7 +289,7 @@ def bundle_items(path):
 
 def verify(voldir):
     counts = collections.Counter()
-    worst_bind = worst_raw = worst_norm = 0.0
+    worst_bind = worst_raw = worst_norm = worst_join = 0.0
     problems = []
     for f in sorted(os.listdir(voldir)):
         if not f.lower().endswith(('.bdp', '.cmp')):
@@ -286,20 +344,29 @@ def verify(voldir):
                 else:
                     if sorted(anim.records) != list(range(len(s.nodes))):
                         raise ValueError('RawAnim does not cover every node')
-                    if s.poses:  # the bind pose a second time: compare
-                        for i, (length, nt, nr, consts, t, q) in anim.records.items():
+                    for i, track in anim.records.items():
+                        if s.poses:  # the bind pose a second time: compare
+                            t, q = track.translations[0][0], track.rotations[0][0]
                             p = s.poses[i]
-                            worst_raw = max(worst_raw, max(abs(u - v) for u, v in zip(t[:3], p.translation)),
-                                            min(max(abs(u - v) for u, v in zip(q[:4], p.rotation)),
-                                                max(abs(u + v) for u, v in zip(q[:4], p.rotation))))
+                            worst_raw = max(worst_raw, max(abs(u - v) for u, v in zip(t, p.translation)),
+                                            min(max(abs(u - v) for u, v in zip(q, p.rotation)),
+                                                max(abs(u + v) for u, v in zip(q, p.rotation))))
+                        for (p, d), (p2, _) in zip(track.translations, track.translations[1:]):
+                            worst_join = max(worst_join, max(abs(p[k] + d[k] - p2[k]) for k in range(3)))
+                        for key, key2 in zip(track.rotations, track.rotations[1:]):
+                            q, q2 = raw_rotation(key, 1.0), key2[0]
+                            worst_join = max(worst_join, min(max(abs(u - v) for u, v in zip(q, q2)),
+                                                             max(abs(u + v) for u, v in zip(q, q2))))
                     counts['raw animations'] += 1
+                    counts['raw segments'] += sum(len(t.translations) + len(t.rotations)
+                                                  for t in anim.records.values())
             except (ValueError, struct.error) as err:
                 problems.append(f'{f} {b.name(e.name)!r}: {err}')
     for p in problems[:20]:
         print(p)
     print(', '.join(f'{v} {k}' for k, v in counts.items()) + f'; {len(problems)} problems')
     print(f'bind pose chain vs stored inverse bind: max error {worst_bind:.2e}; RawAnim vs skeleton bind pose: '
-          f'{worst_raw:.2e}; rotation key |q| - 1: {worst_norm:.2e}')
+          f'{worst_raw:.2e}; rotation key |q| - 1: {worst_norm:.2e}; RawAnim segment joins: {worst_join:.2e}')
     return not problems
 
 
@@ -342,6 +409,130 @@ def anim_name(name):
     return name[3:] if name.startswith('000') else name
 
 
+def add_animation(g, name, duration, channels):
+    """channels: [(node, 'translation' or 'rotation', times 0..1, values in glTF convention)]"""
+    samplers, out = [], []
+    for node, path, times, values in channels:
+        samplers.append({'input': scalar_accessor(g, [t * duration for t in times]),
+                         'output': g.accessor([list(v) for v in values],
+                                              'VEC3' if path == 'translation' else 'VEC4', target=None),
+                         'interpolation': 'LINEAR'})
+        out.append({'sampler': len(samplers) - 1, 'target': {'node': node, 'path': path}})
+    g.doc.setdefault('animations', []).append({'name': name, 'samplers': samplers, 'channels': out})
+
+
+def keyframe_channels(anim, joints):
+    return ([(joints[t.bone], 'translation', t.times, t.values) for t in anim.translations] +
+            [(joints[t.bone], 'rotation', t.times, [gltf_rotation(q) for q in t.values]) for t in anim.rotations])
+
+
+def raw_channels(raw, joints):
+    out = []
+    for bone in sorted(raw.records):
+        t_times, t_values, r_times, r_values = raw.samples(bone)
+        out.append((joints[bone], 'translation', t_times, t_values))
+        out.append((joints[bone], 'rotation', r_times, [gltf_rotation(q) for q in r_values]))
+    return out
+
+
+class Models:
+    """The node-tree models of a bundle: hierarchy, rest pose (the RawAnim at time 0) and clips. Every tree
+    has a model of the same name whose mesh objects ("MODEL|object") are named after its nodes; their vertices
+    are in the node's space."""
+
+    def __init__(self, bundle):
+        self.b = bundle
+        self.trees, self.raws, self.clips = {}, {}, collections.defaultdict(list)
+        items = list(bundle.items(0))
+        for e, a, _ in items:
+            if e.type == 3:
+                self.trees[self.key(bundle.name(e.name))] = Skeleton(a, bundle.names)
+        for e, a, _ in items:
+            if e.type != 4:
+                continue
+            if struct.unpack_from('<I', a, 0x20)[0] == RAW:
+                raw = RawAnim(a, bundle.names)
+                self.raws[self.key(raw.skeleton_name)] = raw
+            else:
+                clip = Animation(a, bundle.names)
+                self.clips[self.key(clip.skeleton_name)].append((anim_name(bundle.name(e.name)), clip))
+
+    @staticmethod
+    def key(name):
+        name = name.lstrip('\x13').lower()
+        return name[:-4] if name.endswith('.pwk') else name
+
+    def add(self, g, assets, name, parent, translation=None, rotation_z=None):
+        """Place model `name` under `parent`: (root node, node per tree node), or None if it has no meshes."""
+        key = self.key(name)
+        entries = assets.models.get(key, [])
+        if not entries:
+            return None
+        root = g.node(name, None, translation, rotation_z, parent)
+        joints = []
+        tree = self.trees.get(key)
+        if tree:
+            raw = self.raws.get(key)
+            for i, node in enumerate(tree.nodes):
+                j = g.node(node.name, parent=root if node.parent < 0 else joints[node.parent])
+                if raw and i in raw.records:
+                    t, q = raw.records[i].translations[0][0], raw.records[i].rotations[0][0]
+                elif tree.poses:
+                    t, q = tree.poses[i].translation, tree.poses[i].rotation
+                else:
+                    t, q = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)
+                if any(t):
+                    g.doc['nodes'][j]['translation'] = list(t)
+                if tuple(q) != (0.0, 0.0, 0.0, 1.0):
+                    g.doc['nodes'][j]['rotation'] = gltf_rotation(q)
+                joints.append(j)
+        by_node = {tree.nodes[i].name.lower(): j for i, j in enumerate(joints)} if tree else {}
+        for entry in entries:
+            m = assets.mesh(entry)
+            if m is not None:
+                obj = assets.clean(entry[0].name).partition('|')[2].lower()
+                g.node(g.doc['meshes'][m]['name'], m, parent=by_node.get(obj, root))
+        return root, joints
+
+    def loop(self, g, name, joints):
+        """Add the model's own RawAnim as a clip "<name> loop" if it moves; True if it did."""
+        raw = self.raws.get(self.key(name))
+        if not raw or not joints or not raw.moving():
+            return False
+        add_animation(g, f'{self.key(name)} loop', raw.duration, raw_channels(raw, joints))
+        return True
+
+
+def export_models(voldir, bundle_name, out):
+    """Every node-tree model of a bundle that has more than one node, clips or a moving RawAnim."""
+    files = {f.lower(): f for f in os.listdir(voldir)}
+    path = os.path.join(voldir, files.get(bundle_name.lower()) or files[bundle_name.lower() + '.bdp'])
+    b, _ = bundle_items(path)
+    stem = os.path.splitext(os.path.basename(path))[0]
+    models = Models(b)
+    outdir = os.path.join(out, stem, 'models')
+    written = []
+    for key, tree in sorted(models.trees.items()):
+        raw = models.raws.get(key)
+        if len(tree.nodes) < 2 and not models.clips.get(key) and not (raw and raw.moving()):
+            continue
+        g = mesh.Gltf()
+        assets = mesh.BundleAssets(b, g, outdir, '../textures')
+        placed = models.add(g, assets, key, 0)
+        if placed is None:
+            continue
+        _, joints = placed
+        if raw and raw.moving():
+            add_animation(g, key, raw.duration, raw_channels(raw, joints))
+        for name, clip in models.clips.get(key, []):
+            add_animation(g, name, clip.duration, keyframe_channels(clip, joints))
+        os.makedirs(outdir, exist_ok=True)
+        file = bdp.safe_name(key)
+        g.save(os.path.join(outdir, file + '.gltf'))
+        written.append((file, len(g.doc.get('animations', []))))
+    return written
+
+
 def export_monster(voldir, monster, out):
     files = {f.lower(): f for f in os.listdir(voldir)}
     b, items = bundle_items(os.path.join(voldir, files[monster.lower() + '.cmp']))
@@ -381,27 +572,15 @@ def export_monster(voldir, monster, out):
     count = 0
     if anims_file:
         ab, aitems = bundle_items(os.path.join(voldir, anims_file))
-        g.doc['animations'] = []
         for e, a, _ in aitems:
             if e.type != 4 or struct.unpack_from('<I', a, 0x20)[0] != KEY_INTERP:
                 continue
             anim = Animation(a, ab.names)
             if anim.bones != len(joints):
                 continue
-            samplers, channels = [], []
-            for tracks, path, convert in ((anim.translations, 'translation', list),
-                                          (anim.rotations, 'rotation', gltf_rotation)):
-                for tr in tracks:
-                    times = [t * anim.duration for t in tr.times]
-                    samplers.append({'input': scalar_accessor(g, times),
-                                     'output': g.accessor([convert(v) for v in tr.values],
-                                                          'VEC3' if path == 'translation' else 'VEC4', target=None),
-                                     'interpolation': 'LINEAR'})
-                    channels.append({'sampler': len(samplers) - 1, 'target': {'node': joints[tr.bone], 'path': path}})
-            g.doc['animations'].append({'name': anim_name(ab.name(e.name)), 'samplers': samplers,
-                                        'channels': channels})
+            add_animation(g, anim_name(ab.name(e.name)), anim.duration, keyframe_channels(anim, joints))
             count += 1
-        g.doc['animations'].sort(key=lambda x: x['name'])
+        g.doc.get('animations', []).sort(key=lambda x: x['name'])
     os.makedirs(out, exist_ok=True)
     g.save(os.path.join(out, monster + '.gltf'))
     return count
@@ -411,6 +590,9 @@ def main():
     args = sys.argv[1:]
     if len(args) == 2 and args[0] == '--verify':
         sys.exit(0 if verify(args[1]) else 1)
+    elif len(args) == 4 and args[1] == '--models':
+        for file, clips in export_models(args[0], args[2], args[3]):
+            print(f'{file}: {clips} clips')
     elif len(args) == 3:
         voldir, monster, out = args
         if monster == '--all':
