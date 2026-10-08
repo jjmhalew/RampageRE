@@ -15,8 +15,9 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 
 ## Status
 
-**Early bring-up, not playable yet.** The recompiled game starts on Windows, loads its IOP modules and data
-archive, and runs its front-end menu loop with VU1 rendering, but the picture is still wrong. See [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
+**Early bring-up, not playable yet.** The recompiled game starts on Windows, shows the legal screen, streams
+its data archive, compiles its scripts and starts the front-end shell, then stops in the attract mode. See
+[docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
 
 | Step | |
 |---|---|
@@ -25,7 +26,9 @@ archive, and runs its front-end menu loop with VU1 rendering, but the picture is
 | IOP modules (sio2man, libsd, MultiStream) | ✅ |
 | File system | ✅ |
 | zlib asset loading, data archive mounted, menu loop | ✅ |
-| Graphics (GS / VU1) | ❌ VU1 runs, picture still wrong |
+| Graphics (GS / VU1): legal screen | ✅ |
+| Game scripts compile and run in the recompiled game (shell, attract mode) | ✅ |
+| Front end (attract mode videos, title, menus) | ❌ stops in the attract mode |
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
 | Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |
 | Meshes and materials to glTF (5,577 meshes), three.js viewer | ✅ |

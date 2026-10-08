@@ -1,9 +1,8 @@
 # Rampage: Total Destruction (PS2, SLES-53800) – PS2Recomp bring-up notes
 
-State on 2026-10-08: the recompiled game boots natively on Windows, runs all C++ static constructors,
-loads its IOP modules, sets up the GS display, feeds VIF1 through MFIFO, runs `RApp::Init` and reaches the
-front-end menu code, which stops because the game's data archive was never mounted (see "Current
-blocker"). No picture yet.
+State on 2026-10-08 (evening): the recompiled game boots natively on Windows, shows the legal screen,
+mounts and streams `RAMPAGE.VOL`, compiles its scripts and starts the front-end shell and attract mode, where
+it currently stops (see "Current blocker").
 
 ## The disc
 - `SLES_538.00`: main ELF, Metrowerks CodeWarrior MIPS 2.4.1.01, stripped, one RWX segment that holds
@@ -78,18 +77,56 @@ add the binding to `recomp/config.toml` so the next regenerate keeps it.
 | `_memalign_r` (0x3293E8) trims newlib chunks while malloc/free are runtime stubs: it freed the block it returned, so later allocations overlapped (zlib state overwritten with 0x11 fill) | bound to `memalign_r` (`0x3293C0` is `memalign`, DB name "setlocale" again) |
 | VIF1 MFIFO (`D_CTRL.MFD = 2`) not emulated: VIF1 ran the empty ring at once and the game waited forever on `D1_TADR` | MFIFO in the runtime: fromSPR wraps in `RBOR/RBSR`, VIF1 drains up to fromSPR's `MADR` and keeps running |
 | `sceDopen/sceDread/sceDclose` missing in the runtime, so the disc listing was empty and `RAMPAGE.VOL` was "not found" | implemented on the host (CD names upper case with `;1`, iomanX modes) and bound at 0x14D688/0x14D8B8/0x14D750 |
+| `PMFHL.LW` packed the wrong halves (newlib `strtod` looped forever) | `ps2_pmfhl_*` helpers in `ps2_runtime_macros.h` |
+| `STREAM.IRX` calls an EE RPC server (sid 0x12344321) from the IOP; the IOP side had no client for EE servers | IOP→EE RPC: `BindRpc` to an EE server, `CallRpc` queues a guest invocation of the server function and wakes the IOP thread with the reply |
+| VIF1 PATH2: after a `DIRECT` whose GIF tag starts an `IMAGE` transfer, the runtime took the next raw bytes of the VIF stream as pixels. Rampage sends the pixels in the next `DIRECT` (`NOP`, `DIRECT 0x40`, data), so the interpreter swallowed VIF codes and parsed texture data as commands (opcodes 0x2A/0x55) | the image continuation is taken from the next `DIRECT` payload |
+| VIF1 commands whose payload continues in the next DMA packet or MFIFO drain were dropped | incomplete commands are carried over to the next transfer |
+| `vfprintf` (0x32EFC8) is bound to the runtime stub, which only knows host `FILE`s; newlib's `vsnprintf` passes a string `FILE` on the stack, so every `snprintf` in the game produced "" | the stub writes into newlib string `FILE`s (`_flags & __SSTR`, `_p`/`_w`) |
+| the runtime read `va_list` arguments 4 bytes apart; Metrowerks spills variadic registers with `sd`, so each takes 8 (`%s[]%i` gave `Color[]0` for `Color[4]`) | 8-byte slots (`PS2X_VA_SLOT=4` for the old behaviour) |
+
+The `snprintf` bug was the one that kept the front end from starting: the script compiler names array types
+with `snprintf("%s[]%i")`, every array type got the name "", `float[]` resolved to `GuiObject[]`, binding
+failed for every script that uses arrays ("Error: Binding failed." from the PP compiler), `Shell.bsf` was
+deleted, the shell stayed in state 1 (memory card check) forever and only the legal screen was drawn.
+
+| PS2Recomp `dispatchGuestBranch`: when a callee is unwound to the scheduler (tail jump or checkpoint) with `ctx->pc` equal to the entry of a call that is still pending further up, that call took it for a return and carried on with the inner frames' stack pointer. Rampage's script interpreter is recursive (0x1bf3b0 → 0x1c0430 → 0x1bf3b0) and tail-jumps to 0x1c0430, so it returned to a heap address | an explicit unwinding flag (`g_ps2GuestUnwinding`), cleared by the scheduler before it enters guest code |
 
 ## Current blocker
-Being checked: with the directory functions in place, does the volume find `RAMPAGE.VOL;1`, and does the
-MultiStream RPC give each file a position? Before that fix the menu code crashed calling through a null
-GUI scene (0x345F1C, `profile_arrow_down` / `btn_select` screen) because nothing had been loaded.
+With scripts compiling and the dispatch fix, the shell and the attract mode run without crashing: VU1 runs
+about 26 microprograms per frame and the GS receives textured triangle strips for fbp 0x50. But every vertex
+comes out at x ≈ 2 (GS units before the 1728 offset) with y in the thousands, so all of it lands outside the
+scissor and the screen stays black. Next: check the VU1 path for these strips (UNPACK formats and
+STMOD/STMASK, the microprogram's FTOI4/clipping, or the XGKICK packet layout).
+
+Before that: `Shell::onInit` loads `VShell`, `Shell` (7 MB) and `ShellData`, the `ControlRoom` and
+`AttractMode` interfaces load, and the attract mode walks its states (`BootCheck`, `ShortDelay`,
+`MidwayVideo`, `PipeworksVideo`, `DigitalVideo`, `BinkStill`, `IntroVideo`, ...); the videos are `.pss`
+files played through `GuiQuad::setVideo`.
+
+## How the script system works (PP language)
+- `.bsf` = "Compiled PPTokenStream": tokens of preprocessed source. At load time the game parses them with a
+  bison parser (`yyparse` 0x1c5cb0, error reporter 0x1C61F0, `%s(%i) Error: %s`), binds symbols (0x1C0810,
+  node classes `P*Entry`/`P*Node` in RTTI) and executes the tree (AST interpreter, no generated code).
+- Script load: `GuiScript::load` 0x2344E0 → open via the file system 0x10C220 → parse/bind 0x1D4870.
+  Debug output goes to 0x1C6110, which is an empty function in the retail build; probing its arguments
+  shows the compiler's errors (`Cannot reconcile types %s and %s in expresssion.` etc.).
+- Shell: `RShellPackage` (vtable 0x44b170) init 0x309500 creates the `SaveGame` popup (0x4d7e80, loads
+  `MemoryCard.BDP`/`.ifc`), then 0x308950 loads `Shell.bsf` and calls `Shell::onInit`. Shell state lives at
+  0x4d51f0 (1 = memory card check, 2 = attract mode, ...), updated by 0x308710 every frame.
+- Stream loader (EE side): requests are queued and sent with `sceSifCallRpc` (0x135690, client 0x450040,
+  0x800-byte buffers); `STREAM.IRX` polls the EE server 0x132030 for the next command.
 
 ## Debug aids
 - `tools/dis.py ADDR`: disassembly with call names and strings; `tools/xref.py callers|callees ADDR`.
 - `tools/trace_fn.py ADDR...`: logs entry into generated functions (`[enter]` lines).
 - `tools/bind_stub.py ADDR HANDLER "why"`: bind a function to a runtime handler without a regenerate.
 - `test.ps1`: runs the game for N seconds; the runtime writes a `[status]` line and `shot_NNN.png` in
-  `build/disc` every ~10 s (temporary bring-up code in the runtime patch).
+  `build/disc` every ~10 s (temporary bring-up code in the runtime patch). With the status line:
+  `[thread]` lines with a heuristic stack backtrace (`[stack]`), a VIF1 opcode histogram (`[vifops]`),
+  `PS2X_WATCH=0x4d51f0,gp-0x70a4,...` prints guest words (absolute or relative to the main thread's
+  `$gp`) and `PS2X_DUMPRAM=1` writes the EE RAM to `build/disc/ram.bin`.
+- IOP: `[iop-import]` traces every IOP import (60 lines per import), `[iopthreads]` dumps IOP threads,
+  semaphores and event flags every ~10 s of IOP time, `[cdread]` names the host file of every CD read.
 
 ## Not tried yet
 - Graphics: the runtime's GS/VU path is partial and slow ("very bad for VU and GS" in its README).
