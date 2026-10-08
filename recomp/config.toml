@@ -261,6 +261,8 @@ stubs = [
   "sceDopen@0x0014D688", # directory listing on the host; the native version needs the IOP fileio server
   "sceDread@0x0014D8B8", # directory listing on the host
   "sceDclose@0x0014D750", # directory listing on the host
+  "sceMpegIsEnd@0x0015EC98", # libmpeg internals are not kept by the runtime's MPEG stubs; the player ends a movie on sceMpegIsEnd
+  "sceMpegIsRefBuffEmpty@0x0015ECA8", # reads libmpeg internals the runtime's MPEG stubs do not keep
 ]
 
 # Guest functions without runtime handlers that may be referenced by address.

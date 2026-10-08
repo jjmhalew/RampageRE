@@ -502,10 +502,10 @@ index c5e31c4..aafcccc 100644
              m_insideInterrupt = false;
          }
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Compatibility.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Compatibility.cpp
-index 9f8f59f..a758e87 100644
+index 9f8f59f..1ff857c 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/Compatibility.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/Compatibility.cpp
-@@ -4,11 +4,21 @@
+@@ -4,11 +4,23 @@
  
  namespace ps2_stubs
  {
@@ -513,7 +513,9 @@ index 9f8f59f..a758e87 100644
 +    static void heapTrace(const char *op, R5900Context *ctx, uint32_t a, uint32_t b, uint32_t result)
 +    {
 +        static int count = 0;
-+        if (++count > 400)
++        const bool failed = result == 0u && std::strcmp(op, "free") != 0;
++        const bool large = (std::strcmp(op, "malloc") == 0 && a >= 0x40000u) || (std::strcmp(op, "memalign") == 0 && b >= 0x40000u);
++        if (++count > 400 && !failed && !large)
 +            return;
 +        std::cerr << "[heap] " << op << " a=0x" << std::hex << a << " b=0x" << b << " -> 0x" << result
 +                  << " ra=0x" << getRegU32(ctx, 31) << std::dec << std::endl;
@@ -527,7 +529,7 @@ index 9f8f59f..a758e87 100644
          setReturnU32(ctx, guestAddr);
      }
  
-@@ -33,6 +43,7 @@ namespace ps2_stubs
+@@ -33,6 +45,7 @@ namespace ps2_stubs
      void free_r(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          const uint32_t guestAddr = getRegU32(ctx, 5); // $a1
@@ -535,7 +537,7 @@ index 9f8f59f..a758e87 100644
          if (runtime && guestAddr != 0u)
          {
              runtime->guestFree(guestAddr);
-@@ -44,6 +55,7 @@ namespace ps2_stubs
+@@ -44,6 +57,7 @@ namespace ps2_stubs
          const uint32_t oldGuestAddr = getRegU32(ctx, 5); // $a1
          const uint32_t newSize = getRegU32(ctx, 6);      // $a2
          const uint32_t guestAddr = runtime ? runtime->guestRealloc(oldGuestAddr, newSize) : 0u;
@@ -543,7 +545,15 @@ index 9f8f59f..a758e87 100644
          setReturnU32(ctx, guestAddr);
      }
  
-@@ -59,6 +71,7 @@ namespace ps2_stubs
+@@ -52,6 +66,7 @@ namespace ps2_stubs
+         const uint32_t alignment = getRegU32(ctx, 5); // $a1
+         const uint32_t size = getRegU32(ctx, 6);      // $a2
+         const uint32_t guestAddr = runtime ? runtime->guestMalloc(size, alignment) : 0u;
++        heapTrace("memalign", ctx, alignment, size, guestAddr);
+         setReturnU32(ctx, guestAddr);
+     }
+ 
+@@ -59,6 +74,7 @@ namespace ps2_stubs
      {
          const uint32_t size = getRegU32(ctx, 5); // $a1
          const uint32_t guestAddr = runtime ? runtime->guestMalloc(size) : 0u;
@@ -753,24 +763,27 @@ index d467c4b..dbee15f 100644
          {
              std::string rendered = formatPs2StringWithVaList(rdram, runtime, formatOwned.c_str(), va_list_addr);
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
-index 44eaef4..c4aca58 100644
+index 44eaef4..36e3cc1 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
-@@ -468,6 +468,9 @@ namespace ps2_stubs
+@@ -468,6 +468,10 @@ namespace ps2_stubs
          };
  #endif
  
 +        // Last MPEG video sequence header (with extensions) fed to any decoder.
 +        std::vector<uint8_t> g_lastMpegSequenceHeader;
++        uint64_t g_rampagePssBytes = 0, g_rampageDroppedPssBytes = 0, g_rampageEsBytes = 0; // RAMPAGE-DEBUG
 +
          struct MpegRegisteredCallback
          {
              uint32_t type = 0u;
-@@ -1038,6 +1041,23 @@ namespace ps2_stubs
+@@ -1012,6 +1016,27 @@ namespace ps2_stubs
              }
+         }
  
-             playback.sawInput = true;
-+            // Remember the sequence header with its extensions (up to the next other start code).
++        // Remember the last video sequence header with its extensions (up to the next other start code).
++        void rememberMpegSequenceHeader(const uint8_t *data, size_t size)
++        {
 +            for (size_t i = 0; i + 4u <= size; ++i)
 +            {
 +                if (data[i] == 0u && data[i + 1u] == 0u && data[i + 2u] == 1u && data[i + 3u] == 0xB3u)
@@ -784,13 +797,23 @@ index 44eaef4..c4aca58 100644
 +                    }
 +                    if (end + 4u <= size)
 +                        g_lastMpegSequenceHeader.assign(data + i, data + end);
-+                    break;
++                    return;
 +                }
 +            }
++        }
++
+         void feedElementaryStream(MpegPlaybackState &playback, const uint8_t *data, size_t size, int64_t pts90k = -1, int64_t dts90k = -1)
+         {
+             if (!data || size == 0)
+@@ -1038,6 +1063,7 @@ namespace ps2_stubs
+             }
+ 
+             playback.sawInput = true;
++            rememberMpegSequenceHeader(data, size);
              updateMpegPictureTiming(playback, data, size);
              if (playback.waitingForVideoSequenceHeader)
              {
-@@ -1055,9 +1075,27 @@ namespace ps2_stubs
+@@ -1055,9 +1081,28 @@ namespace ps2_stubs
                          playback.videoSequenceSyncBuffer.begin() + static_cast<std::ptrdiff_t>(keepFrom));
                  }
  
@@ -812,6 +835,7 @@ index 44eaef4..c4aca58 100644
 +                            rebuilt.insert(rebuilt.end(), sync.begin() + static_cast<std::ptrdiff_t>(i), sync.end());
 +                            playback.videoSequenceSyncBuffer = std::move(rebuilt);
 +                            sequenceHeader = 0u;
++                            std::fprintf(stderr, "[mpegpic] injected the last sequence header before a GOP%c", 10);
 +                            break;
 +                        }
 +                    }
@@ -819,7 +843,95 @@ index 44eaef4..c4aca58 100644
                  if (sequenceHeader == kStartCodeNotFound)
                  {
                      return;
-@@ -2164,6 +2202,16 @@ namespace ps2_stubs
+@@ -1097,8 +1142,12 @@ namespace ps2_stubs
+                 playback.decoder = std::make_unique<MpegFfmpegDecoder>();
+             }
+ 
++            g_rampageEsBytes += size;
+             if (!playback.decoder->feed(data, size, playback.decodedFrames, pts90k, dts90k))
+             {
++                static int s_feedFails = 0;
++                if (s_feedFails++ < 20)
++                    std::fprintf(stderr, "[mpegpic] decoder feed failed (es bytes so far %llu)%c", static_cast<unsigned long long>(g_rampageEsBytes), 10);
+                 playback.decoder.reset();
+                 playback.waitingForVideoSequenceHeader = true;
+                 playback.videoSequenceSyncBuffer.clear();
+@@ -1437,6 +1486,12 @@ namespace ps2_stubs
+             {
+                 return;
+             }
++            // Even data that is dropped below (a stream that already ended) may carry the next movie's
++            // sequence header, which the player reads before it creates the next decoder.
++            rememberMpegSequenceHeader(data, size);
++            g_rampagePssBytes += size;
++            if (playback.streamEnded)
++                g_rampageDroppedPssBytes += size;
+ 
+             if (playback.sawInput && playback.cdStreamGeneration != g_mpeg_stub_state.cdStreamGeneration)
+             {
+@@ -1652,6 +1707,51 @@ namespace ps2_stubs
+             dispatchStreamCallbacks(rdram, ctx, runtime, events);
+         }
+ 
++        // libmpeg runs the stream callbacks inside sceMpegDemuxPss(Ring), and players rely on that:
++        // Rampage copies the video stream into its own ring there and parses the sequence header right
++        // after the demux call. Run them before the caller continues (the caller's return value must
++        // already be set: this does not return when there are callbacks).
++        void runStreamCallbacksBeforeReturn(uint8_t *rdram,
++                                            R5900Context *ctx,
++                                            PS2Runtime *runtime,
++                                            const std::vector<MpegStreamCallbackEvent> &events)
++        {
++            std::vector<GuestInvocation> invocations;
++            for (const MpegStreamCallbackEvent &event : events)
++            {
++                for (const MpegRegisteredCallback &callback : event.callbacks)
++                {
++                    if (callback.func == 0u || !runtime->hasFunction(callback.func))
++                        continue;
++                    const uint32_t cbDataAddr = runtime->guestMalloc(kMpegCallbackDataSize, 16u);
++                    if (cbDataAddr == 0u)
++                        continue;
++                    if (!writeMpegCallbackData(rdram, cbDataAddr, event))
++                    {
++                        runtime->guestFree(cbDataAddr);
++                        continue;
++                    }
++                    GuestInvocation invocation{};
++                    invocation.kind = GuestInvocationKind::RpcCallback;
++                    invocation.context = *ctx;
++                    invocation.context.pc = callback.func;
++                    SET_GPR_U32(&invocation.context, 4, event.mpegAddr);
++                    SET_GPR_U32(&invocation.context, 5, cbDataAddr);
++                    SET_GPR_U32(&invocation.context, 6, callback.data);
++                    SET_GPR_U32(&invocation.context, 7, 0u);
++                    SET_GPR_U32(&invocation.context, 29, 0u);
++                    SET_GPR_U32(&invocation.context, 31, 0u);
++                    invocation.onComplete = [runtime, cbDataAddr](const R5900Context &, R5900Context &)
++                    {
++                        runtime->guestFree(cbDataAddr);
++                    };
++                    invocations.push_back(std::move(invocation));
++                }
++            }
++            if (!invocations.empty())
++                runtime->eeScheduler().invokeCurrentSequence(std::move(invocations));
++        }
++
+         void writeBlankMpegFrame(uint8_t *rdram, uint32_t destAddr, uint32_t width, uint32_t height)
+         {
+             if (!rdram || destAddr == 0u)
+@@ -2141,8 +2241,8 @@ namespace ps2_stubs
+             });
+         }
+ 
+-        dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+         setReturnS32(ctx, static_cast<int32_t>(consumed));
++        runStreamCallbacksBeforeReturn(rdram, ctx, runtime, callbackEvents);
+     }
+ 
+     void sceMpegDemuxPssRing(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -2164,6 +2264,16 @@ namespace ps2_stubs
          const uint32_t availableBytes = getRegU32(ctx, 6);
          const uint32_t ringBaseAddr = getRegU32(ctx, 7);
          const uint32_t ringSize = readAbiArg4(rdram, ctx);
@@ -836,7 +948,17 @@ index 44eaef4..c4aca58 100644
  
          std::vector<MpegStreamCallbackEvent> callbackEvents;
          std::vector<uint32_t> completedMpegIds;
-@@ -2282,6 +2330,7 @@ namespace ps2_stubs
+@@ -2235,8 +2345,8 @@ namespace ps2_stubs
+             });
+         }
+ 
+-        dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+         setReturnS32(ctx, static_cast<int32_t>(consumed));
++        runStreamCallbacksBeforeReturn(rdram, ctx, runtime, callbackEvents);
+     }
+ 
+     void sceMpegDispCenterOffX(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -2282,6 +2392,7 @@ namespace ps2_stubs
  
      void sceMpegGetPicture(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
@@ -844,7 +966,7 @@ index 44eaef4..c4aca58 100644
          const uint32_t mpegAddr = getRegU32(ctx, 4);
          const uint32_t imageAddr = getRegU32(ctx, 5);
          uint32_t width = kStubMovieWidth;
-@@ -2292,6 +2341,14 @@ namespace ps2_stubs
+@@ -2292,6 +2403,15 @@ namespace ps2_stubs
          {
              std::unique_lock<std::mutex> lock(g_mpeg_stub_mutex);
              MpegPlaybackState &playback = getPlaybackState(mpegAddr);
@@ -853,13 +975,14 @@ index 44eaef4..c4aca58 100644
 +            // the stream is over and asking the game for more data would only hit its end of file.
 +            if (playback.sawSequenceEnd && playback.decodedFrames.empty() && !playback.streamEnded)
 +            {
++                std::fprintf(stderr, "[mpegpic] stream 0x%x ended after %u pictures (sequence end)%c", mpegAddr, playback.picturesServed, 10);
 +                playback.streamEnded = true;
 +                flushDecoderIfEnded(playback); // pictures still held by the decoder come out now
 +            }
              if (playback.decodedFrames.empty() &&
                  !g_mpeg_stub_state.currentCdStreamEofSeen &&
                  !playback.streamEnded &&
-@@ -2307,6 +2364,71 @@ namespace ps2_stubs
+@@ -2307,6 +2427,73 @@ namespace ps2_stubs
                      });
                      ++g_mpeg_stub_state.getPictureWaitTraceCount;
                  }
@@ -898,8 +1021,10 @@ index 44eaef4..c4aca58 100644
 +                {
 +                    static int s_nodataLogs = 0;
 +                    if (s_nodataLogs++ < 12 || (s_nodataLogs % 500) == 0)
-+                        std::fprintf(stderr, "[mpegpic] nodata callback #%d mpeg=0x%x served=%u sawInput=%d failed=%d ended=%d pss=%zu frames=%zu eof=%d\n",
-+                                     s_nodataLogs, mpegAddr, playback.picturesServed, static_cast<int>(playback.sawInput),
++                        std::fprintf(stderr, "[mpegpic] nodata callback #%d pssIn=%llu dropped=%llu es=%llu waitSeq=%d mpeg=0x%x served=%u sawInput=%d failed=%d ended=%d pss=%zu frames=%zu eof=%d\n",
++                                     s_nodataLogs, static_cast<unsigned long long>(g_rampagePssBytes), static_cast<unsigned long long>(g_rampageDroppedPssBytes),
++                                     static_cast<unsigned long long>(g_rampageEsBytes), static_cast<int>(playback.waitingForVideoSequenceHeader),
++                                     mpegAddr, playback.picturesServed, static_cast<int>(playback.sawInput),
 +                                     static_cast<int>(playback.decoderFailed), static_cast<int>(playback.streamEnded), playback.pssBuffer.size(),
 +                                     playback.decodedFrames.size(), static_cast<int>(g_mpeg_stub_state.currentCdStreamEofSeen));
 +                    ++streak;
@@ -931,21 +1056,40 @@ index 44eaef4..c4aca58 100644
                  lock.unlock();
                  runtime->eeScheduler().waitExternal(
                      EeWaitReason::Mpeg,
-@@ -2369,6 +2491,13 @@ namespace ps2_stubs
+@@ -2369,6 +2556,13 @@ namespace ps2_stubs
                  playback.nextPictureTickQ32 = presentationTargetQ32 + frameIntervalQ32;
                  playback.presentationEndTickQ32 = playback.nextPictureTickQ32;
                  haveFrame = true;
 +                s_nodataWithoutProgress[mpegAddr] = 0u;
 +                {
 +                    static int s_served = 0;
-+                    if (s_served++ < 8)
++                    if (s_served++ < 4 || (playback.picturesServed % 100u) == 0u)
 +                        std::fprintf(stderr, "[mpegpic] served frame %u %dx%d queued=%zu\n", playback.picturesServed, frame.width, frame.height,
 +                                     playback.decodedFrames.size());
 +                }
                  if (g_mpeg_stub_state.pictureTraceCount < 32u)
                  {
                      PS2_IF_AGRESSIVE_LOGS({
-@@ -2459,8 +2588,9 @@ namespace ps2_stubs
+@@ -2415,7 +2609,17 @@ namespace ps2_stubs
+             writeBlankMpegFrame(rdram, imageAddr, width, height);
+         }
+ 
+-        setReturnS32(ctx, 0);
++        // After the last picture of a stream that ended (sequence_end_code, see above) there is
++        // nothing left to decode: report it like libmpeg's decoder running past the end.
++        bool endedWithoutPicture = false;
++        if (!haveFrame)
++        {
++            std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
++            const MpegPlaybackState &playback = getPlaybackState(mpegAddr);
++            endedWithoutPicture = playback.streamEnded && playback.sawSequenceEnd && playback.picturesServed > 0u &&
++                                  playback.decodedFrames.empty();
++        }
++        setReturnS32(ctx, endedWithoutPicture ? -1 : 0);
+     }
+ 
+     void sceMpegGetPictureRAW8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -2459,8 +2663,9 @@ namespace ps2_stubs
          // be observed while more PSS data is still buffered, and a decoder
          // failure before producer EOF may still recover on a later sequence.
          const bool producerEnded =
@@ -957,6 +1101,18 @@ index 44eaef4..c4aca58 100644
          const bool ended = producerEnded &&
                             (playback.streamEnded || (playback.decoderFailed && playback.sawInput));
          const uint64_t presentationEnd = playback.presentationEndTickQ32;
+@@ -2507,7 +2712,10 @@ namespace ps2_stubs
+             std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
+             MpegPlaybackState &playback = getPlaybackState(param_1);
+             MpegPlaybackState resetState = makeFreshPlaybackStatePreservingConfig(playback);
+-            if (playback.streamEnded || playback.decoderFailed)
++            std::fprintf(stderr, "[mpegpic] reset 0x%x ended=%d seqEnd=%d served=%u%c", param_1, static_cast<int>(playback.streamEnded),
++                         static_cast<int>(playback.sawSequenceEnd), playback.picturesServed, 10);
++            // A game-fed stream that ended at its sequence_end_code starts over on reset (next movie).
++            if ((playback.streamEnded && !playback.sawSequenceEnd) || playback.decoderFailed)
+             {
+                 resetState.sawInput = true;
+                 resetState.streamEnded = true;
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
 index b50a4cf..692742a 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
@@ -1461,7 +1617,7 @@ index 89d8576..394dec0 100644
      void log(ps2x::iop::LogLevel level, std::string_view message) override;
  
 diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
-index 37b6a4d..f6bd698 100644
+index 37b6a4d..350e3a5 100644
 --- a/ps2xRuntime/src/lib/ps2_memory.cpp
 +++ b/ps2xRuntime/src/lib/ps2_memory.cpp
 @@ -10,6 +10,8 @@
@@ -1524,7 +1680,20 @@ index 37b6a4d..f6bd698 100644
              if ((channelBase == 0x1000A000u || channelBase == 0x10009000u || channelBase == 0x10008000u) && (m_gsVRAM || channelBase == 0x10008000u))
              {
                  auto enqueueTransfer = [&](uint32_t srcAddr, uint32_t qwCount)
-@@ -1600,6 +1626,32 @@ bool PS2Memory::tryProcessScratchpadDma(uint32_t channelBase, uint32_t chcr)
+@@ -1438,7 +1464,11 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                         uint16_t tagQwc = static_cast<uint16_t>(tag & 0xFFFF);
+                         uint32_t id = static_cast<uint32_t>((tag >> 28) & 0x7);
+                         const bool irq = ((tag >> 31) & 0x1ull) != 0ull;
+-                        uint32_t addr = static_cast<uint32_t>((tag >> 32) & 0x7FFFFFFF);
++                        // Tag ADDR bit 31 (SPR) selects scratchpad memory for the data.
++                        const uint32_t rawTagAddr = static_cast<uint32_t>(tag >> 32);
++                        uint32_t addr = (rawTagAddr & 0x80000000u) != 0u
++                                            ? (PS2_SCRATCHPAD_BASE | (rawTagAddr & (PS2_SCRATCHPAD_SIZE - 16u)))
++                                            : (rawTagAddr & 0x7FFFFFFFu);
+                         lastTagUpper = static_cast<uint32_t>((tag >> 16) & 0xFFFFu);
+                         ++tagsProcessed;
+ 
+@@ -1600,6 +1630,32 @@ bool PS2Memory::tryProcessScratchpadDma(uint32_t channelBase, uint32_t chcr)
      const uint32_t originalMadr = m_ioRegisters[channelBase + 0x10u] & 0x7FFFFFF0u;
      const uint32_t originalSadr = m_ioRegisters[channelBase + 0x80u] & 0x3FF0u;
  
@@ -1557,7 +1726,7 @@ index 37b6a4d..f6bd698 100644
      uint32_t mainOffset = 0u;
      try
      {
-@@ -1643,6 +1695,137 @@ bool PS2Memory::tryProcessScratchpadDma(uint32_t channelBase, uint32_t chcr)
+@@ -1643,6 +1699,141 @@ bool PS2Memory::tryProcessScratchpadDma(uint32_t channelBase, uint32_t chcr)
      return true;
  }
  
@@ -1622,7 +1791,11 @@ index 37b6a4d..f6bd698 100644
 +        const uint32_t qwc = static_cast<uint32_t>(tag & 0xFFFFu);
 +        const uint32_t id = static_cast<uint32_t>((tag >> 28) & 0x7u);
 +        const bool irq = ((tag >> 31) & 0x1ull) != 0ull;
-+        const uint32_t addr = static_cast<uint32_t>((tag >> 32) & 0xFFFFFFF0u);
++        // Tag ADDR bit 31 (SPR) selects scratchpad memory for the data.
++        const uint32_t rawTagAddr = static_cast<uint32_t>(tag >> 32);
++        const uint32_t addr = (rawTagAddr & 0x80000000u) != 0u
++                                  ? (PS2_SCRATCHPAD_BASE | (rawTagAddr & (PS2_SCRATCHPAD_SIZE - 16u)))
++                                  : (rawTagAddr & 0x7FFFFFF0u);
 +
 +        const bool payloadInRing = (id == 1u || id == 2u || id == 7u); // cnt, next, end
 +        if (payloadInRing && 16u + qwc * 16u > available)
@@ -1695,7 +1868,7 @@ index 37b6a4d..f6bd698 100644
  void PS2Memory::completeDmacChannel(uint32_t channelBase, uint32_t cause)
  {
      static constexpr uint32_t kDStat = 0x1000E010u;
-@@ -1896,7 +2079,7 @@ void PS2Memory::processPendingTransfers()
+@@ -1896,7 +2087,7 @@ void PS2Memory::processPendingTransfers()
          m_ioRegisters[VIF0_CHANNEL + 0x00] &= ~0x100u;
          m_ioRegisters[VIF0_CHANNEL + 0x20] = 0;
      }
@@ -1736,7 +1909,7 @@ index 8590f14..015ba88 100644
      data[3] = static_cast<uint8_t>(btns >> 8);
      return true;
 diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
-index 45cb9d2..7de2e6e 100644
+index 45cb9d2..b50292e 100644
 --- a/ps2xRuntime/src/lib/ps2_runtime.cpp
 +++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
 @@ -27,6 +27,13 @@
@@ -1838,7 +2011,7 @@ index 45cb9d2..7de2e6e 100644
  }
  
  void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
-@@ -2446,6 +2478,120 @@ void PS2Runtime::run()
+@@ -2446,6 +2478,128 @@ void PS2Runtime::run()
          }
          EndDrawing();
  
@@ -1857,7 +2030,15 @@ index 45cb9d2..7de2e6e 100644
 +                      << " dispfb2=0x" << gs.dispfb2 << " display2=0x" << gs.display2 << " bgcolor=0x" << gs.bgcolor << " smode2=0x" << gs.smode2 << std::dec
 +                      << " dma=" << m_memory.dmaStartCount() << " gif=" << m_memory.gifCopyCount()
 +                      << " gsw=" << m_memory.gsWriteCount() << " vif=" << m_memory.vifWriteCount()
-+                      << " threads=" << m_eeScheduler->snapshot().threads.size() << std::endl;
++                      << " threads=" << m_eeScheduler->snapshot().threads.size() << " path3Masked=" << m_memory.isPath3Masked()
++                      << " csr=0x" << std::hex << m_memory.gs().csr.load() << std::dec;
++            {
++                extern size_t vif1CarrySize();
++                extern std::atomic<uint64_t> g_rampageMskPath3[2];
++                std::cerr << " vif1carry=" << vif1CarrySize() << " mask=" << g_rampageMskPath3[0].load() << " unmask=" << g_rampageMskPath3[1].load()
++                          << " d1chcr=0x" << std::hex << m_memory.read32(0x10009000u) << " d1tadr=0x" << m_memory.read32(0x10009030u)
++                          << " d8madr=0x" << m_memory.read32(0x1000D010u) << std::dec << std::endl;
++            }
 +            // PS2X_DUMPRAM=1: write the 32 MB of EE RAM to ram.bin with each status line
 +            if (std::getenv("PS2X_DUMPRAM"))
 +            {
@@ -1960,10 +2141,10 @@ index 45cb9d2..7de2e6e 100644
          {
              RUNTIME_LOG("[run] window close requested, breaking out of loop");
 diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
-index b02c7ca..5218905 100644
+index b02c7ca..375a456 100644
 --- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
 +++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
-@@ -1,5 +1,22 @@
+@@ -1,5 +1,29 @@
  // Based on Blackline Interactive implementation
 +#include <atomic>
 +#include <vector>
@@ -1981,15 +2162,23 @@ index b02c7ca..5218905 100644
 +{
 +    g_vif1Carry.clear();
 +}
++
++std::atomic<uint64_t> g_rampageMskPath3[2]; // RAMPAGE-DEBUG: mask / unmask count
++
++size_t vif1CarrySize()
++{
++    return g_vif1Carry.size();
++}
  #include "runtime/ps2_memory.h"
 +#include <cstdio>
  #include <cstring>
  
  enum VIFCmd : uint8_t
-@@ -300,42 +317,59 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -300,42 +324,67 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
      if (sizeBytes == 0u)
          return;
  
+-    uint32_t pos = 0;
 +    // VIF1 is one command stream: a command whose payload continues in the next DMA packet (a CNT tag
 +    // holding an UNPACK header followed by a REF tag with the data, or an MFIFO drain that stops at the
 +    // write pointer) is kept and completed by the next transfer instead of being dropped.
@@ -2001,18 +2190,17 @@ index b02c7ca..5218905 100644
 +        data = joined.data();
 +        sizeBytes = static_cast<uint32_t>(joined.size());
 +    }
-+
-     uint32_t pos = 0;
-+    auto carryFrom = [&](uint32_t commandStart)
-+    {
-+        if (sizeBytes - commandStart <= kVif1CarryLimit)
-+            g_vif1Carry.assign(data + commandStart, data + sizeBytes);
-+    };
  
-     while (pos + 4 <= sizeBytes)
+-    while (pos + 4 <= sizeBytes)
++    uint32_t pos = 0;
++    auto carryFrom = [&](uint32_t commandStart)
      {
 -        if (m_vif1PendingPath2ImageQwc != 0u)
--        {
++        if (sizeBytes - commandStart <= kVif1CarryLimit)
++            g_vif1Carry.assign(data + commandStart, data + sizeBytes);
++        static int s_carryLogs = 0;
++        if (s_carryLogs++ < 40)
+         {
 -            const uint32_t availableQw = (sizeBytes - pos) / 16u;
 -            if (availableQw == 0u)
 -            {
@@ -2036,8 +2224,15 @@ index b02c7ca..5218905 100644
 -                m_vif1PendingPath2DirectHl = false;
 -            }
 -            continue;
--        }
--
++            uint32_t cmdWord = 0;
++            std::memcpy(&cmdWord, data + commandStart, 4);
++            std::fprintf(stderr, "[vifcarry] cmd=%08x at %u of %u (carry %u) cycle=%04x mode=%u\n", cmdWord, commandStart, sizeBytes,
++                         sizeBytes - commandStart, vif1_regs.cycle & 0xFFFFu, vif1_regs.mode);
+         }
++    };
+ 
++    while (pos + 4 <= sizeBytes)
++    {
          uint32_t cmd;
          memcpy(&cmd, data + pos, 4);
          pos += 4;
@@ -2053,7 +2248,7 @@ index b02c7ca..5218905 100644
 +            s_hist[s_histPos % 24][1] = cmd;
 +            s_hist[s_histPos % 24][2] = (vif1_regs.cycle & 0xFFFFu);
 +            ++s_histPos;
-+            if ((opcode == 0x2Au || opcode == 0x55u) && s_dumped < 2)
++            if (cmd == 0xe4ec0000u && s_dumped < 2)
 +            {
 +                ++s_dumped;
 +                for (uint32_t h = (s_histPos > 24u ? s_histPos - 24u : 0u); h < s_histPos; ++h)
@@ -2073,7 +2268,15 @@ index b02c7ca..5218905 100644
          uint16_t imm = cmd & 0xFFFF;
          uint8_t num = (cmd >> 16) & 0xFF;
          const bool irq = (cmd & 0x80000000u) != 0u;
-@@ -416,6 +450,21 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -386,6 +435,7 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+             // VIF command docs: MSKPATH3 uses IMMEDIATE bit 15.
+             const bool wasMasked = m_path3Masked;
+             m_path3Masked = (imm & 0x8000u) != 0u;
++            g_rampageMskPath3[m_path3Masked ? 0 : 1].fetch_add(1);
+             if (wasMasked && !m_path3Masked)
+                 flushMaskedPath3Packets();
+             continue;
+@@ -416,6 +466,21 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
                  vif1_regs.tops = (vif1_regs.base + vif1_regs.ofst) & 0x3FFu;
              vif1_regs.stat ^= (1u << 7); // toggle DBF
  
@@ -2095,7 +2298,7 @@ index b02c7ca..5218905 100644
              if (m_vu1MscalCallback)
                  m_vu1MscalCallback(startPC, runTop, runItop);
              continue;
-@@ -441,7 +490,10 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -441,7 +506,10 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
          else if (opcode == VIF_STMASK)
          {
              if (pos + 4 > sizeBytes)
@@ -2107,7 +2310,7 @@ index b02c7ca..5218905 100644
              uint32_t maskValue = 0;
              std::memcpy(&maskValue, data + pos, sizeof(maskValue));
              vif1_regs.mask = maskValue;
-@@ -451,7 +503,10 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -451,7 +519,10 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
          else if (opcode == VIF_STROW)
          {
              if (pos + 16 > sizeBytes)
@@ -2119,7 +2322,7 @@ index b02c7ca..5218905 100644
              std::memcpy(vif1_regs.row, data + pos, 16);
              pos += 16;
              continue;
-@@ -459,7 +514,10 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -459,7 +530,10 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
          else if (opcode == VIF_STCOL)
          {
              if (pos + 16 > sizeBytes)
@@ -2131,7 +2334,7 @@ index b02c7ca..5218905 100644
              std::memcpy(vif1_regs.col, data + pos, 16);
              pos += 16;
              continue;
-@@ -469,6 +527,11 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -469,6 +543,11 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
              uint32_t destAddr = (uint32_t)imm * 8u;
              const uint32_t instructionCount = (num == 0u) ? 256u : static_cast<uint32_t>(num);
              const uint32_t mpgBytes = instructionCount * 8u;
@@ -2143,7 +2346,7 @@ index b02c7ca..5218905 100644
              if (m_vu1Code && destAddr < PS2_VU1_CODE_SIZE && mpgBytes > 0)
              {
                  uint32_t copyBytes = mpgBytes;
-@@ -490,17 +553,44 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -490,17 +569,44 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
              uint32_t qwCount = imm;
              if (qwCount == 0)
                  qwCount = 65536;
@@ -2192,7 +2395,7 @@ index b02c7ca..5218905 100644
                  if (pendingImageQw != 0u)
                  {
                      m_vif1PendingPath2ImageQwc = pendingImageQw;
-@@ -565,6 +655,11 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+@@ -565,6 +671,11 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
  
              uint32_t totalBytes = sourceVectorCount * bytesPerVector;
              totalBytes = (totalBytes + 3) & ~3u;

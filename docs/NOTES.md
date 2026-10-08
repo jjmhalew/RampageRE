@@ -1,8 +1,8 @@
 # Rampage: Total Destruction (PS2, SLES-53800) – PS2Recomp bring-up notes
 
-State on 2026-10-08 (evening): the recompiled game boots natively on Windows, shows the legal screen,
-mounts and streams `RAMPAGE.VOL`, compiles its scripts and starts the front-end shell and attract mode, where
-it currently stops (see "Current blocker").
+State on 2026-10-08 (night): the recompiled game boots natively on Windows and reaches the front-end main menu
+(legal screen, autosave notice, intro movies, attract mode, CAMPAIGN menu, profile entry). See "Current
+blocker" for what is still wrong.
 
 ## The disc
 - `SLES_538.00`: main ELF, Metrowerks CodeWarrior MIPS 2.4.1.01, stripped, one RWX segment that holds
@@ -98,13 +98,20 @@ deleted, the shell stayed in state 1 (memory card check) forever and only the le
 | `sceMpegReset` after the first chunk dropped the movie's only sequence header, so FFmpeg never got one | the last sequence header is remembered and put in front of the next GOP |
 | movie end was only known from `sceCdSt` EOF; the player asked for data past the end of the file forever | the video's sequence_end_code with no pictures left ends the stream (`GetPicture`, `sceMpegIsEnd`) |
 
+| the player ends a movie on `sceMpegIsEnd` (0x15EC98, reads `mp->sys` internals the stubs never update) | bound to the runtime stub, like `sceMpegIsRefBuffEmpty` (0x15ECA8) |
+| after the last picture `sceMpegGetPicture` returned 0 as if there was more | returns -1 once a game-fed stream ended |
+| `sceMpegReset` kept a stream "ended", and the next movie's first chunk (read before `sceMpegCreate`) was dropped with its sequence header | sequence headers are remembered from the raw PSS data; reset starts over after a sequence end |
+| DMA chain tags with ADDR bit 31 (SPR: data in scratchpad) were read from main RAM (the generic chain code masked the bit, the MFIFO drain kept it), so VIF1 parsed EE code as VIF commands and PATH3 stayed masked | the SPR bit maps the address to the scratchpad |
+| libmpeg runs stream callbacks (`sceMpegAddStrCallback`) inside `sceMpegDemuxPss`; the runtime queued them for later. Rampage copies the video into its own ring in that callback and parses the sequence header right after the demux, so it read the previous movie's bytes and asked for 25 MB | the demux stubs run the callbacks before returning (`invokeCurrentSequence`) |
+
 ## Current blocker
-The front end draws: after the legal screen the autosave notice appears (with grey boxes behind the glyphs:
-font alpha is not right yet), autopressed Cross dismisses it, and the attract mode plays `MidwayVideo`: FFmpeg
-decodes 512×384 pictures and the player draws a full-screen quad from VRAM block 0. But that VRAM stays empty,
-so the screen is black, and the attract state stays at 2 (`MidwayVideo`) after the last picture: the player
-does not report the video as finished. Next: how the player uploads the decoded picture (path3 / fromIPU) and
-what its `Video.status()` waits for (presentation time, audio stream).
+The game now gets from boot through the legal screen, the autosave notice, the Midway and Pipeworks movies and
+the attract mode into the front end: the main menu (CAMPAIGN) is drawn over the monster artwork, and the
+autopressed Cross opens the profile name entry. What is still wrong:
+- movie pictures are decoded but show up almost black;
+- text glyphs have grey boxes behind them (font texture alpha / CLUT);
+- the frame rate is low (about 8 game frames per second with the interpreted VU1).
+Next: the glyph alpha, then play into a game (campaign needs a profile; the autopress types "AAAA").
 
 How the GUI renders: VU1 microprogram at 0x14d8/0xf70 transforms GUI vertices with a matrix at VU data
 0x89..0x8c (built on the EE with libvu0, see `sceVu0MulMatrix` above) and kicks packed `XYZF2` triangle

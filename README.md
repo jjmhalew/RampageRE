@@ -15,9 +15,9 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 
 ## Status
 
-**Early bring-up, not playable yet.** The recompiled game starts on Windows, shows the legal screen and the
-autosave notice, streams its data archive, runs its scripts and decodes the intro movies, then stops after the
-first movie. See
+**Early bring-up, not playable yet.** The recompiled game starts on Windows and reaches the front-end main
+menu: legal screen, autosave notice, intro movies (decoded, still too dark), attract mode, CAMPAIGN menu and
+profile entry. Text still has grey boxes behind it and it runs slowly. See
 [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
 
 | Step | |
@@ -29,8 +29,9 @@ first movie. See
 | zlib asset loading, data archive mounted, menu loop | ✅ |
 | Graphics (GS / VU1): legal screen, GUI (autosave notice) | ✅ |
 | Game scripts compile and run in the recompiled game (shell, attract mode) | ✅ |
-| Movies (`.pss`) decode | ✅ |
-| Front end (movies on screen, title, menus) | ❌ stops after the first movie |
+| Movies (`.pss`) decode and play to the end | ✅ (pictures too dark) |
+| Front end: attract mode, main menu, profile entry | ✅ (glyphs have grey boxes) |
+| Into a game (campaign) | ❌ |
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
 | Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |
 | Meshes and materials to glTF (5,577 meshes), three.js viewer | ✅ |
