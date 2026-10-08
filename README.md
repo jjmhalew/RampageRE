@@ -27,7 +27,8 @@ archive, and runs its front-end menu loop with VU1 rendering, but the picture is
 | zlib asset loading, data archive mounted, menu loop | ✅ |
 | Graphics (GS / VU1) | ❌ VU1 runs, picture still wrong |
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
-| Bundles (`.bdp`/`.cmp`: levels, monsters, props) | next |
+| Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |
+| Models, skeletons, animations (glTF export) | next |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -55,6 +56,8 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/funcmap.py` | finds function starts without Ghidra (jal targets, vtables, constructors, ...) |
 | `tools/pvol.py` | lists or extracts `RAMPAGE.VOL`, the game's data archive (352 named files) |
 | `tools/bsf.py` | decompiles the 138 game scripts (`.bsf`) to source and compiles them back (`--verify`) |
+| `tools/bdp.py` | lists and extracts bundle entries (`--verify`: all 117 bundles fully accounted for) |
+| `tools/tex.py` | exports bundle textures to PNG |
 | `tools/refs.py` | finds the code that references an address (strings, tables) |
 | `tools/iso9660.py` | extracts a PS2 disc image |
 | `patches/ps2recomp-runtime.diff` | runtime changes applied to the PS2Recomp submodule by `build.ps1` |

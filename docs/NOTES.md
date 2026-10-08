@@ -10,7 +10,8 @@ blocker"). No picture yet.
   code and data together. About 7,500 functions (8,818 in the current map, including small thunks).
 - `RAMPAGE.VOL`: PVOL archive, 352 files with their original names (`pvol.py` lists/extracts it):
   `.bsf` (138 compiled scripts, most of the game logic: decompiled by `tools/bsf.py`, see
-  [FORMAT_BSF.md](FORMAT_BSF.md)), `.bdp` and `.cmp` ("Pipeworks Bundle File version 1.3", 57 + 60),
+  [FORMAT_BSF.md](FORMAT_BSF.md)), `.bdp` and `.cmp` ("Pipeworks Bundle File version 1.3", 57 + 60, see
+  [FORMAT_BDP.md](FORMAT_BDP.md)),
   `.zip` (real PKZIP, 60: each holds a byte-identical copy of the `.cmp` of the same name),
   `.pss` (21 MPEG-2 videos), `.mic` (11 audio streams), `.samp`, `.uber`, `.txt`.
 - `DESI/JARVOS.ELF` + `M1.ELF` + `*.SR`: emulators for the unlockable arcade Rampage games (skip).
