@@ -15,9 +15,9 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 
 ## Status
 
-**Early bring-up, not playable yet.** The recompiled game starts on Windows and reaches the front-end main
-menu: legal screen, autosave notice, intro movies, attract mode, CAMPAIGN menu and profile entry. It runs
-slowly and without sound for now. See
+**Early bring-up, not really playable yet.** The recompiled game starts on Windows, goes through the front end
+(legal screen, autosave notice, intro movies, menus, profile, monster select) and runs the first campaign level,
+Las Vegas. The 3D picture still has errors (black ground), it runs slowly and there is no sound yet. See
 [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
 
 | Step | |
@@ -31,7 +31,7 @@ slowly and without sound for now. See
 | Game scripts compile and run in the recompiled game (shell, attract mode) | ✅ |
 | Movies (`.pss`) decode and play | ✅ |
 | Front end: attract mode, main menu, profile entry | ✅ |
-| Into a game (campaign) | ❌ |
+| Into a game: campaign, monster select, Las Vegas loads and runs | ✅ (black ground, slow, no sound) |
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
 | Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |
 | Meshes and materials to glTF (5,577 meshes), three.js viewer | ✅ |

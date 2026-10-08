@@ -1,8 +1,8 @@
 # Rampage: Total Destruction (PS2, SLES-53800) – PS2Recomp bring-up notes
 
-State on 2026-10-08 (night): the recompiled game boots natively on Windows and reaches the front-end main menu
-(legal screen, autosave notice, intro movies, attract mode, CAMPAIGN menu, profile entry). See "Current
-blocker" for what is still wrong.
+State on 2026-10-08 (night): the recompiled game boots natively on Windows, goes through the front end
+(legal screen, autosave notice, intro movies, attract mode, menus, profile, monster select) and plays the first
+campaign level (Las Vegas). See "Current state" for what is still wrong.
 
 ## The disc
 - `SLES_538.00`: main ELF, Metrowerks CodeWarrior MIPS 2.4.1.01, stripped, one RWX segment that holds
@@ -106,14 +106,14 @@ deleted, the shell stayed in state 1 (memory card check) forever and only the le
 
 | the GIF keeps a path's tag open across transfers; the runtime started every PATH2/PATH3 transfer as a new packet. Rampage sends an A+D tag with one `DIRECT` and the blend template (ALPHA, TEST) through the next DMA REF, so ALPHA_1 was read as a GIF tag and stayed 0x1 (inverted blend: grey boxes behind text, near-black movies) | `GifArbiter::submit` keeps each path's open tag and continues it in the next transfer (this replaces the VIF-side IMAGE continuation) |
 
-## Current blocker
-The game boots through the legal screen, the autosave notice, the Midway and Pipeworks movies and the attract
-mode into the front end, with correct blending: the main menu (CAMPAIGN) over the monster artwork and the
-profile name entry (the autopressed Cross types "AAAA"). What is still wrong or missing:
+## Current state: in game
+`.\test.ps1 -ToGameplay` drives the pad through the front end (autosave notice, movies, main menu, Create New
+Profile, name "AA", campaign, monster select with George) and the first level loads and runs: Las Vegas with
+the HUD (lives, timer, score), the city blocks, the "Welcome to Vegas" sign and the opening Upgrade Challenge.
+What is still wrong or missing:
+- the ground renders black and the monster is hard to make out (3D renderer issues to look at);
 - the frame rate is low (about 8 game frames per second with the interpreted VU1);
-- no audio;
-- unattended tests cannot navigate menus yet (the autopress only taps Start and Cross).
-Next: a scripted input sequence for test runs, then play into a game.
+- no audio.
 
 How the GUI renders: VU1 microprogram at 0x14d8/0xf70 transforms GUI vertices with a matrix at VU data
 0x89..0x8c (built on the EE with libvu0, see `sceVu0MulMatrix` above) and kicks packed `XYZF2` triangle
@@ -143,7 +143,8 @@ files played through `GuiQuad::setVideo`.
 - `tools/trace_fn.py ADDR...`: logs entry into generated functions (`[enter]` lines).
 - `tools/bind_stub.py ADDR HANDLER "why"`: bind a function to a runtime handler without a regenerate.
 - `test.ps1`: runs the game for N seconds; the runtime writes a `[status]` line and `shot_NNN.png` in
-  `build/disc` every ~10 s (temporary bring-up code in the runtime patch). With the status line:
+  `build/disc` every 600 frames (`PS2X_SHOT_EVERY`). `-PadInput "12:cross;20.5:down/0.3"` scripts the pad
+  (`PS2X_INPUT`), `-ToGameplay` plays into the first level. With the status line:
   `[thread]` lines with a heuristic stack backtrace (`[stack]`), a VIF1 opcode histogram (`[vifops]`),
   `PS2X_WATCH=0x4d51f0,gp-0x70a4,...` prints guest words (absolute or relative to the main thread's
   `$gp`) and `PS2X_DUMPRAM=1` writes the EE RAM to `build/disc/ram.bin`.
