@@ -15,8 +15,9 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 
 ## Status
 
-**Early bring-up, not playable yet.** The recompiled game starts on Windows, shows the legal screen, streams
-its data archive, compiles its scripts and starts the front-end shell, then stops in the attract mode. See
+**Early bring-up, not playable yet.** The recompiled game starts on Windows, shows the legal screen and the
+autosave notice, streams its data archive, runs its scripts and decodes the intro movies, then stops after the
+first movie. See
 [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
 
 | Step | |
@@ -26,9 +27,10 @@ its data archive, compiles its scripts and starts the front-end shell, then stop
 | IOP modules (sio2man, libsd, MultiStream) | ✅ |
 | File system | ✅ |
 | zlib asset loading, data archive mounted, menu loop | ✅ |
-| Graphics (GS / VU1): legal screen | ✅ |
+| Graphics (GS / VU1): legal screen, GUI (autosave notice) | ✅ |
 | Game scripts compile and run in the recompiled game (shell, attract mode) | ✅ |
-| Front end (attract mode videos, title, menus) | ❌ stops in the attract mode |
+| Movies (`.pss`) decode | ✅ |
+| Front end (movies on screen, title, menus) | ❌ stops after the first movie |
 | Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
 | Bundles (`.bdp`/`.cmp`): container parsed, 1,428 textures to PNG | ✅ [docs/FORMAT_BDP.md](docs/FORMAT_BDP.md) |
 | Meshes and materials to glTF (5,577 meshes), three.js viewer | ✅ |
@@ -72,6 +74,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/prb.py` | prints property books (design data) as readable trees |
 | `viewer/index.html` | three.js viewer for the exported glTF, plays animations (serve the repository root) |
 | `tools/refs.py` | finds the code that references an address (strings, tables) |
+| `tools/vudis.py` | disassembles VU micro code and decodes the runtime's VU1 traces |
 | `tools/iso9660.py` | extracts a PS2 disc image |
 | `patches/ps2recomp-runtime.diff` | runtime changes applied to the PS2Recomp submodule by `build.ps1` |
 | `PS2Recomp/` | submodule, pinned to the tested commit |

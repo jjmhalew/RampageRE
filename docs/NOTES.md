@@ -91,12 +91,25 @@ deleted, the shell stayed in state 1 (memory card check) forever and only the le
 
 | PS2Recomp `dispatchGuestBranch`: when a callee is unwound to the scheduler (tail jump or checkpoint) with `ctx->pc` equal to the entry of a call that is still pending further up, that call took it for a return and carried on with the inner frames' stack pointer. Rampage's script interpreter is recursive (0x1bf3b0 → 0x1c0430 → 0x1bf3b0) and tail-jumps to 0x1c0430, so it returned to a heap address | an explicit unwinding flag (`g_ps2GuestUnwinding`), cleared by the scheduler before it enters guest code |
 
+| `sceVu0MulMatrix` stub multiplied in the wrong order (libvu0 computes m0[i] = Σ m1[k]·m2[i][k], i.e. M1×M2 for column vectors); every GUI vertex came out at x ≈ 2 | operands swapped |
+| the pad backend (`PSPadBackend`) is always used, so `PS2X_AUTOPRESS` in the stub never applied | autopress moved into the backend (Start, then Cross, held for a second every 6 s) |
+| `sceMpegGetPicture` waited for frames that only the waiting thread can feed: Rampage's player feeds libmpeg from its `sceMpegCbNodata` callback | the stub calls the registered Nodata callback (two per vsync, then waits a frame for the stream) |
+| that callback polls for stream data that arrives through the IOP→EE RPC, which was never started inside another invocation | RPC-callback invocations may nest on top of another RPC-callback invocation |
+| `sceMpegReset` after the first chunk dropped the movie's only sequence header, so FFmpeg never got one | the last sequence header is remembered and put in front of the next GOP |
+| movie end was only known from `sceCdSt` EOF; the player asked for data past the end of the file forever | the video's sequence_end_code with no pictures left ends the stream (`GetPicture`, `sceMpegIsEnd`) |
+
 ## Current blocker
-With scripts compiling and the dispatch fix, the shell and the attract mode run without crashing: VU1 runs
-about 26 microprograms per frame and the GS receives textured triangle strips for fbp 0x50. But every vertex
-comes out at x ≈ 2 (GS units before the 1728 offset) with y in the thousands, so all of it lands outside the
-scissor and the screen stays black. Next: check the VU1 path for these strips (UNPACK formats and
-STMOD/STMASK, the microprogram's FTOI4/clipping, or the XGKICK packet layout).
+The front end draws: after the legal screen the autosave notice appears (with grey boxes behind the glyphs:
+font alpha is not right yet), autopressed Cross dismisses it, and the attract mode plays `MidwayVideo`: FFmpeg
+decodes 512×384 pictures and the player draws a full-screen quad from VRAM block 0. But that VRAM stays empty,
+so the screen is black, and the attract state stays at 2 (`MidwayVideo`) after the last picture: the player
+does not report the video as finished. Next: how the player uploads the decoded picture (path3 / fromIPU) and
+what its `Video.status()` waits for (presentation time, audio stream).
+
+How the GUI renders: VU1 microprogram at 0x14d8/0xf70 transforms GUI vertices with a matrix at VU data
+0x89..0x8c (built on the EE with libvu0, see `sceVu0MulMatrix` above) and kicks packed `XYZF2` triangle
+strips. `tools/vudis.py` disassembles VU micro code and decodes `PS2X_VUTRACE=1` traces (`build/disc/vutrace.txt`,
+plus `vucode_*.bin`/`vudata_*.bin` snapshots of the first two runs of each microprogram).
 
 Before that: `Shell::onInit` loads `VShell`, `Shell` (7 MB) and `ShellData`, the `ControlRoom` and
 `AttractMode` interfaces load, and the attract mode walks its states (`BootCheck`, `ShortDelay`,
