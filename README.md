@@ -1,17 +1,22 @@
 # RampageRE
 
-A native PC port of *Rampage: Total Destruction* (PS2, Pipeworks / Midway, 2006), built by statically recompiling
-the original game code to C++ with [PS2Recomp](https://github.com/ran-j/PS2Recomp). It runs the game from
+A native PC port of *Rampage: Total Destruction* (PS2, Pipeworks / Midway, 2006) that runs the game from
 **your own disc**: no game files are included in this repository.
+
+It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE):
+- **Recompiled base.** The original game code, statically recompiled to C++ with
+  [PS2Recomp](https://github.com/ran-j/PS2Recomp). It runs the real game logic and serves as the reference.
+- **Reimplementation.** The game's formats are reverse engineered, documented in `docs/` and read by tools
+  that are checked byte for byte against every file on the disc. Those parts then replace the recompiled code
+  with readable native code: first the scripts and data, then the renderer, then the game systems.
 
 > Unofficial fan project for preservation. Not affiliated with or endorsed by Pipeworks, Midway, Warner Bros.
 > or Sony. Rampage and related names are trademarks of their owners. You need your own copy of the original game.
 
 ## Status
 
-**Early bring-up, not playable yet.** The recompiled game starts on Windows, runs all its C++ constructors,
-loads its IOP modules and file system, and stops while unpacking its first compressed asset. There is no picture
-yet. See [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
+**Early bring-up, not playable yet.** The recompiled game starts on Windows, loads its IOP modules and data
+archive, and runs its front-end menu loop with VU1 rendering, but the picture is still wrong. See [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the current blocker.
 
 | Step | |
 |---|---|
@@ -19,8 +24,10 @@ yet. See [docs/NOTES.md](docs/NOTES.md) for what works, what was fixed and the c
 | Boot, C++ static constructors (280) | ✅ |
 | IOP modules (sio2man, libsd, MultiStream) | ✅ |
 | File system | ✅ |
-| zlib asset loading | ❌ current blocker |
-| Graphics (GS / VU1) | not reached yet |
+| zlib asset loading, data archive mounted, menu loop | ✅ |
+| Graphics (GS / VU1) | ❌ VU1 runs, picture still wrong |
+| Scripts (`.bsf`) decompiled to source, 138/138 rebuilt byte for byte | ✅ [docs/FORMAT_BSF.md](docs/FORMAT_BSF.md) |
+| Bundles (`.bdp`/`.cmp`: levels, monsters, props) | next |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -47,6 +54,8 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/split_elf.py` | splits the retail ELF's single code+data segment into real sections |
 | `tools/funcmap.py` | finds function starts without Ghidra (jal targets, vtables, constructors, ...) |
 | `tools/pvol.py` | lists or extracts `RAMPAGE.VOL`, the game's data archive (352 named files) |
+| `tools/bsf.py` | decompiles the 138 game scripts (`.bsf`) to source and compiles them back (`--verify`) |
+| `tools/refs.py` | finds the code that references an address (strings, tables) |
 | `tools/iso9660.py` | extracts a PS2 disc image |
 | `patches/ps2recomp-runtime.diff` | runtime changes applied to the PS2Recomp submodule by `build.ps1` |
 | `PS2Recomp/` | submodule, pinned to the tested commit |

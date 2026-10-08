@@ -9,7 +9,9 @@ blocker"). No picture yet.
 - `SLES_538.00`: main ELF, Metrowerks CodeWarrior MIPS 2.4.1.01, stripped, one RWX segment that holds
   code and data together. About 7,500 functions (8,818 in the current map, including small thunks).
 - `RAMPAGE.VOL`: PVOL archive, 352 files with their original names (`pvol.py` lists/extracts it):
-  `.bsf` ("Comp", 138), `.bdp` ("Pipe", 57), `.zip` (real PKZIP, 60, animations), `.cmp` (60),
+  `.bsf` (138 compiled scripts, most of the game logic: decompiled by `tools/bsf.py`, see
+  [FORMAT_BSF.md](FORMAT_BSF.md)), `.bdp` and `.cmp` ("Pipeworks Bundle File version 1.3", 57 + 60),
+  `.zip` (real PKZIP, 60: each holds a byte-identical copy of the `.cmp` of the same name),
   `.pss` (21 MPEG-2 videos), `.mic` (11 audio streams), `.samp`, `.uber`, `.txt`.
 - `DESI/JARVOS.ELF` + `M1.ELF` + `*.SR`: emulators for the unlockable arcade Rampage games (skip).
 - 0x430000–0x443b50 also holds a table of script-binding names (`ChallengeStatus::updateBossHealth`,
@@ -17,6 +19,11 @@ blocker"). No picture yet.
 - Metrowerks RTTI is intact: about 516 vtables with class names (`RApp`, `PS2PreEnumFileSystemVolume`,
   `GuiScreenJunction`, `RWorldPackage`, ...). A vtable is `{typeinfo, 0, methods...}` and typeinfo starts
   with a pointer to the class name. That names most virtual methods for free.
+
+## Approach
+Hybrid, like WoodyRE: the PS2Recomp build runs the original code and is the reference; formats get documented
+(`docs/FORMAT_*.md`) with tools verified byte for byte on every disc file, and parts of the game are then
+replaced by readable native code (scripts and data first, then the renderer, then game systems).
 
 ## Program flow (what is known)
 - `main` = 0x1A7A70: SIF/CD init, IOP reset with `IOPRP300.IMG`, module loads, GS/DMA setup (0x267980),
