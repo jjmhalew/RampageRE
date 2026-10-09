@@ -92,7 +92,8 @@ break and wreck a cell and its neighbours, and a damaged storey shows its interi
 The facade's other passes are the game's too ("Facade geometry"): intact windows show `InnerWindow` interiors behind
 the sheet's clear panes, tinted `CubeTint`; hits dent the facade (its grid vertices move in the face, 0.1 … 0.45 by level) and fade in `CrackTexture` by the levels,
 around the windows of lightly damaged cells; a broken corner cell shows the inner wall behind it (the sheet's
-`InnerWallColumn`). A floor whose HP runs out falls: the storeys above
+`InnerWallColumn`). The buildings' adornments hang where the game puts them (fire escapes, AC units, awnings, roof
+trims: "Adornments"), ride their storeys down, fall off with their cells and are knocked off by attacks. A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
 and sinks, leaving its rubble ("Collapse"; `--do "collapse"` destroys the building in front of the monster).
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster

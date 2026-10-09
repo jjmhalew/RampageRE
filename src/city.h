@@ -44,6 +44,16 @@ typedef struct {
 
 typedef struct { float y, direction, phase, turn_deg; } Vehicle;
 
+/* an adornment on a building (record 0x60 bytes at building +0x250): a fire escape, an AC unit, a roof's trim */
+typedef struct {
+    int inst;                                         /* its instance */
+    int side, record;                                 /* +0x40: 0 left, 1 right, 2 front, 4 ground, 5 roof; +0x38 storey */
+    int cell, flags, detach;                          /* +0x48; AdornmentFlags (+0x3C); CellDetachDamage (+0x50) */
+    float x, y, deg, zoff;                            /* in the building's frame; +0x34 */
+    float lo[3], hi[3];                               /* its model's box, in its own frame */
+    int gone;                                         /* flag 0x10: off the building */
+} Adornment;
+
 typedef struct {                                      /* a building's cells and its facade quads */
     Building b;
     int mesh;                                         /* the facade's scene mesh, -1 none */
@@ -59,6 +69,7 @@ typedef struct {                                      /* a building's cells and 
      * cracks, the inner corner walls. Per sheet column its window outline in cell units (x0, z0, x1, z1; x0 < 0
      * none), the sheet's InnerWallColumn, 1 / CrackScale and CrackTint */
     float outline[4][4]; int inner_wall; float crack_k, crack_tint[3];
+    Adornment *adorn; int nadorn;
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
@@ -114,6 +125,9 @@ int scene_monster_face(Scene *s, const char *clip, int head);
 int scene_monster_hand(const Scene *s, int hand, Mat4 *world);
 /* where that arm's shoulder (upper arm) is in the world, as posed, and how far the arm reaches; 0 = ok */
 int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
+/* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
+ * ones, flag 4, nor obstacles, flag 2); how many */
+int scene_adornments_hit(Scene *s, const float centre[3], float radius);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
  * storeys and rubble drawn as they now are */
 void scene_buildings_update(Scene *s, float dt);

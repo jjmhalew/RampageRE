@@ -94,7 +94,7 @@ static int find(Group g, const char *key, Group *where, Record *out)
     for (int depth = 0; g.at && depth < 16; depth++) {
         for (uint32_t i = 0, n = group_count(g); i < n; i++) {
             Record r = group_record(g, i);
-            if (strcmp(r.name, key) == 0) {
+            if (_stricmp(r.name, key) == 0) {        /* 0x1B4490 compares with 0x32C9C8: any case */
                 *where = g;
                 *out = r;
                 return 1;

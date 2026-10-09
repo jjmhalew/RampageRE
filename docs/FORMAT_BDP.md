@@ -406,6 +406,28 @@ The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then it
 `CellDetachDamage` and `VertDetachDamage` belong to a building's attachments (AC units, fire escapes; 0x2C617C), not
 to the grid.
 
+### Adornments
+A template's and a building instance's `Adornment|` entries (0x2D1A30, the template's first) are the fire escapes,
+AC units, awnings, roof trims and stone heads hung on a building: a record of 0x60 bytes each at building +0x250
+(count +0x258), filled by 0x2C6120 from the entry and its `TemplateName` template (`Shape|Shape` from the template;
+`AdornmentFlags`, `CellDetachDamage`, `VertDetachDamage`, `DislodgedFx` from the entry, else the template). Keys
+match in any case (0x1B4490), as 22 entries spell `Cell` and `Floor`.
+
+- **Where** (0x30FAA0, 0x30F710, 0x2CF2F0): on a side (`side` 0 left, 1 right, 2 front), at storey `floor`, `cell`
+  (5 wide, the cells' order), `u` along the face from the cell's edge (left to right seen from outside), `v` up from
+  the storey's floor; the model's origin on the face plane, turned so its +x runs along the face and +y goes into
+  the building (rows at 0x430F10). `side` 4 is the ground floor (v above the base), 5 the roof (1.5 + v above the
+  roof band's foot); they are placed by `LocationOrigin`: 0 the left face from its back, 1 the right face from its
+  front, 2 the front from its left (v still adds to the height), 4 or 5 (u, v) from the building's middle.
+- **Height each frame** (0x30F690, 0x2CD010): 6 + 3 × the slot of its storey, or of the first one above it still
+  standing (the roof band's at the top), + its offset; lower by 3 × the falling storey's progress when above it.
+- **Falling off**: setting a cell's state (0x2CFDA0) drops the adornments on that cell once the state reaches their
+  `CellDetachDamage` (0x2CFC20; the structural ones, flag 4, only once the building's HP is gone), so a collapsing
+  storey sheds its own; an attack sphere reaching one at 0.75 of its radius knocks it off (0x2D4390; not flag 4 nor
+  2) and spawns its `DislodgedFx` at the cell's middle. `VertDetachDamage` is never read.
+- **Flags**: 2 an obstacle for the climbing (−2) and safe from normal attacks, 4 structural, 8 detaching, 0x10 gone.
+  The data has only 0 and 4. `DistFadeLevel` (default 2) only keeps an entry for grids of a lower detail level.
+
 ### Facade geometry
 The grid G builds the walls itself: the grid builder 0x2D1A30 sets up a mesh writer per pass and face (G+0x1FC + pass
 × 0x174 + face × 0x7C, 0x2D32D0). The builders sit in two 9-entry tables of member-function pointers, [pass][face]

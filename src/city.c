@@ -718,6 +718,139 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
     }
 }
 
+/* a group's Adornment| entries (0x2D1A30: the template's, then the instance's), placed by 0x30FAA0 / 0x30F710:
+ * on a side (0 left, 1 right, 2 front) at storey `floor`, `cell` 5 wide, u along the face (left to right seen from
+ * outside), v up from the storey's floor, the model facing out (its +y into the building); on the ground floor
+ * (side 4: v above the base) or the roof (side 5: 1.5 + v above the roof band's foot), by LocationOrigin: 0 the
+ * left face from its back, 1 the right face from its front, 2 the front from its left, 4 / 5 (u, v) from the
+ * building's middle. AdornmentFlags and CellDetachDamage come from the entry, else its template. */
+static void adornments(City *c, Scene *s, SceneBuilding *sb, Group from, int nst)
+{
+    Group where;
+    static Record r[MAX_REC];
+    uint32_t n = from.at ? group_all(from, "Adornment|", r, MAX_REC) : 0;
+    (void)where;
+    float hw = sb->b.width * CELL / 2, hd = sb->b.depth * CELL / 2;
+    for (uint32_t i = 0; i < n; i++) {
+        Group e = record_group(from, r[i]), at = template_of(c, group_str(e, "TemplateName"));
+        const char *shape = at.at ? group_str(at, "Shape|Shape") : NULL;
+        if (!shape)
+            continue;
+        Adornment a = { 0 };
+        a.side = (int)group_num(e, "side", 2);
+        float u = group_num(e, "u", 0), v = group_num(e, "v", 0);
+        int origin = 3;
+        if (a.side < 4) {
+            a.record = (int)group_num(e, "floor", 0);
+            a.cell = (int)group_num(e, "cell", 0);
+        } else {
+            a.record = a.side == 5 ? nst : 0;
+            a.cell = -1;
+            origin = (int)group_num(e, "LocationOrigin", 0);
+        }
+        a.flags = (int)group_num(e, "AdornmentFlags", group_num(at, "AdornmentFlags", 0));
+        a.detach = (int)group_num(e, "CellDetachDamage", group_num(at, "CellDetachDamage", 0));
+        int face = a.side < 4 ? a.side : origin;
+        float along = a.side < 4 ? CELL * (float)a.cell + u : u;
+        if (face == FACE_LEFT) { a.x = -hw; a.y = hd - along; a.deg = -90; }
+        else if (face == FACE_RIGHT) { a.x = hw; a.y = -hd + along; a.deg = 90; }
+        else if (face == FACE_FRONT) { a.x = -hw + along; a.y = -hd; a.deg = 0; }
+        else if (origin == 4 || origin == 5) { a.x = u; a.y = v; a.deg = 0; }
+        a.zoff = (a.side == 4 ? -GROUND_FLOOR : a.side == 5 ? 1.5f : 0) + (origin == 4 || origin == 5 ? 0 : v);
+        if (a.record < 0 || a.record > nst)
+            continue;
+        int missing = s->missing;
+        a.inst = place_model(c, s, shape, sb->node, -1);
+        s->missing = missing;
+        if (a.inst < 0)
+            continue;
+        for (int k = 0; k < 3; k++) {                /* its model's box (0x2D4390 tests the model's own) */
+            a.lo[k] = 1e30f;
+            a.hi[k] = -1e30f;
+        }
+        for (uint32_t it = 0; it < s->nitems; it++) {
+            if (s->items[it].instance != a.inst)
+                continue;
+            const Mesh *m = &s->meshes[s->items[it].mesh].mesh;
+            for (uint32_t p = 0; p < m->nparts; p++)
+                for (uint32_t q = 0; q < m->parts[p].nverts; q++)
+                    for (int k = 0; k < 3; k++) {
+                        float x = m->parts[p].pos[3 * q + k];
+                        if (x < a.lo[k]) a.lo[k] = x;
+                        if (x > a.hi[k]) a.hi[k] = x;
+                    }
+        }
+        sb->adorn = realloc(sb->adorn, sizeof *sb->adorn * (size_t)(sb->nadorn + 1));
+        sb->adorn[sb->nadorn++] = a;
+    }
+}
+
+/* 0x30F690 / 0x2CD010: an adornment's height now: on its storey's slot, or the first one above standing (the roof
+ * band's at the top), 6 + 3 x slot + its offset, lower by the falling storey's progress above it */
+static float adornment_z(const Building *b, const Adornment *a)
+{
+    int slot = b->n;
+    for (int o = a->record; o < b->storeys; o++) {
+        int ls = building_live_of(b, o);
+        if (ls >= 0) {
+            slot = ls;
+            break;
+        }
+    }
+    float z = GROUND_FLOOR + STOREY * (float)slot + a->zoff;
+    if (b->collapse > 0 && slot >= b->collapse)
+        z -= STOREY * b->progress;
+    return z;
+}
+
+static void adornments_place(Scene *s, SceneBuilding *sb, Mat4 sway)
+{
+    const Building *b = &sb->b;
+    for (int i = 0; i < sb->nadorn; i++) {
+        Adornment *a = &sb->adorn[i];
+        if (!a->gone && a->side < 3) {               /* 0x2CFC20: its cell damaged enough, it falls off (flag 4 once
+                                                        the building's HP is gone) */
+            int ci = building_cell_index(b, a->side, a->cell);
+            int st = ci >= 0 && a->record < b->storeys ? b->cell[a->record][ci].state : 0;
+            if (st > 0 && st >= a->detach && (!(a->flags & 4) || b->hp <= 0))
+                a->gone = 1;
+        }
+        Instance *in = &s->instances[a->inst];
+        in->dynamic = 1;
+        in->hidden = a->gone || b->state == BUILDING_GONE;
+        in->base = mat_mul(sway, mat_mul(sb->node, mat_trs_z(a->x, a->y, adornment_z(b, a), a->deg)));
+    }
+}
+
+int scene_adornments_hit(Scene *s, const float centre[3], float radius)
+{
+    int n = 0;
+    for (uint32_t bi = 0; bi < s->nbuildings; bi++) {
+        SceneBuilding *sb = &s->buildings[bi];
+        for (int i = 0; i < sb->nadorn; i++) {
+            Adornment *a = &sb->adorn[i];
+            if (a->gone || (a->flags & 6))
+                continue;
+            const float *m = s->instances[a->inst].base.m;   /* the centre in its own frame (a rotation about z) */
+            float d[3] = { centre[0] - m[12], centre[1] - m[13], centre[2] - m[14] }, l[3], r = 0.75f * radius, dd = 0;
+            for (int k = 0; k < 3; k++)
+                l[k] = m[4 * k] * d[0] + m[4 * k + 1] * d[1] + m[4 * k + 2] * d[2];
+            for (int k = 0; k < 3; k++) {
+                float c = l[k] < a->lo[k] ? a->lo[k] - l[k] : l[k] > a->hi[k] ? l[k] - a->hi[k] : 0;
+                dd += c * c;
+            }
+            if (dd <= r * r) {
+                a->gone = 1;                         /* flag 0x10 (its DislodgedFx, an effect, is not drawn) */
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  knocked off building %u's adornment %d (side %d)\n", bi, i, a->side);
+                s->instances[a->inst].hidden = 1;
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
 static void building(City *c, Scene *s, Group inst, float row_offset)
 {
     Group t = template_of(c, group_str(inst, "TemplateName")), where;
@@ -786,6 +919,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         sb->first = sb->last = 0;
         sb->rest = NULL;
         sb->moving = 0;
+        sb->adorn = NULL;
+        sb->nadorn = 0;
         sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
@@ -827,6 +962,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         place_object(c, s, record_group(where, obj[i]), node);
     if (s->nbuildings > had) {                       /* its pieces, to move */
         SceneBuilding *sb = &s->buildings[s->nbuildings - 1];
+        adornments(c, s, sb, t, nst);
+        adornments(c, s, sb, inst, nst);
         const char *rubble = group_str(t, "Shape|RubbleShape");
         int missing = s->missing;
         sb->rubble = rubble ? place_model(c, s, rubble, node, -1) : -1;
@@ -840,6 +977,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         for (int i = sb->first; i < sb->last; i++)
             sb->rest[i - sb->first] = s->instances[i].base;
         facade_passes(s, sb);
+        adornments_place(s, sb, mat_identity());
     }
 }
 
@@ -1466,6 +1604,7 @@ static void building_place(Scene *s, SceneBuilding *sb)
         if (gone && i != sb->rubble)
             in->hidden = 1;
     }
+    adornments_place(s, sb, sway);
     for (int o = 0; o < b->storeys; o++) {           /* the interiors: at their storey, a falling one squashed */
         int ls = building_live_of(b, o);
         float bottom = 0, height = STOREY;
@@ -1647,8 +1786,10 @@ void scene_free(Scene *s)
     free(s->vehicles);
     free(s->obstacle_of);
     free(s->obstacles);
-    for (uint32_t i = 0; i < s->nbuildings; i++)
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
         free(s->buildings[i].rest);
+        free(s->buildings[i].adorn);
+    }
     free(s->buildings);
     memset(s, 0, sizeof *s);
 }

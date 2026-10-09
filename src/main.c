@@ -576,7 +576,7 @@ static void air_control(Viewer *v, const MoveState *st, float lx, float ly, floa
 static void hit_spheres(Viewer *v)
 {
     v->scene.nspheres = 0;
-    if (!v->have_graph || !v->show_hits || !v->armed || v->scene.monster < 0)
+    if (!v->have_graph || !v->armed || v->scene.monster < 0)
         return;
     const Instance *in = &v->scene.instances[v->scene.monster];
     const MoveGraph *g = &v->graph;
@@ -600,7 +600,10 @@ static void hit_spheres(Viewer *v)
         for (int r = 0; r < 3; r++)
             c[r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
         c[3] = sh->radius;
+        scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
     }
+    if (!v->show_hits)
+        v->scene.nspheres = 0;
 }
 
 static void hands_step(Viewer *v, float dt);
@@ -843,7 +846,7 @@ static void hands_step(Viewer *v, float dt)
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
- * "mirror" flips the mirror state for the next clip; "at x y" puts the monster there, facing the buildings */
+ * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way) */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -875,6 +878,11 @@ static void play_script(Viewer *v, const char *script, float aspect)
             p = end;
             v->mz = 0;
             v->heading = 0;
+            while (*p == ' ') p++;
+            if ((*p >= '0' && *p <= '9') || *p == '-') {   /* at x y heading */
+                v->heading = (float)strtod(p, &end);
+                p = end;
+            }
             continue;
         }
         if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
@@ -898,6 +906,7 @@ static void play_script(Viewer *v, const char *script, float aspect)
                     v->scene.instances[v->scene.monster].offset =
                         (float)clip_at(v, &v->graph.states[v->run.state], v->run.time);
                     scene_update(&v->scene, 0);
+                    hit_spheres(v);
                 }
                 if (WORDS[i].button >= 0)
                     held[WORDS[i].button] = 1;
