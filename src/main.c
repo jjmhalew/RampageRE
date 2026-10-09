@@ -24,6 +24,7 @@
 #include "army.h"
 #include "hud.h"
 #include "vehicle.h"
+#include "edible.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -57,6 +58,9 @@ typedef struct {
     int held_unit;                                   /* or the army unit (army.c), -1 none */
     int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
     Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
+    Edibles *edibles;                                /* the power-ups and hazards behind the windows (edible.c) */
+    EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
+    struct { int fx, edible; float off[3]; } efx[32]; int nefx;   /* the edibles' effects that follow them */
     struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
     Army *army;
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
@@ -222,6 +226,7 @@ static void start_moves(Viewer *v)
     if (getenv("RAMPAGE_HP"))                        /* a test's start (the game starts at MONSTER_DATA +0x138) */
         v->hp = (float)atof(getenv("RAMPAGE_HP"));
     v->energy = 0;
+    edible_power_init(&v->power);
     memset(v->shakes, 0, sizeof v->shakes);
     for (int i = 0; i < 64; i++) v->last_collapse[i] = -1;
     v->mount.at.building = v->mount.cand.building = -1;
@@ -274,6 +279,11 @@ static int people_visible(void *ctx, const float p[3], float radius)
     float t = tanf((v->cam.s.fov > 0 ? v->cam.s.fov : 1) / 2), zz = z > 0.1f ? z : 0.1f;
     return fabsf(x) - radius <= zz * t * 4 / 3 && fabsf(y) - radius <= zz * t;
 }
+
+static int edible_cell_state(void *ctx, int building, int storey, int column);
+static int edible_cell_where(void *ctx, int building, int storey, int column, float out[3]);
+static int edible_call(Viewer *v, const char *call, const float *xyz);
+static void monster_stats(Viewer *v, float health, float energy);
 
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
 static Group army_find(void *ctx, const char *book, const char *name)
@@ -378,6 +388,27 @@ static void build(Viewer *v)
         }
     }
     v->scene.traffic = v->veh;
+    edible_free(v->edibles);                         /* the edibles behind the block's windows */
+    v->edibles = NULL;
+    v->nefx = 0;
+    if (v->have_scene) {
+        static EdibleHost eh;
+        eh.find = army_find;
+        eh.cell_state = edible_cell_state;
+        eh.cell_place = edible_cell_where;
+        eh.ctx = v;
+        v->edibles = edible_new(&eh);
+        if (v->edibles) {
+            edible_load_block(v->edibles, v->scene.block);
+            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+                const SceneBuilding *sb = &v->scene.buildings[i];
+                edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
+            }
+            if (getenv("RAMPAGE_TRACE"))
+                printf("edibles: %d kinds, %d slots\n", edible_kinds(v->edibles), edible_slots(v->edibles));
+        }
+    }
+    v->scene.edibles = v->edibles;
     if (v->have_scene && v->scene.folk)
         people_set_visible(v->scene.folk, people_visible, v);
     hud_close(v->hud);                               /* player 1's HUD for this monster (Hud0.ifc) */
@@ -438,9 +469,11 @@ static int along(const Viewer *v, float p0)
 
 static int answer(void *ctx, const char *call, const float *a)
 {
-    static const char *const YES[] = { "Monsters::hasRoarEnergy", "Monsters::canSpin",
-                                       "Monsters::hasDoubleJump", "Monsters::hasJumpSmash", "Monsters::hasChargePunch" };
+    static const char *const YES[] = { "Monsters::canSpin", "Monsters::hasDoubleJump" };
     Viewer *v = ctx;
+    int r = v ? edible_power_answer(&v->power, call) : -1;   /* hasRoarEnergy, hasChargePunch, ... (edible.c) */
+    if (r >= 0)
+        return r;
     for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
         if (strcmp(call, YES[i]) == 0)
             return 1;
@@ -463,7 +496,12 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0, 0) == 5;
     if (!strcmp(call, "Monsters::canRespawn")) return v->defeated;   /* [G]: the native's lives / credits not read */
     if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(v, a + 1) >= 0;
-    if (!strcmp(call, "Monsters::canDoPunch")) return window_person(v, a + 1) < 0;   /* not at an occupied window */
+    if (!strcmp(call, "Monsters::canDoPunch")) {     /* not at a person's or a power-up's window */
+        int e = edible_call(v, call, a + 1);
+        return e >= 0 ? e : window_person(v, a + 1) < 0;
+    }
+    if (strstr(call, "::canGrabPowerup") || strstr(call, "::checkForHazard"))
+        return edible_call(v, call, a + 1) > 0;
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
         return v->held >= 0 || v->held_unit >= 0 || v->held_vehicle >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
@@ -525,6 +563,12 @@ static void hit_building_front(Viewer *v, const float *p)
         }
     }
     int hit = best && building_hit(&best->b, bq, 2.0f);
+    if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
+        edible_power_hit_building(&v->power, 1, v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF, 0)) {
+        edible_power_start_rage(&v->power, 0);
+        v->pending_slot = 54;
+    }
+    v->energy = v->power.energy;
     if (getenv("RAMPAGE_TRACE"))
         printf("  hitBuildingFront side %d at %.1f %.1f %.1f: %s", side, w[0], w[1], w[2],
                !best ? "no building\n" : hit ? "hit" : "no damage");
@@ -705,7 +749,7 @@ static void clip_event(Viewer *v, const MoveEvent *e)
             return;
         if (e->p[0] != 0) {
             PeopleEaten got = people_eat(v->scene.folk, v->held);
-            people_apply_eaten(&got, &v->hp, 200, &v->energy);
+            monster_stats(v, got.health, got.energy);
             if (getenv("RAMPAGE_TRACE"))
                 printf("  ate: health %+.0f -> %.0f, energy %+.0f -> %.0f\n", got.health, v->hp, got.energy, v->energy);
         } else {
@@ -714,6 +758,13 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         v->held = -1;
         return;
     }
+    else if (strstr(n, "::doGrabPowerup") || strstr(n, "::destroyPowerup") || strstr(n, "::checkForHazard")) {
+        int r = edible_call(v, n, e->p + 1);         /* grabBuildingOccupant: the edible at that window */
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  %s: %d\n", n, r);
+        return;
+    }
+    else if (!strcmp(n, "Monsters::useRoarEnergy")) { edible_power_use_roar(&v->power); v->energy = v->power.energy; return; }
     else if (!strcmp(n, "Monsters::changeMountRail")) {
         float d = v->mirror ? -e->p[0] : e->p[0];
         climb_change_rail(&v->mount, d < 0 ? -1 : 1);
@@ -895,7 +946,7 @@ static void hit_spheres(Viewer *v)
             float from[3] = { v->mx, v->my, v->mz };
             PeopleEaten got = scene_huts_hit(&v->scene, c, c[3], from);
             if (got.health != 0 || got.energy != 0 || got.points != 0)
-                people_apply_eaten(&got, &v->hp, 200, &v->energy);
+                monster_stats(v, got.health, got.energy);
         }
     }
     if (!v->show_hits)
@@ -917,6 +968,123 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
 }
 
 /* the army each frame (army.c): the monster as it sees it, the buildings, then what it makes happen */
+/* gCommon.addStats on the monster (0x2C51A0): HP and energy by the rules edible.c keeps (none at 0 HP; while raging
+ * only a full Energy restarts it); a full one starts the rage: Monsters::startRage, slot 54 [G: its slot] */
+static void monster_stats(Viewer *v, float health, float energy)
+{
+    if (edible_power_add_stats(&v->power, &v->hp, 200, health, energy, 0)) {
+        edible_power_start_rage(&v->power, 0);
+        if (!v->defeated)
+            v->pending_slot = 54;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  rage\n");
+    }
+    v->energy = v->power.energy;
+}
+
+/* the cell a monster call's (x, y, z) names (getBuildingOccupant, people_probe): its building, storey as built and
+ * column, and whether a person is at its window; the edibles' answer to the call, -1 none */
+static int edible_call(Viewer *v, const char *call, const float *xyz)
+{
+    if (!v->edibles)
+        return -1;
+    PeopleBox boxes[64];
+    int nb = scene_people_boxes(&v->scene, boxes, 64), b = -1, ls = -1, col = -1;
+    float at[3] = { v->mx, v->my, v->mz };
+    int found = people_probe(boxes, nb, at, xyz, v->mirror, &b, &ls, &col);
+    int o = found && b >= 0 && ls >= 0 && ls < v->scene.buildings[b].b.n ? v->scene.buildings[b].b.live[ls] : -1;
+    int person = o >= 0 && v->scene.folk && people_window_at(v->scene.folk, b, ls, col) >= 0;
+    return edible_monster_call(v->edibles, call, o >= 0 ? b : -1, o, col, person, 0,
+                               v->have_graph ? v->graph.states[v->run.state].name : NULL);
+}
+
+/* the edibles' frame: their clocks, then what they did */
+static void edible_step(Viewer *v, float dt)
+{
+    if (!v->edibles)
+        return;
+    edible_update(v->edibles, dt);
+    if (edible_power_update(&v->power, dt, v->hp) && getenv("RAMPAGE_TRACE"))
+        printf("  the rage ends\n");
+    v->energy = v->power.energy;
+    EdibleEvent ev[32];
+    int ne;
+    while ((ne = edible_events(v->edibles, ev, 32)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const EdibleEvent *e = &ev[i];
+            switch (e->type) {
+            case EE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
+                    if (id >= 0 && e->edible >= 0 && v->nefx < 32) {
+                        const Edible *it = edible_get(v->edibles, e->edible);
+                        v->efx[v->nefx].fx = id;
+                        v->efx[v->nefx].edible = e->edible;
+                        for (int k = 0; k < 3; k++)
+                            v->efx[v->nefx].off[k] = it ? e->pos[k] - it->pos[k] : 0;
+                        v->nefx++;
+                    }
+                }
+                break;
+            case EE_EFFECT_STOP: if (v->fxw) fx_stop(v->fxw, e->id); break;
+            case EE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case EE_REACTION:                        /* playReaction: the state of that name, only while alive */
+                if (v->hp > 0 && v->have_graph && e->name)
+                    for (int k = 0; k < v->graph.n; k++)
+                        if (!_stricmp(v->graph.states[k].name, e->name)) {
+                            moves_force(&v->run, k);
+                            break;
+                        }
+                break;
+            case EE_SPEED: edible_power_speed(&v->power, e->amount, e->v[0]); break;
+            case EE_STATS:                           /* the score through the army, HP and energy here */
+                if (v->army)
+                    army_add_stats(v->army, 0, e->tmpl, e->level);
+                monster_stats(v, e->v[0], e->v[1]);
+                break;
+            case EE_BANNER:
+                if (v->hud)
+                    hud_float(v->hud, (int)e->amount, e->pos, 0, 1.0f);
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE") && e->type != EE_EFFECT && e->type != EE_EFFECT_STOP)
+                printf("  edible event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->edible);
+        }
+    for (int k = 0; k < v->nefx; k++) {              /* the effects that follow their edible, while it is out */
+        const Edible *it = edible_get(v->edibles, v->efx[k].edible);
+        if (!it || it->phase == EP_GONE || !fx_alive(v->fxw, v->efx[k].fx)) {
+            v->efx[k--] = v->efx[--v->nefx];
+            continue;
+        }
+        float at[3] = { it->pos[0] + v->efx[k].off[0], it->pos[1] + v->efx[k].off[1], it->pos[2] + v->efx[k].off[2] };
+        fx_move(v->fxw, v->efx[k].fx, at);
+    }
+}
+
+/* the edibles' host: a front cell's state and where its edible stands */
+static int edible_cell_state(void *ctx, int building, int storey, int column)
+{
+    const Viewer *v = ctx;
+    if (building < 0 || (uint32_t)building >= v->scene.nbuildings)
+        return -1;
+    const Building *b = &v->scene.buildings[building].b;
+    int ci = building_cell_index(b, FACE_FRONT, column);
+    return ci < 0 || storey < 0 || storey >= b->storeys || building_live_of(b, storey) < 0 ? -1 : b->cell[storey][ci].state;
+}
+static int edible_cell_where(void *ctx, int building, int storey, int column, float out[3])
+{
+    const Viewer *v = ctx;
+    if (building < 0 || (uint32_t)building >= v->scene.nbuildings)
+        return 0;
+    const Building *b = &v->scene.buildings[building].b;
+    int ls = storey >= 0 && storey < b->storeys ? building_live_of(b, storey) : -1;
+    if (ls < 0)
+        return 0;
+    edible_cell_place(b->min, column, ls, out);
+    return 1;
+}
+
 /* 0x2D6A50: a hit on the monster: HP off, the reaction by its level and the knock */
 static void monster_hit(Viewer *v, const char *name, float amount, int level, const float knock[3], const float from[3])
 {
@@ -979,8 +1147,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, const ArmyBo
             case VE_HP: if (v->hp > 0) v->hp = fmaxf(0, fminf(200, v->hp + e->amount)); break;
             case VE_STATS:                           /* id 1: the army applied it (its events follow) */
                 if (e->id == 0) {
-                    v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->v[0])) : v->hp;
-                    v->energy = fmaxf(0, fminf(100, v->energy + e->v[1]));
+                    monster_stats(v, e->v[0], e->v[1]);
                 }
                 break;
             case VE_REMOVED:
@@ -1059,6 +1226,7 @@ static void army_step(Viewer *v, float dt)
     v->scene.monster_move = m.move;
     army_update(v->army, dt, &m, 1, boxes, nb);
     vehicle_step(v, dt, &m, boxes, nb);
+    edible_step(v, dt);
     ArmyEvent ev[64];
     int ne;
     while ((ne = army_events(v->army, ev, 64)) > 0)
@@ -1101,7 +1269,7 @@ static void army_step(Viewer *v, float dt)
             case AE_REACTION: v->pending_slot = e->level; break;
             case AE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
             case AE_STATS_HEALTH: v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->amount)) : v->hp; break;
-            case AE_STATS_ENERGY: v->energy = fmaxf(0, fminf(100, v->energy + e->amount)); break;
+            case AE_STATS_ENERGY: monster_stats(v, 0, e->amount); break;
             case AE_FLOAT:                           /* a PointsBanner: 0.8 for the army's awards (0x2BAB2C) */
                 if (v->hud)
                     hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);

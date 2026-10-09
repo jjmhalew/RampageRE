@@ -12,6 +12,7 @@
 #include "hud.h"
 #include "vehicle.h"
 #include "water.h"
+#include "edible.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -87,7 +88,8 @@ typedef struct {                                      /* a building's cells and 
     Group props;                                      /* its template (DefBuildingProps' Scoring, ...) */
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
-} SceneBuilding;   /* a car on a lane, phase 0..1 along it */
+    Group inst;                                       /* its BuildingInstance| (EdibleInstance| rows, ...) */
+} SceneBuilding;
 
 typedef struct {
     const Bundle *city;
@@ -99,7 +101,8 @@ typedef struct {
     /* the traffic, the fire truck and the rockets (vehicle.c, the viewer's): the TrafficDef blocks of the three block
      * slots (0 this one, 1 and 2 behind it) and the roof rockets the buildings carry, for it to make */
     Vehicles *traffic; Group traffic_def[3];
-    Water *water[16]; int nwater; float water_acc;   /* the block's WaterObject|s (water.c), stepped at 1/60 */
+    Water *water[16]; int nwater; float water_acc;
+    Edibles *edibles;                                 /* the power-ups and hazards behind the windows (edible.c) */   /* the block's WaterObject|s (water.c), stepped at 1/60 */
     struct { const char *name; float pos[3], facing; int building; } rockets[16]; int nrockets;
     int placing_building;                             /* the playable building whose objects are placed, -1 none */
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;

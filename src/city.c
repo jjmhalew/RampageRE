@@ -706,6 +706,25 @@ static int vehicle_look(City *c, Scene *s, int who, const char *shape)
     return id;
 }
 
+/* each frame: every revealed edible at its matrix (looks keyed from 3 << 20); an InvisShape one is its effect alone */
+static void edible_sync(Scene *s)
+{
+    if (!s->edibles || !s->owner)
+        return;
+    for (int i = 0, n = edible_count(s->edibles); i < n; i++) {
+        const Edible *e = edible_get(s->edibles, i);
+        int who = (3 << 20) + i;
+        int show = e->phase != EP_GONE && e->shape ? vehicle_look(s->owner, s, who, e->shape) : -1;
+        for (int k = 0; k < s->nlooks; k++)
+            if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
+                s->instances[s->looks[k].inst].hidden = 1;
+        if (show >= 0) {
+            s->instances[show].hidden = 0;
+            memcpy(s->instances[show].base.m, e->world, sizeof e->world);
+        }
+    }
+}
+
 /* each frame: every vehicle at its matrix (looks keyed from 2 << 20) */
 static void vehicle_sync(Scene *s)
 {
@@ -1388,6 +1407,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         memset(sb->seen, 0, sizeof sb->seen);
         sb->seen_collapse = -1;
         sb->props = t;
+        sb->inst = inst;
         sb->seen_state = BUILDING_STANDING;
         sb->fx_glass = group_str(t, "Glass_Small");
         sb->fx_wall_small = group_str(t, "Wall_Small");
@@ -1772,6 +1792,7 @@ static void update(Scene *s, double t, int all)
     people_sync(s, t);
     army_sync(s, t);
     vehicle_sync(s);
+    edible_sync(s);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
         if (in->tree.n && (all || in->has_clip)) {
@@ -2394,6 +2415,9 @@ void scene_buildings_update(Scene *s, float dt)
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
                             sb->b.min[2] + GROUND_FLOOR + STOREY * (float)(k - 1) }, in[3] = { 0, 1, 0 };
             scene_fx(s, sb->fx_floor, at, in);
+            if (s->edibles && k - 1 < BUILDING_STOREYS)   /* 0x317A70: its edibles gone, those next to it out */
+                edible_floor_fell(s->edibles, (int)i, sb->b.live[k - 1], k < sb->b.storeys ? sb->b.live[k] : -1,
+                                  k >= 2 ? sb->b.live[k - 2] : -1);
         }
         sb->seen_collapse = sb->b.collapse;
         if (s->army && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING) {   /* destroyed */
@@ -2409,13 +2433,16 @@ void scene_buildings_update(Scene *s, float dt)
         if (s->traffic && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING)
             vehicle_building_gone(s->traffic, (int)i);   /* onBuildingDestruction: its roof rockets fly */
         sb->seen_state = sb->b.state;
-        for (int ls = 0; s->folk && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at state 2 or more */
+        for (int ls = 0; (s->folk || s->edibles) && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at 2 or more */
             for (int col = 0; col < sb->b.width; col++) {
                 int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];
                 if (ci < 0 || sb->b.cell[o][ci].state < 2 || sb->broke[o][ci])
                     continue;
                 sb->broke[o][ci] = 1;
-                people_cell_broken(s->folk, (int)i, ls);
+                if (s->folk)
+                    people_cell_broken(s->folk, (int)i, ls);
+                if (s->edibles)                      /* its edible comes out (0x317BC0) */
+                    edible_cell_broken(s->edibles, (int)i, o, col, sb->b.cell[o][ci].state, sb->b.state);
             }
         MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
         for (int st = 0; st < sb->b.storeys; st++)
