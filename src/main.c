@@ -34,6 +34,15 @@
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
+/* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
+static const char *const CAMPAIGN[] = { "LasVegas", "SanFrancisco", "London", "LosAngeles", "Chicago", "HongKong", "NewYork" };
+static int campaign_index(const char *city)
+{
+    for (int i = 0; i < 7; i++)
+        if (!strcmp(CAMPAIGN[i], city))
+            return i;
+    return 0;
+}
 #define NCITIES 7
 
 typedef struct {
@@ -109,7 +118,8 @@ typedef struct {
     int challenges_lost;                             /* a block of this city was won with its challenge not met */
     int upgrade_fx;                                  /* the MonsterUpgrade object's effect, -1 */
     int exit_game;                                   /* the game went back to the shell (the Pause menu's Quit) */
-    float sfx_vol, music_vol, music_now;             /* the Options page's volumes, 1 = as the game; the music now */              /* the footfalls' names and the foot records (footstep.c) */
+    float sfx_vol, music_vol, music_now;
+    int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */             /* the Options page's volumes, 1 = as the game; the music now */              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
     float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
@@ -550,7 +560,8 @@ static void build(Viewer *v)
             static GameHost gh;
             gh.find = army_find;
             gh.ctx = v;
-            GameConfig gc = { GP_CAMPAIGN, 1, 0, 0, 7, city_block_index(v->city, v->blocks[v->block]), 1 };
+            GameConfig gc = { v->play_type ? v->play_type : GP_CAMPAIGN, 1, 0, campaign_index(CITIES[v->city_index]), 7,
+                              city_block_index(v->city, v->blocks[v->block]), 1 };
             v->game = game_new(&gh, &gc);
             v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
@@ -567,7 +578,7 @@ static void build(Viewer *v)
         hud_close(v->hud);                           /* player 1's HUD for this monster (Hud0.ifc) */
         v->hud = NULL;
         if (v->have_gui && v->have_scene && v->monster >= 0 && !v->no_hud) {
-            HudConfig hc = { 0, 1, HUD_PLAY_CAMPAIGN, 0, v->monsters[v->monster] };
+            HudConfig hc = { 0, 1, v->play_type ? v->play_type : HUD_PLAY_CAMPAIGN, 0, v->monsters[v->monster] };
             v->hud = hud_open(&v->gui_world, &v->gui_common, &hc);
             if (v->hud) {
                 hud_set(v->hud, v->hp, 200, v->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
@@ -1581,12 +1592,26 @@ static void game_step(Viewer *v, float dt)
                 if (v->hud) {
                     HudResults r;
                     memset(&r, 0, sizeof r);
-                    r.play_type = HUD_PLAY_CAMPAIGN;
+                    r.play_type = game_play_type(v->game);   /* GP_* and HUD_PLAY_* agree */
                     r.num_players = 1;
-                    for (int c = 0; c < 7; c++) {
-                        r.points[0][c] = game_points(v->game, 0, c);
-                        r.kills[0][c] = game_kills(v->game, 0, c);
+                    for (int p = 0; p < r.num_players; p++) {
+                        for (int c = 0; c < 7; c++) {
+                            r.points[p][c] = game_points(v->game, p, c);
+                            r.kills[p][c] = game_kills(v->game, p, c);
+                        }
+                        r.monsters[p] = v->monster >= 0 ? v->monsters[v->monster] : NULL;
+                        r.blocks_won[p] = game_blocks_won(v->game, p);
+                        r.cities_won[p] = game_cities_won(v->game, p);
                     }
+                    r.king_block = game_king(v->game, 0);
+                    r.king_city = game_king(v->game, 1);
+                    r.king_world = game_king(v->game, 2);
+                    r.blocks_to_win = game_blocks_to_win(v->game);
+                    r.cities_to_win = game_cities_to_win(v->game);
+                    int ci = game_city_index(v->game);
+                    r.next_city = ci >= 0 && ci < 6 ? CAMPAIGN[ci + 1] : NULL;
+                    r.clock_time = game_clock(v->game, NULL);
+                    r.clock_limit = game_clock_limit(v->game);
                     r.block_played = game_block_name(v->game, 0);
                     r.block_current = game_block_name(v->game, 1);
                     for (uint32_t k = 0; k < v->scene.nbuildings; k++)
@@ -2550,8 +2575,10 @@ static void upgrade_touch(Viewer *v, const float centre[3], float radius)
     if (v->fxw && v->upgrade_fx >= 0)
         fx_stop(v->fxw, v->upgrade_fx);
     v->upgrade_fx = -1;
-    if (v->hud)                                      /* hideChallengeCompletionUI is not ported */
+    if (v->hud) {                                    /* gWorld.hideChallengeCompletionUI, then its banner */
+        hud_hide_challenge_completion(v->hud);
         hud_banner_text(v->hud, v->challenge.up.text, v->challenge.up.colour, 1, "v_upgrade");
+    }
     v->power.abilities |= mv;
     if (getenv("RAMPAGE_TRACE"))
         printf("  upgrade taken: %s\n", challenge_upgrade_move(mv));
@@ -2731,6 +2758,11 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--nofog") == 0) v.fog = -1;
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
+        else if (strcmp(argv[i], "--play") == 0 && i + 1 < argc) {   /* campaign, kingcity, kingworld, timed */
+            const char *m = argv[++i];
+            v.play_type = !_stricmp(m, "kingcity") ? GP_KING_CITY : !_stricmp(m, "kingworld") ? GP_KING_WORLD :
+                          !_stricmp(m, "timed") ? GP_TIMED_RUN : GP_CAMPAIGN;
+        }
         else if (strcmp(argv[i], "--cam") == 0 && i + 5 < argc) {   /* x y z yaw pitch (degrees): a fixed view */
             for (int k = 0; k < 5; k++)
                 view[k] = (float)atof(argv[++i]);

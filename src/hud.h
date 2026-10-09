@@ -1,8 +1,9 @@
 /* hud.h - the game's 2D interface over the world: the in-play HUD of one player (HudN.ifc and Clock.ifc of
  * WorldGui.bdp, run by the logic of Hud.bsf / Clock.bsf), the floating score numbers (PointsBanner, 0x331D50), the
  * text banners (PointsBanner.createAndStartText: Rage.ifc + Rage.bsf), the challenge / boss status (ChallengeStatus),
- * the challenge card (ChallengeText), the results screens (WorldGuiDriver::startResults: Results, GameOver) and the
- * Pause menu (Pause.ifc + Pause.bsf), drawn with the game's bitmap fonts (.fdf + texture) and texts (.loc).
+ * the challenge card (ChallengeText), the results screens (WorldGuiDriver::startResults: Results, LevelResults,
+ * WorldResults, the King screens, TimedRunResults, GameOver) and the Pause menu (Pause.ifc + Pause.bsf), drawn with
+ * the game's bitmap fonts (.fdf + texture) and texts (.loc).
  * docs/FORMAT_GUI.md has the formats, docs/SCREENS_NOTES.md the banners and screens, docs/PAUSE_NOTES.md the Pause
  * menu; hud.c cites the game code ([R] read in the code or the files, [G] a guess where it matters).
  *
@@ -94,6 +95,12 @@ void hud_banner_rage(Hud *h);
  * 220 0 0, scale 0.5, sound "V_Monster_Reveal_Seq" [R]. monster: gCommon.getMonsterName(gWorld.startReveal(pos)),
  * e.g. "Boosy" */
 void hud_banner_reveal(Hud *h, const char *monster);
+/* gWorld.hideChallengeCompletionUI (World binding 102, 0x2B01C0) [R]: every interface on the screen named
+ * "Removeable" gets flag 0x1 (hidden): those are the text banners, which Rage::setPointsBannerData renames ("CHALLENGE
+ * MET!", "5,000 PTS", the edibles' and the upgrades' texts, the monster reveal), not the plain RAMPAGE banner. They
+ * run on unseen and unload as usual. StreetObject.bsf calls it when a monster takes the challenge's upgrade, before
+ * its own banner */
+void hud_hide_challenge_completion(Hud *h);
 
 /* ---- the challenge: ChallengeStatus (the item count or the boss's health bar, bottom left) and ChallengeText (the
  * card at the block's start). What the game's gWorld knows about the current block's challenge: */
@@ -144,17 +151,33 @@ typedef struct {
     int city_destroyed;      /* gCommon.isCityDestroyed() (game_city_destroyed) */
     int monster_revealed;    /* gWorld.wasMonsterRevealed() */
     /* LevelResults (the city's end) */
-    const char *city;        /* gCommon.getCityName(getLastCityIdx()): a .loc key, "LasVegas" */
+    const char *city;        /* gCommon.getCityName(getLastCityIdx()): a .loc key, "LasVegas" (KingCityResults asks
+                              * getGameStatus().getCityName(): the same city) */
     int city_score;          /* gCommon.getGameStatus().getCityScore() (game_city_total) */
     int par_score;           /* gWorld.getParScore() (game_par_score) */
     unsigned city_flags;     /* getCityFlags() (game_city_flags): a star each for 1 all blocks, 2 par, 4 challenges,
                               * 8 monsters revealed */
     int show_victory;        /* gCommon.getShowVictory(): no "Change Monster" / "Quit" */
+    /* the King screens (KingBlockResults, KingCityResults, KingWorldResults), per player slot 0 .. 3 */
+    const char *monsters[4]; /* gCommon.getGameStatus().getMonsterName(i): a .loc key ("George", "Boosy") */
+    int king_block, king_city, king_world;   /* gCommon.getKingOfBlock / City / World (game_king(g, 0 / 1 / 2)): a
+                                              * player slot, -1 none (a tie) */
+    int blocks_won[4];       /* Player.getNumBlocksWon (game_blocks_won) */
+    int cities_won[4];       /* Player.getNumCitiesWon (game_cities_won) */
+    int blocks_to_win;       /* gCommon.getNumBlocksToWin (game_blocks_to_win) */
+    int cities_to_win;       /* gCommon.getNumCitiesToWin (game_cities_to_win) */
+    const char *next_city;   /* gCommon.getCityName(getGameStatus().getCityIdx() + 1): the King of the World's next
+                              * city, a .loc key (CityData.City<game_city_index + 1>) */
+    /* TimedRunResults */
+    float clock_time;        /* gWorld.getGameClockTime (game_clock): the seconds left, this block's added */
+    float clock_limit;       /* gWorld.getGameClockLimit (game_clock_limit): the seconds this block added */
 } HudResults;
-/* show results screen `screen` (any open one is unloaded). Results (the block's: the score lines counting up, the
- * time bonus among them), LevelResults (the city's: its score, the par, the stars) and GameOver are the game's; the
- * others are stand-ins that draw nothing and answer DONE after 3 s or on HUD_EV_ACCEPT. r may be NULL for
- * GameOver */
+/* show results screen `screen` (any open one is unloaded): GameOver, Results (the block's: the score lines counting up,
+ * the time bonus among them), LevelResults (the city's: its score, the par, the stars), WorldResults (the campaign's
+ * end), KingBlockResults (the block's winner, the points, the standings), KingCityResults (the King of the City, the
+ * standings), KingWorldResults (the King of the World) and TimedRunResults (the time left and added). r may be NULL
+ * for GameOver. A screen whose layout is missing is a stand-in that draws nothing and answers DONE after 3 s or on
+ * HUD_EV_ACCEPT */
 void hud_results(Hud *h, int screen, const HudResults *r);
 /* the result the screen gave since the last call (HUD_RESULT_*, the numbers of game.h GR_*), HUD_RESULT_NONE none */
 int hud_result(Hud *h);

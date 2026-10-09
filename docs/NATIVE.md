@@ -28,7 +28,8 @@ back); the monster runs its own move graph and the game's camera follows it
 `--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
 directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
 buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... drive it; `award Name` counts an object of
-that template for the block's challenge; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. The console prints
+that template for the block's challenge; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
+(its results screens). The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
@@ -131,7 +132,7 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- the King and Timed Run results screens; the goals of scripts not ported (trains, cable cars, freighters, hot dog
+- the goals of scripts not ported (trains, cable cars, freighters, hot dog
   carts, bikers, parade balloons, chimneys and gongs, street lamps) never count; hideChallengeCompletionUI;
 - which monster a cryotube reveals (the banner names the next one in the viewer's list), findPointInRubble;
 - the feet locked to the ground and dragged (0x33BF10 and kin; footstep.c keeps the records for it);

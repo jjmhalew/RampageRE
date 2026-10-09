@@ -126,7 +126,8 @@ Then:
   one, the clock counts down the bonus time (480 s) and is always shown, but nothing happens at 0.
 
 The clock starts when state 6 is entered. The time left is the seconds minus the time since the start, never below
-0. It is drawn in states 5 and 6 when ClockVisible is set (Clock.bsf: m:ss, fading in).
+0. `gWorld.getGameClockTime` (World binding 82, 0x2AF848) is that time left; `getGameClockLimit` (binding 81, 0x2AF818)
+is the clock's +0x30, the TimeLimit read (`game_clock_limit`). It is drawn in states 5 and 6 when ClockVisible is set (Clock.bsf: m:ss, fading in).
 
 **Time bonus** (0x347E10, when the block is won): of the entries whose time has not been reached, the most points.
 The default table is < 120 s 5000, < 150 s 2500, < 180 s 1500, < 240 s 500, < 360 s 200, < 480 s 100. In the
@@ -203,8 +204,11 @@ block's points.
 4. Cross starts the walkout.
 5. When it is over: `setResultState(1)`, and the world moves on. 5 s and a 0.5 s fade later: `endResults`.
 
-"select" answers 3 and a confirmed quit answers 4. LevelResults, WorldResults and the King screens answer 1 the same
-way.
+"select" answers 3 and a confirmed quit answers 4. LevelResults, WorldResults, KingBlockResults, King of the World's
+KingCityResults and TimedRunResults answer 1 the same way (after their walkout); King of the City's KingCityResults and
+KingWorldResults answer 4 on Continue, which leaves for the menus (the quit flag) [R the scripts;
+docs/SCREENS_NOTES.md]. A Timed Run's block shows TimedRunResults: the time left, the next block's TimeLimit added,
+the total.
 
 ## The play modes and the campaign
 
@@ -249,5 +253,8 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
   back to Levels.bsf's version.
 - **[G]** `gWorld.frand` is an LCG.
 - **[G]** The respawn's drop height is a guess at the camera plane.
-- The results screens are not drawn here. `game_auto_results` answers for them after a delay: GR_DONE, or
-  GR_CONTINUE for the GameOver screen.
+- The results screens are not drawn here: `src/hud.c` has them (hud_results; docs/SCREENS_NOTES.md), fed by these
+  queries (game_points, game_kills, game_king, game_blocks_won, game_cities_won, game_blocks_to_win,
+  game_cities_to_win, game_city_index, game_clock, game_clock_limit, game_block_name, game_city_destroyed ...).
+  `game_auto_results` answers for them after a delay when nothing draws them: GR_DONE, or GR_CONTINUE for the
+  GameOver screen.

@@ -1153,6 +1153,9 @@ float game_clock(const Game *g, int *visible)
     return clock_left(g);
 }
 
+float game_clock_limit(const Game *g) { return g ? g->limit : 0; }   /* lwc1 0x4D51C0 [R 0x2AF834] */
+int game_city_index(const Game *g) { return g ? g->cfg.city_index : 0; }
+
 int game_points(const Game *g, int slot, int cat)
 {
     return g && slot >= 0 && slot < GAME_PLAYERS && cat >= 0 && cat < 7 ? g->p[slot].points[cat] : -1;

@@ -16,8 +16,15 @@ code or the files, **[G]** a guess or a stand-in.
 - `Rage.ifc`: the text `Rage` at 320 240, Atrox60, centred both ways, s 1.4, charspacing 1, maxwidth 500, with a
   hidden `line2` (ArialBlack24, s 1.2, 30 below), and a quad `Head` (HUD_GEORGE_HEAD, scale 4).
 - `setPointsBannerData`: message, colour, the text object's scale (0.5 for edibles and the reveal, 1.0 for challenges),
-  hold 0.35 s, the sound unless `"Default"`; the interface is renamed `Removeable` (`gWorld.hideChallengeCompletionUI`,
-  0x2B01C0, hides those).
+  hold 0.35 s, the sound unless `"Default"`; the interface is renamed `Removeable`. So every text banner (challenge
+  met, the reward, edibles, upgrades, the reveal) is `Removeable`; the plain RAMPAGE banner (no data) stays `guiRage`.
+- **hideChallengeCompletionUI** (World binding 102, 0x2B01C0): for each interface on the screen (screen +0x238: the
+  list at +0x0, its count at +0x8) named (+0x38) `Removeable`, the vtable call +0x44 (0x22A3B0, `flags +0x5A |= arg`)
+  with 1. Flag 0x1 is what `GuiObject.isVisible` tests (0x256C64: `!(flags & 1)`): the banners are hidden, not
+  unloaded. `StreetObject::TakeDamage` calls it when a monster takes the challenge's upgrade, just before its own
+  banner (the upgrade's TextID, white, `v_upgrade`), which is therefore not hidden. **[G]** The hidden banners' scripts
+  are taken to run on and unload themselves as usual (the GUI manager's frame events to hidden interfaces are not
+  traced). Ported as `hud_hide_challenge_completion`.
 - **The name**: `localizeString(name)`; if it begins with `#` the text is the rest, as is (the reveal builds its
   text itself). The texts are in `Game.loc` (WorldGui.bdp): `InstantRampage` "Instant\nRampage", `SpeedIncrease`
   "Speed\nBoost", `Challenge_Met` "CHALLENGE MET!", `MonsterRevealed` "%s Unlocked", `RAMPAGE`. Keys ignore case
@@ -103,7 +110,66 @@ and `endResults` at once; Quit → ConfirmQuit, Yes → 4. `gApp.pauseGame(1)` w
 A frame 480 wide holding `ConfirmQuit` ("Unsaved progress ... quit?") or `ConfirmQuitShort`, the list No / Yes
 (left / right) 15 below the text, centred on the screen, fading in; X answers, Back closes.
 
+### The other screens: the common pattern [R]
+WorldResults, KingBlockResults, KingCityResults, KingWorldResults and TimedRunResults are written like Results.scr:
+`setupIntroItem(name)` takes an object's place, scale and fade as both ends (fade 1), the script then sets the start
+and end time and the ends it changes; `setupIntro` puts each intro item at its start. `processIntro` moves the items of
+the state's list (`niState` 0 the intro, then the walkout; KingBlockResults has more, below) and, when all are done,
+`niState++`. Like Results.scr's it takes its flag by value, so taken by reference here **[G]**. The walkout's items
+are set up at the start, so they start where the objects were at the intro's start, not where the intro left them.
+The King screens and TimedRunResults reuse Results' news flash: the same first ten intro items (title bars, "Rampage
+Alert", "CHANNEL 3", the grey field, the orange band, "Live", the buttons, the scrolling title from 1.25 s), the same
+walkout of the field, band, buttons and "Live", the same title scroll and "Live" blink from 1.5 s, buttons at 590 less
+the widest shown, the PS2 button colours and (except KingWorldResults) ConfirmQuit for Back. After the walkout: result
+1, 5 s more, a 0.5 s fade, `endResults`. "P" + (n + 1) is a key of Game.loc ("P1"); monster names are localized keys
+("Boosy" is "Bubba").
+
+### WorldResults (the campaign's end, state 11) [R WorldResults.scr]
+"TOTAL DESTRUCTION!" (Atrox60 × 1.25, from x 960) and "ALL CITIES DESTROYED!" (from −320) between two red bands
+(from −320 and 640; the script sets the second's start twice, 960 then 640), all in 0.5 s; Continue fades in at 1.55
+s. X: the `fade` quad (black, 649 × 489) is shown and fades in over 0.5 s; then result 1 and `endResults` at once. No
+Back, no ConfirmQuit, no dt guard.
+
+### KingBlockResults (a King mode's block, state 7) [R KingBlockResults.scr]
+- The block's King (`getKingOfBlock`): "P2: Lizzie" / "Wins this block" slide in at 2.25 s, Continue fades in at
+  2.45; with none (a tie) "It Is A Tie!
+Block will be replayed" and the Replay button instead.
+- The points list: the players by points (category 6, an exchange sort as written, not stable), counting up 0.5 s each
+  from 1.5 s (`Slot_Jackpot` until the last); the first one's count is also the big `winnerScore` (in at 2.5 s).
+- States: 0 the intro; X → 1 `rankItems` ("CITY STANDINGS" and `br_list` slide in from the left, 0.25..0.75 s: the
+  players by blocks won, "blocks/to win"; the points list and score drop, the winner lines fade out); X → 2 the
+  walkout ("MOVING ON TO <the next block>"); 3 result 1. With a King of the City (`getKingOfCity() != -1`) the first
+  X runs `altWalkoutItems` instead (the field, list, score, band, buttons, "Live" go; the winner lines fade over 1 s,
+  the tie text 1..2 s) and the state jumps from 1 to 3.
+- As written, the walkout's `br_winner` / `br_list` items start at the intro's start x (−320, −265): the standings
+  leave the screen at once instead of dropping; the rank move of the points list starts at y 216, not the 281 the
+  intro left it at.
+- Quit hidden when the city is destroyed or has a King; Back asks ConfirmQuit then (Yes → 4).
+
+### KingCityResults (state 10, both King modes) [R KingCityResults.scr]
+"P2: Lizzie" / "is King of Las Vegas" (`getKingOfCity`, the city's localized name), the title "<city> - COMPLETELY
+DESTROYED", the standings: "CITY STANDINGS" (blocks won of `getNumBlocksToWin`) or, in King of the World, "WORLD
+STANDINGS" (cities won of `getNumCitiesToWin`), the rows sorted by blocks won in both. X: King of the City → result
+4 at once (to the menus; no walkout); King of the World → "MOVING ON TO <getCityName(getCityIdx() + 1)>", the
+walkout, result 1. Quit hidden in King of the City or with a King of the World. **[G]** A city that ran out of blocks
+without a King (the King of the City's last block won by nobody alone) would show "P0: " (no monster).
+
+### KingWorldResults (state 11, King modes) [R KingWorldResults.scr]
+"THE WORLD COMPLETELY DESTROYED" scrolling, "P2: Lizzie" (the script asks `getKingOfCity()`, the last city's King,
+who is the world's) / "is King of the World", the points list (not moved by the intro) with cities won of those to
+win, sorted by blocks won. Quit hidden; OK (X) → result 4 at once. The script never starts its walkout, has no
+ConfirmQuit, and adds the Continue fade item twice.
+
+### TimedRunResults (a Timed Run's block, state 7) [R TimedRunResults.scr]
+- "Block Destroyed" (fading in 1.0..1.5 s) and, from 1.5 s, counting up 0.5 s each: "Time Remaining:" total − added,
+  "+ Bonus Time:" added, "= Total Time:" total, with total `gWorld.getGameClockTime()` (the seconds left: the block's
+  rest plus the next block's TimeLimit, the clock being reset and the next block read before the screen) and added
+  `gWorld.getGameClockLimit()` (World binding 81, 0x2AF818: the clock's +0x30, the TimeLimit, 180). Times are ":ss"
+  under a minute, else "m:ss". (The label's key is `Resullts_TimeRemaining`, which Game.loc has.)
+- The city done: "YOU WIN!
+City Destroyed" and "Time Remaining:" the clock's seconds; no count-up; Quit hidden.
+- X: "MOVING ON TO <the next block>" when the block names differ, the walkout, result 1. Back (Quit shown):
+  ConfirmQuit, Yes → 4.
+
 ### Not ported
-WorldResults, KingBlockResults, KingCityResults, KingWorldResults, TimedRunResults: `hud_results` shows nothing and
-answers DONE after 3 s or on X **[G stand-in]**. The save button and profile saving, `hideChallengeCompletionUI`. (The
-Pause menu is ported: [PAUSE_NOTES.md](PAUSE_NOTES.md).)
+The save button and profile saving. (The Pause menu is ported: [PAUSE_NOTES.md](PAUSE_NOTES.md).)

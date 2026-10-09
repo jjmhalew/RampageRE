@@ -1,8 +1,10 @@
 /* hud.c - the game's 2D interface (hud.h; docs/FORMAT_GUI.md, docs/SCREENS_NOTES.md), transcribed from the PS2 game:
  * the GUI layout files (.ifc, bundle type 24: Hud0..3.ifc, Clock.ifc, Rage.ifc, ChallengeStatus.ifc,
- * ChallengeText.ifc, Results.ifc, LevelResults.ifc, GameOver.ifc, Pause.ifc of WorldGui.bdp), the logic of their
- * scripts (build/scripts/Hud.scr, Clock.scr, Rage.scr, ChallengeStatus.scr, ChallengeText.scr, Results.scr,
- * LevelResults.scr, GameOver.scr, Pause.scr, WorldGuiDriver.scr and the
+ * ChallengeText.ifc, Results.ifc, LevelResults.ifc, WorldResults.ifc, KingBlockResults.ifc, KingCityResults.ifc,
+ * KingWorldResults.ifc, TimedRunResults.ifc, GameOver.ifc, Pause.ifc of WorldGui.bdp), the logic of their scripts
+ * (build/scripts/Hud.scr, Clock.scr, Rage.scr, ChallengeStatus.scr, ChallengeText.scr, Results.scr, LevelResults.scr,
+ * WorldResults.scr, KingBlockResults.scr, KingCityResults.scr, KingWorldResults.scr, TimedRunResults.scr,
+ * GameOver.scr, Pause.scr, WorldGuiDriver.scr and the
  * include files ObjectFader.h, ConfirmQuit.h, ButtonSetup.h), the GUI objects that draw them (GuiQuad 0x2439E0,
  * GuiSlider layout 0x24A310, GuiText 0x234D30), the bitmap fonts (OFontData loader 0x1B7CD0, OFont defaults 0x1B7200,
  * the line measure 0x1B5AA0 / 0x1B6270, the string draw 0x1B6A80 and its glyph quads 0x1B64B0), the string tables
@@ -37,6 +39,8 @@
 #define MAX_FADERS 6
 #define MAX_CALLS 48
 #define RAGE_COPIES 15
+#define MAX_INTRO 24                                     /* a screen's intro items (KingBlockResults: 20) */
+#define MAX_WALK 12                                      /* its walkout, rank and alternative walkout items */
 
 /* ---------------------------------------------------------------- colours */
 /* the files write RRGGBBAA [R: Hud.scr's rageColor (1, 0.5, 0.25) is the layout's maskColor 0xFF8040FF] */
@@ -1140,13 +1144,15 @@ typedef struct {
     Layout *L;
     Node *rage, *head, *copies[RAGE_COPIES];
     int init;
+    int removeable;                                      /* this.setName("Removeable") (setPointsBannerData) */
     float timer, hold, scale, col[4];
     char message[MAX_TEXT], message2[MAX_TEXT], sound[32];
 } Rage;
 
 typedef struct { Node *obj; float t0, t1, p0[3], p1[3], s0, s1, f0, f1; int done; } Intro;
 
-enum { SCR_STANDIN, SCR_RESULTS, SCR_GAME_OVER, SCR_LEVEL, SCR_PAUSE };
+enum { SCR_STANDIN, SCR_RESULTS, SCR_GAME_OVER, SCR_LEVEL, SCR_PAUSE, SCR_WORLD, SCR_KING_BLOCK, SCR_KING_CITY,
+       SCR_KING_WORLD, SCR_TIMED };
 typedef struct {
     Layout *L;
     int kind, screen;
@@ -1163,8 +1169,15 @@ typedef struct {
     int rating;
     float intro_t, live_delay, cu_progress, pulse_t, left_x, right_x, title_w, save_delay;
     Node *list, *total, *live, *title1, *title2, *base, *save, *cu_item;
-    Intro intro[16], walk[8];
+    Intro intro[MAX_INTRO], walk[MAX_WALK];
     int nintro, nwalk;
+    /* WorldResults, KingBlockResults, KingCityResults, KingWorldResults, TimedRunResults */
+    char monsters[4][32], next_city[64];
+    int ids[4];                                          /* KingBlockResults' aPlayerIds: the players by points */
+    int do_rank, alt_walkout;                            /* bDoRank, bUseAltWalkout */
+    Intro rank[MAX_WALK], alt[MAX_WALK];                 /* rankItems, altWalkoutItems */
+    int nrank, nalt;
+    Node *times[3];                                      /* TimedRunResults' gtTimes */
     /* GameOver.scr (and Pause.scr: listbox) */
     Node *choices;
     /* Pause.scr */
@@ -1602,8 +1615,8 @@ static Rage *rage_load(Hud *h)
     return r;
 }
 
-/* Rage::setPointsBannerData / setPointsBannerData2 (and this.setName("Removeable"): gWorld.hideChallengeCompletionUI
- * hides those, 0x2B01C0, not ported) */
+/* Rage::setPointsBannerData / setPointsBannerData2, and this.setName("Removeable"): gWorld.hideChallengeCompletionUI
+ * hides those (hud_hide_challenge_completion) */
 static void rage_data(Rage *r, const char *message, const char *message2, const float col[4], float size, float hold,
                       const char *sfx)
 {
@@ -1612,6 +1625,7 @@ static void rage_data(Rage *r, const char *message, const char *message2, const 
     memcpy(r->col, col, sizeof r->col);
     r->scale = size;
     r->hold = hold;
+    r->removeable = 1;
     if (!sfx || strcmp(sfx, "Default") != 0)
         snprintf(r->sound, sizeof r->sound, "%s", sfx ? sfx : "");
 }
@@ -1747,6 +1761,19 @@ void hud_banner_reveal(Hud *h, const char *monster)
     Rage *r = rage_load(h);
     if (r)
         rage_data(r, msg, NULL, col, 0.5f, 0.35f, "V_Monster_Reveal_Seq");
+}
+
+/* gWorld.hideChallengeCompletionUI, 0x2B01C0 [R]: for each interface of the screen (screen +0x238: the list at +0x0,
+ * its count at +0x8) whose name (+0x38) is "Removeable", vtable +0x44 (0x22A3B0: flags +0x5A |= 1) with 1. Flag 0x1
+ * is the one GuiObject.isVisible tests (0x256C64: !(flags & 1)) [R]. The banner's script goes on [G: the GUI manager's
+ * frame events to a hidden interface not traced] and unloads it at its end as usual; here it is not drawn. */
+void hud_hide_challenge_completion(Hud *h)
+{
+    if (!h)
+        return;
+    for (int i = 0; i < h->nrages; i++)
+        if (h->rages[i]->removeable && h->rages[i]->L)
+            h->rages[i]->L->root->visible = 0;
 }
 
 /* ---------------------------------------------------------------- ChallengeStatus [R ChallengeStatus.scr] */
@@ -2052,8 +2079,9 @@ static int cq_process(Hud *h, Screen *s, int ev)
             fader_go(&s->fd, q->box, -1);
         else if (s->kind == SCR_RESULTS)
             results_quit(h, s);
-        else if (s->kind == SCR_LEVEL)
-            set_result(h, HUD_RESULT_QUIT);              /* LevelResults::onQuit */
+        else if (s->kind == SCR_LEVEL || s->kind == SCR_KING_BLOCK || s->kind == SCR_KING_CITY || s->kind == SCR_TIMED)
+            set_result(h, HUD_RESULT_QUIT);              /* LevelResults / KingBlockResults / KingCityResults /
+                                                          * TimedRunResults::onQuit */
         else if (s->kind == SCR_PAUSE)
             pause_quit(h, s);
         else
@@ -2092,19 +2120,19 @@ static Intro *intro_item(Screen *s, Intro *list, int *n, int max, const char *na
 }
 static Intro *intro_x(Screen *s, const char *name, float t0, float t1, float x0, float x1)
 {
-    Intro *it = intro_item(s, s->intro, &s->nintro, 16, name);
+    Intro *it = intro_item(s, s->intro, &s->nintro, MAX_INTRO, name);
     if (it) { it->t0 = t0; it->t1 = t1; it->p0[0] = x0; it->p1[0] = x1; }
     return it;
 }
 static Intro *intro_y(Screen *s, const char *name, float t0, float t1, float y0, float y1)
 {
-    Intro *it = intro_item(s, s->intro, &s->nintro, 16, name);
+    Intro *it = intro_item(s, s->intro, &s->nintro, MAX_INTRO, name);
     if (it) { it->t0 = t0; it->t1 = t1; it->p0[1] = y0; it->p1[1] = y1; }
     return it;
 }
 static Intro *walk_item(Screen *s, const char *name, float t1, int axis, float a, float b)
 {
-    Intro *it = intro_item(s, s->walk, &s->nwalk, 8, name);
+    Intro *it = intro_item(s, s->walk, &s->nwalk, MAX_WALK, name);
     if (it) { it->t0 = 0; it->t1 = t1; it->p0[axis] = a; it->p1[axis] = b; }
     return it;
 }
@@ -2124,18 +2152,23 @@ static void res_marquee(Hud *h, Screen *s, const char *text)
     }
 }
 
-/* fixButtonColors(this, "continue", "quit", "select", "save") on the PS2 (gApp.getPlatform() 2) [R ButtonSetup.h] */
+/* bs_fixButton(this, name, index) on the PS2 (gApp.getPlatform() 2): the button's text in ps2Buttons[index]
+ * [R ButtonSetup.h] */
+static void button_colour(Screen *s, const char *name, int index)
+{
+    static const float ps2[4][3] = { { 0, 186, 255 }, { 190, 45, 39 }, { 220, 108, 194 }, { 0, 240, 156 } };
+    Node *t = name && *name ? layout_find(s->L->root, name) : NULL;
+    if (t && index >= 0 && index < 4) {
+        col_set(t->tcol, ps2[index][0] / 255.0f, ps2[index][1] / 255.0f, ps2[index][2] / 255.0f, 1);
+        t->has_tcol = 1;
+    }
+}
+/* fixButtonColors(this, "continue", "quit", "select", "save") */
 static void res_button_colours(Screen *s)
 {
     static const char *const names[4] = { "continue", "quit", "select", "save" };
-    static const float ps2[4][3] = { { 0, 186, 255 }, { 190, 45, 39 }, { 220, 108, 194 }, { 0, 240, 156 } };
-    for (int i = 0; i < 4; i++) {
-        Node *t = layout_find(s->L->root, names[i]);
-        if (t) {
-            col_set(t->tcol, ps2[i][0] / 255.0f, ps2[i][1] / 255.0f, ps2[i][2] / 255.0f, 1);
-            t->has_tcol = 1;
-        }
-    }
+    for (int i = 0; i < 4; i++)
+        button_colour(s, names[i], i);
 }
 
 /* Results::doInterface 8192 [R] */
@@ -2229,7 +2262,7 @@ static void results_start(Hud *h, Screen *s)
     static const char *const fades[3] = { "continue", "select", "quit" };
     static const float ft[3][2] = { { 2.05f, 2.15f }, { 2.15f, 2.26f }, { 2.25f, 2.36f } };
     for (int i = 0; i < 3; i++) {
-        it = intro_item(s, s->intro, &s->nintro, 16, fades[i]);
+        it = intro_item(s, s->intro, &s->nintro, MAX_INTRO, fades[i]);
         if (it) { it->t0 = ft[i][0] + save_t; it->t1 = ft[i][1] + save_t; it->f0 = 0; it->f1 = 1; }
     }
     for (int i = 0; i < s->nintro; i++) {
@@ -2536,7 +2569,7 @@ static void level_start(Hud *h, Screen *s)
     static const char *const fades[3] = { "continue", "select", "quit" };
     static const float ft[3][2] = { { 1.65f, 1.75f }, { 1.75f, 1.86f }, { 1.85f, 1.96f } };
     for (int i = 0; i < 3; i++) {
-        Intro *it = intro_item(s, s->intro, &s->nintro, 16, fades[i]);
+        Intro *it = intro_item(s, s->intro, &s->nintro, MAX_INTRO, fades[i]);
         if (it) { it->t0 = ft[i][0]; it->t1 = ft[i][1]; it->f0 = 0; it->f1 = 1; }
     }
     float y = 245.0f, t = 0.5f;
@@ -2648,6 +2681,668 @@ static void gameover_input(Hud *h, Screen *s, int ev)
         else if (sel == 1) set_result(h, HUD_RESULT_SELECT);
         s->ended = 1;
     }
+}
+
+/* ---------------------------------------------------------------- WorldResults, the King screens, TimedRunResults */
+/* Their scripts follow Results.scr [R WorldResults.scr, KingBlockResults.scr, KingCityResults.scr,
+ * KingWorldResults.scr, TimedRunResults.scr]: an intro of timed items (from / to, scale, fade), the scrolling title
+ * and the "Live" box, a count-up (KingBlockResults: the players' points; TimedRunResults: the times), Continue for
+ * the walkout, then setResultState(1), 5 s, a 0.5 s fade, endResults. Their processIntro takes niFlag by value like
+ * Results.scr's; it is taken by reference here, as there [G]. */
+
+/* setupIntroItem into list 0 introItems, 1 walkoutItems, 2 rankItems or 3 altWalkoutItems, t0 .. t1, moving along
+ * axis (0 x, 1 y, -1 none) from a to b */
+static Intro *kr_item(Screen *s, int list, const char *name, float t0, float t1, int axis, float a, float b)
+{
+    Intro *it = list == 0 ? intro_item(s, s->intro, &s->nintro, MAX_INTRO, name) :
+                list == 1 ? intro_item(s, s->walk, &s->nwalk, MAX_WALK, name) :
+                list == 2 ? intro_item(s, s->rank, &s->nrank, MAX_WALK, name) :
+                intro_item(s, s->alt, &s->nalt, MAX_WALK, name);
+    if (!it)
+        return NULL;
+    it->t0 = t0;
+    it->t1 = t1;
+    if (axis >= 0) {
+        it->p0[axis] = a;
+        it->p1[axis] = b;
+    }
+    return it;
+}
+static Intro *kr_fade(Screen *s, int list, const char *name, float t0, float t1, float f0, float f1)
+{
+    Intro *it = kr_item(s, list, name, t0, t1, -1, 0, 0);
+    if (it) { it->f0 = f0; it->f1 = f1; }
+    return it;
+}
+/* setupIntro's end: each intro item where it starts */
+static void intro_apply(Screen *s)
+{
+    for (int i = 0; i < s->nintro; i++) {
+        memcpy(s->intro[i].obj->p, s->intro[i].p0, sizeof s->intro[i].p0);
+        s->intro[i].obj->m = s->intro[i].s0;
+        s->intro[i].obj->fade = s->intro[i].f0;
+    }
+}
+/* the news flash's intro, the same in the King screens and TimedRunResults (Results.scr's first ten) */
+static void kr_news_intro(Screen *s)
+{
+    kr_item(s, 0, "titlebarshadow", 0, 0.5f, 0, -640, 0);
+    kr_item(s, 0, "titlebar", 0, 0.5f, 0, -640, 0);
+    kr_item(s, 0, "alert", 0.33f, 0.75f, 1, -44, 44);
+    kr_item(s, 0, "channel", 0.33f, 0.75f, 1, -51, 51);
+    Intro *it = kr_item(s, 0, "channelNumber", 0.33f, 0.75f, 0, 640, 503);
+    if (it) { it->s0 = 3.0f; it->s1 = 0.85f; }
+    kr_item(s, 0, "grayDataField", 0.75f, 1.0f, 1, -280, 80);
+    kr_item(s, 0, "orangeBand", 0.75f, 1.0f, 0, 640, 60);
+    it = kr_item(s, 0, "Live", 0.75f, 1.0f, 0, 640, 487);
+    if (it) it->p0[1] = it->p1[1] = 340;
+    kr_item(s, 0, "buttons", 0, 0.1f, 0, 0, 0);
+    kr_item(s, 0, "goal1", 1.25f, 1.5f, 0, 640, 62);
+}
+/* and its walkout: the grey field drops, the band and the buttons slide right, the "Live" box sinks */
+static void kr_news_walkout(Screen *s, int list)
+{
+    kr_item(s, list, "grayDataField", 0, 0.5f, 1, 80, 480);
+    kr_item(s, list, "orangeBand", 0, 0.5f, 0, 60, 640);
+    kr_item(s, list, "buttons", 0, 0.5f, 0, 0, 600);
+    Intro *it = kr_item(s, list, "Live", 0, 1.0f, 1, 340, 408);
+    if (it) it->p0[0] = it->p1[0] = 487;
+}
+
+/* setupButtons: every button's left edge at 590 less the widest shown */
+static void kr_buttons(Hud *h, Screen *s)
+{
+    Node *bt = layout_find(s->L->root, "buttons");
+    float w = 0;
+    for (Node *c = bt ? bt->child : NULL; c; c = c->next)
+        if (c->visible) {
+            float wt = text_w(&h->gui, c) * c->m;
+            if (wt > w) w = wt;
+        }
+    for (Node *c = bt ? bt->child : NULL; c; c = c->next)
+        c->p[0] = 590.0f - w;
+}
+
+/* string.format(localizeString(fmt_key), localizeString(arg_key)) */
+static void loc_format(const Gui *g, char *out, size_t n, const char *fmt_key, const char *arg_key)
+{
+    const char *fmt = loc_find(g, fmt_key), *arg = loc_find(g, arg_key);
+    const char *at = fmt ? strstr(fmt, "%s") : NULL;
+    if (!arg)
+        arg = arg_key ? arg_key : "";
+    if (at)
+        snprintf(out, n, "%.*s%s%s", (int)(at - fmt), fmt, arg, at + 2);
+    else
+        snprintf(out, n, "%s", fmt ? fmt : arg);
+}
+
+/* the scrolling title (goal1 and goal2, from goalbase, cut to 62 .. 503 as in Results [G]) set to text; "Live" */
+static void kr_title(Hud *h, Screen *s, const char *text)
+{
+    Node *root = s->L->root;
+    s->live = layout_find(root, "live");
+    show(s->live, 1);
+    s->live_vis = 1;
+    s->title1 = layout_find(root, "goal1");
+    s->title2 = layout_find(root, "goal2");
+    s->base = layout_find(root, "goalbase");
+    s->left_x = 62.0f;
+    s->right_x = 503.0f;
+    s->title_w = text_w(&h->gui, s->title1);
+    Node *gg = layout_find(root, "gGoal");
+    if (gg) {
+        gg->clip = 1;
+        gg->clip_x0 = s->left_x;
+        gg->clip_x1 = s->right_x;
+    }
+    res_marquee(h, s, text);
+    if (s->title1 && s->title2) {
+        s->title2->p[0] = s->left_x + s->title_w + 150.0f;
+        node_text(s->title2, s->title1->text);
+    }
+}
+/* Continue: setMarqueText(localizeString("Results_MovingOnTo") + localizeString(key)) */
+static void kr_moving_on(Hud *h, Screen *s, const char *key)
+{
+    const char *mo = loc_find(&h->gui, "Results_MovingOnTo"), *bn = loc_find(&h->gui, key);
+    char msg[MAX_TEXT];
+    snprintf(msg, sizeof msg, "%s%s", mo ? mo : "MOVING ON TO ", bn ? bn : key ? key : "");
+    res_marquee(h, s, msg);
+}
+
+static int kr_players(const Screen *s)
+{
+    return s->r.num_players > 0 && s->r.num_players <= 4 ? s->r.num_players : 1;
+}
+/* localizeString(getGameStatus().getMonsterName(slot)) [G: slot -1, no King, gives ""] */
+static const char *kr_monster(const Hud *h, const Screen *s, int slot)
+{
+    if (slot < 0 || slot > 3)
+        return "";
+    const char *t = loc_find(&h->gui, s->monsters[slot]);
+    return t ? t : s->monsters[slot];
+}
+/* the winner's line: localizeString("P" + (slot + 1)) + ": " + the monster's name ("P1: Lizzie") */
+static void kr_winner(Hud *h, Screen *s, Node *t, int slot)
+{
+    char key[16], buf[MAX_TEXT];
+    snprintf(key, sizeof key, "P%d", slot + 1);
+    const char *p = loc_find(&h->gui, key);
+    snprintf(buf, sizeof buf, "%s: %s", p ? p : key, kr_monster(h, s, slot));
+    node_text(t, buf);
+}
+/* one row of a standings list: the item localized "P<slot + 1>", its "name" ": <monster>", its child `value_of`
+ * the value */
+static void kr_row(Hud *h, Screen *s, Node *item, int slot, const char *value_of, const char *value)
+{
+    if (!item)
+        return;
+    char key[16], buf[MAX_TEXT];
+    snprintf(key, sizeof key, "P%d", slot + 1);
+    node_localize(&h->gui, item, key);
+    snprintf(buf, sizeof buf, ": %s", kr_monster(h, s, slot));
+    node_text(layout_find(item->child, "name"), buf);
+    if (value_of)
+        node_text(layout_find(item->child, value_of), value);
+}
+/* orderPlayers' exchange sort over the first n, most first, as written (not stable) */
+static void kr_sort(int *ids, int *scores, int n)
+{
+    for (int i = 0; i < n; i++)
+        for (int j = i; j < n; j++)
+            if (scores[j] > scores[i]) {
+                int k = ids[i]; ids[i] = ids[j]; ids[j] = k;
+                k = scores[i]; scores[i] = scores[j]; scores[j] = k;
+            }
+}
+/* the players by blocks won (KingBlockResults' br_list, KingCityResults, KingWorldResults) */
+static void kr_rank_by_blocks(const Screen *s, int rank[4])
+{
+    int scores[4] = { 0, 0, 0, 0 }, np = kr_players(s);
+    for (int i = 0; i < 4; i++) {
+        rank[i] = i;
+        scores[i] = i < np ? s->r.blocks_won[i] : 0;
+    }
+    kr_sort(rank, scores, np);
+}
+
+/* TimedRunResults::getFormattedValue: ":ss" under a minute, else "m:ss" */
+static void tr_time(char *out, size_t n, int v)
+{
+    if (v < 60)
+        snprintf(out, n, ":%02d", v);
+    else
+        snprintf(out, n, "%d:%02d", v / 60, v % 60);
+}
+
+/* WorldResults::doInterface 8192: "TOTAL DESTRUCTION!" / "ALL CITIES DESTROYED!" between two red bands; Continue
+ * fades the screen to black */
+static void world_start(Hud *h, Screen *s)
+{
+    Node *root = s->L->root;
+    s->do_intro = 1;
+    root->fade = 1;
+    kr_buttons(h, s);
+    kr_item(s, 0, "titlebar1", 0, 0.5f, 0, 320.0f - 640.0f, 320);
+    kr_item(s, 0, "totalDestruction", 0, 0.5f, 0, 320.0f + 640.0f, 320);
+    kr_item(s, 0, "destroyed", 0, 0.5f, 0, 320.0f - 640.0f, 320);
+    kr_item(s, 0, "titlebar2", 0, 0.5f, 0, 640, 320);       /* its startPos.x set twice: 960, then 640 */
+    kr_fade(s, 0, "continue", 1.55f, 1.65f, 0, 1);
+    kr_fade(s, 0, "fade", 0, 0, 0, 0);
+    intro_apply(s);
+    show(layout_find(root, "fade"), 0);
+    kr_fade(s, 1, "fade", 0, 0.5f, 0, 1);                  /* setupWalkout: the black veil over 0.5 s */
+    button_colour(s, "continue", 0);
+}
+
+/* KingBlockResults::doInterface 8192: the block's winner ("P1: George" / "Wins this block", or "It Is A Tie!"), the
+ * players' points counting up in their order, the winner's under it; Continue swaps in the city standings (blocks
+ * won of the blocks to win), Continue again walks out. With a King of the City the standings are skipped (the
+ * alternative walkout). */
+static void kb_start(Hud *h, Screen *s)
+{
+    Node *root = s->L->root;
+    const HudResults *r = &s->r;
+    int np = kr_players(s), scores[4], rank[4];
+    char msg[MAX_TEXT];
+    s->do_intro = 1;
+    s->cu_index = -1;
+    s->cu_progress = -1;
+    root->fade = 1;
+    set_result(h, HUD_RESULT_NONE);
+    s->list = layout_find(root, "pointsList");
+    for (int i = 1; i < list_count(s->list); i++)
+        show(list_item(s->list, i), 0);
+    s->total = layout_find(root, "winnerScore");
+    node_text(s->total, "0");
+    int tie = r->king_block == -1;
+    show(layout_find(root, "itsatie"), tie);
+    show(layout_find(root, "replay"), tie);
+    show(layout_find(root, "playerwins"), !tie);
+    show(layout_find(root, "winsblock"), !tie);
+    show(layout_find(root, "continue"), !tie);
+    if (!tie)
+        kr_winner(h, s, layout_find(root, "playerwins"), r->king_block);
+    loc_format(&h->gui, msg, sizeof msg, "Results_CompletlyDestroyed", s->played);
+    kr_title(h, s, msg);
+    /* orderPlayers: the points list by points (category 6), the block standings by blocks won */
+    for (int i = 0; i < 4; i++) {
+        s->ids[i] = i;
+        scores[i] = r->points[i][6];
+    }
+    kr_sort(s->ids, scores, np);
+    for (int i = 0; i < np; i++)
+        kr_row(h, s, list_item(s->list, i), s->ids[i], NULL, NULL);
+    kr_rank_by_blocks(s, rank);
+    Node *bl = layout_find(root, "br_list");
+    for (int i = 0; i < np; i++) {
+        snprintf(msg, sizeof msg, "%d/%d", r->blocks_won[rank[i]], r->blocks_to_win);
+        kr_row(h, s, list_item(bl, i), rank[i], "points", msg);
+    }
+    for (int i = 0; i < 4; i++)
+        show(list_item(bl, i), i < np);
+    if (r->city_destroyed || r->king_city != -1)
+        show(layout_find(root, "quit"), 0);
+    kr_buttons(h, s);
+    /* setupIntro */
+    kr_item(s, 0, "br_winner", 0, 0, 0, -320, -320);         /* the standings wait off the screen */
+    kr_item(s, 0, "br_list", 0, 0, 0, -265, -265);
+    kr_news_intro(s);
+    kr_item(s, 0, "pointsList", 1.25f, 1.5f, 1, -40, 281);
+    kr_item(s, 0, "playerwins", 2.25f, 2.5f, 0, -640, 320);
+    kr_item(s, 0, "winsblock", 2.25f, 2.5f, 0, 1280, 320);
+    kr_item(s, 0, "itsatie", 2.25f, 2.5f, 0, -640, 320);
+    kr_item(s, 0, "winnerScore", 2.5f, 2.75f, 1, -93, 205);
+    kr_fade(s, 0, "continue", 2.45f, 2.55f, 0, 1);
+    kr_fade(s, 0, "replay", 2.55f, 2.65f, 0, 1);
+    kr_fade(s, 0, "quit", 2.65f, 2.76f, 0, 1);
+    intro_apply(s);
+    /* the later lists' items start where the objects are now, at the intro's start: br_winner's walkout begins at
+     * x -320 (it leaves the screen at once) and the points list's rank move at y 216, not the 281 it came to [R as
+     * written] */
+    s->alt_walkout = r->king_city != -1;
+    if (s->alt_walkout) {                                    /* setupAltWalkout */
+        kr_news_walkout(s, 3);
+        kr_item(s, 3, "pointsList", 0, 0.5f, 1, 216, 616);
+        kr_item(s, 3, "winnerScore", 0, 0.5f, 1, 163, 563);
+        kr_fade(s, 3, "playerwins", 0, 1.0f, 1, 0);
+        kr_fade(s, 3, "winsblock", 0, 1.0f, 1, 0);
+        kr_fade(s, 3, "itsatie", 1.0f, 2.0f, 1, 0);
+    } else {
+        kr_item(s, 2, "br_winner", 0.25f, 0.75f, 0, -320, 320);   /* setupRank */
+        kr_item(s, 2, "br_list", 0.25f, 0.75f, 0, -265, 65);
+        kr_item(s, 2, "pointsList", 0, 0.5f, 1, 216, 616);
+        kr_item(s, 2, "winnerScore", 0, 0.5f, 1, 163, 563);
+        kr_fade(s, 2, "playerwins", 0, 0.5f, 1, 0);
+        kr_fade(s, 2, "winsblock", 0, 0.5f, 1, 0);
+        kr_fade(s, 2, "itsatie", 0, 0.5f, 1, 0);
+        kr_item(s, 1, "br_winner", 0.25f, 0.75f, 1, 110, 510);   /* setupWalkout */
+        kr_item(s, 1, "br_list", 0.25f, 0.75f, 1, 270, 670);
+        kr_news_walkout(s, 1);
+    }
+    button_colour(s, "continue", 0);
+    button_colour(s, "quit", 1);
+    button_colour(s, "replay", 0);
+    cq_init(s);
+}
+
+/* KingBlockResults::countUpScores: each player's points in their order, half a second each; the first's also under
+ * the winner's line */
+static void kb_count(Hud *h, Screen *s, float dt)
+{
+    char buf[32];
+    if (s->cu_progress < 0) {
+        s->cu_progress = 0;
+        s->cu_index++;
+        s->cu_total += s->cu_value;
+        if (s->cu_index >= kr_players(s)) {
+            sound(h, "Slot_Jackpot", 1);
+            s->sound_on = 0;
+            s->count_up = 2;
+            return;
+        }
+        Node *it = list_item(s->list, s->cu_index);
+        show(it, 1);
+        s->cu_value = s->r.points[s->ids[s->cu_index]][6];
+        s->cu_item = it ? layout_find(it->child, "points") : NULL;
+        node_text(s->cu_item, "0");
+    }
+    s->cu_progress += dt / 0.5f;
+    float p = s->cu_progress;
+    if (s->cu_progress >= 1.0f) {
+        p = 1.0f;
+        s->cu_progress = -1.0f;
+    }
+    fmt_value(buf, sizeof buf, (int)((float)s->cu_value * p));
+    node_text(s->cu_item, buf);
+    if (s->cu_index == 0)
+        node_text(s->total, buf);
+}
+
+/* KingCityResults::doInterface 8192: "P1: George" / "is King of <city>", the city (King of the World: the world)
+ * standings, blocks (cities) won of those to win. The King of the City's Continue answers 4 (back to the menus);
+ * the King of the World's walks out, "MOVING ON TO <the next city>" */
+static void kc_start(Hud *h, Screen *s)
+{
+    Node *root = s->L->root;
+    const HudResults *r = &s->r;
+    int np = kr_players(s), rank[4], world = r->play_type == HUD_PLAY_KING_WORLD;
+    char msg[MAX_TEXT];
+    s->do_intro = 1;
+    root->fade = 1;
+    set_result(h, HUD_RESULT_NONE);
+    s->list = layout_find(root, "pointsList");
+    kr_winner(h, s, layout_find(root, "playerwins"), r->king_city);
+    const char *ik = loc_find(&h->gui, "Results_IsKingOf"), *cn = loc_find(&h->gui, s->city);
+    snprintf(msg, sizeof msg, "%s%s", ik ? ik : "is King of ", cn ? cn : s->city);
+    node_text(layout_find(root, "winscity"), msg);
+    loc_format(&h->gui, msg, sizeof msg, "Results_CompletlyDestroyed", s->city);
+    kr_title(h, s, msg);
+    if (r->play_type == HUD_PLAY_KING_CITY || r->king_world != -1)
+        show(layout_find(root, "quit"), 0);
+    /* orderPlayers: by blocks won (in both modes) */
+    kr_rank_by_blocks(s, rank);
+    node_localize(&h->gui, layout_find(root, "standings_type"), world ? "Results_WorldStandings" :
+                                                                         "Results_CityStandings");
+    for (int i = 0; i < np; i++) {
+        snprintf(msg, sizeof msg, "%d/%d", world ? r->cities_won[rank[i]] : r->blocks_won[rank[i]],
+                 world ? r->cities_to_win : r->blocks_to_win);
+        kr_row(h, s, list_item(s->list, i), rank[i], "wins", msg);
+    }
+    for (int i = 0; i < 4; i++)
+        show(list_item(s->list, i), i < np);
+    kr_buttons(h, s);
+    kr_news_intro(s);
+    kr_item(s, 0, "pointsList", 1.25f, 1.5f, 1, -40, 275);
+    kr_item(s, 0, "standings_type", 1.25f, 1.5f, 1, -60, 255);
+    kr_item(s, 0, "playerwins", 2.25f, 2.5f, 0, -640, 320);
+    kr_item(s, 0, "winscity", 2.25f, 2.5f, 0, 1280, 320);
+    kr_fade(s, 0, "continue", 2.45f, 2.55f, 0, 1);
+    kr_fade(s, 0, "quit", 2.55f, 2.66f, 0, 1);
+    intro_apply(s);
+    kr_news_walkout(s, 1);
+    kr_item(s, 1, "pointsList", 0, 0.5f, 1, 265, 616);
+    kr_item(s, 1, "standings_type", 0, 0.5f, 1, 245, 606);
+    kr_fade(s, 1, "playerwins", 0, 1.0f, 1, 0);
+    kr_fade(s, 1, "winscity", 0, 1.0f, 1, 0);
+    button_colour(s, "continue", 0);
+    button_colour(s, "quit", 1);
+    cq_init(s);
+}
+
+/* KingWorldResults::doInterface 8192: "THE WORLD COMPLETELY DESTROYED", "P1: George" / "is King of the World" (the
+ * winner asked for is getKingOfCity(): the last city's King, the world's), the cities won of those to win; OK
+ * answers 4 (the script has no walkout trigger and no ConfirmQuit) */
+static void kw_start(Hud *h, Screen *s)
+{
+    Node *root = s->L->root;
+    const HudResults *r = &s->r;
+    int np = kr_players(s), rank[4];
+    char msg[MAX_TEXT];
+    s->do_intro = 1;
+    root->fade = 1;
+    set_result(h, HUD_RESULT_NONE);
+    kr_winner(h, s, layout_find(root, "playerwins"), r->king_city);
+    const char *wd = loc_find(&h->gui, "Results_WorldDestroyed");
+    kr_title(h, s, wd ? wd : "Results_WorldDestroyed");
+    kr_rank_by_blocks(s, rank);                              /* by blocks won, showing the cities won */
+    Node *pl = layout_find(root, "pointsList");
+    for (int i = 0; i < np; i++) {
+        snprintf(msg, sizeof msg, "%d/%d", r->cities_won[rank[i]], r->cities_to_win);
+        kr_row(h, s, list_item(pl, i), rank[i], "wins", msg);
+    }
+    for (int i = 0; i < 4; i++)
+        show(list_item(pl, i), i < np);
+    kr_buttons(h, s);                                        /* the quit button still counted */
+    kr_news_intro(s);
+    kr_item(s, 0, "playerwins", 2.25f, 2.5f, 0, -640, 320);
+    kr_item(s, 0, "winsworld", 2.25f, 2.5f, 0, 1280, 320);
+    kr_fade(s, 0, "continue", 2.45f, 2.55f, 0, 1);
+    kr_fade(s, 0, "continue", 2.45f, 2.55f, 0, 1);           /* added twice [R] */
+    intro_apply(s);
+    kr_news_walkout(s, 1);
+    kr_fade(s, 1, "playerwins", 0, 1.0f, 1, 0);
+    kr_fade(s, 1, "winsworld", 0, 1.0f, 1, 0);
+    show(layout_find(root, "quit"), 0);
+    button_colour(s, "continue", 0);
+    button_colour(s, "quit", 1);
+}
+
+/* TimedRunResults::doInterface 8192: "Block Destroyed" and the time left, the time added (the next block's
+ * TimeLimit) and the total counting up (m:ss), or, the city done, "YOU WIN! City Destroyed" and the time left */
+static void tr_start(Hud *h, Screen *s)
+{
+    Node *root = s->L->root;
+    const HudResults *r = &s->r;
+    char msg[MAX_TEXT];
+    s->do_intro = 1;
+    s->cu_index = -1;
+    s->cu_progress = -1;
+    root->fade = 1;
+    set_result(h, HUD_RESULT_NONE);
+    s->times[0] = layout_find(root, "timeRemaining");
+    s->times[1] = layout_find(root, "bonusTime");
+    s->times[2] = layout_find(root, "totalTime");
+    for (int i = 0; i < 3; i++)
+        show(s->times[i], 0);
+    show(layout_find(root, "block_destroyed"), !r->city_destroyed);
+    show(layout_find(root, "city_destroyed"), r->city_destroyed);
+    if (r->city_destroyed) {
+        tr_time(msg, sizeof msg, (int)r->clock_time);
+        node_text(layout_find(root, "finalTimeRemaining"), msg);
+    }
+    loc_format(&h->gui, msg, sizeof msg, "Results_CompletlyDestroyed", s->played);
+    kr_title(h, s, msg);
+    kr_buttons(h, s);                                        /* quit still hidden (F 0x1): continue's width */
+    kr_news_intro(s);
+    kr_fade(s, 0, "block_destroyed", 1.0f, 1.5f, 0, 1);
+    kr_fade(s, 0, "city_destroyed", 1.0f, 1.5f, 0, 1);
+    kr_fade(s, 0, "continue", 1.45f, 1.55f, 0, 1);
+    kr_fade(s, 0, "quit", 1.55f, 1.66f, 0, 1);
+    intro_apply(s);
+    kr_news_walkout(s, 1);
+    kr_fade(s, 1, "block_destroyed", 0, 1.5f, 1, 0);
+    kr_fade(s, 1, "city_destroyed", 0, 1.5f, 1, 0);
+    show(layout_find(root, "quit"), !r->city_destroyed);
+    button_colour(s, "continue", 0);
+    button_colour(s, "quit", 1);
+    cq_init(s);
+}
+
+/* TimedRunResults::countUpTime: the time left before (total - added), the time added, the total, half a second
+ * each; nothing when the city is done */
+static void tr_count(Screen *s, float dt)
+{
+    char buf[32];
+    if (s->cu_progress < 0) {
+        s->cu_progress = 0;
+        s->cu_index++;
+        if (s->cu_index >= 3 || s->r.city_destroyed) {
+            s->count_up = 2;
+            return;
+        }
+        int total = (int)s->r.clock_time, bonus = (int)s->r.clock_limit;
+        s->cu_value = s->cu_index == 0 ? total - bonus : s->cu_index == 1 ? bonus : total;
+        s->cu_item = s->times[s->cu_index];
+        show(s->cu_item, 1);
+    }
+    s->cu_progress += dt / 0.5f;
+    float p = s->cu_progress;
+    if (s->cu_progress >= 1.0f) {
+        p = 1.0f;
+        s->cu_progress = -1.0f;
+    }
+    tr_time(buf, sizeof buf, (int)((float)s->cu_value * p));
+    node_text(s->cu_item, buf);
+}
+
+/* processIntro: the items of the state's list (KingBlockResults: 0 intro, 1 rank, 2 walkout, or after the intro the
+ * alternative walkout; the others: 0 intro, 1 walkout); at its end the state goes on (KingBlockResults' alternative
+ * walkout skips the walkout's state) */
+static int kr_process(Hud *h, Screen *s, float dt)
+{
+    s->intro_t += dt;
+    Intro *items = NULL;
+    int count = 0, flag = 0, kb = s->kind == SCR_KING_BLOCK;
+    if (s->ni_state == 0) { items = s->intro; count = s->nintro; }
+    else if (kb && s->alt_walkout) { items = s->alt; count = s->nalt; }
+    else if (kb && s->ni_state == 1) { items = s->rank; count = s->nrank; }
+    else if (kb && s->ni_state == 2) { items = s->walk; count = s->nwalk; }
+    else if (!kb && s->ni_state == 1) { items = s->walk; count = s->nwalk; }
+    else
+        return 0;
+    for (int i = 0; i < count; i++) {
+        Intro *it = &items[i];
+        if (it->done)
+            continue;
+        flag = 1;
+        if (s->intro_t < it->t0)
+            continue;
+        float p = it->t1 > it->t0 ? (s->intro_t - it->t0) / (it->t1 - it->t0) : 1;
+        if (s->intro_t >= it->t1) {
+            p = 1;
+            it->done = 1;
+        }
+        for (int k = 0; k < 3; k++)
+            it->obj->p[k] = it->p0[k] + (it->p1[k] - it->p0[k]) * p;
+        it->obj->m = it->s0 + p * (it->s1 - it->s0);
+        it->obj->fade = it->f0 + p * (it->f1 - it->f0);
+    }
+    if (s->ni_state == 0 && s->kind != SCR_WORLD) {
+        s->scroll = s->intro_t >= 1.5f;                      /* the title scrolls from 1.5 s */
+        if (kb && !s->count_up && (s->count_up = s->intro_t >= 1.5f) != 0) {
+            sound(h, "Slot_Jackpot", 0);
+            s->sound_on = 1;
+        } else if (s->kind == SCR_TIMED && !s->count_up)
+            s->count_up = s->intro_t >= 1.5f;
+    }
+    if (!flag) {
+        if (kb && s->ni_state == 1 && s->alt_walkout)
+            s->ni_state++;
+        s->ni_state++;
+        s->intro_t = 0;
+    }
+    return flag;
+}
+
+/* doInterface 2048 */
+static void kr_frame(Hud *h, Screen *s, float dt)
+{
+    int k = s->kind;
+    if ((k == SCR_KING_BLOCK || k == SCR_KING_CITY) && dt > 0.5f)
+        return;
+    if (s->do_intro)
+        s->do_intro = kr_process(h, s, dt);
+    if (s->scroll)
+        results_scroll(h, s, dt);
+    if (s->count_up == 1) {
+        if (k == SCR_KING_BLOCK) kb_count(h, s, dt);
+        else if (k == SCR_TIMED) tr_count(s, dt);
+    }
+    if (s->do_rank)
+        s->do_rank = kr_process(h, s, dt);
+    if (s->do_walkout)
+        s->do_walkout = kr_process(h, s, dt);
+    int done = k == SCR_KING_BLOCK ? 3 : 2;                  /* the state after the walkout */
+    if (k == SCR_WORLD) {
+        if (s->ni_state == 2) {                              /* setResultState(1) and endResults at once */
+            set_result(h, HUD_RESULT_DONE);
+            s->ended = 1;
+            s->ni_state = 3;
+        }
+    } else if (s->ni_state == done) {
+        set_result(h, HUD_RESULT_DONE);
+        s->intro_t = 5.0f;
+        s->ni_state = done + 1;
+    } else if (s->ni_state == done + 1) {                    /* 5 s more on screen */
+        s->intro_t -= dt;
+        if (s->intro_t <= 0) {
+            s->intro_t = 1.0f;
+            s->ni_state = done + 2;
+        }
+    } else if (s->ni_state == done + 2) {                    /* then fades out in half a second */
+        s->intro_t -= 2.0f * dt;
+        if (s->intro_t <= 0) {
+            s->ni_state = done + 3;
+            s->ended = 1;
+        } else
+            s->L->root->fade = s->intro_t;
+    }
+    if (k != SCR_WORLD && k != SCR_KING_WORLD)               /* UpdateObjectFader: the ConfirmQuit box */
+        fader_update(&s->fd, dt);
+}
+
+/* the screen takes Continue (hud_results_auto) */
+static int kr_ready(const Screen *s)
+{
+    if (s->cq.state || s->do_intro || s->do_walkout || s->do_rank)
+        return 0;
+    return s->ni_state == 1 || (s->kind == SCR_KING_BLOCK && s->ni_state == 2);
+}
+
+/* doInterface, the pad */
+static void kr_input(Hud *h, Screen *s, int ev)
+{
+    int k = s->kind;
+    if (k != SCR_WORLD && k != SCR_KING_WORLD && cq_process(h, s, ev))
+        return;
+    if (s->do_intro || s->do_walkout || s->ni_state > (k == SCR_KING_BLOCK ? 2 : 1))
+        return;
+    Node *root = s->L->root, *quit = layout_find(root, "quit");
+    if (ev == HUD_EV_START || ev == HUD_EV_ACCEPT) {
+        switch (k) {
+        case SCR_WORLD:
+            if (s->ni_state == 1) {
+                sound(h, "Click", 0);
+                show(layout_find(root, "fade"), 1);
+                s->do_walkout = 1;
+            }
+            break;
+        case SCR_KING_BLOCK:
+            if (s->ni_state == 1 && !s->do_rank) {           /* the standings */
+                sound(h, "Click", 0);
+                s->do_rank = 1;
+            } else if (s->ni_state == 2) {
+                sound(h, "Click", 0);
+                kr_moving_on(h, s, s->current);
+                s->do_walkout = 1;
+            }
+            break;
+        case SCR_KING_CITY:
+            if (s->ni_state == 1) {
+                sound(h, "Click", 0);
+                if (s->r.play_type == HUD_PLAY_KING_CITY)
+                    set_result(h, HUD_RESULT_QUIT);
+                else {
+                    kr_moving_on(h, s, s->next_city);
+                    s->do_walkout = 1;
+                }
+            }
+            break;
+        case SCR_KING_WORLD:
+            sound(h, "Click", 0);
+            set_result(h, HUD_RESULT_QUIT);
+            break;
+        case SCR_TIMED:
+            if (s->ni_state == 1) {
+                sound(h, "Click", 0);
+                if (strcmp(s->current, s->played) != 0)
+                    kr_moving_on(h, s, s->current);
+                s->do_walkout = 1;
+            }
+            break;
+        default: break;
+        }
+    } else if (ev == HUD_EV_BACK) {
+        int ask = k == SCR_KING_BLOCK ? !s->r.city_destroyed && s->r.king_city == -1 :
+                  k == SCR_KING_CITY ? s->r.king_world == -1 && quit && quit->visible :
+                  k == SCR_TIMED ? quit && quit->visible : 0;
+        if (ask) {
+            sound(h, "Cancel", 0);
+            cq_show(h, s, 1);
+        }
+    }
+    /* buttons 0 and 1 (Change Monster, Autosave) do nothing in these screens */
 }
 
 /* ---------------------------------------------------------------- the Pause menu [R Pause.scr] */
@@ -3116,6 +3811,9 @@ void hud_results(Hud *h, int screen, const HudResults *r)
         snprintf(s->current, sizeof s->current, "%s", r->block_current ? r->block_current : "");
         snprintf(s->results_text, sizeof s->results_text, "%s", r->results_text ? r->results_text : "");
         snprintf(s->city, sizeof s->city, "%s", r->city ? r->city : "");
+        snprintf(s->next_city, sizeof s->next_city, "%s", r->next_city ? r->next_city : "");
+        for (int i = 0; i < 4; i++)
+            snprintf(s->monsters[i], sizeof s->monsters[i], "%s", r->monsters[i] ? r->monsters[i] : "");
     } else {
         s->r.play_type = h->cfg.play_type;
         s->r.num_players = 1;
@@ -3124,11 +3822,15 @@ void hud_results(Hud *h, int screen, const HudResults *r)
     s->r.block_current = s->current;
     s->r.results_text = s->results_text;
     s->r.city = s->city;
+    s->r.next_city = s->next_city;
+    for (int i = 0; i < 4; i++)
+        s->r.monsters[i] = s->monsters[i];
     h->result = HUD_RESULT_NONE;                         /* nResultState = 0 */
     char file[40];
     snprintf(file, sizeof file, "%s.ifc", names[screen >= 0 && screen < 8 ? screen : 7]);
-    s->kind = screen == HUD_SCREEN_RESULTS ? SCR_RESULTS : screen == HUD_SCREEN_GAME_OVER ? SCR_GAME_OVER :
-              screen == HUD_SCREEN_LEVEL ? SCR_LEVEL : SCR_STANDIN;
+    static const int kinds[8] = { SCR_GAME_OVER, SCR_RESULTS, SCR_LEVEL, SCR_WORLD, SCR_KING_BLOCK, SCR_KING_CITY,
+                                  SCR_KING_WORLD, SCR_TIMED };
+    s->kind = kinds[screen >= 0 && screen < 8 ? screen : 7];
     if (s->kind != SCR_STANDIN && (s->L = layout_load(&h->gui, h->gui.bundles[0], file)) == NULL)
         s->kind = SCR_STANDIN;
     if (s->kind == SCR_RESULTS)
@@ -3137,6 +3839,16 @@ void hud_results(Hud *h, int screen, const HudResults *r)
         level_start(h, s);
     else if (s->kind == SCR_GAME_OVER)
         gameover_start(h, s);
+    else if (s->kind == SCR_WORLD)
+        world_start(h, s);
+    else if (s->kind == SCR_KING_BLOCK)
+        kb_start(h, s);
+    else if (s->kind == SCR_KING_CITY)
+        kc_start(h, s);
+    else if (s->kind == SCR_KING_WORLD)
+        kw_start(h, s);
+    else if (s->kind == SCR_TIMED)
+        tr_start(h, s);
 }
 
 int hud_result(Hud *h)
@@ -3162,6 +3874,8 @@ static void screen_input(Hud *h, Screen *s, int ev, int button)
         level_input(h, s, ev, button);
     else if (s->kind == SCR_GAME_OVER)
         gameover_input(h, s, ev);
+    else if (s->kind >= SCR_WORLD)
+        kr_input(h, s, ev);
     else if (ev == HUD_EV_ACCEPT || ev == HUD_EV_START) {
         set_result(h, HUD_RESULT_DONE);
         s->ended = 1;
@@ -3200,13 +3914,17 @@ static void screen_update(Hud *h, float dt)
         level_frame(h, s, dt);
     else if (s->kind == SCR_GAME_OVER)
         fader_update(&s->fd, dt);
-    else if (s->age >= 3.0f) {                           /* the stand-in */
+    else if (s->kind >= SCR_WORLD)
+        kr_frame(h, s, dt);
+    else if (s->age >= 3.0f) {                           /* the stand-in (a layout missing) */
         set_result(h, s->screen == HUD_SCREEN_GAME_OVER ? HUD_RESULT_CONTINUE : HUD_RESULT_DONE);
         s->ended = 1;
         return;
     }
+    if (s->ended)
+        return;
     int ready = s->kind == SCR_RESULTS || s->kind == SCR_LEVEL ? results_ready(s) :
-                s->kind == SCR_GAME_OVER ? !s->cq.state : 0;
+                s->kind == SCR_GAME_OVER ? !s->cq.state : s->kind >= SCR_WORLD ? kr_ready(s) : 0;
     s->ready = ready ? s->ready + dt : 0;
     if (h->auto_press > 0 && ready && s->ready >= h->auto_press) {
         s->ready = 0;

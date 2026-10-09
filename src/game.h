@@ -190,6 +190,10 @@ int game_play_type(const Game *g);
 int game_lives(const Game *g, int slot);             /* GameStatus.getNumLives (the HUD's "xN") */
 /* gWorld.getGameClockTime (seconds left, 0x347DC0) and isGameClockVisible (ClockVisible, states 5 and 6) */
 float game_clock(const Game *g, int *visible);
+/* gWorld.getGameClockLimit (World binding 81, 0x2AF818): the clock's +0x30, the current block's TimeLimit (the Timed
+ * Run's 180 a block; TimedRunResults' "+ Bonus Time") */
+float game_clock_limit(const Game *g);
+int game_city_index(const Game *g);                  /* gCommon.getGameStatus().getCityIdx(): CityData.City<n> */
 int game_points(const Game *g, int slot, int cat);  /* Player.getPoints(cat): this block's (the HUD shows GPT_TOTAL) */
 int game_kills(const Game *g, int slot, int cat);
 int game_city_score(const Game *g, int slot);        /* Player.getCityScore: the blocks' totals so far */
