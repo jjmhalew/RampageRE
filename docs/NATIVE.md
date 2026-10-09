@@ -88,7 +88,9 @@ hides them): the punch's fist, the kick's foot. The army comes for the monster (
 helicopters, SWAT vans, army trucks with troops and tanks, which fire the `Weapons.bdp` weapons at it (hits take its
 health and start its reactions), the punks throw their bottles, droppables fall from windows; blows wreck the
 units, the monster grabs and eats troops, and buildings and kills score as the game's `Scoring` says
-(`RAMPAGE_TRACE=1` prints the hits and the score). The game's sound plays (src/sound.c, [FORMAT_SOUND.md](FORMAT_SOUND.md): Rampage.uber's event programs over
+(`RAMPAGE_TRACE=1` prints the hits and the score). At 0 HP the monster takes slot 67 (`React_Defeated`), lies down, shrinks to 0.2
+(`setScale`: setDynamicScale) and waits; a button respawns it at full health and it grows back (`RAMPAGE_HP=5`
+starts it low, for testing). The game's sound plays (src/sound.c, [FORMAT_SOUND.md](FORMAT_SOUND.md): Rampage.uber's event programs over
 .samp's PS-ADPCM, 3D by the camera, each block's `.mic` music): the monster's clip sounds and the people's; only in
 a window of one's own (never with `--shot`; `--mute` keeps it quiet). The monsters' hair, fur and whiskers are the game's cloth simulation (src/cloth.c,
 [CLOTH_NOTES.md](CLOTH_NOTES.md)), stepped in the world so the monster's moves drag them. The face plays its own clip over the body's (the game's face layer:
@@ -132,5 +134,6 @@ x ±75 and y −30.
 - scoring;
 - effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the GUI; the effects' and objects'
   sounds;
-- the GUI (health, score, floating numbers), the monster's death, bosses, Vehicle.bsf (Humvee), rockets;
+- the GUI (health, score, floating numbers), becomeHuman's streaker, the real canRespawn (lives), bosses,
+  Vehicle.bsf (Humvee), rockets;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

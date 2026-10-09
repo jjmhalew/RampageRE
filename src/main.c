@@ -55,6 +55,8 @@ typedef struct {
     int held_unit;                                   /* or the army unit (army.c), -1 none */
     Army *army;
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
+    int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
+    float scale, scale_from, scale_to, scale_time, scale_left;   /* setDynamicScale */
     struct { int id, fx, unit, shot; float off[3]; } fxa[128]; int nfxa;   /* the army's effects that follow */
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
@@ -202,7 +204,12 @@ static void start_moves(Viewer *v)
     v->held = -1;
     v->held_unit = -1;
     v->pending_slot = -1;
+    v->defeated = 0;
+    v->scale = v->scale_to = 1;
+    v->scale_left = 0;
     v->hp = 200;
+    if (getenv("RAMPAGE_HP"))                        /* a test's start (the game starts at MONSTER_DATA +0x138) */
+        v->hp = (float)atof(getenv("RAMPAGE_HP"));
     v->energy = 0;
     memset(v->shakes, 0, sizeof v->shakes);
     for (int i = 0; i < 64; i++) v->last_collapse[i] = -1;
@@ -342,6 +349,7 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canHop")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 3;
     if (!strcmp(call, "Monsters::canSwing")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 4;
     if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0, 0) == 5;
+    if (!strcmp(call, "Monsters::canRespawn")) return v->defeated;   /* [G]: the native's lives / credits not read */
     if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(v, a + 1) >= 0;
     if (!strcmp(call, "Monsters::canDoPunch")) return window_person(v, a + 1) < 0;   /* not at an occupied window */
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
@@ -506,6 +514,19 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::transferMount")) { climb_transfer(&v->mount); return; }
+    else if (!strcmp(n, "Monsters::setScale")) {     /* (scale, time): setDynamicScale, from its size now */
+        v->scale_from = v->scale;
+        v->scale_to = e->p[0] > 0 ? e->p[0] : 1;
+        v->scale_time = v->scale_left = e->p[1] > 0 ? e->p[1] : 0;
+        if (v->scale_left <= 0)
+            v->scale = v->scale_to;
+        return;
+    }
+    else if (!strcmp(n, "Monsters::startRespawn")) { /* back to full health (MONSTER_DATA +0x138) */
+        v->hp = 200;
+        v->defeated = 0;
+        return;
+    }
     else if (!strcmp(n, "Monsters::doGrabPerson")) { /* grabBuildingOccupant(loc, 1) (0x2B3350): 0.25 s blend */
         int who = v->held < 0 ? window_person(v, e->p + 1) : -1;
         if (who >= 0) {
@@ -829,12 +850,19 @@ static void army_step(Viewer *v, float dt)
                 else sound_play(e->name, e->pos, 1);
                 break;
             case AE_HIT: {                           /* 0x2D6A50: HP off, the reaction by its level and the knock */
+                if (v->defeated)
+                    break;
                 v->hp = fmaxf(0, v->hp - e->amount);
                 float heading = v->heading / 57.2957795f, at[3] = { v->mx, v->my, v->mz };
                 int slot = army_reaction_slot(e->level, e->v, v->mode, army_hit_behind(at, heading, e->pos));
                 if (slot >= 0) {
                     memcpy(v->vel, e->v, sizeof v->vel);
                     v->pending_slot = slot;
+                }
+                if (v->hp <= 0) {                    /* 0x2D9364: at 0 HP slot 67, React_Defeated */
+                    v->defeated = 1;
+                    v->pending_slot = 67;
+                    memset(v->vel, 0, sizeof v->vel);
                 }
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  hit by %s: %.1f, HP %.0f, slot %d\n", e->name ? e->name : "?", e->amount, v->hp, slot);
@@ -1127,6 +1155,15 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                    v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
+    if (v->scale_left > 0) {                         /* the dynamic scale, linear over its time [G] */
+        v->scale_left -= dt;
+        float f = v->scale_left > 0 ? v->scale_left / v->scale_time : 0;
+        v->scale = v->scale_to + (v->scale_from - v->scale_to) * f;
+    }
+    if (v->scale != 1 && v->scene.monster >= 0)
+        for (int k = 0; k < 11; k++)
+            if ((k & 3) != 3)
+                v->scene.instances[v->scene.monster].base.m[k] *= v->scale;
     hands_step(v, dt);
     if (v->scene.folk) {                             /* the people, the one in its hand, what they make happen */
         PeopleMonster pm = { { v->mx, v->my, v->mz }, v->have_graph ? v->graph.states[v->run.state].name : NULL };
