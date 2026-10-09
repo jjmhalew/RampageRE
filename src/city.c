@@ -417,6 +417,9 @@ static void place_flags(City *c, Scene *s, Group t, Mat4 base)
         sk->wind.vert_force = group_num(cb, "VerticalWindForce", 10);
         sk->wind.time_offset = group_num(cb, "TimeOffset", 0);
         push_item(s, scene_add_mesh(s, m, s->city), id, -1, sk);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("flag %s at %.1f %.1f %.1f\n", model, s->instances[id].base.m[12], s->instances[id].base.m[13],
+                   s->instances[id].base.m[14]);
     }
 }
 
