@@ -48,6 +48,7 @@ typedef struct {
     float shake_t, shake_total;
     float shake[4][3];                               /* (period, phase, amp) */
     uint32_t seed;                                   /* Park-Miller (0x106BD0) */
+    int no_autocollapse;                             /* disableAutoCollapse(1): its HP running out does not fell it */
     int dirty;                                       /* a cell or a storey changed: redraw */
 } Building;
 
@@ -57,6 +58,9 @@ int building_cell_index(const Building *b, int face, int column);    /* -1 if ou
  * took damage. Only front cells take damage from hits, and only while it stands, as in the game. */
 int building_hit(Building *b, const float p[3], float radius);
 void building_destroy(Building *b);                 /* the collapseBuilding binding (0x2BB8B0): it falls */
+/* setCellDamage(face, floor, column, state): the cell of template storey o (0 the first above the ground floor) on
+ * that face to damage state 0 .. 3, its HP with it (10, 7, 3, 0); a front end cell is its side's too */
+void building_set_cell(Building *b, int face, int o, int col, int state);
 void building_update(Building *b, float dt);         /* collapses, destruction, the shaker (0x2BDC70) */
 float building_shake(const Building *b);             /* the sway along x now (0x2CC450) */
 /* where live storey s stands now: its bottom and its height (a falling storey is squashed as the ones above come

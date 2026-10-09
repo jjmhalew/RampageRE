@@ -220,11 +220,11 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     if (d == 0)
         return 0;
     shake_more(b);
-    if (d >= b->hp) {                                /* the building's HP is gone: it falls */
+    if (d >= b->hp && !b->no_autocollapse) {         /* the building's HP is gone: it falls */
         destroyed(b);
         return 1;
     }
-    b->hp -= d;
+    b->hp = d >= b->hp ? 0 : b->hp - d;
     if (d >= b->floor_hp[o]) {                       /* the floor's HP is gone: it collapses */
         b->floor_hp[o] = 0;
         floor_falls(b, s + 1);
@@ -396,6 +396,26 @@ static int crack_step(Building *b)
         }
     }
     return 0;
+}
+
+void building_set_cell(Building *b, int face, int o, int col, int state)
+{
+    static const uint8_t HP[4] = { 10, 7, 3, 0 };   /* the HP a state starts below (cell_damage's 7 and 3) [G] */
+    if (o < 0 || o >= BUILDING_STOREYS || state < 0 || state > 3)
+        return;
+    if (face == FACE_FRONT) {
+        set_state(b, o, col, state);
+        int i = building_cell_index(b, FACE_FRONT, col);
+        if (i >= 0)
+            b->cell[o][i].hp = HP[state];
+        return;
+    }
+    int i = building_cell_index(b, face, col);
+    if (i < 0)
+        return;
+    b->cell[o][i].state = (uint8_t)state;
+    b->cell[o][i].hp = HP[state];
+    b->dirty = 1;
 }
 
 void building_destroy(Building *b)

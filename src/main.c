@@ -900,9 +900,25 @@ static void stick_world(const Viewer *v, float lx, float ly, float w[3])
 #define ROOF_BAND 1.5f                               /* a building box's top 1.5 is its roof's band (0x2D1A30) */
 
 /* the highest ground at (x, y) not above z + 1: the street, or the roof of a building it stands over */
+/* the water the monster stands in (0x2D5F00: its box against the waters'), -1 none */
+static int water_at(const Viewer *v, float x, float y)
+{
+    for (int k = 0; k < v->scene.nwater; k++)
+        if (water_contains(v->scene.water[k], x, y))
+            return k;
+    return -1;
+}
+
+/* a water's surface: its z (water_floor gives it outside the pool's rectangle) */
+static float water_surface(const Water *w)
+{
+    return water_floor(w, 1e9f, 1e9f);
+}
+
 static float ground_at(const Viewer *v, float x, float y, float z)
 {
-    float g = 0;
+    int wk = water_at(v, x, y);                      /* in the water: its floor (0x2E859C: +0xA48 = 0x337E00) */
+    float g = wk >= 0 ? water_floor(v->scene.water[wk], x, y) : 0;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
         float top = b->max[2];
@@ -1168,6 +1184,21 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am)
             case BE_COLLAPSE:
                 if (e->building >= 0 && (uint32_t)e->building < v->scene.nbuildings)
                     building_destroy(&v->scene.buildings[e->building].b);
+                break;
+            case BE_NO_AUTOCOLLAPSE:
+                if (e->building >= 0 && (uint32_t)e->building < v->scene.nbuildings)
+                    v->scene.buildings[e->building].b.no_autocollapse = 1;
+                break;
+            case BE_CELL_DAMAGE:                     /* New York's walls broken open before the generators */
+                if (e->building >= 0 && (uint32_t)e->building < v->scene.nbuildings)
+                    building_set_cell(&v->scene.buildings[e->building].b, e->level, e->a, e->b, e->c);
+                break;
+            case BE_FORCE_DAMAGE:                    /* RoofItem.bsf's forceDamage: the roof item there is knocked
+                                                      * off (the adornment nearest pos, within 2 units [G]) */
+                scene_adornments_hit(&v->scene, e->pos, 2);
+                break;
+            case BE_CAMERA_RMH:                      /* Levels::changeTwoTiltCameraRMH: how tall the camera frames */
+                v->cam.s.rep_monster_height = e->amount;
                 break;
             default: break;
             }
@@ -1703,6 +1734,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         v->stick[0] = lx;
         v->stick[1] = ly;
         float t0 = v->run.time, length = st->length;
+        float cdt = dt * v->power.speed;             /* the clips run at the speed scale x their rate (0x2EBFE0:
+                                                      * setSpeedScale, the rage's 1.33, the speed power-up) */
         int ev = -1;
         if (v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF) {   /* the air: velocity, then gravity */
             v->mx += v->vel[0] * dt;
@@ -1713,6 +1746,16 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             float g = ground_at(v, v->mx, v->my, v->mz);
             if (v->mz <= g && v->vel[2] <= 0) {
                 v->mz = g;
+                int wk = water_at(v, v->mx, v->my);
+                if (v->mode == MODE_AIRBORNE && wk >= 0) {   /* into the water (0x2DCA94): pressed down 1.25 x its
+                                                      * radius across, by its fall speed, and its splash [G: the
+                                                      * props' WaterImpactFx where the game starts it was not read] */
+                    float s = fminf(fmaxf(-v->vel[2] / 50, 0), 1), at[3] = { v->mx, v->my, 0 };
+                    at[2] = water_surface(v->scene.water[wk]);
+                    water_disturb(v->scene.water[wk], at, 1.25f * MONSTER_HALF_WIDTH, -(2 * s + 0.5f * (1 - s)));
+                    if (v->fxw)
+                        fx_spawn(v->fxw, "footfall_big_water", at, NULL, 1);
+                }
                 if (v->mode == MODE_AIRBORNE) {      /* landed (0x2DC450): slot 56 in the current column */
                     int to = moves_slot(&v->graph, SLOT_LAND, v->column);
                     if (to >= 0) {
@@ -1734,6 +1777,16 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                 v->mode = MODE_AIRBORNE;             /* not read) and lands through the landing slot */
             else
                 v->mz = g;
+        }
+        {                                            /* wading (0x2E2900 -> 0x2E2BD0): the water pressed down under
+                                                      * it, half its radius across, by how deep it stands */
+            int wk = v->mode != MODE_BUILDING ? water_at(v, v->mx, v->my) : -1;
+            if (wk >= 0) {
+                float at[3] = { v->mx, v->my, water_surface(v->scene.water[wk]) };
+                float deep = fminf(fmaxf(at[2] - v->mz, 0), MONSTER_HEIGHT);
+                if (deep > 0)
+                    water_disturb(v->scene.water[wk], at, 0.5f * MONSTER_HALF_WIDTH, -0.9f * deep / MONSTER_HEIGHT);
+            }
         }
         air_control(v, st, lx, ly, dt);
         if (v->mode == MODE_GROUND || v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF || v->mode == MODE_PRONE) {
@@ -1766,8 +1819,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             }
         }
         float before[3] = { v->mx, v->my, v->mz };
-        int switched = ev == 0 || moves_step(&v->run, in, dt, answer, v);
-        float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
+        int switched = ev == 0 || moves_step(&v->run, in, cdt, answer, v);
+        float t1 = switched ? (ev == 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : v->run.time;
         float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
         if (root_at(v, clip_at(v, st, t0), a, q) == 0 && root_at(v, clip_at(v, st, t1), b, q) == 0) {
             float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
