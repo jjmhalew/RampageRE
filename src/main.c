@@ -785,6 +785,29 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
  * targets, then the IK's targets in the monster's frame */
 static void hands_step(Viewer *v, float dt)
 {
+    /* 0x322360 (from 0x2E0FEC; not in states whose node flags have 0x1080, 0x50, 0x80002 or 0x40000): a planted hand
+     * the arm cannot reach from below lifts the monster just enough, h = dz - sqrt(dz^2 - (|d|^2 - L^2)), at most
+     * 0.4, the larger of the two hands' */
+    const MoveState *st = v->have_graph ? &v->graph.states[v->run.state] : NULL;
+    if (st && !(st->flags & (0x1080 | 0x50 | 0x80002 | 0x40000))) {
+        float lift = 0;
+        for (int h = 0; h < 2; h++) {
+            float sh[3], reach, d[3], d2 = 0;
+            if (!v->hand[h].planted || scene_monster_shoulder(&v->scene, h, sh, &reach) != 0)
+                continue;
+            for (int k = 0; k < 3; k++) {
+                d[k] = v->hand[h].tp[k] - sh[k];
+                d2 += d[k] * d[k];
+            }
+            float disc = d[2] * d[2] - (d2 - reach * reach);
+            if (d[2] < 0 || d2 < reach * reach || disc < 0)
+                continue;
+            float up = d[2] - sqrtf(disc);
+            if (up <= 0.4f && up > lift)
+                lift = up;
+        }
+        v->mz += lift;
+    }
     float h0 = v->heading / 57.2957795f, c = cosf(h0), sn = sinf(h0);
     for (int h = 0; h < 2; h++) {
         Hand *hd = &v->hand[h];

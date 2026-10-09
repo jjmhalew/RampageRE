@@ -86,6 +86,7 @@ typedef struct {
     float ik_w[2], ik_pos[2][3], ik_rot[2][9];
     int ik_chain[2][3], ik_ready;
     Mat4 ik_anim[2];
+    float ik_shoulder[2][3], ik_reach[2];             /* the upper arm's place (model space, as drawn), the arm's length */
 } Scene;
 
 typedef struct City City;
@@ -108,6 +109,8 @@ int scene_monster_play(Scene *s, const char *clip);
 int scene_monster_face(Scene *s, const char *clip, int head);
 /* the monster's hand (0 left, 1 right, as drawn) in the world, as the clips posed it (before the IK); 0 = ok */
 int scene_monster_hand(const Scene *s, int hand, Mat4 *world);
+/* where that arm's shoulder (upper arm) is in the world, as posed, and how far the arm reaches; 0 = ok */
+int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
  * storeys and rubble drawn as they now are */
 void scene_buildings_update(Scene *s, float dt);

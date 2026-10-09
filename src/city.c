@@ -999,6 +999,18 @@ static void monster_ik(Scene *s, Instance *in)
         if (!ok)
             continue;
         s->ik_anim[h] = in->mirrored ? reflect_x(in->node[c[2]]) : in->node[c[2]];
+        float len = 0;
+        for (int k = 0; k < 2; k++) {                /* upper arm + forearm */
+            float d2 = 0;
+            for (int j = 0; j < 3; j++) {
+                float d = in->node[c[k + 1]].m[12 + j] - in->node[c[k]].m[12 + j];
+                d2 += d * d;
+            }
+            len += sqrtf(d2);
+        }
+        s->ik_reach[h] = len;
+        for (int j = 0; j < 3; j++)
+            s->ik_shoulder[h][j] = in->node[c[0]].m[12 + j] * (in->mirrored && j == 0 ? -1.0f : 1.0f);
         if (s->ik_w[h] <= 0 || getenv("RAMPAGE_NOIK"))
             continue;
         float p[3] = { s->ik_pos[h][0], s->ik_pos[h][1], s->ik_pos[h][2] }, r[9];
@@ -1019,6 +1031,17 @@ int scene_monster_hand(const Scene *s, int hand, Mat4 *world)
     if (s->monster < 0 || hand < 0 || hand > 1 || !s->ik_ready || s->ik_chain[hand][2] < 0)
         return -1;
     *world = mat_mul(s->instances[s->monster].base, s->ik_anim[hand]);
+    return 0;
+}
+
+int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach)
+{
+    if (s->monster < 0 || hand < 0 || hand > 1 || !s->ik_ready || s->ik_chain[hand][2] < 0)
+        return -1;
+    const float *m = s->instances[s->monster].base.m, *p = s->ik_shoulder[hand];
+    for (int k = 0; k < 3; k++)
+        at[k] = m[k] * p[0] + m[4 + k] * p[1] + m[8 + k] * p[2] + m[12 + k];
+    *reach = s->ik_reach[hand];
     return 0;
 }
 
