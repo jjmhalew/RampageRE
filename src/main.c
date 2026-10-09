@@ -43,10 +43,19 @@ typedef struct {
     uint32_t armed; int show_hits;                   /* body parts an attack event armed (bits); H draws them */
     int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
     Mount mount;                                     /* on a building's face (climb.c) */
+    const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
 } Viewer;
 
-/* the clip's root at time t (seconds of the clip: the state's time × its rate), held at the clip's last frame
- * (clip_pose loops: its end is its start) */
+/* seconds into the monster's clip at the state's time: the game runs a clip on a 0 .. 1 clock that the state's rate
+ * (node +0x0, 1 / its length) moves (0x2FFF10), so the state's time x rate x the clip's duration */
+static double clip_at(const Viewer *v, const MoveState *st, double t)
+{
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    return t * st->rate * (in->has_clip ? in->clip.duration : 1);
+}
+
+/* the clip's root at time t (seconds of the clip, clip_at), held at the clip's last frame (clip_pose loops: its end
+ * is its start) */
 static int root_at(const Viewer *v, double t, float tr[3], float q[4])
 {
     const Instance *in = &v->scene.instances[v->scene.monster];
@@ -97,11 +106,11 @@ static void play_state(Viewer *v)
     const MoveState *st = &v->graph.states[v->run.state];
     if (scene_monster_play(&v->scene, st->clip) != 0)
         printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
-    v->entry_yaw = root_yaw(v, v->run.time * st->rate);
-    v->entry_t = v->run.time * st->rate;
+    v->entry_yaw = root_yaw(v, clip_at(v, st, v->run.time));
+    v->entry_t = clip_at(v, st, v->run.time);
     if (getenv("RAMPAGE_ROOT")) {
         float rt[3], rq[4];
-        if (root_at(v, v->run.time * st->rate, rt, rq) == 0)
+        if (root_at(v, clip_at(v, st, v->run.time), rt, rq) == 0)
             printf("  root of %s: %.2f %.2f %.2f\n", st->clip, rt[0], rt[1], rt[2]);
     }
     v->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed, on the ground */
@@ -112,8 +121,45 @@ static void play_state(Viewer *v)
     if (v->scene.monster >= 0)
         v->scene.instances[v->scene.monster].mirrored = v->mirror;
     float q[4];
-    if (root_at(v, v->run.time * st->rate, v->entry_root, q) != 0)
+    if (root_at(v, clip_at(v, st, v->run.time), v->entry_root, q) != 0)
         memset(v->entry_root, 0, sizeof v->entry_root);
+}
+
+/* setFacialAnim (0x2E9200, 0x2E9350): the state node of that name plays its clip on the face, from its start; a name
+ * no node has does nothing */
+static void face_play(Viewer *v, const char *name, int head, int loop, int count)
+{
+    const MoveNode *n = moves_node(&v->graph, name);
+    int r = n && n->clip ? scene_monster_face(&v->scene, n->clip, head) : -2;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("face %s: %s (%d nodes) -> %d\n", name, n && n->clip ? n->clip : "-", v->graph.nnodes, r);
+    if (r != 0)
+        return;
+    v->face = n;
+    v->face_loop = loop;
+    v->face_count = count;
+}
+
+/* Monsters.bsf's DefaultFacialAnim: Expression_Idle, looping, the head itself left to the body */
+static void face_default(Viewer *v)
+{
+    face_play(v, "Expression_Idle", 0, 1, 0);
+}
+
+/* the face clip's clock: 0 .. 1 at its node's rate; at its end (0x2E95D0) it plays again while it loops or has
+ * plays left, else the default face comes back (nothing is queued here: queueFacialAnim is not called) */
+static void face_step(Viewer *v, float dt)
+{
+    if (!v->face || v->scene.monster < 0)
+        return;
+    Instance *in = &v->scene.instances[v->scene.monster];
+    in->face_t += v->face->rate * dt;
+    if (in->face_t < 1)
+        return;
+    if (v->face_loop || --v->face_count > 0)
+        in->face_t = 0;
+    else
+        face_default(v);
 }
 
 static void start_moves(Viewer *v)
@@ -127,6 +173,8 @@ static void start_moves(Viewer *v)
         return;
     v->have_graph = 1;
     moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
+    v->face = NULL;
+    face_default(v);                                 /* Monsters::PostInit */
     memset(&v->input, 0, sizeof v->input);
     memset(v->vel, 0, sizeof v->vel);
     v->mirror = v->mirror_queued = 0;
@@ -338,6 +386,17 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
     else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
     else if (!strcmp(n, "Monsters::setMirrorState")) { v->mirror_queued = e->p[0] != 0; return; }
+    else if (!strcmp(n, "Monsters::faceAnim")) {     /* (expression, head layer, -, plays): never looping */
+        static const struct { int code; const char *name; } FACES[] = {
+            { 15, "Expression_Barf" }, { 1, "Expression_Burp" }, { 2, "Expression_Choke" }, { 3, "Expression_Yuck" },
+            { 10, "Expression_Chew" }, { 13, "Expression_Chomp" }, { 5, "Expression_Flex" }, { 12, "Expression_Roar" },
+            { 11, "Expression_Smile" }, { 8, "Expression_Spew" }, { 9, "Expression_Zap" }, { 18, "React_Intro" },
+            { 19, "React_Victory" }, { 20, "Expression_Intro" } };
+        for (size_t k = 0; k < sizeof FACES / sizeof *FACES; k++)
+            if (FACES[k].code == (int)e->p[0])
+                face_play(v, FACES[k].name, e->p[1] != 0, 0, (int)e->p[3]);
+        return;
+    }
     else if (!strcmp(n, "Monsters::prepareToMount")) { climb_prepare(&v->mount); return; }
     else if (!strcmp(n, "Monsters::mountBuilding")) {
         Climber cl = climber(v);
@@ -524,6 +583,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
 {
     if (v->have_graph) {
         MoveInput *in = &v->input;
+        face_step(v, dt);
         if (in->v[MV_LX] != lx) in->fresh[MV_LX] = 0.2f;
         if (in->v[MV_LY] != ly) in->fresh[MV_LY] = 0.2f;
         in->v[MV_LX] = lx;
@@ -601,7 +661,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         int switched = ev == 0 || moves_step(&v->run, in, dt, answer, v);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
         float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
-        if (root_at(v, t0 * st->rate, a, q) == 0 && root_at(v, t1 * st->rate, b, q) == 0) {
+        if (root_at(v, clip_at(v, st, t0), a, q) == 0 && root_at(v, clip_at(v, st, t1), b, q) == 0) {
             float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
             float dx = st->flags & NODE_ROOT_X ? b[0] - a[0] : 0, dy = st->flags & NODE_ROOT_Y ? b[1] - a[1] : 0;
             float m = v->mirror ? -1.0f : 1.0f;      /* mirrored: across the monster's x */
@@ -610,7 +670,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             if (st->flags & NODE_ROOT_Z)
                 v->mz += b[2] - a[2];
             if (st->flags & NODE_ROOT_TURN)
-                v->heading += m * root_turn(v, t0 * st->rate, t1 * st->rate);
+                v->heading += m * root_turn(v, clip_at(v, st, t0), clip_at(v, st, t1));
         }
         clip_events(v, st, t0, t1);                  /* the old clip's events up to now */
         if (v->mode == MODE_BUILDING && v->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
@@ -623,13 +683,13 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (switched) {
             /* a clip that bakes: its root, as drawn where it ended (the axes it handed over were held at its start, a
              * turn it handed over taken out), in the monster's frame as seen (mirrored if it was) */
-            int bake = (st->flags & NODE_BAKE_ROOT) && root_at(v, t1 * st->rate, b, q) == 0;
+            int bake = (st->flags & NODE_BAKE_ROOT) && root_at(v, clip_at(v, st, t1), b, q) == 0;
             float bake_p[3], bake_r[3][3];
             if (bake) {
                 for (int k = 0; k < 3; k++)
                     bake_p[k] = st->flags & (k == 0 ? NODE_ROOT_X : k == 1 ? NODE_ROOT_Y : NODE_ROOT_Z) ?
                                 v->entry_root[k] : b[k];
-                float zero[3] = { 0, 0, 0 }, tw = st->flags & NODE_ROOT_TURN ? root_turn(v, v->entry_t, t1 * st->rate) : 0;
+                float zero[3] = { 0, 0, 0 }, tw = st->flags & NODE_ROOT_TURN ? root_turn(v, v->entry_t, clip_at(v, st, t1)) : 0;
                 Mat4 r = mat_mul(mat_trs_z(0, 0, 0, -tw), mat_tq(zero, q));
                 seen_root(v->mirror, bake_p, &r, bake_r);
             }
@@ -686,7 +746,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
         float turn = st->flags & NODE_ROOT_TURN ?
-            root_turn(v, v->entry_t, v->run.time * st->rate) : 0;
+            root_turn(v, v->entry_t, clip_at(v, st, v->run.time)) : 0;
         scene_monster_root_motion(&v->scene, (st->flags & NODE_ROOT_X ? 1 : 0) | (st->flags & NODE_ROOT_Y ? 2 : 0),
                                   v->entry_root, turn);
     }
@@ -876,8 +936,8 @@ int main(int argc, char **argv)
                 held[PAD[k].button] = w.keys[PAD[k].key];
             }
             play_step(&v, lx, ly, pressed, held, shot ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
-            v.scene.instances[v.scene.monster].offset =      /* the clip at the state's time × its rate */
-                (float)(v.run.time * (v.have_graph ? v.graph.states[v.run.state].rate : 1) - (shot ? shot_time : now - start));
+            v.scene.instances[v.scene.monster].offset =      /* the clip at the state's time (clip_at) */
+                (float)((v.have_graph ? clip_at(&v, &v.graph.states[v.run.state], v.run.time) : v.run.time) - (shot ? shot_time : now - start));
             memcpy(cam.pos, v.cam.pos, sizeof cam.pos);
             memcpy(cam.rows, v.cam.rot, sizeof cam.rows);
             cam.use_rows = 1;

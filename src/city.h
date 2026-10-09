@@ -26,6 +26,9 @@ typedef struct {
      * at root_hold, and its turn about Z is taken out by root_turn degrees */
     int still_root; float root_hold[3], root_turn;
     float (*pose)[7];                                 /* the monster: each node's last local pose (t, q) */
+    /* the monster's face layer (0x2E9350, 0x2FFF10): a clip on its own 0 .. 1 clock whose bones replace the body
+     * clip's in face_mask (the nodes under Bip01 Head, the head itself too for a head layer) */
+    Clip face; int has_face; double face_t; uint8_t *face_mask;
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
     int hidden;                                       /* not drawn (a building's interior until it is damaged) */
     int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
@@ -90,6 +93,8 @@ void scene_monster_place(Scene *s, float x, float y, float z, float deg);
  * monster itself makes */
 void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn);
 int scene_monster_play(Scene *s, const char *clip);
+/* the face layer plays clip (head: Bip01 Head itself too), at face_t 0 .. 1 (Instance.face_t); 0 = ok */
+int scene_monster_face(Scene *s, const char *clip, int head);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
  * storeys and rubble drawn as they now are */
 void scene_buildings_update(Scene *s, float dt);

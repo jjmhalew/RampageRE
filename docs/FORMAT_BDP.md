@@ -218,7 +218,8 @@ that pose as its RawAnim.
 
 **Monster names.** Animations are shared by skeleton type and prefixed with it (`SKELETON_1_WALK2` for George's
 ape skeleton, `SKELETON_2_...` for Ralph). `<MONSTER>_HEAD_*` move the face and head bones (87 of the 330 also
-the spine) and leave the rest in the bind pose, so they are probably layered over a body animation. From the
+the spine) and leave the rest in the bind pose: they play on the face layer over the body clip
+([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "The face"). A KeyInterpAnim's key times are 0 .. 1 of its duration. From the
 names (not checked in the code): `FACE_*` are climbing on the front of a building, `SIDE_L_*` on its side,
 `GROUND_*`, `IDLE` and `WALK2` on the street.
 

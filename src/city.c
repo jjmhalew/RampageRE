@@ -672,6 +672,8 @@ static void pose_instance(Scene *s, Instance *in, double t)
         float tr[3] = { nd->t[0], nd->t[1], nd->t[2] }, q[4] = { nd->q[0], nd->q[1], nd->q[2], nd->q[3] };
         if (in->has_clip)
             clip_pose(&in->clip, t + in->offset, i, tr, q);
+        if (in->has_face && in->face_mask && in->face_mask[i])   /* the face clip's, fully (weight 1.0) */
+            clip_pose(&in->face, in->face_t * in->face.duration, i, tr, q);
         if (w > 0) {                                 /* towards the held pose by the share of the blend left */
             const float *h = in->held[i];
             for (int k = 0; k < 3; k++)
@@ -1025,6 +1027,78 @@ int scene_monster_play(Scene *s, const char *clip)
     return -1;
 }
 
+static int ends_with(const char *s, const char *tail)
+{
+    size_t a = strlen(s), b = strlen(tail);
+    return a >= b && _stricmp(s + a - b, tail) == 0;
+}
+
+static void mark_subtree(const Tree *t, int root, uint8_t *mask)
+{
+    mask[root] = 1;
+    for (uint32_t i = (uint32_t)root + 1; i < t->n; i++)  /* parents come first */
+        if (t->nodes[i].parent >= 0 && mask[t->nodes[i].parent])
+            mask[i] = 1;
+}
+
+int scene_monster_face(Scene *s, const char *clip, int head)
+{
+    if (s->monster < 0 || !s->monster_anims || !clip)
+        return -1;
+    Instance *in = &s->instances[s->monster];
+    const Bundle *ab = s->monster_anims;
+    const BdpEntry *e = NULL;
+    for (uint32_t i = 0; i < ab->nentries && !e; i++) {
+        const char *n = bdp_name(ab, ab->entries[i].name);
+        if (!strncmp(n, "000", 3))
+            n += 3;
+        if (ab->entries[i].type == ET_ANIM && _stricmp(n, clip) == 0)
+            e = &ab->entries[i];
+    }
+    Clip c;
+    if (!e || clip_read(e, &c) != 0)
+        return -1;
+    if (in->has_face)
+        clip_free(&in->face);
+    in->face = c;
+    in->has_face = 1;
+    in->face_t = 0;
+    /* the mask (0x2EA458): the subtree of Bip01 Head; for five skeletons the subtree three nodes above it and their
+     * brows and eyes by name; setFacialAnim's head layer adds or takes out the head itself */
+    if (!in->face_mask)
+        in->face_mask = calloc(in->tree.n ? in->tree.n : 1, 1);
+    memset(in->face_mask, 0, in->tree.n);
+    int hd = -1;
+    for (uint32_t i = 0; i < in->tree.n && hd < 0; i++)
+        if (ends_with(in->tree.nodes[i].name, "Bip01 Head"))
+            hd = (int)i;
+    if (hd < 0)
+        return 0;
+    static const char *const WIDE[] = { "Eyegore_Skeleton", "Cal_skeleton", "Venus_skeleton", "Natilie_skeleton",
+                                        "Jill_skeleton" };
+    int wide = 0;
+    const Bundle *mb = s->monster_bundle;
+    for (uint32_t i = 0; mb && i < mb->nentries; i++)
+        if (mb->entries[i].type == ET_TREE)
+            for (size_t k = 0; k < sizeof WIDE / sizeof *WIDE; k++)
+                wide |= ends_with(bdp_name(mb, mb->entries[i].name), WIDE[k]);
+    if (wide) {
+        int top = hd;
+        for (int k = 0; k < 3 && in->tree.nodes[top].parent >= 0; k++)
+            top = in->tree.nodes[top].parent;
+        mark_subtree(&in->tree, top, in->face_mask);
+        static const char *const NAMED[] = { "Bip01 L Brow", "Bip01 R Brow", "Bip01 L Eye", "Bip01 R Eye" };
+        for (uint32_t i = 0; i < in->tree.n; i++)
+            for (size_t k = 0; k < sizeof NAMED / sizeof *NAMED; k++)
+                if (ends_with(in->tree.nodes[i].name, NAMED[k]))
+                    in->face_mask[i] = 1;
+    } else {
+        mark_subtree(&in->tree, hd, in->face_mask);
+    }
+    in->face_mask[hd] = (uint8_t)(head != 0);
+    return 0;
+}
+
 /* a building's pieces where it now is: its sway, its storeys coming down, its body sinking */
 static void building_place(Scene *s, SceneBuilding *sb)
 {
@@ -1203,6 +1277,9 @@ void scene_free(Scene *s)
         tree_free(&s->instances[i].tree);
         if (s->instances[i].has_clip)
             clip_free(&s->instances[i].clip);
+        if (s->instances[i].has_face)
+            clip_free(&s->instances[i].face);
+        free(s->instances[i].face_mask);
         free(s->instances[i].node);
         free(s->instances[i].pose);
         free(s->instances[i].held);

@@ -67,7 +67,7 @@ plays it:
 
 | Node | | |
 |---|---|---|
-| +0x00 | f32 rate | the clip plays at this speed: the state's length is the clip's duration / rate (all 176 of George's states; `Ground_Idle` plays its 1 s clip at 0.15, 6.67 s) |
+| +0x00 | f32 rate | the speed of the clip's 0 .. 1 clock (0x2FFF10 clamps it to 1): the state lasts 1 / rate, and is at its clip's duration × time × rate (`Ground_Idle`: 0.15, its 6.67 s `SKELETON_1_IDLE_3` once through; most rates are about 1 / their clip's length) |
 | +0x04 | f32 turn | with flag 0x8, how fast it turns towards the stick (6 on the ground, 1.5 in the air, 12 in the flip) |
 | +0x08 | f32 speed | with the air flags, the speed the stick drives it at (16 in a jump, 1 on the ground) |
 | +0x14 | f32 blend | seconds to blend into the clip (0x2FFA00, +0x4E58 of the animation player and 1 / it) |
@@ -259,6 +259,22 @@ in this clip, whether it is coming down from the top.
   mirrored, facing the other way). canSpider asks for 6, which canClimb never answers.
 - **The camera's reach** (−9, 0x336230): for a player, the place may be at most 70 high and 30 along x from the middle
   of the players' x (0x336360, kept at gp − 0x6C70; one player: its own x).
+
+## The face
+`setFacialAnim(name, head layer, looping, plays)` (binding 0x2E9200, 0x2E9350) looks the name up among the state
+nodes (a hash of their names at monster +0x124): George's nodes 0 .. 11 are `Expression_Barf` … `Expression_Zap`, each
+playing a `George_Head_*` clip at the rate 1 / its duration with a blend of 0.2. Its clip runs as a second layer of
+the animation player (0x2FFF10) on its own 0 .. 1 clock and replaces the body clip, rotation and place, on the bones
+of a mask built at spawn (0x2EA458): the subtree under `Bip01 Head` (George: 8 .. 27, the eyes, lips, cheeks, brows
+and jaw), the head itself only with the head layer; for `Eyegore`, `Cal`, `Venus`, `Natilie` and `Jill`'s skeletons
+the subtree three nodes above the head, and their brows and eyes by name. At spawn `Monsters::PostInit` starts
+`DefaultFacialAnim` (`Expression_Idle`, looping, no head layer); a face clip that ends plays again while it loops or
+has plays left (0x2E95D0), else the next queued one (`queueFacialAnim`), else the default again. So the face bones
+never show the body clips' own: the shared `SKELETON_1_*` clips turn George's eyes 112 … 176° from his bind pose,
+the face clips keep them within 20°. `Monsters::faceAnim(expression, head layer, -, plays)`, a clip event, picks the
+name by number (1 Burp, 2 Choke, 3 Yuck, 5 Flex, 8 Spew, 9 Zap, 10 Chew, 11 Smile, 12 Roar, 13 Chomp, 15 Barf, 18
+`React_Intro`, 19 `React_Victory`, 20 `Expression_Intro`) and never loops. There is no eye tracking or blinking; a
+head animator (`MonsterHeadAnimator`, vtable 0x44B020) turns the head towards a target.
 
 ## Slots
 The game's own events (hits, landing, rampage) start states through the 74 slots: slot k is a start list index at

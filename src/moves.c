@@ -97,6 +97,19 @@ int moves_read(const Bundle *b, MoveGraph *g)
                         state = j;
             g->slot[c][k] = c > 0 && list < 0 ? g->slot[0][k] : state;
         }
+    uint32_t nnodes = rd32(d + 0xA4C), nodes = rd32(d + 0xA50);
+    if (nodes + 0x84 * (uint64_t)nnodes <= size) {
+        g->nodes = calloc(nnodes ? nnodes : 1, sizeof *g->nodes);
+        g->nnodes = (int)nnodes;
+        for (uint32_t k = 0; k < nnodes; k++) {
+            const uint8_t *nd = d + nodes + 0x84 * k;
+            MoveNode *m = &g->nodes[k];
+            m->rate = rdf(nd);
+            m->blend = rdf(nd + 0x14);
+            m->clip = name_at(b, (int32_t)rd32(nd + 0x78));
+            m->name = name_at(b, (int32_t)rd32(nd + 0x7C));
+        }
+    }
     MoveTrans *t = g->all;
     for (int k = 0; k < n; k++) {
         MoveState *s = &g->states[k];
@@ -193,7 +206,16 @@ void moves_free(MoveGraph *g)
     free(g->all_events);
     free(g->slot);
     free(g->shapes);
+    free(g->nodes);
     memset(g, 0, sizeof *g);
+}
+
+const MoveNode *moves_node(const MoveGraph *g, const char *name)
+{
+    for (int i = 0; name && i < g->nnodes; i++)
+        if (g->nodes[i].name && _stricmp(g->nodes[i].name, name) == 0)
+            return &g->nodes[i];
+    return NULL;
 }
 
 int moves_find(const MoveGraph *g, const char *state)

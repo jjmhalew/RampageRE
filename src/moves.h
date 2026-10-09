@@ -68,11 +68,16 @@ typedef struct {
      * arms: a shape whose bone is armed can hit */
     const char *part_name[MOVES_PARTS]; int nparts;
     int part_nbones[MOVES_PARTS]; int16_t part_bone[MOVES_PARTS][MOVES_PART_BONES];
+    /* every state node (+0xA4C / +0xA50), by name: setFacialAnim plays a node's clip on the face (George's
+     * Expression_Idle .. Expression_Zap play George_Head_*), its rate 1 / the clip's duration */
+    struct MoveNode { const char *name, *clip; float rate, blend; } *nodes; int nnodes;
 } MoveGraph;
+typedef struct MoveNode MoveNode;
 
 int moves_read(const Bundle *monster, MoveGraph *g);  /* the bundle's MONSTER_DATA; 0 = ok */
 void moves_free(MoveGraph *g);
 int moves_find(const MoveGraph *g, const char *state);   /* -1 = none */
+const MoveNode *moves_node(const MoveGraph *g, const char *name);   /* NULL = none (any case) */
 
 typedef struct {
     float v[MV_COUNT];                               /* held values (booleans 0 / 1) */
