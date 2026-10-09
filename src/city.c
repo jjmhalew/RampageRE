@@ -1850,6 +1850,13 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         else
             people_add_band(s->folk, s->scripted[k].t, s->scripted[k].pos);
     }
+    n = group_all(block, "WaterObject|", r, MAX_REC);   /* the harbour, the pools (0x338CC0) */
+    for (uint32_t i = 0; i < n && s->nwater < 16; i++) {
+        WaterDef wd;
+        static const float at[3] = { 0, 0, 0 };
+        if (water_read(record_group(block, r[i]), &wd) == 0 && (s->water[s->nwater] = water_new(&wd, at, 0)) != NULL)
+            s->nwater++;
+    }
     n = group_all(block, "ActorInstance|", r, MAX_REC);
     for (uint32_t i = 0; i < n; i++) {
         Group a = record_group(block, r[i]), t = template_of(c, group_str(a, "Name"));
@@ -2334,6 +2341,12 @@ static void building_place(Scene *s, SceneBuilding *sb)
 
 void scene_buildings_update(Scene *s, float dt)
 {
+    s->water_acc += dt;                              /* the water, a game frame at a time (0x336DC0) */
+    if (s->water_acc > 0.25f)
+        s->water_acc = 0.25f;
+    for (; s->water_acc >= 1.0f / 60; s->water_acc -= 1.0f / 60)
+        for (int k = 0; k < s->nwater; k++)
+            water_step(s->water[k], 1.0f / 60);
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         SceneBuilding *sb = &s->buildings[i];
         building_update(&sb->b, dt);
@@ -2515,6 +2528,8 @@ int city_camera(City *c, Group *two_tilts)
 
 void scene_free(Scene *s)
 {
+    for (int k = 0; k < s->nwater; k++)
+        water_free(s->water[k]);
     for (uint32_t i = 0; i < s->nmeshes; i++)
         mesh_free(&s->meshes[i].mesh);
     for (uint32_t i = 0; i < s->nitems; i++)

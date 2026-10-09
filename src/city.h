@@ -11,6 +11,7 @@
 #include "army.h"
 #include "hud.h"
 #include "vehicle.h"
+#include "water.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -98,6 +99,7 @@ typedef struct {
     /* the traffic, the fire truck and the rockets (vehicle.c, the viewer's): the TrafficDef blocks of the three block
      * slots (0 this one, 1 and 2 behind it) and the roof rockets the buildings carry, for it to make */
     Vehicles *traffic; Group traffic_def[3];
+    Water *water[16]; int nwater; float water_acc;   /* the block's WaterObject|s (water.c), stepped at 1/60 */
     struct { const char *name; float pos[3], facing; int building; } rockets[16]; int nrockets;
     int placing_building;                             /* the playable building whose objects are placed, -1 none */
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;

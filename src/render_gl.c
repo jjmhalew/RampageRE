@@ -358,6 +358,46 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
 
 /* the particles (fx.c): after the world, not writing depth, tested against it unless the effect says not to
  * (-TestZBuffer); additive or alpha blended; the colour times the texture (the game's 128 = 1) */
+/* the water surfaces (water.c; ROWater 0x339D00): unlit white x the EnvMap texture at the view's reflection, opaque,
+ * fogged as the world */
+static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
+{
+    static float *uv;
+    static int nuv;
+    glDisable(GL_LIGHTING);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glColor4f(1, 1, 1, 1);
+    for (int k = 0; k < s->nwater; k++) {
+        const Water *w = s->water[k];
+        int nv = water_vertex_count(w), ntris = 0;
+        if (nv > nuv) {
+            uv = realloc(uv, sizeof(float) * 2 * (size_t)nv);
+            nuv = nv;
+        }
+        water_env_uv(w, cam->pos, uv);
+        int name = water_texture(w) ? bdp_find_name(s->city, water_texture(w)) : -1;
+        GLuint id = name > 0 ? texture(r, s->city, (uint32_t)name) : 0;
+        if (id) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, id);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+        } else
+            glDisable(GL_TEXTURE_2D);
+        const uint32_t *tris = water_triangles(w, &ntris);
+        glVertexPointer(3, GL_FLOAT, 0, water_positions(w));
+        glTexCoordPointer(2, GL_FLOAT, 0, uv);
+        glDrawElements(GL_TRIANGLES, 3 * ntris, GL_UNSIGNED_INT, tris);
+        if (id)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
+    glEnable(GL_LIGHTING);
+}
+
 /* the HUD's quads (hud.c): the GUI's 640 x 480 screen at the window's height, centred (its 4:3 kept), in order, no
  * depth, alpha blended */
 static void draw_hud(Renderer *r, const Scene *s, float aspect)
@@ -560,6 +600,8 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
         glPopMatrix();
     }
+    if (s->nwater)
+        draw_water(r, s, cam);
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
