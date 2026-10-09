@@ -122,6 +122,9 @@ typedef struct {
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
+    /* the block's scripted objects for people.c: Band.bsf (a band marching in) and RoyalGuardHut.bsf (a guard's hut) */
+    struct { Group t; float pos[3]; int instance, hut, hut_id; float vel[3]; } scripted[8]; int nscripted;
+    int placing_block;                                /* placing the block's own objects (not those behind) */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
     int monster;                                      /* instance of the monster, -1 = none */
@@ -169,6 +172,11 @@ int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
 /* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
  * ones, flag 4, nor obstacles, flag 2); how many */
 int scene_adornments_hit(Scene *s, const float centre[3], float radius);
+/* RoyalGuardHut's TakeDamage: a monster's attack sphere (centre, radius) from the monster at `from` sends the huts it
+ * reaches flying (people_hut_hit); what the monster gets, summed */
+PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3]);
+void scene_huts_update(Scene *s, float dt);         /* the flying huts move; a deleted one is no longer drawn */
+Group city_template(City *c, const char *name);     /* an object template by name (the city's template books) */
 void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]);   /* an effect to start */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
 int scene_monster_node(const Scene *s, const char *name, Mat4 *world);

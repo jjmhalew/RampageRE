@@ -41,6 +41,44 @@ actor). 0x800 means "deleting" (`requestDelete`, vtable +0x58, 0x285DD0), and 0x
 | `Tourist` | Every 0.25 s: a monster within 15 along x gets its photo taken (`Idle`, then a flash at node `Camera`). Its mover is fixed in place, facing the monster. Kids (`IsChild`) keep `MonsterResponseDist` (10 or 6): a monster that close makes them run 160 away at 7 (`Running`), and they are deleted at the end. Held: `PickedUp2` |
 | `Person_Child` | Runs along its mover. A monster in a `Ground*` move that hits it is thrown back (0, −20, 30) |
 
+| `Mime` | Starts in state 4 on a 0.001-unit mover, whose immediate end picks a random `Anim1`–`Anim8` (state 1). Each anim plays three times, then the next one; after 8 it goes back to 1. Facing: anims 1–3 face −180°, 4 faces +90°, 5 faces 0°, 6 faces −90°, 7 faces +90°, 8 faces −90°. `Anim7` shuffles 2.5 towards −x and `Anim8` 2.5 towards +x, at 50 × the frame step per second. Held: **2**. Smashed: **8**, deleted after 4 s |
+| `BandMember` (made by `Band`) | `Band` (an `ObjectInstance`, `MarchingBand1` in New York) creates its `OTRef\|BandMember1..n` 0.25 s after it starts. They form files of three (the leader alone in front), spaced 3.5 along x and 2 along y, and march at 4 from x = 50 to the band's place, facing −x. Once there they play `Playing` facing the street (**2**). The leader's `BandSound` loops, once per band. Grabbing or hitting any member sets the shared `flee`: the music stops, and every member runs at 15 to a random point up to 100 along x and at y = −10 … −60 (**8**), deleted on arrival. Held: **4**. Smashed: **16**, deleted after 3 s |
+| `RoyalGuard` (made by `RoyalGuardHut`) | The hut's mover takes the guard 3 towards −y. Then **16**: 5 along `MarchDir`. **512**: `Perform` three times. **32**: `Idle` for 2 s. **64**: 5 back. **128**: 3 back in, then deleted, or, if its hut was destroyed, **256**: 80 away, then deleted. Held: **2**. Smashed: **8**. Its `flyDuration` is never set, so it is deleted at its next 1 s pulse |
+| `RoyalGuardHut` | London's `StationRoyalGuardLeft` / `Right` (`MarchDir` 1 / −1). It pulses every 1 s. The first guard comes out after 4 s; after that, if a guard is still out it checks again in 6 s, otherwise it sends a new one 15 s later. Hit by a monster: it flies off on a `SphereMover` at −25 × the hit's direction in x and y, gives `addStats(hut, 0)` (10 points), tells its guard (`eventHutDestroyed`), and is deleted at its next pulse |
+
+**Streakers** (`Monsters::createStreaker`, from `becomeHuman`): `becomeHuman` is a clip event of
+`Faceup_Idle_Shrinking` at 0.763, after a defeated monster has shrunk to 0.2 over 0.83 s. It runs only while
+`gWorld.getState() == 6`.
+- **The actor**: `NakedFemale` if the monster `isFemale`, otherwise `NakedMale` (the script names exactly these).
+- **Where it runs**: it starts at the monster's place and runs at 2.241 to y = −dir − 3 (`StreakOut`), then on along
+  that line towards x = dir × 100 (`Streaking`). dir = −1 when the camera's x is greater than the monster's,
+  otherwise +1.
+- **How it looks**: it always faces +x, so on the −x side the scurry plays backwards (`setAnimPlayDir(−1)`).
+- **When it goes**: it is deleted once `isSphereVisible(pos, 4)` fails.
+- **The monster**: `becomeHuman` (0x2D3ED0) keeps the actor (+0xAAC), sets +0xAB4 and clears its own object flag
+  0x20, which presumably stops it being drawn.
+
+## The world state (`gWorld.getState()`)
+`getState` (World binding 58, dispatcher 0x2AE3D0, table 0x42DD70) returns the word at 0x4D6A80. That word is the
+level / block state machine:
+- setState is 0x325BF0, the update is 0x3247A0 (handlers at table 0x434020), and entering a state is 0x324340
+  (table 0x434040);
+- most states run a `Levels.bsf` / `WorldGuiDriver.bsf` function on entry.
+
+| State | Meaning |
+|---|---|
+| 1 | starting `SinglePlayer` |
+| 4 | a level begins (`Levels::BeginLevelNI` / `ContinueLevelNI`) |
+| 5 | a block begins (`BeginBlockNI`) |
+| **6** | **a block is being played**: entered from 4 … 11 once the block is ready (it asks `IsBlockFinished`) |
+| 8 | game over (`WorldGuiDriver::startResults`, `GameOverNI`) |
+| 9 | end of the block (`EndBlockNI`) |
+| 10 | end of the level (`EndLevelNI`) |
+| 11 | end of the world (`EndWorldNI`) |
+| 15 | reset or unload |
+
+The Actor destructor (0x30DF80) also spawns an instance's `SpawnsItem<n>` only in state 6.
+
 **`TakeDamage`** (an armed attack sphere reaching a person) smashes that person, except:
 - a window person anywhere but state 7;
 - a kid tourist;
@@ -144,6 +182,8 @@ This works on an actor, or on an object of class 0x4D0720.
   (0x31AD00).
 - **The Actor bindings' bodies**: `startAnim`'s second argument, `onPickup` (taken as sending script event 8), and
   `getStringProp` versus `getTemplateStringProp` (only the template is read).
-- **Scripts not ported**: `Mime`, `BandMember`, `RoyalGuard` and the naked streakers. They play their `DefaultAnim`,
-  and if smashed they are deleted after 3 s.
+- **Scripts not ported**: any other script plays its `DefaultAnim`, and if smashed is deleted after 3 s.
+- **The LineMover's end**: it fires once; the port then stops the mover until a handler starts another.
+- **Band timing**: the band's members appear 0.25 s after `people_add_band` (its `onInit` pulse).
+- **The flying hut**: its flight is left to the viewer.
 - **Drawing**: `RenderScale` (`DefActorProps`: 0.65) is for the renderer to apply.

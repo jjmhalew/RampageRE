@@ -30,7 +30,8 @@ typedef struct People People;
 
 enum {                                               /* by the template's Script|ScriptName */
     PK_WINDOW, PK_RUNNER, PK_WALKER, PK_STATIONARY, PK_TOURIST, PK_CHILD,
-    PK_OTHER                                         /* any other script (Mime, BandMember, ...): DefaultAnim only */
+    PK_OTHER,                                        /* any other script: its DefaultAnim only */
+    PK_MIME, PK_BAND, PK_GUARD                       /* Mime.bsf, BandMember.bsf, RoyalGuard.bsf */
 };
 enum {
     PP_SCRIPT,                                       /* doing what its script says */
@@ -64,6 +65,10 @@ typedef struct {
     /* the hold and the flight */
     float blend, blend_left, from_q[4], from_p[3];   /* HeldObjectMover: blending in from where it was */
     float vel[3], spin[3], rot[3];                   /* SpherePhysicsMover */
+    /* Mime (curAnim, numAnimReps, endLoc, Stationary), RoyalGuard (marchDirection, idleTime, hutDestroyed, its hut) */
+    int cur_anim, reps, stationary, hut_destroyed, hut;
+    float end_loc[3], march_dir, idle_time;
+    int anim_reverse;                                /* setAnimPlayDir(-1): anim_time runs backwards */
 } Person;
 
 typedef struct {                                     /* what the people see of a monster */
@@ -73,7 +78,8 @@ typedef struct {                                     /* what the people see of a
 
 /* what the people make happen elsewhere (sounds, effects, the monster's reactions) */
 enum {
-    PE_SOUND,                                        /* name: a 3D sound at the person */
+    PE_SOUND,                                        /* name: a 3D sound at the person (on = 0: stop that person's
+                                                      * looping sound of that name, remove3DSfx) */
     PE_EFFECT,                                       /* name at v (node: on the monster, by that node; NULL: at v) */
     PE_DROP,                                         /* a droppable (the block's DroppableDef) falls from v */
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */
@@ -82,12 +88,19 @@ enum {
     PE_MONSTER_FART                                  /* Monsters::doFart: Expression_Smile, the Fart effect, +20 up */
 };
 typedef struct { int type, who, on; const char *name, *node; float v[3], amount; } PeopleEvent;
+typedef struct { float health, energy, points; int priest; } PeopleEaten;
 
 /* the clip length the viewer knows: the clip anim (NULL: the shape's own RawAnim) of a look; 0 = none */
 typedef float (*PeopleClipSeconds)(void *ctx, const char *anim, const char *shape);
 
 People *people_new(PeopleClipSeconds clip_seconds, void *ctx);
 void people_free(People *p);
+/* the template of a name (gWorld.createActor / OTRef): Band.bsf's members, the huts' guards */
+typedef Group (*PeopleFindTemplate)(void *ctx, const char *name);
+void people_set_templates(People *p, PeopleFindTemplate find, void *ctx);
+/* gWorld.isSphereVisible(pos, r): the streakers leave once out of view; unset, everything counts as visible */
+typedef int (*PeopleVisible)(void *ctx, const float pos[3], float radius);
+void people_set_visible(People *p, PeopleVisible visible, void *ctx);
 void people_seed(People *p, uint32_t seed);          /* gWorld.frand()'s stand-in */
 void people_set_droppable_rate(People *p, float rate);   /* the block's DroppableDef rate (getDroppableRate) */
 
@@ -102,6 +115,23 @@ int people_crowd(People *p, const Group *tmpls, int ntmpls, const float centre[3
 /* a LineMover for a person (gWorld.createLineMover, init, addPoint, setFlags): 1 face the way it goes, 2 loop,
  * 8 face the nearest monster */
 void people_set_path(People *p, int who, const float (*pts)[3], int n, float speed, uint32_t flags);
+/* Band.bsf (an ObjectInstance, MarchingBand1 in New York): 0.25 s after it starts its OTRef|BandMember1 .. n march
+ * in at 4 from x = 50 + their file offset to dest (its Location) less the offset, then play facing the street; when
+ * one is grabbed or hit, the whole band runs off at 15 */
+void people_add_band(People *p, Group band, const float dest[3]);
+/* RoyalGuardHut.bsf (London's StationRoyalGuardLeft / Right): a guard (OTRef|Guard) comes out after 4 s, then
+ * whenever none is out, every 15 s (6 s re-checks); it marches 3 out, 5 along MarchDir, performs, waits 2 s, marches
+ * back and in. Returns the hut's id */
+int people_add_hut(People *p, Group hut, const float pos[3]);
+/* the hut's TakeDamage (a monster hit it): it flies at -25 x the hit's direction in x and y (vel, the viewer's to
+ * apply), is deleted at its next pulse, and its guard marches 80 off instead of going back in. addStats(hut, 0) */
+PeopleEaten people_hut_hit(People *p, int hut, const float direction[3], float vel[3]);
+int people_hut_state(const People *p, int hut);     /* 0 standing, 1 hit (flying), 2 deleted */
+/* Monsters::createStreaker, from becomeHuman (the Faceup_Idle_Shrinking clip at 0.763, a defeated monster), only
+ * while gWorld.getState() == 6 (a block in play). tmpl: NakedFemale if the monster isFemale, else NakedMale;
+ * camera_x the camera's x. Out at 2.241 to y = -3 -+ 1, then scurrying off along it (Person_Runner.bsf), deleted
+ * once out of view. The monster's becomeHuman (0x2D3ED0) keeps the actor (+0xAAC) and stops drawing itself. */
+int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float camera_x);
 
 void people_update(People *p, float dt, const PeopleMonster *m, int nm);
 int people_count(const People *p);
@@ -131,7 +161,6 @@ int people_nearest(const People *p, const float hand[3], const float root[3], co
 void people_grab(People *p, int who, float blend);
 /* each frame it is held: the hand's (LiftNodeName, "Helper R Hand") world matrix, column-major */
 void people_hold(People *p, int who, const float hand_world[16], int mirrored, float dt);
-typedef struct { float health, energy, points; int priest; } PeopleEaten;
 /* throwObject(1, ...): onThrow(monster, eaten); gone. What the monster gets (gCommon.addStats, 0x2C51A0) */
 PeopleEaten people_eat(People *p, int who);
 /* addStats on the monster: hit points to max(1, hp + health) within hp_max (MONSTER_DATA +0x138, 200), only while

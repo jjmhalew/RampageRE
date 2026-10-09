@@ -12,6 +12,7 @@
 #define DELETE_ME (4 | 8 | 16)                       /* [R] what a script handler returns to have its actor deleted */
 #define MAX_EVENTS 256
 #define MAX_TIMERS 32
+#define MAX_OBJECTS 16
 
 /* object flags (+0x4C), names from the table at 0x3F5F70 [R] */
 enum { OF_DYING = 0x800, OF_PUSH_OUT = 0x4000, OF_EFF_NODES = 0x8000, OF_PICKUP = 0x10000, OF_HELD = 0x20000,
@@ -30,6 +31,14 @@ struct People {
     int nev;
     struct { float left; PeopleEvent ev; } timer[MAX_TIMERS];
     int ntimers;
+    PeopleFindTemplate find;
+    void *find_ctx;
+    PeopleVisible visible;
+    void *visible_ctx;
+    int band_flee, band_sound;                       /* BandMember.bsf's globals: flee, bandSFXAllocated */
+    /* the script objects that make people: Band.bsf (once, after 0.25 s) and RoyalGuardHut.bsf (pulsing each 1 s) */
+    struct { int hut; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
+    int nobj;
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -276,6 +285,7 @@ static int mover_step(People *p, Person *q, float dt)
         } else {
             q->mv.t = 1;
             r = 2;
+            q->mv.active = 0;                        /* [G] the end is told once (a handler may start another) */
         }
     }
     s = q->mv.seg;
@@ -443,6 +453,49 @@ static void smash(People *p, Person *q, float monster_heading);
 static void walk(People *p, Person *q);
 static void decide(People *p, Person *q);
 
+/* -- Mime.bsf: 4 walking in, 1 performing Anim1 .. Anim8 (each twice more, then the next; after 8 back to 1), 2 held,
+ * 8 flying. Anim7 shuffles 2.5 to -x and Anim8 2.5 to +x, at 50 x the frame step a second */
+static void mime_anim(People *p, Person *q, int random_offset)
+{
+    char name[16];
+    snprintf(name, sizeof name, "Anim%d", q->cur_anim);
+    start_anim(p, q, name, random_offset);
+}
+
+static void mime_facing(Person *q)                   /* chooseFacing */
+{
+    static const float h[9] = { -180, -180, -180, -180, 90, 0, -90, 90, -90 };
+    q->heading = q->cur_anim >= 0 && q->cur_anim <= 8 ? h[q->cur_anim] : -180;
+}
+
+static void mime_mover(Person *q)                    /* chooseMover */
+{
+    float end[3] = { q->pos[0], q->pos[1], q->pos[2] };
+    if (q->cur_anim == 7) {
+        end[0] -= 2.5f;
+        mover_init(q, q->pos, end, 50 * TIMESTEP);
+        q->mv.flags = 0;
+    } else if (q->cur_anim == 8) {
+        if (q->state == 4) {                         /* (only reached from a walk-in) */
+            float start[3] = { q->stationary ? q->end_loc[0] - 5 : -60, q->end_loc[1], 0 };
+            mover_init(q, start, q->end_loc, 35 * TIMESTEP);
+        } else {
+            end[0] += 2.5f;
+            mover_init(q, q->pos, end, 50 * TIMESTEP);
+        }
+        q->mv.flags = 0;
+    }
+}
+
+/* -- RoyalGuard.bsf: out of the hut (the hut's mover, 3 towards -y), 4 -> 16 five along MarchDir, 512 Perform three
+ * times, 32 Idle for 2 s, 64 five back, 128 three in: deleted, or (its hut destroyed) 256 eighty away, deleted */
+static void guard_march(Person *q, float dx, float dy)
+{
+    float end[3] = { q->pos[0] + dx, q->pos[1] + dy, q->pos[2] };
+    mover_init(q, q->pos, end, 5);
+    q->mv.flags = 0;
+}
+
 static int on_anim_done(People *p, Person *q)
 {
     const PeopleMonster *m = nearest_monster(p, q->pos);
@@ -487,6 +540,36 @@ static int on_anim_done(People *p, Person *q)
             start_anim(p, q, "PickedUp2", 0);
             q->pulse_delay = 10 * TIMESTEP;
             q->pulse_time = 0;
+        }
+        return 1;
+    case PK_MIME:
+        if (q->state == 1) {
+            if (q->cur_anim <= 8 && q->reps < 2) {
+                q->reps++;
+            } else if (q->cur_anim <= 7 && q->reps >= 2) {
+                q->reps = 0;
+                q->cur_anim++;
+            } else {
+                q->cur_anim = 1;
+                q->reps = 0;
+            }
+            mime_anim(p, q, 0);
+            mime_facing(q);
+            mime_mover(q);
+        } else if (q->state == 4 || q->state == 5) {
+            mime_anim(p, q, 0);
+        }
+        return 1;
+    case PK_GUARD:
+        if (q->state == 512) {
+            if (q->reps > 0) {
+                q->reps--;
+                start_anim(p, q, "Perform", 0);
+            } else {
+                start_anim(p, q, "Idle", 0);
+                q->idle_time = 2;
+                q->state = 32;
+            }
         }
         return 1;
     default:
@@ -546,8 +629,45 @@ static int on_pulse(People *p, Person *q)
     switch (q->kind) {
     case PK_WINDOW:
         return window_pulse(q);
-    case PK_RUNNER:                                  /* (the naked streakers' visibility check is left out) */
-        return q->state == 16 ? fly_countdown(q) : 1;
+    case PK_RUNNER:
+        if (q->state == 16 && fly_countdown(q) == DELETE_ME)
+            return DELETE_ME;
+        if (strcmp(q->anim, "Streaking") == 0 && p->visible && !p->visible(p->visible_ctx, q->pos, 4.0f))
+            return DELETE_ME;                        /* a streaker out of view */
+        return 1;
+    case PK_MIME:
+        return q->state == 8 ? fly_countdown(q) : 1;
+    case PK_BAND:
+        if ((q->sub & 64) && p->band_flee) {
+            emit(p, PE_SOUND, who_of(p, q), tstr(q, "Sound|BandSound"), NULL, q->pos, 0, 0);
+            q->sub &= ~64;
+        }
+        if (q->state == 4 || q->state == 8)
+            return 1;
+        if (q->state == 16) {
+            q->fly_duration -= 0.25f;
+            return q->fly_duration < 0 ? DELETE_ME : 1;
+        }
+        if (p->band_flee) {                          /* the whole band runs off */
+            q->state = 8;
+            float dir = frand(p) > 0.5f ? 1.0f : -1.0f;
+            start_anim(p, q, "Running", 1);
+            float end[3] = { q->pos[0] + dir * frand(p) * 100.0f, -10.0f - 50.0f * frand(p), 0 };
+            mover_init(q, q->pos, end, 15);
+            q->mv.flags = 0;
+            q->heading = -90.0f * dir;               /* FACE_RIGHT x dir */
+        }
+        return 1;
+    case PK_GUARD:
+        if (q->state == 8)
+            return fly_countdown(q);                 /* its flyDuration is never set: 0, so gone at the next pulse */
+        if (q->state == 32 && (q->idle_time -= 1.0f) <= 0) {
+            q->heading = 90.0f * q->march_dir;
+            start_anim(p, q, "March", 0);
+            guard_march(q, -5.0f * q->march_dir, 0);
+            q->state = 64;
+        }
+        return 1;
     case PK_WALKER:
         if (q->state == 0) {
             q->pulse_delay = q->is_grenadier ? 3 * TIMESTEP : 0;
@@ -601,8 +721,60 @@ static int on_mover(People *p, Person *q, int st)
     case PK_RUNNER:
         if (st == 2)                                 /* it sets up another run across, then asks to be deleted */
             return DELETE_ME;
-        if (st == 3 && strcmp(q->anim, "RunOut") == 0)
+        if (st == 3 && strcmp(q->anim, "RunOut") == 0) {
             q->heading = q->pos[1] < -3.0f ? -90.0f : 90.0f;
+        } else if (st == 3 && strcmp(q->anim, "StreakOut") == 0) {   /* out on the street: scurry off */
+            q->heading = -90;
+            start_anim(p, q, "Streaking", 0);
+            q->pulse_delay = 0.25f;
+            if (q->pos[1] > -3.0f)                   /* going to -x while facing +x: the scurry played backwards */
+                q->anim_reverse = 1;
+        }
+        return 1;
+    case PK_MIME:
+        if (st == 2 && (q->state == 4 || q->state == 5)) {
+            q->state = 1;
+            q->cur_anim = 1 + (int)(frand(p) * 7.995f);
+            q->reps = 0;
+            mime_anim(p, q, 1);
+            mime_facing(q);
+            mime_mover(q);
+        }
+        return 1;
+    case PK_BAND:
+        if (st == 2) {
+            if (q->state == 8)
+                return DELETE_ME;
+            q->heading = 180;                        /* FACE_BACK */
+            start_anim(p, q, "Playing", 1);
+            q->state = 2;
+        }
+        return 1;
+    case PK_GUARD:
+        if (st != 2)
+            return 1;
+        if (q->state == 4) {
+            q->heading = -90.0f * q->march_dir;
+            guard_march(q, 5.0f * q->march_dir, 0);
+            q->state = 16;
+        } else if (q->state == 16) {
+            q->heading = 180;
+            q->reps = 2;
+            start_anim(p, q, "Perform", 0);
+            q->state = 512;
+        } else if (q->state == 64) {
+            q->heading = 0;
+            guard_march(q, 0, 3);
+            q->state = 128;
+        } else if (q->state == 128) {
+            if (!q->hut_destroyed)
+                return DELETE_ME;
+            q->heading = 90.0f * q->march_dir;
+            guard_march(q, -80.0f * q->march_dir, 0);
+            q->state = 256;
+        } else if (q->state == 256) {
+            return DELETE_ME;
+        }
         return 1;
     case PK_CHILD:
         return st == 2 ? DELETE_ME : 1;
@@ -699,6 +871,18 @@ static void on_pickup(People *p, Person *q)          /* the script's onPickup (s
         break;
     case PK_CHILD:
         break;
+    case PK_BAND:
+        if (q->state != 4) {
+            start_anim(p, q, "PickedUp", 1);
+            p->band_flee = 1;
+            q->state = 4;
+        }
+        break;
+    case PK_MIME:
+    case PK_GUARD:
+        start_anim(p, q, "PickedUp", 0);
+        q->state = 2;
+        break;
     default:                                         /* [G] */
         start_anim(p, q, "PickedUp", 0);
         break;
@@ -716,6 +900,9 @@ static void smash(People *p, Person *q, float monster_heading)
     case PK_WALKER: q->state = 6; q->pulse_delay = 1.0f; break;
     case PK_STATIONARY: q->state = 2; q->pulse_delay = 1.0f; break;
     case PK_TOURIST: q->state = 4; q->pulse_delay = 3.0f; break;
+    case PK_MIME: q->state = 8; q->pulse_delay = 1.0f; break;
+    case PK_BAND: q->state = 16; break;              /* still pulsing every 0.25 s */
+    case PK_GUARD: q->state = 8; break;              /* pulsing every 1 s */
     default: q->state = 99; q->fly_duration = 3; q->pulse_delay = 1.0f; break;   /* [G] */
     }
     q->pulse_time = 0;
@@ -760,6 +947,22 @@ static int take_damage(People *p, Person *q, float monster_heading, const char *
         on_pickup(p, q);
         smash(p, q, monster_heading);
         return 1;
+    case PK_MIME:
+    case PK_GUARD:
+        if (q->state == 8)
+            return 0;
+        smash(p, q, monster_heading);
+        on_pickup(p, q);                             /* state 2 again, as in the scripts */
+        start_anim(p, q, "PickedUp", 0);
+        return 1;
+    case PK_BAND:
+        if (q->state == 16)
+            return 0;
+        smash(p, q, monster_heading);
+        p->band_flee = 1;
+        on_pickup(p, q);                             /* state 4 again, as in the script */
+        start_anim(p, q, "PickedUp", 0);
+        return 1;
     case PK_CHILD:                                   /* a monster on the ground is thrown back by it */
         if (move && strncmp(move, "Ground", 6) == 0) {
             float v[3] = { 0, -20, 30 };
@@ -781,6 +984,7 @@ static int script_kind(const char *script)
     static const struct { const char *name; int kind; } k[] = {
         { "Person_Window", PK_WINDOW }, { "Person_Runner", PK_RUNNER }, { "WalkingAroundPerson", PK_WALKER },
         { "StationaryPerson", PK_STATIONARY }, { "Tourist", PK_TOURIST }, { "Person_Child", PK_CHILD },
+        { "Mime.", PK_MIME }, { "BandMember.", PK_BAND }, { "RoyalGuard.", PK_GUARD },
     };
     for (size_t i = 0; script && i < sizeof k / sizeof k[0]; i++)
         if (strncmp(script, k[i].name, strlen(k[i].name)) == 0)
@@ -844,6 +1048,42 @@ static void construct(People *p, Person *q)
         q->pulse_delay = TIMESTEP;
         sound(p, q, "Sound|AmbientLoopingSound");
         q->state = 0;
+        break;
+    case PK_MIME:
+        q->flags |= OF_EFF_NODES | OF_PICKUP;
+        q->state = 4;
+        memcpy(q->end_loc, q->pos, sizeof q->end_loc);
+        q->stationary = (int)tnum(q, "Stationary", 1);
+        q->cur_anim = 8;
+        q->reps = 0;
+        mime_anim(p, q, 1);
+        {                                            /* a step of 0.001: its first mover callback comes at once */
+            float end[3] = { q->pos[0] + 0.001f, q->pos[1], q->pos[2] };
+            mover_init(q, q->pos, end, 1);
+            q->mv.flags = 0;
+        }
+        mime_facing(q);
+        break;
+    case PK_BAND:
+        p->band_flee = 0;                            /* the script's global, reset by every new member */
+        q->state = 1;
+        q->pulse_delay = 0.25f;
+        q->flags |= OF_EFF_NODES | OF_PICKUP;
+        if (tstr(q, "Sound|BandSound") && !p->band_sound) {   /* the band's music, once */
+            emit(p, PE_SOUND, who_of(p, q), tstr(q, "Sound|BandSound"), NULL, q->pos, 0, 1);
+            q->sub |= 64;
+            p->band_sound = 1;
+        }
+        break;
+    case PK_GUARD:
+        q->flags |= OF_EFF_NODES | OF_PICKUP;
+        q->heading = 180;
+        start_anim(p, q, "March", 0);
+        q->pulse_delay = 1;
+        q->march_dir = 1;
+        q->hut = -1;
+        q->fly_duration = 0;                         /* never set by the script */
+        q->state = 4;
         break;
     case PK_STATIONARY:
         q->flags |= OF_EFF_NODES | OF_PICKUP;
@@ -963,6 +1203,178 @@ int people_events(People *p, PeopleEvent *out, int max)
     return n;
 }
 
+void people_set_templates(People *p, PeopleFindTemplate find, void *ctx)
+{
+    p->find = find;
+    p->find_ctx = ctx;
+}
+
+void people_set_visible(People *p, PeopleVisible visible, void *ctx)
+{
+    p->visible = visible;
+    p->visible_ctx = ctx;
+}
+
+static Group template_ref(People *p, Group from, const char *key)   /* the template an OTRef| of from names */
+{
+    Group none = { NULL, 0 };
+    const char *name = from.at ? group_str(from, key) : NULL;
+    return name && p->find ? p->find(p->find_ctx, name) : none;
+}
+
+/* Band::createBand: BandMember1 .. n in files of three (the leader alone in front), 3.5 apart along x and 2 along y,
+ * from x = 50 to the band's place, at 4, facing -x */
+static void create_band(People *p, int o)
+{
+    float x = 0, y = 0;
+    for (int i = 1; i < 10000; i++) {
+        char key[32];
+        snprintf(key, sizeof key, "OTRef|BandMember%d", i);
+        if (!group_str(p->obj[o].t, key))
+            break;
+        Group t = template_ref(p, p->obj[o].t, key);
+        if (!t.at)
+            continue;
+        if (i == 1) {
+            y = 2;
+        } else if ((i + 1) % 3 == 0) {
+            y = 0;
+            x += 3.5f;
+        }
+        y += 2;
+        float start[3] = { 50 + x, -y, 0 }, end[3] = { p->obj[o].pos[0] + x, p->obj[o].pos[1] - y, 0 };
+        int who = people_add(p, t, start, 90);
+        if (who < 0)
+            continue;
+        Person *q = &p->v[who];
+        start_anim(p, q, "Running", 1);
+        mover_init(q, start, end, 4);
+        q->mv.flags = 0;
+        q->heading = 90;
+    }
+}
+
+/* RoyalGuardHut::createGuard: out of the hut's place, 3 towards -y at 5, marching along MarchDir */
+static void create_guard(People *p, int o)
+{
+    Group t = template_ref(p, p->obj[o].t, "OTRef|Guard");
+    if (!t.at)
+        return;
+    int who = people_add(p, t, p->obj[o].pos, 180);
+    if (who < 0)
+        return;
+    Person *q = &p->v[who];
+    start_anim(p, q, "March", 0);
+    q->march_dir = group_num(p->obj[o].t, "MarchDir", 1);   /* setMarchDirection */
+    q->hut = o;
+    float end[3] = { p->obj[o].pos[0], p->obj[o].pos[1] - 3, p->obj[o].pos[2] };
+    mover_init(q, p->obj[o].pos, end, 5);
+    q->mv.flags = 0;
+    p->obj[o].guard = who;
+}
+
+static void objects_update(People *p, float dt)
+{
+    for (int o = 0; o < p->nobj; o++) {
+        if (p->obj[o].state == 2)
+            continue;
+        if (!p->obj[o].hut) {                        /* Band: onInit sets a 0.25 s pulse, which makes the band */
+            if ((p->obj[o].timer -= dt) <= 0) {
+                create_band(p, o);
+                p->obj[o].state = 2;                 /* then it asks to be deleted */
+            }
+            continue;
+        }
+        if ((p->obj[o].timer += dt) < 1)             /* the hut pulses every second */
+            continue;
+        p->obj[o].timer -= 1;
+        if (p->obj[o].state == 1) {                  /* hit: its deathLength (never set, 0) runs out at once */
+            p->obj[o].state = 2;
+            continue;
+        }
+        if ((p->obj[o].create_time -= 1) <= 0) {
+            int g = p->obj[o].guard;
+            if (g >= 0 && g < p->n && p->v[g].phase != PP_GONE) {
+                p->obj[o].create_time = 6;
+            } else {
+                create_guard(p, o);
+                p->obj[o].create_time = 15;
+            }
+        }
+    }
+}
+
+void people_add_band(People *p, Group band, const float dest[3])
+{
+    if (p->nobj >= MAX_OBJECTS)
+        return;
+    int o = p->nobj++;
+    memset(&p->obj[o], 0, sizeof p->obj[o]);
+    p->obj[o].t = band;
+    memcpy(p->obj[o].pos, dest, sizeof p->obj[o].pos);
+    p->obj[o].timer = 0.25f;
+    p->obj[o].guard = -1;
+}
+
+int people_add_hut(People *p, Group hut, const float pos[3])
+{
+    if (p->nobj >= MAX_OBJECTS)
+        return -1;
+    int o = p->nobj++;
+    memset(&p->obj[o], 0, sizeof p->obj[o]);
+    p->obj[o].hut = 1;
+    p->obj[o].t = hut;
+    memcpy(p->obj[o].pos, pos, sizeof p->obj[o].pos);
+    p->obj[o].create_time = 4;
+    p->obj[o].guard = -1;
+    return o;
+}
+
+PeopleEaten people_hut_hit(People *p, int hut, const float direction[3], float vel[3])
+{
+    PeopleEaten e = { 0, 0, 0, 0 };
+    if (vel)
+        vel[0] = vel[1] = vel[2] = 0;
+    if (hut < 0 || hut >= p->nobj || !p->obj[hut].hut || p->obj[hut].state != 0)
+        return e;
+    if (vel) {                                       /* a SphereMover at -direction (x, y) x 25 */
+        vel[0] = -direction[0] * 25;
+        vel[1] = -direction[1] * 25;
+        vel[2] = direction[2] * 25;
+    }
+    p->obj[hut].state = 1;
+    int g = p->obj[hut].guard;
+    if (g >= 0 && g < p->n && p->v[g].phase != PP_GONE)
+        p->v[g].hut_destroyed = 1;                   /* eventHutDestroyed */
+    Group t = p->obj[hut].t;                         /* gCommon.addStats(hut, slot, 0) */
+    e.health = t.at ? group_num(t, "Health", 0) : 0;
+    e.energy = t.at ? group_num(t, "Energy", 0) : 0;
+    e.points = t.at ? group_num(t, "Points", 0) : 0;
+    return e;
+}
+
+int people_hut_state(const People *p, int hut)
+{
+    return hut >= 0 && hut < p->nobj ? p->obj[hut].state : 2;
+}
+
+int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float camera_x)
+{
+    float dir = camera_x > monster_pos[0] ? -1.0f : 1.0f;   /* away from the camera's side */
+    float start[3] = { monster_pos[0], monster_pos[1], monster_pos[2] };
+    float out[3] = { start[0], -dir * 1.0f - 3.0f, 0 }, end[3] = { dir * 100.0f, out[1], 0 };
+    int who = people_add(p, tmpl, start, -90);
+    if (who < 0)
+        return -1;
+    Person *q = &p->v[who];
+    start_anim(p, q, "StreakOut", 1);
+    mover_init(q, start, out, 2.241f);
+    mover_add(q, end);
+    q->mv.flags = 0;
+    q->heading = -90;
+    return who;
+}
+
 static void gone(Person *q)
 {
     q->phase = PP_GONE;
@@ -981,6 +1393,7 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
                 p->ev[p->nev++] = p->timer[i].ev;
             p->timer[i--] = p->timer[--p->ntimers];
         }
+    objects_update(p, dt);
     for (int i = 0; i < p->n; i++) {
         Person *q = &p->v[i];
         if (q->phase == PP_GONE)
@@ -988,8 +1401,11 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
         int r = 1;
         /* the anim: a play that does not repeat ends in onAnimComplete */
         if (q->anim_loop) {
-            if (q->anim_len > 0)
-                q->anim_time = fmodf(q->anim_time + dt, q->anim_len);
+            if (q->anim_len > 0) {
+                q->anim_time = fmodf(q->anim_time + (q->anim_reverse ? -dt : dt), q->anim_len);
+                if (q->anim_time < 0)
+                    q->anim_time += q->anim_len;
+            }
         } else if (!q->anim_done) {
             q->anim_time += dt;
             if (q->anim_time >= q->anim_len) {

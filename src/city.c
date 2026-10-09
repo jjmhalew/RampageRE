@@ -426,15 +426,29 @@ static void place_flags(City *c, Scene *s, Group t, Mat4 base)
 static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
 {
     Group t = template_of(c, group_str(inst, "Name"));
-    const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL;
-    if (!shape) {
-        s->missing++;
-        return;
-    }
+    const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL, *script = t.at ? group_str(t, "Script|ScriptName") : NULL;
     float xyz[3];
     location(inst, xyz);
     Mat4 at = mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)));
+    int scripted = -1;                               /* a band or a guard's hut: for people.c, once it exists */
+    if (s->placing_block && script && s->nscripted < 8 &&
+        (!_strnicmp(script, "Band.", 5) || !_strnicmp(script, "RoyalGuardHut.", 14))) {
+        scripted = s->nscripted++;
+        memset(&s->scripted[scripted], 0, sizeof s->scripted[scripted]);
+        s->scripted[scripted].t = t;
+        s->scripted[scripted].hut = !_strnicmp(script, "RoyalGuardHut.", 14);
+        s->scripted[scripted].hut_id = s->scripted[scripted].instance = -1;
+        for (int k = 0; k < 3; k++)
+            s->scripted[scripted].pos[k] = at.m[12 + k];
+    }
+    if (!shape) {
+        if (scripted < 0)
+            s->missing++;
+        return;
+    }
     int id = place_model(c, s, shape, at, -1);
+    if (scripted >= 0)
+        s->scripted[scripted].instance = id;
     if (id >= 0)
         place_flags(c, s, t, at);
     const char *flags = group_str(t, "Flags");
@@ -511,6 +525,47 @@ int city_shape_box(City *c, const char *shape, float min[3], float max[3])
         mesh_free(&m);
     }
     return found ? 0 : -1;
+}
+
+static Group people_template(void *ctx, const char *name) { return template_of(ctx, name); }
+Group city_template(City *c, const char *name) { return template_of(c, name); }
+
+PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3])
+{
+    PeopleEaten sum = { 0, 0, 0, 0 };
+    for (int k = 0; k < s->nscripted && s->folk; k++) {
+        if (!s->scripted[k].hut || s->scripted[k].hut_id < 0 || people_hut_state(s->folk, s->scripted[k].hut_id) != 0)
+            continue;
+        const float *p = s->scripted[k].pos;
+        float d[3] = { p[0] - centre[0], p[1] - centre[1], p[2] + 2 - centre[2] };   /* the hut's middle, 2 up [G] */
+        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (radius + 2) * (radius + 2))   /* 2 its reach [G] */
+            continue;
+        float dir[3] = { from[0] - p[0], from[1] - p[1], 0 }, l = sqrtf(dir[0] * dir[0] + dir[1] * dir[1]);
+        if (l > 1e-4f) { dir[0] /= l; dir[1] /= l; }    /* towards the monster: it flies away from it */
+        PeopleEaten e = people_hut_hit(s->folk, s->scripted[k].hut_id, dir, s->scripted[k].vel);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  a guard's hut hit: %.0f points, flying at %.1f %.1f\n", e.points, s->scripted[k].vel[0],
+                   s->scripted[k].vel[1]);
+        sum.health += e.health; sum.energy += e.energy; sum.points += e.points;
+    }
+    return sum;
+}
+
+void scene_huts_update(Scene *s, float dt)
+{
+    for (int k = 0; k < s->nscripted && s->folk; k++) {
+        int id = s->scripted[k].instance, st;
+        if (!s->scripted[k].hut || id < 0 || s->scripted[k].hut_id < 0)
+            continue;
+        st = people_hut_state(s->folk, s->scripted[k].hut_id);
+        if (st == 1)                                 /* its SphereMover */
+            for (int j = 0; j < 3; j++) {
+                s->scripted[k].pos[j] += s->scripted[k].vel[j] * dt;
+                s->instances[id].base.m[12 + j] += s->scripted[k].vel[j] * dt;
+            }
+        else if (st == 2)
+            s->instances[id].hidden = 1;
+    }
 }
 
 static float people_clip_seconds(void *ctx, const char *anim, const char *shape)
@@ -1716,15 +1771,27 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     for (uint32_t i = 0; i < n; i++)
         building(c, s, record_group(where, r[i]), row_offset, 0, 0);
     static const char *const objects[] = { "ObjectInstance|", "AttackObjectInstance|", "XObjectInstance|" };
+    s->placing_block = 1;
     for (int k = 0; k < 3; k++) {
         n = group_values(block, objects[k], &where, r, MAX_REC);
         for (uint32_t i = 0; i < n; i++)
             place_object(c, s, record_group(where, r[i]), root);
     }
+    s->placing_block = 0;
     /* the people (people.c): the block's ActorInstance| entries (SpawnedItem = 1: comes after an earlier one is
      * gone), Traffic's two crowds of the block's occupants' runners, the window occupants later */
     s->owner = c;
     s->folk = people_new(people_clip_seconds, c);
+    people_set_templates(s->folk, people_template, c);
+    for (int k = 0; k < s->nscripted; k++) {        /* Band.bsf, RoyalGuardHut.bsf */
+        if (getenv("RAMPAGE_TRACE"))
+            printf("%s at %.1f %.1f\n", s->scripted[k].hut ? "a guard's hut" : "a band", s->scripted[k].pos[0],
+                   s->scripted[k].pos[1]);
+        if (s->scripted[k].hut)
+            s->scripted[k].hut_id = people_add_hut(s->folk, s->scripted[k].t, s->scripted[k].pos);
+        else
+            people_add_band(s->folk, s->scripted[k].t, s->scripted[k].pos);
+    }
     n = group_all(block, "ActorInstance|", r, MAX_REC);
     for (uint32_t i = 0; i < n; i++) {
         Group a = record_group(block, r[i]), t = template_of(c, group_str(a, "Name"));

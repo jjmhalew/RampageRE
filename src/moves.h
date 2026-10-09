@@ -74,6 +74,8 @@ typedef struct {
     /* the attachment nodes (+0xA84 / +0xA88, 0x38 bytes): a matrix (rows, then the place) on a bone: Helper R Hand
      * (what the monster holds things by), fxNode_*, Tracking_Node ... */
     struct MoveAttach { const char *name; int bone; float m[12]; } *attach; int nattach;
+    const char *props;                               /* +0xAA4: its property book ("George_prop": MiscData|IsFemale,
+                                                        LiftNodeName ..., read by the setup 0x2E98C0) */
 } MoveGraph;
 typedef struct MoveNode MoveNode;
 

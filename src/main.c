@@ -242,6 +242,34 @@ static void start_moves(Viewer *v)
         play_state(v);
 }
 
+/* Monster.isFemale (script method 0x96, 0x2AC0E0): the monster's +0xAB6, which its setup (0x2E98C0) sets from
+ * MiscData|IsFemale of its property book (MONSTER_DATA +0xAA4): Amanda, Jill, Lizzie, Natalie, Snapper, Venus */
+static int monster_female(const Viewer *v)
+{
+    char book[64];                                   /* "George_prop.prb": the book George_prop(.bdp) */
+    snprintf(book, sizeof book, "%s", v->have_graph && v->graph.props ? v->graph.props : "");
+    char *dot = strrchr(book, '.');
+    if (dot)
+        *dot = 0;
+    Group g = book[0] ? city_book_group(v->city, book, "MiscData") : (Group){ 0 };
+    return g.at && group_num(g, "IsFemale", 0) != 0;
+}
+
+/* gWorld.isSphereVisible for people.c: the sphere inside the game camera's view (its fov across the 640 x 480 GUI
+ * screen's height, 4:3 across) */
+static int people_visible(void *ctx, const float p[3], float radius)
+{
+    const Viewer *v = ctx;
+    const float (*r)[3] = (const float (*)[3])v->cam.rot;
+    float d[3] = { p[0] - v->cam.pos[0], p[1] - v->cam.pos[1], p[2] - v->cam.pos[2] };
+    float x = d[0] * r[0][0] + d[1] * r[0][1] + d[2] * r[0][2], y = d[0] * r[2][0] + d[1] * r[2][1] + d[2] * r[2][2];
+    float z = d[0] * r[1][0] + d[1] * r[1][1] + d[2] * r[1][2];
+    if (z < -radius)
+        return 0;
+    float t = tanf((v->cam.s.fov > 0 ? v->cam.s.fov : 1) / 2), zz = z > 0.1f ? z : 0.1f;
+    return fabsf(x) - radius <= zz * t * 4 / 3 && fabsf(y) - radius <= zz * t;
+}
+
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
 static Group army_find(void *ctx, const char *book, const char *name)
 {
@@ -298,7 +326,9 @@ static void build(Viewer *v)
         city_monster(v->city, &v->scene, v->monsters[v->monster], v->clip, v->mx, v->my, v->heading) == 0)
         printf("%s: %s\n", v->monsters[v->monster], v->scene.monster_clip ? v->scene.monster_clip : "-");
     start_moves(v);
-    if (v->have_scene && v->scene.music)             /* the block's music, looping (sound.c; silent unless started) */
+    if (getenv("RAMPAGE_TRACE") && v->have_graph)
+        printf("properties %s%s\n", v->graph.props ? v->graph.props : "-", monster_female(v) ? ", female" : "");
+    if (v->have_scene && v->scene.music)            /* the block's music, looping (sound.c; silent unless started) */
         music_play(v->scene.music);
     if (v->army) {
         army_free(v->army);
@@ -320,6 +350,8 @@ static void build(Viewer *v)
         }
     }
     v->scene.army = v->army;
+    if (v->have_scene && v->scene.folk)
+        people_set_visible(v->scene.folk, people_visible, v);
     hud_close(v->hud);                               /* player 1's HUD for this monster (Hud0.ifc) */
     v->hud = NULL;
     if (v->have_gui && v->have_scene && v->monster >= 0 && !v->no_hud) {
@@ -512,6 +544,8 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     if (e->type != 21 || !e->name)
         return;
     const char *n = e->name;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  script %s (%g %g %g %g)\n", n, e->p[0], e->p[1], e->p[2], e->p[3]);
     if (!strcmp(n, "Monsters::jumpNull"))        { w[0] = mirror * e->p[0]; w[1] = e->p[2]; set = 1; }
     else if (!strcmp(n, "Monsters::jumpNorm"))   { w[0] = mirror * e->p[0]; w[2] = 22; set = 1; }
     else if (!strcmp(n, "Monsters::jumpLow"))    { w[0] = mirror * e->p[0]; w[2] = 15; set = 1; }
@@ -577,6 +611,18 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     else if (!strcmp(n, "Monsters::startRespawn")) { /* back to full health (MONSTER_DATA +0x138) */
         v->hp = 200;
         v->defeated = 0;
+        if (v->scene.monster >= 0)
+            v->scene.instances[v->scene.monster].hidden = 0;
+        return;
+    }
+    else if (!strcmp(n, "Monsters::becomeHuman")) {  /* while a block plays (state 6): createStreaker, and the monster
+                                                        stops drawing itself (0x2D3ED0) */
+        if (!v->scene.folk || v->scene.monster < 0)
+            return;
+        Group t = city_template(v->city, monster_female(v) ? "NakedFemale" : "NakedMale");
+        float at[3] = { v->mx, v->my, v->mz };
+        if (t.at && people_add_streaker(v->scene.folk, t, at, v->cam.pos[0]) >= 0)
+            v->scene.instances[v->scene.monster].hidden = 1;
         return;
     }
     else if (!strcmp(n, "Monsters::doGrabPerson")) { /* grabBuildingOccupant(loc, 1) (0x2B3350): 0.25 s blend */
@@ -796,8 +842,13 @@ static void hit_spheres(Viewer *v)
         scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
         if (v->army)                                 /* and the army's units (20 a blow [G]) */
             army_hit(v->army, 0, c, c[3], 20);
-        if (v->scene.folk)                           /* and people (TakeDamage) */
+        if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
+            float from[3] = { v->mx, v->my, v->mz };
+            PeopleEaten got = scene_huts_hit(&v->scene, c, c[3], from);
+            if (got.health != 0 || got.energy != 0 || got.points != 0)
+                people_apply_eaten(&got, &v->hp, 200, &v->energy);
+        }
     }
     if (!v->show_hits)
         v->scene.nspheres = 0;
@@ -1239,6 +1290,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         PeopleMonster pm = { { v->mx, v->my, v->mz }, v->have_graph ? v->graph.states[v->run.state].name : NULL };
         scene_people_spawn(&v->scene, dt);
         people_update(v->scene.folk, dt, &pm, 1);
+        scene_huts_update(&v->scene, dt);
         Mat4 h;
         if (v->held >= 0 && people_get(v->scene.folk, v->held)->phase != PP_HELD)
             v->held = -1;

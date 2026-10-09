@@ -97,6 +97,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
                         state = j;
             g->slot[c][k] = c > 0 && list < 0 ? g->slot[0][k] : state;
         }
+    g->props = name_at(b, (int32_t)rd32(d + 0xAA4));
     uint32_t nattach = rd32(d + 0xA84), attach = rd32(d + 0xA88);
     if (nattach < 256 && attach + 0x38 * (uint64_t)nattach <= size) {
         g->attach = calloc(nattach ? nattach : 1, sizeof *g->attach);
