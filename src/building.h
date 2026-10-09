@@ -23,6 +23,12 @@ typedef struct {
     uint8_t state, hp, tile;                         /* +0 damage state, +4 HP (10), +5 the sheet's column */
 } BuildingCell;
 
+/* a grid vertex (32 bytes in the game): its dent level 0 .. 3 (+0x0's alpha / 85) and how far the dent moved it
+ * along its face (+0x14, left to right seen from outside) and up (+0x18); per vertex row, left D + 1 (back to front),
+ * right D + 1 (front to back), front W + 1 (left to right) */
+typedef struct { uint8_t level; float along, up; } BuildingVert;
+#define BUILDING_VCOLS (BUILDING_CELLS + 1)
+
 typedef struct {
     float min[3], max[3];                            /* in the world (the grid's +0x24 .. +0x38); max z drops as it falls */
     int width, depth, storeys;                       /* storeys: as built */
@@ -32,7 +38,7 @@ typedef struct {
     int hp, hp_max;                                  /* BuildingHP (+0x390, +0x394; default 6 x width x storeys) */
     int floor_hp[BUILDING_STOREYS];                  /* FloorHP per storey (floor +0x14; default 8 x width) */
     BuildingCell cell[BUILDING_STOREYS][BUILDING_CELLS];   /* [o][face x depth + column], fronts from 2 x depth */
-    uint8_t vert[BUILDING_STOREYS + 1][BUILDING_CELLS];    /* the front's vertex levels 0 .. 3 by live row (dents) */
+    BuildingVert vert[BUILDING_STOREYS + 1][3][BUILDING_VCOLS];   /* by live row, face (FACE_*), column: the dents */
     int collapse;                                    /* G+0x1CC: -1 none, k >= 1 live storey k-1 falls, 0 it sinks */
     float progress;                                  /* G+0x1D0: storeys fallen (0 .. 1; 0 .. 7/3 sinking) */
     float timer;                                     /* the destruction's clock (+0x150) */
@@ -58,5 +64,8 @@ float building_shake(const Building *b);             /* the sway along x now (0x
 void building_storey(const Building *b, int s, float *bottom, float *height);
 float building_sink(const Building *b);
 int building_live_of(const Building *b, int o);      /* storey o's live place, -1 if it has fallen */
+/* 0x2CEAD0: a vertex's dent level; a new dent moves it 0.1 .. 0.45 (by level) in a random direction in its face's
+ * plane, a deeper one further the same way; the front's corners are the sides' too */
+void building_set_level(Building *b, int face, int row, int col, int level);
 
 #endif

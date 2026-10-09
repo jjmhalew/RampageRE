@@ -627,7 +627,7 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
     const Building *b = &sb->b;
     int cells = 2 * b->depth + b->width;
     part_reset(glass, (uint32_t)(b->storeys * cells));
-    part_reset(crack, (uint32_t)(b->storeys * b->width * 4));
+    part_reset(crack, (uint32_t)(b->storeys * cells * 4));
     part_reset(inner, (uint32_t)(b->storeys * 2));
     float tint[4] = { s->cube_tint[0] / 256, s->cube_tint[1] / 256, s->cube_tint[2] / 256, 1 };
     for (int o = 0; o < b->storeys; o++) {
@@ -660,29 +660,36 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
                     }
                     part_quad(glass, pos, uv, col4, n);
                 }
-                if (face != FACE_FRONT)
-                    continue;
                 /* the cracks: this cell's corners in the vertex rows ls (bottom) and ls + 1 (top) */
-                float lv[4] = { b->vert[ls][col], b->vert[ls][col + 1], b->vert[ls + 1][col + 1], b->vert[ls + 1][col] };
+                const BuildingVert *cv[4] = { &b->vert[ls][face][col], &b->vert[ls][face][col + 1],
+                                              &b->vert[ls + 1][face][col + 1], &b->vert[ls + 1][face][col] };
+                float lv[4] = { cv[0]->level, cv[1]->level, cv[2]->level, cv[3]->level };
                 if (lv[0] + lv[1] + lv[2] + lv[3] <= 0)
                     continue;
                 float outer[4][2] = { { 0, 0 }, { CELL, 0 }, { CELL, STOREY }, { 0, STOREY } };
                 float in[4][2] = { { ol[0], ol[1] }, { ol[2], ol[1] }, { ol[2], ol[3] }, { ol[0], ol[3] } };
                 int bands = cell->state < 2 && ol[0] >= 0;
-                float start = CELL * (float)b->depth + CELL * (float)col, up = STOREY * (float)ls;
+                float start = (face == FACE_FRONT ? CELL * (float)b->depth : face == FACE_RIGHT ?
+                               CELL * (float)(b->depth + b->width) : 0) + CELL * (float)col, up = STOREY * (float)ls;
+                int corner_of[4] = { 0, 1, 2, 3 };           /* an inner corner moves with the nearest outer one */
                 for (int band = 0; band < (bands ? 4 : 1); band++) {
                     float az[4][2], al[4], pos[4][3], uv[4][2], col4[4][4];
+                    int who[4];
                     if (bands) {                         /* bottom, right, top, left of the window */
                         int i = band, j = (band + 1) & 3;
                         memcpy(az[0], outer[i], 8); memcpy(az[1], outer[j], 8);
                         memcpy(az[2], in[j], 8); memcpy(az[3], in[i], 8);
                         al[0] = lv[i]; al[1] = lv[j]; al[2] = lv[j]; al[3] = lv[i];
+                        who[0] = who[3] = corner_of[i];
+                        who[1] = who[2] = corner_of[j];
                     } else {
                         memcpy(az, outer, sizeof az);
                         memcpy(al, lv, sizeof al);
+                        for (int k = 0; k < 4; k++) who[k] = k;
                     }
                     for (int k = 0; k < 4; k++) {
-                        face_point(sb, face, col, az[k][0], az[k][1], -0.02f, bottom, height, pos[k]);
+                        face_point(sb, face, col, az[k][0] + cv[who[k]]->along, az[k][1], -0.02f, bottom, height, pos[k]);
+                        pos[k][2] += cv[who[k]]->up;
                         uv[k][0] = (start + az[k][0]) * sb->crack_k;
                         uv[k][1] = -(up + az[k][1]) * sb->crack_k;
                         memcpy(col4[k], sb->crack_tint, 12);
@@ -1487,8 +1494,15 @@ static void building_place(Scene *s, SceneBuilding *sb)
                 int32_t v = sb->quad[o][c];
                 if (v < 0 || (uint32_t)v + 4 > p->nverts)
                     continue;
-                for (int k = 0; k < 4; k++)          /* a storey that has gone: no height, nothing drawn */
-                    p->pos[3 * (v + k) + 2] = bottom + (k & 1 ? height : 0);
+                int face = c < b->depth ? FACE_LEFT : c < 2 * b->depth ? FACE_RIGHT : FACE_FRONT;
+                int col = face == FACE_LEFT ? c : face == FACE_RIGHT ? c - b->depth : c - 2 * b->depth;
+                for (int k = 0; k < 4; k++) {        /* corners: bottom, top, bottom, top; a fallen storey: no height */
+                    const BuildingVert *dv = ls >= 0 ? &b->vert[ls + (k & 1)][face][col + (k >> 1)] : NULL;
+                    float at[3];
+                    face_point(sb, face, col, CELL * (float)(k >> 1) + (dv ? dv->along : 0), 0, 0,
+                               bottom + (k & 1 ? height : 0) + (dv ? dv->up : 0), STOREY, at);
+                    memcpy(p->pos + 3 * (v + k), at, sizeof at);
+                }
             }
         }
     }

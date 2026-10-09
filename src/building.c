@@ -1,5 +1,6 @@
 /* building.c - a building's cells, how hits damage them and how it falls (building.h; docs/FORMAT_BDP.md "Damage",
  * "Collapse"). */
+#include <math.h>
 #include <string.h>
 #include "building.h"
 
@@ -105,12 +106,95 @@ static void floor_falls(Building *b, int k)
         int o = b->live[k - 1];
         for (int c = 0; c < 2 * b->depth + b->width && c < BUILDING_CELLS; c++)
             b->cell[o][c].state = 3;
-        for (int c = 0; c <= b->width && c < BUILDING_CELLS; c++)   /* its vertex rows to level 3 */
-            b->vert[k - 1][c] = b->vert[k][c] = 3;
+        for (int f = 0; f < 3; f++)                  /* its vertex rows to level 3, on every face */
+            for (int c = 0; c <= (f == FACE_FRONT ? b->width : b->depth) && c < BUILDING_VCOLS; c++) {
+                building_set_level(b, f, k - 1, c, 3);
+                if (k < b->n)
+                    building_set_level(b, f, k, c, 3);
+            }
     }
     b->collapse = k;                                 /* 0x2CE240 */
     b->progress = 0;
     b->dirty = 1;
+}
+
+void building_set_level(Building *b, int face, int row, int col, int level)
+{
+    int ncol = face == FACE_FRONT ? b->width : b->depth;
+    if (face < 0 || face > 2 || row < 0 || row > b->n || col < 0 || col > ncol || col >= BUILDING_VCOLS)
+        return;
+    BuildingVert *v = &b->vert[row][face][col];
+    int old = v->level, lc = level < 3 ? level : 3;
+    if (old == level)
+        return;
+    v->level = (uint8_t)level;
+    if (level == 0) {
+        v->along = v->up = 0;
+    } else if (level > old) {
+        if (old == 0 || v->along * v->along + v->up * v->up < 1e-6f) {   /* a new dent, 0x1063F0's sin and cos */
+            float r = 0.2f + 0.1f * rnd01(b), th = 6.2831853f * rnd01(b) - 3.14159265f;
+            v->along = sinf(th) * r * 0.5f * (float)lc;
+            v->up = cosf(th) * r * 0.5f * (float)lc;
+        } else {                                     /* deeper, the same way */
+            float k = (float)lc / (float)(old < 3 ? old : 3);
+            v->along *= k;
+            v->up *= k;
+        }
+    }
+    if (row == 0 || row == b->n)                     /* the bottom and the top row only move along */
+        v->up = 0;
+    /* the front's corners are the sides' front vertices: they stay on the corner and move up together */
+    if ((face == FACE_FRONT && (col == 0 || col == b->width)) || (face == FACE_LEFT && col == b->depth) ||
+        (face == FACE_RIGHT && col == 0))
+        v->along = 0;
+    if (face == FACE_LEFT && col == b->depth) b->vert[row][FACE_FRONT][0].up = v->up;
+    if (face == FACE_RIGHT && col == 0) b->vert[row][FACE_FRONT][b->width].up = v->up;
+    if (face == FACE_FRONT && col == 0) b->vert[row][FACE_LEFT][b->depth].up = v->up;
+    if (face == FACE_FRONT && col == b->width) b->vert[row][FACE_RIGHT][0].up = v->up;
+    b->dirty = 1;
+}
+
+/* 0x2CC900: one dent's worth at a vertex (row, u: the faces unwrapped, left 0 .. 2, front from 2, right from
+ * W + 2, the depth taken as 2), or the first of its rings (0x4310D0: 1, 8, 12 vertices) below the ring's cap:
+ * 3 at the vertex, 2 around it, 1 further out. 1 if a vertex took it. */
+static int dent(Building *b, int row, int u, int amount)
+{
+    static const int8_t RING[21][2] = {               /* 0x4310E0: (du, drow) */
+        { 0, 0 },
+        { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 },
+        { 2, 0 }, { 2, 1 }, { 1, 2 }, { 0, 2 }, { -1, 2 }, { -2, 1 }, { -2, 0 }, { -2, -1 }, { -1, -2 }, { 0, -2 },
+        { 1, -2 }, { 2, -1 } };
+    static const int FIRST[3] = { 0, 1, 9 }, COUNT[3] = { 1, 8, 12 };
+    uint32_t r = rnd(b);
+    for (int t = 1; t <= 3; t++)
+        for (int k = 0; k < t; k++) {
+            int cap = t - k;
+            for (int i = 0; i < COUNT[k]; i++) {
+                const int8_t *d = RING[FIRST[k] + (int)((r + (uint32_t)i) % (uint32_t)COUNT[k])];
+                int uu = u + d[0], rr = row + d[1], face, col;
+                if (uu < 0 || uu >= b->width + 4 || rr < 0 || rr > b->n)
+                    continue;
+                if (uu < 2) { face = FACE_LEFT; col = uu; }
+                else if (uu <= b->width + 2) { face = FACE_FRONT; col = uu - 2; }
+                else { face = FACE_RIGHT; col = uu - b->width - 2; }
+                if (col > (face == FACE_FRONT ? b->width : b->depth))
+                    continue;
+                int lv = b->vert[rr][face][col].level;
+                if (lv >= cap)
+                    continue;
+                building_set_level(b, face, rr, col, lv + amount < cap ? lv + amount : cap);
+                int tf = -1, tc = 0;                 /* the corner's twin on the side */
+                if (face == FACE_FRONT && col == 0) { tf = FACE_LEFT; tc = 2; }
+                if (face == FACE_FRONT && col == b->width) { tf = FACE_RIGHT; tc = 0; }
+                if (tf >= 0 && tc <= b->depth) {
+                    int tl = b->vert[rr][tf][tc].level;
+                    if (tl < cap)
+                        building_set_level(b, tf, rr, tc, tl + amount < cap ? tl + amount : cap);
+                }
+                return 1;
+            }
+        }
+    return 0;
 }
 
 /* the building's HP is gone: it is destroyed (0x2BB8B0) */
@@ -220,12 +304,17 @@ int building_hit(Building *b, const float p[3], float radius)
     } else {
         return 0;
     }
-    (void)fh;                                        /* where across the cell: the dents (0x2CC900), not drawn here */
+    /* Building::hit's dents: at the cell's corner nearest the hit, 3 x round(radius / 2.5) times (0x2CC900) */
+    int vrow = s + (int)floorf(fv + 0.5f), vcol = col + (int)floorf(fh + 0.5f);
+    int u = face == FACE_LEFT ? vcol : face == FACE_FRONT ? vcol + 2 : vcol + b->width + 2;
+    int dented = 0;
+    for (int i = 0, n = 3 * (int)floorf(radius / 2.5f + 0.5f); i < n; i++)
+        dented |= dent(b, vrow, u, 1);
     if (radius < 2.0f)
-        return 0;
+        return dented;
     if (face == FACE_LEFT && col == b->depth - 1) { face = FACE_FRONT; col = 0; }        /* the corners count as the */
     if (face == FACE_RIGHT && col == 0) { face = FACE_FRONT; col = b->width - 1; }       /* front's end cells */
-    return face == FACE_FRONT ? cell_damage(b, s, col, 2, 1, fv) : 0;
+    return (face == FACE_FRONT ? cell_damage(b, s, col, 2, 1, fv) : 0) | dented;
 }
 
 /* 0x2BD3B0: a floor has come down onto the one below (only a floor's own collapse, not the destruction's): the one
@@ -294,9 +383,9 @@ static int crack_step(Building *b)
         int start = (int)(rnd(b) % (uint32_t)cols);
         for (int i = 0; i < cols; i++) {
             int v = (start + i) % cols;
-            if (b->vert[j][v])
+            if (b->vert[j][FACE_FRONT][v].level)
                 continue;
-            b->vert[j][v] = (uint8_t)(1 + rnd(b) % 3);
+            building_set_level(b, FACE_FRONT, j, v, (int)(1 + rnd(b) % 3));
             if (j > 0)                               /* the cells either side of it, in the storey below the row */
                 for (int c = v - 1; c <= v; c++) {
                     int ci = building_cell_index(b, FACE_FRONT, c);

@@ -354,8 +354,16 @@ units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.
 1. Only a standing building (+0x14C = 1) takes hits. The point goes into the box and onto the nearest of roof, front,
    left or right (0x2BB7B0, never the back), then to a face, storey and column (0x2CCCA0): below z 6.01 the ground
    floor, in the roof's band the roof; storey = (z − 6) / 3, column = the 5-unit slot along the face.
-2. Every hit on a facade dents its vertices: 3 × round(radius / 2.5) times 0x2CC900 raises a vertex level (0 … 3) at
-   the nearest grid vertex or a neighbour at random (rings of 1, 8 and 12, capped 3, 2, 1), which bends the mesh.
+2. Every hit on a facade (any of the three faces, whatever its radius) dents its vertices: 3 × round(radius / 2.5)
+   times 0x2CC900 raises a vertex level (0 … 3) by 1, at the cell's corner nearest the hit or the first vertex of
+   its rings below the ring's cap (rings 0x4310D0 of 1, 8 and 12, (du, row) pairs at 0x4310E0, capped 3, 2, 1,
+   starting at a random entry), the faces unwrapped into one row of columns (left 0 … 2, front from 2, right from
+   W + 2: the depth taken as 2). A front corner raises its side twin too. 0x2CEAD0 sets a level: a new dent moves
+   the vertex 0.5 × level × (0.2 … 0.3) in a random direction in the face's plane (+0x14 along, +0x18 up), a deeper
+   one further the same way; the bottom and top rows move only along, the corners only up and together with the
+   side's, nothing moves along the normal (+0x1C stays 0). The level is +0x0's alpha (× 85), which fades in the
+   crack pass. The cracking (state 4) sets front vertices straight to 1 … 3, a floor's collapse its rows on every
+   face to 3.
 3. With a radius of 2 or more the front cell takes 2 HP (0x2BB950; a side's front column counts as the front's end
    cell, the other side cells and the roof take none). The HP comes off the floor's and the building's pools too:
    when the building's runs out it falls (state 4), when the floor's does every cell of that storey goes to state 3

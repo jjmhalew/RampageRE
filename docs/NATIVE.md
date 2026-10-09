@@ -90,7 +90,7 @@ buildings keep their HP pools, and each facade tile shows its cell's state (the 
 break and wreck a cell and its neighbours, and a damaged storey shows its interior (the floor's `Skeleton`, then its
 `DamagedSkeleton` once half its `FloorHP` is gone) through the holes ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage").
 The facade's other passes are the game's too ("Facade geometry"): intact windows show `InnerWindow` interiors behind
-the sheet's clear panes, tinted `CubeTint`; a cracking front fades in `CrackTexture` by its vertex rows' levels,
+the sheet's clear panes, tinted `CubeTint`; hits dent the facade (its grid vertices move in the face, 0.1 … 0.45 by level) and fade in `CrackTexture` by the levels,
 around the windows of lightly damaged cells; a broken corner cell shows the inner wall behind it (the sheet's
 `InnerWallColumn`). A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
@@ -114,7 +114,7 @@ x ±75 and y −30.
 - the face layer's blend into a new face clip (it cuts), `queueFacialAnim`, the head turning towards a target, cloth
   simulation;
 - friction on the velocity, the head turning with the right stick;
-- the buildings' dents (vertex levels are kept, the facade does not bend), debris and dust effects, scoring;
+- debris and dust effects, scoring;
 - effects (`tools/edf.py`), the GUI, sound;
 - grabbing, the hands' grip on the wall (attachHand / detachHand: IK), the game's rules;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.
