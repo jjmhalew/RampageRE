@@ -65,13 +65,13 @@ asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other 
 | 13 | 1,275 | palette (`.pal`) | header / 256 colours |
 | 16 | 2,119 | `.pwk`: model description; holds u16 name indices of the model's materials, 0xFFFF terminated (probably) | |
 | 17 | 30 | skinned mesh (monster bodies), see below | header / vertices |
-| 20 | 297 | GUI image description (text) | |
+| 20 | 297 | effect ("Text EDF file": particles, composites, camera shakes), see [FORMAT_EDF.md](FORMAT_EDF.md) | |
 | 22 | 28 | property book (`.prb`), see below | |
-| 23 | 13 | text (`.loc`): names of city blocks, challenge texts | |
-| 24 | 43 | GUI layout (`.ifc`) | |
+| 23 | 13 | string table (`.loc`): block names, menus, challenge texts in 9 languages, see [FORMAT_EDF.md](FORMAT_EDF.md) | |
+| 24 | 43 | GUI layout (`.ifc`, XML), see [FORMAT_EDF.md](FORMAT_EDF.md) | |
 | 25 | 44 | cloth simulation settings (hair, whiskers, ...) | |
 
-Types 20, 24 and 25 are named from their entry names and sizes; their contents are not decoded yet.
+Type 25 is named from its entry names; its contents are not decoded yet. Most `.ifc` tags are not decoded either.
 
 ## Textures (type 9) and palettes (type 13)
 Texture data, 0x104 bytes:

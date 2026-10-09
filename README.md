@@ -41,6 +41,7 @@ Las Vegas. The 3D picture still has errors (black ground), it runs slowly and th
 | City models with node trees (people, vehicles, bosses) with their clips; moving props loop in the blocks | ✅ |
 | People and traffic in the blocks (379 people, 375 vehicles; lanes from the game's traffic code) | ✅ |
 | Lighting: the game's lights, fog, drifting clouds; every block also at night | ✅ |
+| Effects (297, rebuilt byte for byte), string tables (13, 9 languages), GUI layouts (XML) | ✅ [docs/FORMAT_EDF.md](docs/FORMAT_EDF.md) |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -72,6 +73,8 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/tex.py` | exports bundle textures to PNG |
 | `tools/mesh.py` | exports bundle meshes with materials and textures as glTF (`--verify`: all 5,577 meshes) |
 | `tools/city.py` | assembles a city's blocks (ground, buildings, street objects) into glTF scenes |
+| `tools/edf.py` | decompiles the 297 effect files ("Text EDF file") to text and compiles them back (`--verify`) |
+| `tools/loc.py` | string tables (`.loc`): 574 keys in 9 languages to TSV (`--verify`) |
 | `tools/anim.py` | skeletons and animations: exports each monster as an animated, skinned glTF, and a city's people, vehicles and bosses with their clips (`--verify`: all 615 node trees and 5,379 animations) |
 | `tools/prb.py` | prints property books (design data) as readable trees |
 | `viewer/index.html` | three.js viewer for the exported glTF, plays animations (serve the repository root) |
