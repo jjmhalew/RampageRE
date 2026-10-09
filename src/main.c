@@ -29,6 +29,7 @@
 #include "look.h"
 #include "shadow.h"
 #include "director.h"
+#include "footstep.h"
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
@@ -100,10 +101,15 @@ typedef struct {
     Camera hud_cam;                                  /* the frame's camera, for the floating scores */
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
     const MoveNode *face;                            /* the face layer's node playing now */
+    FootProps feet_fx; FootState feet;              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
     float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
 } Viewer;
+
+static int water_at(const Viewer *v, float x, float y);
+static float water_surface(const Water *w);
+static float ground_at(const Viewer *v, float x, float y, float z);
 
 static void hud_frame(Viewer *v, int after);
 static void rage_started(Viewer *v);
@@ -247,6 +253,18 @@ static void start_moves(Viewer *v)
     if (v->scene.monster < 0 || !v->scene.monster_bundle || moves_read(v->scene.monster_bundle, &v->graph) != 0)
         return;
     v->have_graph = 1;
+    {                                                /* the property book's footfalls (MonsterFx), DisableFootDrag */
+        char book[64];
+        snprintf(book, sizeof book, "%s", v->graph.props ? v->graph.props : "");
+        char *dot = strrchr(book, '.');
+        if (dot)
+            *dot = 0;
+        foot_props_default(&v->feet_fx);
+        Group g = book[0] ? city_book_group(v->city, book, "MonsterFx") : (Group){ 0 };
+        foot_props_read(&v->feet_fx, g);
+        g = book[0] ? city_book_group(v->city, book, "MiscData") : (Group){ 0 };
+        foot_init(&v->feet, g.at && group_num(g, "DisableFootDrag", 0) != 0);
+    }
     if (v->have_ag)
         dir_graph_free(&v->ag);
     v->have_ag = dir_graph_read(v->scene.monster_bundle, &v->ag) == 0;
@@ -719,6 +737,30 @@ static void hit_building_front(Viewer *v, const float *p)
         printf(" (state %d, %d storeys, HP %d)\n", best->b.state, best->b.n, best->b.hp);
 }
 
+/* the monster as its foot object reads it (footstep.c): the feet's bones, its velocity, its ground, the water */
+static void foot_pose(const Viewer *v, FootPose *m)
+{
+    memset(m, 0, sizeof *m);
+    m->place[0] = v->mx; m->place[1] = v->my; m->place[2] = v->mz;
+    float h = v->heading / 57.2957795f;
+    m->fwd[0] = -sinf(h); m->fwd[1] = cosf(h);
+    for (int f = 0; f < 2; f++) {
+        Mat4 w;
+        if (scene_monster_node(&v->scene, foot_bone(f, v->mirror), &w) == 0) {
+            m->foot[f][0] = w.m[12]; m->foot[f][1] = w.m[13]; m->foot[f][2] = w.m[14];
+        } else
+            memcpy(m->foot[f], m->place, sizeof m->place);
+    }
+    for (int k = 0; k < 3; k++)
+        m->vel[k] = v->vel[k] + v->air[k];
+    m->ground = ground_at(v, v->mx, v->my, v->mz);
+    int wk = water_at(v, v->mx, v->my);
+    m->in_water = wk >= 0;
+    m->water_z = wk >= 0 ? water_surface(v->scene.water[wk]) : 0;
+    m->node_flags = v->have_graph ? v->graph.states[v->run.state].flags : 0;
+    m->mirrored = v->mirror;
+}
+
 static void clip_event(Viewer *v, const MoveEvent *e)
 {
     float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
@@ -774,6 +816,20 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
     else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
+    else if (!strcmp(n, "Monsters::footStep")) { foot_step(&v->feet, (int)e->p[0], v->mirror); return; }
+    else if (!strcmp(n, "Monsters::footPlant") || !strcmp(n, "Monsters::cancelFootStep")) {
+        FootPose m;                                  /* the footfall under a still monster's foot; the feet set down */
+        FootFx fx;
+        foot_pose(v, &m);
+        if (n[10] == 'c')
+            foot_cancel(&v->feet, (int)e->p[0], &m);
+        else if (foot_plant(&v->feet, &v->feet_fx, (int)e->p[0], &m, &fx) && v->fxw) {
+            fx_spawn(v->fxw, fx.name, fx.pos, NULL, 1);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  footfall %s at %.1f %.1f %.1f\n", fx.name, fx.pos[0], fx.pos[1], fx.pos[2]);
+        }
+        return;
+    }
     else if (!strcmp(n, "Monsters::setMirrorState")) { v->mirror_queued = e->p[0] != 0; return; }
     else if (!strcmp(n, "Monsters::faceAnim")) {     /* (expression, head layer, -, plays): never looping */
         int head, plays;                             /* (and a delay > 1: the belch that many seconds later) */
@@ -2036,13 +2092,25 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                 v->mz = g;
                 int wk = water_at(v, v->mx, v->my);
                 if (v->mode == MODE_AIRBORNE && wk >= 0) {   /* into the water (0x2DCA94): pressed down 1.25 x its
-                                                      * radius across, by its fall speed, and its splash [G: the
-                                                      * props' WaterImpactFx where the game starts it was not read] */
+                                                      * radius across, by its fall speed */
                     float s = fminf(fmaxf(-v->vel[2] / 50, 0), 1), at[3] = { v->mx, v->my, 0 };
                     at[2] = water_surface(v->scene.water[wk]);
                     water_disturb(v->scene.water[wk], at, 1.25f * MONSTER_HALF_WIDTH, -(2 * s + 0.5f * (1 - s)));
-                    if (v->fxw)
-                        fx_spawn(v->fxw, "footfall_big_water", at, NULL, 1);
+                }
+                if (v->mode == MODE_AIRBORNE && v->fxw) {   /* every landing (0x2DC450 -> 0x2F48D0): the big
+                                                      * footfall under the spine, GroundImpactFx / WaterImpactFx */
+                    Mat4 sp;
+                    float spine[3] = { v->mx, v->my, v->mz };
+                    FootFx fx;
+                    if (scene_monster_node(&v->scene, FOOT_IMPACT_BONE, &sp) == 0) {
+                        spine[0] = sp.m[12]; spine[1] = sp.m[13];
+                    }
+                    if (foot_impact(&v->feet_fx, spine, g, wk >= 0,
+                                    wk >= 0 ? water_surface(v->scene.water[wk]) : 0, &fx)) {
+                        fx_spawn(v->fxw, fx.name, fx.pos, NULL, 1);
+                        if (getenv("RAMPAGE_TRACE"))
+                            printf("  landing %s at %.1f %.1f %.1f%c", fx.name, fx.pos[0], fx.pos[1], fx.pos[2], 10);
+                    }
                 }
                 if (v->mode == MODE_AIRBORNE) {      /* landed (0x2DC450): slot 56 in the current column */
                     int to = moves_slot(&v->graph, SLOT_LAND, v->column);

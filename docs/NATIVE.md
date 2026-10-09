@@ -131,11 +131,12 @@ x ±75 and y −30.
 ## Not there yet
 - the challenges (the item counts, ChallengeText's cards), the King and Timed Run results screens, the Pause menu;
 - which monster a cryotube reveals (the banner names the next one in the viewer's list), findPointInRubble;
-- the game's footstep effects and the splash effects' own triggers (the viewer splashes on landing in water);
+- the feet locked to the ground and dragged (0x33BF10 and kin; footstep.c keeps the records for it);
 - vertex-coloured interiors of damaged buildings, the facades darkened by their neighbours' shadows.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
 the bosses (boss.c), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
 choreography and camera modes (director.c), the face queue, head turn and friction (look.c), shadows (shadow.c),
-effects with their mesh debris and sounds (fx.c) and sound (sound.c).
+effects with their mesh debris and sounds (fx.c), the footfalls and landings' dust and splashes (footstep.c,
+[FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md)) and sound (sound.c).

@@ -111,8 +111,8 @@ radius, radius, height, against each water's +0x104 box, the list at 0x4D0AE0 / 
 - **its ground** (0x2E859C in 0x2E8530): +0xA48 = 0x337E00, the floor.
 
 The props name the splashes: `WaterFootStepFx = "footfall_water.edf"`, `WaterImpactFx = "footfall_big_water.edf"`
-(George_prop and the others, read by 0x2F5D80 into +0x144 / +0x154 of the props record); where they are started was
-not followed [G: at a footstep / a landing in water, like GroundFootStepFx / GroundImpactFx].
+(George_prop and the others, read by 0x2F5D80 into +0x144 / +0x154 of the props record); they are started by
+`Monster.footPlant` (WaterFootStepFx) and the landing (WaterImpactFx), see [FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md).
 
 ## The floor (0x337E00)
 
