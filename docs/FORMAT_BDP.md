@@ -256,8 +256,12 @@ weights skin the mesh at rest. A flag's particles have no bones.
 ## Materials (type 6)
 0x90 bytes: u16 own name index, u16 layer count?, u16 flags, ..., f32 colours from 0x08 (diffuse, ambient,
 specular, ...), u16 name index of the texture at 0x38 (0 = no texture). 1,412 of the 1,695 materials name a
-texture; the rest have none or name an `.ifl` animation (a text list of frame images and durations) or another
-material.
+texture; the rest have none or name an `.ifl` animation or another material. An `.ifl` is a text entry (type 2):
+one line per frame, its image's name (`Parking00.bmp`: the texture `Parking00`) and how many frames it shows
+(taken as 3ds Max's 30 per second; 20 of them, 9 in Las Vegas: neon signs, fans).
+
+Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees, cloth, teeth), bit 1 see-through
+(fog masks, skylines, tree cards), 0xC the monsters' own; 0x100 on 78 city materials, not decoded.
 
 A mesh part's material name index does not always name a material: 3,768 of the 6,292 parts do, the other 2,524
 name a texture entry (type 9) directly (people, the city backdrops, many props).

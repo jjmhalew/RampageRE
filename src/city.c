@@ -337,7 +337,39 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     }
     float xyz[3];
     location(inst, xyz);
-    place_model(c, s, shape, mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0))), -1);
+    int id = place_model(c, s, shape, mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0))), -1);
+    const char *flags = group_str(t, "Flags");
+    if (id >= 0 && flags && strstr(flags, "IsObstacle")) {   /* 0x335ED0: IsObstacle sets object flag 0x40000 */
+        s->obstacle_of = realloc(s->obstacle_of, sizeof *s->obstacle_of * (s->nobstacles + 1));
+        s->obstacle_of[s->nobstacles++] = id;
+    }
+}
+
+/* the obstacles' boxes: their models' bounds, placed (once the scene is posed) */
+static void obstacle_boxes(Scene *s)
+{
+    free(s->obstacles);
+    s->obstacles = calloc(s->nobstacles ? s->nobstacles : 1, sizeof *s->obstacles);
+    for (uint32_t o = 0; o < s->nobstacles; o++) {
+        float *box = s->obstacles[o];
+        box[0] = box[1] = box[2] = 1e30f;
+        box[3] = box[4] = box[5] = -1e30f;
+        for (uint32_t i = 0; i < s->nitems; i++) {
+            const DrawItem *it = &s->items[i];
+            if (it->instance != s->obstacle_of[o])
+                continue;
+            const Mesh *m = &s->meshes[it->mesh].mesh;
+            for (uint32_t p = 0; p < m->nparts; p++)
+                for (uint32_t v = 0; v < m->parts[p].nverts; v++) {
+                    const float *x = m->parts[p].pos + 3 * v, *w = it->world.m;
+                    for (int k = 0; k < 3; k++) {
+                        float y = w[k] * x[0] + w[4 + k] * x[1] + w[8 + k] * x[2] + w[12 + k];
+                        if (y < box[k]) box[k] = y;
+                        if (y > box[3 + k]) box[3 + k] = y;
+                    }
+                }
+        }
+    }
 }
 
 /* a person in its template's default state (ActorAnimShape|<DefaultAnim>: model and clip), the clip on a loop */
@@ -1117,6 +1149,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     }
     traffic(c, s, block, block_name);
     update(s, 0, 1);
+    obstacle_boxes(s);
     return 0;
 }
 
@@ -1598,6 +1631,8 @@ void scene_free(Scene *s)
     free(s->instances);
     free(s->items);
     free(s->vehicles);
+    free(s->obstacle_of);
+    free(s->obstacles);
     for (uint32_t i = 0; i < s->nbuildings; i++)
         free(s->buildings[i].rest);
     free(s->buildings);

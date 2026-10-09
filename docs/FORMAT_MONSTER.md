@@ -231,6 +231,10 @@ in this clip, whether it is coming down from the top.
   height) wins if the face goes on 11.5 above the monster, else −7. The place is then checked (0x2DDC40, the box
   ± 4.1, 4.1, 4.5): −5 another building in the way (a neighbour flush with the side), −8 the building falling, −6 a
   cell flagged 0x1000, −2 an attachment or object in the way, −3 another monster, −9 out of the camera's reach.
+  The objects of −2 are those flagged 0x40000 or 0x40 (the query mask 0x40040): a template's `Flags` with
+  `IsObstacle` sets 0x40000 (0x335ED0), as the electric side signs (`DefElectricSideSignProps`) have, so climbing
+  into one is `hitElectricSign` (−2) and the clip `React_Side_L_Zap`, whose `faceAnim` plays `Expression_Zap`. The
+  building's own adornments count when their `AdornmentFlags` has bit 2 (not 0x10).
 - **Getting on**: `prepareToMount` takes the point canMount chose, `mountBuilding` mounts it (and
   `transitionToMount(t)` slides the monster onto it over t seconds, root motion still moving the start).
 - **On the face** (each frame in mode 5, 0x2D5870, after the root motion): the monster faces the wall (+y at the

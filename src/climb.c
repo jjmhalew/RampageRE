@@ -19,9 +19,10 @@ static int standing(const Building *b)               /* states 1 .. 3 */
 }
 
 /* 0x2DDC40: can the monster be at pt on building bi? The box pt +- (4.1, 4.1, 4.5) must not reach into another
- * building (-5), the building must not be falling (-8), and a player's place must be in the camera's reach (-9:
+ * building (-5), the building must not be falling (-8), nor into an obstacle object (-2: an electric side sign; the
+ * game also counts the building's adornments flagged 2), and a player's place must be in the camera's reach (-9:
  * 0x336230, at most 70 high and 30 along x from the middle of the players). The game also asks the cells' flag
- * 0x1000 (-6), the building's attachments and other objects (-2) and other monsters (-3): none here. */
+ * 0x1000 (-6) and other monsters (-3): none here. */
 static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
 {
     float lo[3] = { pt[0] - 4.1f, pt[1] - 4.1f, pt[2] - 4.5f }, hi[3] = { pt[0] + 4.1f, pt[1] + 4.1f, pt[2] + 4.5f };
@@ -38,6 +39,14 @@ static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
     const Building *b = building_of(s, bi);
     if (!b || b->state == BUILDING_FALLING || b->state == BUILDING_GONE)
         return -8;
+    for (uint32_t i = 0; s->obstacles && i < s->nobstacles; i++) {
+        const float *o = s->obstacles[i];
+        int overlap = 1;
+        for (int k = 0; k < 3; k++)
+            overlap &= lo[k] < o[3 + k] && hi[k] > o[k];
+        if (overlap)
+            return -2;
+    }
     if (pt[2] > 70 || fabsf(pt[0] - focus_x) > 30)
         return -9;
     return 1;

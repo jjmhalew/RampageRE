@@ -72,6 +72,9 @@ typedef struct {
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
+    /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
+     * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
+    int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
     int monster;                                      /* instance of the monster, -1 = none */

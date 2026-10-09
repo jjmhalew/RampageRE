@@ -1,5 +1,6 @@
 /* render_gl.c - Win32 window, WGL context and an OpenGL 1.1 renderer for a Scene (city.c). */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "plat.h"
@@ -150,9 +151,15 @@ double win_time(void)
 
 typedef struct { const Bundle *b; GLuint *tex; uint32_t n; } BundleTex;   /* per name index: GL texture, ~0 = none */
 
+/* an animated texture (.ifl, a text entry: per line a frame's image and how many frames it shows, 3ds Max's 30 per
+ * second): its frames' texture names */
+#define IFL_FRAMES 64
+typedef struct { const Bundle *b; uint32_t name; int n; uint32_t frame[IFL_FRAMES]; float until[IFL_FRAMES]; } Ifl;
+
 struct Renderer {
     const Scene *scene;
     BundleTex cache[8]; int ncache;
+    Ifl ifl[32]; int nifl;
     uint32_t drawn;
 };
 
@@ -167,6 +174,7 @@ static void drop_textures(Renderer *r)
         free(r->cache[k].tex);
     }
     r->ncache = 0;
+    r->nifl = 0;
 }
 
 void rnd_scene(Renderer *r, const Scene *s)
@@ -221,6 +229,56 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
     return bt->tex[name] == ~0u ? 0 : bt->tex[name];
 }
 
+/* the texture a material shows at time t: itself, or an .ifl's frame then */
+static uint32_t shown_texture(Renderer *r, const Bundle *b, uint32_t name, double t)
+{
+    const BdpEntry *e = bdp_entry(b, name);
+    if (!name || !e || e->type != ET_RAW || bdp_entry_of(b, name, ET_TEXTURE))
+        return name;
+    const char *nm = bdp_name(b, name);
+    size_t len = strlen(nm);
+    if (len < 4 || _stricmp(nm + len - 4, ".ifl") != 0)
+        return name;
+    Ifl *f = NULL;
+    for (int k = 0; k < r->nifl && !f; k++)
+        if (r->ifl[k].b == b && r->ifl[k].name == name)
+            f = &r->ifl[k];
+    if (!f) {
+        if (r->nifl == 32)
+            return name;
+        f = &r->ifl[r->nifl++];
+        memset(f, 0, sizeof *f);
+        f->b = b;
+        f->name = name;
+        const char *p = (const char *)e->data, *end = p + e->size;
+        float total = 0;
+        while (p < end && f->n < IFL_FRAMES) {
+            char img[64], line[128];
+            size_t k = 0;
+            while (p < end && *p != '\n' && k + 1 < sizeof line) line[k++] = *p++;
+            while (p < end && (*p == '\n' || *p == '\r')) p++;
+            line[k] = 0;
+            int frames = 1;
+            if (sscanf(line, "%63s %d", img, &frames) < 1)
+                continue;
+            char *dot = strrchr(img, '.');
+            if (dot) *dot = 0;
+            int idx = bdp_find_name(b, img);
+            if (idx <= 0)
+                continue;
+            total += (frames > 0 ? frames : 1) / 30.0f;
+            f->frame[f->n] = (uint32_t)idx;
+            f->until[f->n++] = total;
+        }
+    }
+    if (!f->n)
+        return name;
+    double at = fmod(t, f->until[f->n - 1]);
+    int k = 0;
+    while (k + 1 < f->n && at >= f->until[k]) k++;
+    return f->frame[k];
+}
+
 static void perspective(float fov_deg, float aspect, float zn, float zf)
 {
     float f = 1.0f / tanf(fov_deg * 3.14159265f / 360.0f);
@@ -253,7 +311,7 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
         const MeshPart *p = &m->parts[i];
         if (!p->ntris)
             continue;
-        GLuint id = texture(r, sm->b, material_texture(sm->b, p->material));
+        GLuint id = texture(r, sm->b, shown_texture(r, sm->b, material_texture(sm->b, p->material), t));
         if (material_flags(sm->b, p->material) & MAT_TWO_SIDED) glDisable(GL_CULL_FACE);
         else glEnable(GL_CULL_FACE);
         if (id) {

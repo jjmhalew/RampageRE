@@ -971,6 +971,10 @@ int main(int argc, char **argv)
         printf("building %u: x %.0f .. %.0f, y %.0f .. %.0f, top %.1f, row %d, %d wide\n", i, b->min[0], b->max[0],
                b->min[1], b->max[1], b->max[2], b->row, b->width);
     }
+    for (uint32_t i = 0; getenv("RAMPAGE_TRACE") && i < v.scene.nobstacles; i++) {
+        const float *o = v.scene.obstacles[i];
+        printf("obstacle %u: %.1f %.1f %.1f .. %.1f %.1f %.1f\n", i, o[0], o[1], o[2], o[3], o[4], o[5]);
+    }
     Camera cam = { { 0, -110, 45 }, 3.14159265f / 2, -0.3f, 60 };
     if (v.monster >= 0) {                                  /* closer, the monster in front */
         cam.pos[1] = -55; cam.pos[2] = 18; cam.pitch = -0.2f;
