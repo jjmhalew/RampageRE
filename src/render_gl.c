@@ -364,6 +364,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     float sky[3] = { 0.47f, 0.6f, 0.89f };
     if (s && s->fog_end > 0)
         memcpy(sky, s->fog_colour, sizeof sky);
+    if (getenv("RAMPAGE_MAGENTA")) { sky[0] = 1; sky[1] = 0; sky[2] = 1; }
     glClearColor(sky[0], sky[1], sky[2], 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!s)

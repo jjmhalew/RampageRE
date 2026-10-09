@@ -963,6 +963,7 @@ int main(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--do") == 0 && i + 1 < argc) script = argv[++i];
         else if (strcmp(argv[i], "--night") == 0) night = 1;
+        else if (strcmp(argv[i], "--fog") == 0) v.fog = 1;
         else if (strcmp(argv[i], "--cam") == 0 && i + 5 < argc) {   /* x y z yaw pitch (degrees): a fixed view */
             for (int k = 0; k < 5; k++)
                 view[k] = (float)atof(argv[++i]);
