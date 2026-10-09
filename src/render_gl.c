@@ -408,6 +408,8 @@ static void draw_fx(Renderer *r, const Camera *cam)
     glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
     glAlphaFunc(GL_GREATER, 0.004f);
+    float fog_col[4], black[4] = { 0, 0, 0, 0 };
+    glGetFloatv(GL_FOG_COLOR, fog_col);
     for (int i = 0; i < s->nfx; i++) {
         const FxQuad *q = &s->fx[i];
         GLuint id = q->b ? texture(r, q->b, q->tex) : 0;
@@ -419,6 +421,9 @@ static void draw_fx(Renderer *r, const Camera *cam)
         }
         if (q->ztest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         glBlendFunc(GL_SRC_ALPHA, q->additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+        /* fog goes on before the blend: an additive quad fogs towards black, so its black adds nothing (fogged
+         * towards the fog colour, every texel would add that colour) */
+        glFogfv(GL_FOG_COLOR, q->additive ? black : fog_col);
         glColor4fv(q->col);
         float c[4][3];                                     /* top-left, top-right, bottom-right, bottom-left */
         if (q->kind == FXQ_BILLBOARD) {
@@ -462,6 +467,7 @@ static void draw_fx(Renderer *r, const Camera *cam)
         glTexCoord2f(q->uv[0], q->uv[3]); glVertex3fv(c[3]);
         glEnd();
     }
+    glFogfv(GL_FOG_COLOR, fog_col);
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
