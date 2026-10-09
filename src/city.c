@@ -375,6 +375,45 @@ static void obstacle_boxes(Scene *s)
 /* the people: one look (instance) per person and ActorAnimShape|<anim> it has shown */
 struct PersonLook { int who; char anim[32]; int inst; };
 
+Group city_book_group(City *c, const char *book, const char *name)
+{
+    Group none = { NULL, 0 };
+    LoadedBook *lb = book && name ? load_book(c, book) : NULL;
+    return lb ? book_group(&lb->book, name) : none;
+}
+
+int city_shape_box(City *c, const char *shape, float min[3], float max[3])
+{
+    char key[64];
+    size_t n = 0;
+    for (; shape && shape[n] && n < 63; n++)
+        key[n] = (char)tolower((unsigned char)shape[n]);
+    key[n] = 0;
+    if (n > 4 && strcmp(key + n - 4, ".pwk") == 0)
+        key[n - 4] = 0;
+    int found = 0;
+    for (int k = 0; k < 3; k++) {
+        min[k] = 1e30f;
+        max[k] = -1e30f;
+    }
+    for (uint32_t i = 0; i < c->bundle.nentries; i++) {
+        const BdpEntry *e = &c->bundle.entries[i];
+        Mesh m;
+        if (e->type != ET_MESH || !c->model_key[i][0] || strcmp(c->model_key[i], key) != 0 || mesh_read(e, &m) != 0)
+            continue;
+        for (uint32_t p = 0; p < m.nparts; p++)
+            for (uint32_t v = 0; v < m.parts[p].nverts; v++)
+                for (int k = 0; k < 3; k++) {
+                    float x = m.parts[p].pos[3 * v + k];
+                    if (x < min[k]) min[k] = x;
+                    if (x > max[k]) max[k] = x;
+                    found = 1;
+                }
+        mesh_free(&m);
+    }
+    return found ? 0 : -1;
+}
+
 static float people_clip_seconds(void *ctx, const char *anim, const char *shape)
 {
     City *c = ctx;
@@ -430,6 +469,63 @@ static int person_look(City *c, Scene *s, int who, const Person *p)
     snprintf(l->anim, sizeof l->anim, "%s", p->anim);
     l->inst = id;
     return id;
+}
+
+/* an army unit's look: its shape, its clip (NULL: the shape's own RawAnim, which place_model takes), keyed by both */
+static int unit_look(City *c, Scene *s, int who, const ArmyUnit *u)
+{
+    char key[32];
+    snprintf(key, sizeof key, "%.15s|%.15s", u->shape ? u->shape : "-", u->clip ? u->clip : "");
+    for (int i = 0; i < s->nlooks; i++)
+        if (s->looks[i].who == who && strcmp(s->looks[i].anim, key) == 0)
+            return s->looks[i].inst;
+    int missing = s->missing;
+    int id = u->shape ? place_model(c, s, u->shape, mat_identity(), -1) : -1;
+    s->missing = missing;
+    if (id >= 0) {
+        Instance *in = &s->instances[id];
+        in->dynamic = 1;
+        const BdpEntry *ce = u->clip ? find_anim(&c->bundle, 2, u->clip) : NULL;
+        Clip clip;
+        if (ce && clip_read(ce, &clip) == 0) {
+            if (clip.bones == in->tree.n) {
+                if (in->has_clip)
+                    clip_free(&in->clip);
+                in->clip = clip;
+                in->has_clip = 1;
+            } else {
+                clip_free(&clip);
+            }
+        }
+    }
+    s->looks = realloc(s->looks, sizeof *s->looks * (size_t)(s->nlooks + 1));
+    struct PersonLook *l = &s->looks[s->nlooks++];
+    l->who = who;
+    snprintf(l->anim, sizeof l->anim, "%s", key);
+    l->inst = id;
+    return id;
+}
+
+/* each frame: every army unit at its place, its clip at anim_time / anim_len of the clip (looks keyed from 1 << 20) */
+static void army_sync(Scene *s, double t)
+{
+    if (!s->army || !s->owner)
+        return;
+    for (int i = 0, n = army_count(s->army); i < n; i++) {
+        const ArmyUnit *u = army_unit(s->army, i);
+        int who = (1 << 20) + i;
+        int show = u->phase != AU_GONE ? unit_look(s->owner, s, who, u) : -1;
+        for (int k = 0; k < s->nlooks; k++)
+            if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
+                s->instances[s->looks[k].inst].hidden = 1;
+        if (show < 0)
+            continue;
+        Instance *in = &s->instances[show];
+        in->hidden = 0;
+        memcpy(in->base.m, u->world, sizeof in->base.m);
+        if (in->has_clip && u->anim_len > 0 && u->clip)
+            in->offset = (float)(u->anim_time / u->anim_len * in->clip.duration - t);
+    }
 }
 
 /* each frame: every person's look where people.c has it (its world matrix, the template's RenderScale), its clip at
@@ -1060,6 +1156,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->nadorn = 0;
         memset(sb->seen, 0, sizeof sb->seen);
         sb->seen_collapse = -1;
+        sb->props = t;
+        sb->seen_state = BUILDING_STANDING;
         sb->fx_glass = group_str(t, "Glass_Small");
         sb->fx_wall_small = group_str(t, "Wall_Small");
         sb->fx_wall_large = group_str(t, "Wall_Large");
@@ -1423,6 +1521,7 @@ int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach)
 static void update(Scene *s, double t, int all)
 {
     people_sync(s, t);
+    army_sync(s, t);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
         if (in->vehicle >= 0) {
@@ -1507,6 +1606,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     }
     Group occ = group_sub(block, "Occupants"), runners[16];
     s->music = group_str(block, "Music");
+    s->block = block;
     s->fill_rate = group_num(occ, "FillRate", 0);
     s->spawn_rate = group_num(occ, "SpawnRate", 0.75f);   /* 0x31A540: the Occupants group's, 0.75 unless set */
     int nrun = 0;
@@ -1975,6 +2075,12 @@ void scene_buildings_update(Scene *s, float dt)
                 if (st <= was)
                     continue;
                 sb->seen[o][ci] = (uint8_t)st;
+                if (s->army && sb->b.state == BUILDING_STANDING) {   /* a cell hit: Scoring.cell[state] */
+                    float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
+                                    sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls };
+                    army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_CELL, st, s->monster_move,
+                                        sb->b.width, sb->b.n, NULL, 0, at);
+                }
                 const char *name = st == 1 ? sb->fx_glass : st == 2 ? sb->fx_wall_small : sb->fx_wall_large;
                 float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
                                 sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls + STOREY / 2 }, in[3] = { 0, 1, 0 };
@@ -1982,11 +2088,27 @@ void scene_buildings_update(Scene *s, float dt)
             }
         if (sb->b.collapse > 0 && sb->b.collapse != sb->seen_collapse) {   /* a floor comes down */
             int k = sb->b.collapse;
+            if (s->army && sb->b.state == BUILDING_FLOOR_FALLING) {
+                float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
+                army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_FLOOR, 0, s->monster_move,
+                                    sb->b.width, sb->b.n, NULL, 0, at);
+            }
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
                             sb->b.min[2] + GROUND_FLOOR + STOREY * (float)(k - 1) }, in[3] = { 0, 1, 0 };
             scene_fx(s, sb->fx_floor, at, in);
         }
         sb->seen_collapse = sb->b.collapse;
+        if (s->army && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING) {   /* destroyed */
+            int fronts[BUILDING_CELLS], nf = 0;
+            for (int col = 0; col < sb->b.width && nf < BUILDING_CELLS; col++) {
+                int ci = building_cell_index(&sb->b, FACE_FRONT, col), top = sb->b.n > 0 ? sb->b.live[sb->b.n - 1] : 0;
+                fronts[nf++] = ci >= 0 ? sb->b.cell[top][ci].state : 0;
+            }
+            float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
+            army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_BUILDING, 0, s->monster_move,
+                                sb->b.width, sb->b.n, fronts, nf, at);
+        }
+        sb->seen_state = sb->b.state;
         for (int ls = 0; s->folk && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at state 2 or more */
             for (int col = 0; col < sb->b.width; col++) {
                 int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];

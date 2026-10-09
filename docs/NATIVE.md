@@ -84,7 +84,11 @@ monster grabs one from a window (`canGrabPerson`) or the street (`doGrabObject` 
 eats (health, energy) or throws them, and its attacks send them flying. Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
-hides them): the punch's fist, the kick's foot. The game's sound plays (src/sound.c, [FORMAT_SOUND.md](FORMAT_SOUND.md): Rampage.uber's event programs over
+hides them): the punch's fist, the kick's foot. The army comes for the monster (src/army.c, [ARMY_NOTES.md](ARMY_NOTES.md)): each block's `AIDef` spawns
+helicopters, SWAT vans, army trucks with troops and tanks, which fire the `Weapons.bdp` weapons at it (hits take its
+health and start its reactions), the punks throw their bottles, droppables fall from windows; blows wreck the
+units, the monster grabs and eats troops, and buildings and kills score as the game's `Scoring` says
+(`RAMPAGE_TRACE=1` prints the hits and the score). The game's sound plays (src/sound.c, [FORMAT_SOUND.md](FORMAT_SOUND.md): Rampage.uber's event programs over
 .samp's PS-ADPCM, 3D by the camera, each block's `.mic` music): the monster's clip sounds and the people's; only in
 a window of one's own (never with `--shot`; `--mute` keeps it quiet). The monsters' hair, fur and whiskers are the game's cloth simulation (src/cloth.c,
 [CLOTH_NOTES.md](CLOTH_NOTES.md)), stepped in the world so the monster's moves drag them. The face plays its own clip over the body's (the game's face layer:
@@ -128,6 +132,5 @@ x ±75 and y −30.
 - scoring;
 - effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the GUI; the effects' and objects'
   sounds;
-- the game's rules (scoring, the AI's army), the people's bottles and droppables (their events are raised, not
-  acted on), window occupants' real spawn rates;
+- the GUI (health, score, floating numbers), the monster's death, bosses, Vehicle.bsf (Humvee), rockets;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

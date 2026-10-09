@@ -21,6 +21,7 @@
 #include "ik.h"
 #include "fx.h"
 #include "sound.h"
+#include "army.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -51,6 +52,11 @@ typedef struct {
     uint32_t shake_seed;
     int last_collapse[64];                           /* per building: its collapse when last looked at */
     int held;                                        /* the person in its hand (people.c), -1 none */
+    int held_unit;                                   /* or the army unit (army.c), -1 none */
+    Army *army;
+    int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
+    struct { int id, fx, unit, shot; float off[3]; } fxa[128]; int nfxa;   /* the army's effects that follow */
+    int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
@@ -194,6 +200,8 @@ static void start_moves(Viewer *v)
     memset(&v->mount, 0, sizeof v->mount);
     memset(v->hand, 0, sizeof v->hand);
     v->held = -1;
+    v->held_unit = -1;
+    v->pending_slot = -1;
     v->hp = 200;
     v->energy = 0;
     memset(v->shakes, 0, sizeof v->shakes);
@@ -221,6 +229,18 @@ static void start_moves(Viewer *v)
         play_state(v);
 }
 
+/* the army's host (army.h): books, clip lengths and model bounds from the city */
+static Group army_find(void *ctx, const char *book, const char *name) { return city_book_group(ctx, book, name); }
+static int army_shape_box(void *ctx, const char *shape, float min[3], float max[3])
+{
+    return city_shape_box(ctx, shape, min, max) == 0;
+}
+static float army_clip_seconds(void *ctx, const char *anim, const char *shape)
+{
+    (void)ctx; (void)anim; (void)shape;
+    return 0;                                        /* army.c falls back to the clip's own length */
+}
+
 static void build(Viewer *v)
 {
     if (v->have_scene)
@@ -232,6 +252,25 @@ static void build(Viewer *v)
     start_moves(v);
     if (v->have_scene && v->scene.music)             /* the block's music, looping (sound.c; silent unless started) */
         music_play(v->scene.music);
+    if (v->army) {
+        army_free(v->army);
+        v->army = NULL;
+    }
+    v->nfxa = 0;
+    v->narmed_people = 0;
+    if (v->have_scene && v->monster >= 0) {          /* the army comes for the monster (the block's AIDef) */
+        static ArmyHost host;
+        host.find = army_find;
+        host.clip_seconds = army_clip_seconds;
+        host.shape_box = army_shape_box;
+        host.ctx = v->city;
+        v->army = army_new(&host);
+        if (v->army) {
+            army_load_block(v->army, v->scene.block);
+            army_activate(v->army, 1);
+        }
+    }
+    v->scene.army = v->army;
     Group tt;
     if (city_camera(v->city, &tt) == 0)
         cam_settings(&v->cam_settings, tt);
@@ -306,7 +345,7 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(v, a + 1) >= 0;
     if (!strcmp(call, "Monsters::canDoPunch")) return window_person(v, a + 1) < 0;   /* not at an occupied window */
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
-        return v->held >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
+        return v->held >= 0 || v->held_unit >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&v->mount, sc, &c, v->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
@@ -485,10 +524,18 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         if (who >= 0) {
             people_grab(v->scene.folk, who, 0.1f);
             v->held = who;
+        } else if (v->army && (who = army_nearest_pickup(v->army, hand, root, fwd, 15)) >= 0) {
+            army_grab(v->army, who, 0);
+            v->held_unit = who;
         }
         return;
     }
     else if (!strcmp(n, "Monsters::throwObject")) {  /* (eat, x, y, z) (0x2D9DC0): eaten, or smashed away */
+        if (v->held_unit >= 0 && v->army) {
+            army_throw(v->army, v->held_unit, 0, e->p[0] != 0, e->p + 1, v->heading / 57.2957795f);
+            v->held_unit = -1;
+            return;
+        }
         if (v->held < 0 || !v->scene.folk)
             return;
         if (e->p[0] != 0) {
@@ -674,6 +721,8 @@ static void hit_spheres(Viewer *v)
             c[r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
         c[3] = sh->radius;
         scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
+        if (v->army)                                 /* and the army's units (20 a blow [G]) */
+            army_hit(v->army, 0, c, c[3], 20);
         if (v->scene.folk)                           /* and people (TakeDamage) */
             people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
     }
@@ -693,6 +742,150 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
             slot = j;
     const ShakeDef *d = name && _stricmp(name, "camshake_collapse") == 0 ? &SHAKE_COLLAPSE : &SHAKE_MONSTER;
     shake_start(&v->shakes[slot], d, pos, 1, 0, &v->shake_seed);
+}
+
+/* the army each frame (army.c): the monster as it sees it, the buildings, then what it makes happen */
+static void army_step(Viewer *v, float dt)
+{
+    if (!v->army || !v->have_graph || v->scene.monster < 0)
+        return;
+    static float spheres[64][4];
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    int ns = 0;
+    for (int i = 0; i < v->graph.nshapes && ns < 64; i++) {   /* every collision sphere, in the world */
+        const MoveShape *sh = &v->graph.shapes[i];
+        if (sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
+            continue;
+        const float *m = in->node[sh->bone].m, *bm = in->base.m;
+        float l[3];
+        for (int r = 0; r < 3; r++)
+            l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
+        if (v->mirror)
+            l[0] = -l[0];
+        for (int r = 0; r < 3; r++)
+            spheres[ns][r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
+        spheres[ns++][3] = sh->radius;
+    }
+    ArmyMonster m;
+    memset(&m, 0, sizeof m);
+    m.pos[0] = v->mx; m.pos[1] = v->my; m.pos[2] = v->mz;
+    m.heading = v->heading / 57.2957795f;
+    m.move = v->graph.states[v->run.state].name;
+    m.mode = v->mode;
+    m.spheres = (const float (*)[4])spheres;
+    m.nspheres = ns;
+    float hw = v->graph.box[0] > 0 ? v->graph.box[0] : 3, hh = v->graph.box[1] > 0 ? v->graph.box[1] : 4.25f;
+    m.box_min[0] = v->mx - hw; m.box_min[1] = v->my - hw; m.box_min[2] = v->mz;
+    m.box_max[0] = v->mx + hw; m.box_max[1] = v->my + hw; m.box_max[2] = v->mz + 2 * hh;
+    static ArmyBox boxes[64];
+    int nb = 0;
+    for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
+        const Building *b = &v->scene.buildings[i].b;
+        memcpy(boxes[nb].min, b->min, sizeof boxes[nb].min);
+        memcpy(boxes[nb].max, b->max, sizeof boxes[nb].max);
+        boxes[nb].width = b->width;
+        boxes[nb].storeys = b->n;
+        boxes[nb].gone = b->state == BUILDING_GONE;
+    }
+    army_set_view(v->army, v->cam.pos[0] - 45, v->cam.pos[0] + 45);   /* the view's x range [G] */
+    v->scene.monster_move = m.move;
+    army_update(v->army, dt, &m, 1, boxes, nb);
+    ArmyEvent ev[64];
+    int ne;
+    while ((ne = army_events(v->army, ev, 64)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const ArmyEvent *e = &ev[i];
+            switch (e->type) {
+            case AE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    if (id >= 0 && (e->unit >= 0 || e->shot >= 0) && v->nfxa < 128) {
+                        v->fxa[v->nfxa].id = e->id;
+                        v->fxa[v->nfxa].fx = id;
+                        v->fxa[v->nfxa].unit = e->shot >= 0 ? -1 : e->unit;
+                        v->fxa[v->nfxa].shot = e->shot;
+                        const ArmyUnit *u = e->unit >= 0 ? army_unit(v->army, e->unit) : NULL;
+                        for (int k = 0; k < 3; k++)
+                            v->fxa[v->nfxa].off[k] = u && e->shot < 0 ? e->pos[k] - u->pos[k] : 0;
+                        v->nfxa++;
+                    } else if (id >= 0 && v->nfxa < 128) {   /* a handle to stop it by */
+                        v->fxa[v->nfxa].id = e->id;
+                        v->fxa[v->nfxa].fx = id;
+                        v->fxa[v->nfxa].unit = v->fxa[v->nfxa].shot = -1;
+                        v->nfxa++;
+                    }
+                }
+                break;
+            case AE_EFFECT_STOP:
+                for (int k = 0; k < v->nfxa; k++)
+                    if (v->fxa[k].id == e->id) {
+                        fx_stop(v->fxw, v->fxa[k].fx);
+                        v->fxa[k] = v->fxa[--v->nfxa];
+                        break;
+                    }
+                break;
+            case AE_SOUND:
+                if (e->level == 0) sound_kill_name(e->name);
+                else sound_play(e->name, e->pos, 1);
+                break;
+            case AE_HIT: {                           /* 0x2D6A50: HP off, the reaction by its level and the knock */
+                v->hp = fmaxf(0, v->hp - e->amount);
+                float heading = v->heading / 57.2957795f, at[3] = { v->mx, v->my, v->mz };
+                int slot = army_reaction_slot(e->level, e->v, v->mode, army_hit_behind(at, heading, e->pos));
+                if (slot >= 0) {
+                    memcpy(v->vel, e->v, sizeof v->vel);
+                    v->pending_slot = slot;
+                }
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  hit by %s: %.1f, HP %.0f, slot %d\n", e->name ? e->name : "?", e->amount, v->hp, slot);
+                break;
+            }
+            case AE_REACTION: v->pending_slot = e->level; break;
+            case AE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
+            case AE_STATS_HEALTH: v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->amount)) : v->hp; break;
+            case AE_STATS_ENERGY: v->energy = fmaxf(0, fminf(100, v->energy + e->amount)); break;
+            case AE_SCORE:
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  score %+.0f (category %d), total %.0f\n", e->amount, e->level,
+                           army_stats(v->army, 0)->points[6]);
+                break;
+            default: break;
+            }
+        }
+    for (int k = 0; k < v->nfxa; k++) {              /* the effects that follow their unit or shot */
+        float at[3];
+        if (v->fxa[k].shot >= 0) {
+            const ArmyShot *sh = NULL;
+            for (int j = 0, n = army_shots(v->army); j < n && !sh; j++)
+                if (army_shot(v->army, j)->id == v->fxa[k].shot && army_shot(v->army, j)->alive)
+                    sh = army_shot(v->army, j);
+            if (!sh) {
+                fx_stop(v->fxw, v->fxa[k].fx);
+                v->fxa[k--] = v->fxa[--v->nfxa];
+                continue;
+            }
+            memcpy(at, sh->pos, sizeof at);
+        } else if (v->fxa[k].unit >= 0) {
+            const ArmyUnit *u = army_unit(v->army, v->fxa[k].unit);
+            if (!u || u->phase == AU_GONE) {
+                fx_stop(v->fxw, v->fxa[k].fx);
+                v->fxa[k--] = v->fxa[--v->nfxa];
+                continue;
+            }
+            for (int j = 0; j < 3; j++)
+                at[j] = u->pos[j] + v->fxa[k].off[j];
+        } else {
+            if (!fx_alive(v->fxw, v->fxa[k].fx))
+                v->fxa[k--] = v->fxa[--v->nfxa];
+            continue;
+        }
+        fx_move(v->fxw, v->fxa[k].fx, at);
+    }
+    if (v->held_unit >= 0) {                         /* a unit in its hand */
+        Mat4 h;
+        if (attach_world(v, "Helper R Hand", &h) == 0)
+            army_hold(v->army, v->held_unit, h.m);
+    }
 }
 
 /* the effects the scene and the people asked for, started; the world's particles moved on */
@@ -827,6 +1020,17 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (st->flags & NODE_STEER)
             v->heading += steer(v, st, lx, ly, dt);
         scene_monster_blend_step(&v->scene, dt);
+        if (ev != 0 && v->pending_slot >= 0) {       /* the army's hit: the reaction slot (0x2D6A50), its column's */
+            int to = moves_slot(&v->graph, v->pending_slot, v->column);
+            v->pending_slot = -1;
+            if (to >= 0) {
+                climb_unmount(&v->mount);
+                moves_force(&v->run, to);
+                if (v->vel[2] > 0)
+                    v->mode = MODE_AIRBORNE;
+                ev = 0;
+            }
+        }
         if (ev != 0) {                               /* 0x2E14F0: held on the face, or knocked off it */
             Climber cl = climber(v);
             int slot = climb_check(&v->mount, &v->scene, &cl, v->mode);
@@ -935,6 +1139,30 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             people_hold(v->scene.folk, v->held, h.m, v->mirror, dt);
         PeopleEvent ev[32];
         int ne = people_events(v->scene.folk, ev, 32);
+        for (int i = 0; i < ne; i++) {               /* what the army takes over: droppables, the punks' bottles */
+            const Person *p = people_get(v->scene.folk, ev[i].who);
+            if (!v->army || !p)
+                continue;
+            if (ev[i].type == PE_DROP) {
+                const char *tmpl = NULL;             /* the block's DroppableDef: one of its OTRef| at random */
+                Group dd = group_sub(v->scene.block, "DroppableDef"), where;
+                Record r[16];
+                uint32_t n = dd.at ? group_values(dd, "OTRef|", &where, r, 16) : 0;
+                if (n)
+                    tmpl = record_str(where, r[(uint32_t)rand() % n]);
+                if (tmpl)
+                    army_drop(v->army, tmpl, ev[i].v, NULL, 0, NULL, 0);
+            } else if (ev[i].type == PE_WEAPON && ev[i].name) {
+                army_person_weapon(v->army, ev[i].who, ev[i].on ? ev[i].name : NULL, p->world, 0);
+                if (ev[i].on && v->narmed_people < 32)
+                    v->armed_people[v->narmed_people++] = ev[i].who;
+            }
+        }
+        for (int i = 0; v->army && i < v->narmed_people; i++) {
+            const Person *p = people_get(v->scene.folk, v->armed_people[i]);
+            if (p)
+                army_person_moved(v->army, v->armed_people[i], p->world);
+        }
         for (int i = 0; i < ne; i++) {
             if (ev[i].type == PE_SOUND && ev[i].name) {
                 const Person *p = people_get(v->scene.folk, ev[i].who);
@@ -955,6 +1183,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         }
     }
     scene_buildings_update(&v->scene, dt);
+    army_step(v, dt);
     fx_step(v, dt);
     shake_step(v->shakes, 8, dt);
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */

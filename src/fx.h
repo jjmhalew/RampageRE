@@ -30,6 +30,9 @@ void fx_world_free(FxWorld *w);
 int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale);
 void fx_stop(FxWorld *w, int id);       /* shut down: emitters stop, live particles finish (a looping fire, ...) */
 int fx_alive(const FxWorld *w, int id);
+/* an effect that follows something (an army unit's, a shot's look): its origin moves, and with it the particles it
+ * keeps relative to it [G: the game's attached effects move their emitter; a shot's trail is not left behind] */
+void fx_move(FxWorld *w, int id, const float pos[3]);
 void fx_clear(FxWorld *w);
 /* advances everything by dt seconds (run as fixed 1/60 s game frames); ground_z is the height of the ground plane for
  * particles that collide with the ground (+CollidesWithGround) */

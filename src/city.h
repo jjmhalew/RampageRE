@@ -8,6 +8,7 @@
 #include "people.h"
 #include "fx.h"
 #include "cloth.h"
+#include "army.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -79,7 +80,8 @@ typedef struct {                                      /* a building's cells and 
     Adornment *adorn; int nadorn;
     uint8_t broke[BUILDING_STOREYS][BUILDING_CELLS];  /* a front cell at state 2 or more, its window people told */
     uint8_t seen[BUILDING_STOREYS][BUILDING_CELLS];   /* each cell's state when its effects were last played */
-    int seen_collapse;
+    int seen_collapse, seen_state;
+    Group props;                                      /* its template (DefBuildingProps' Scoring, ...) */
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
@@ -98,6 +100,9 @@ typedef struct {
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
     float cloth_dt;                                   /* play time not yet simulated by the monster's cloth */
     const char *music;                                /* the block's Music (a .mic stream, sound.c) */
+    Group block;                                      /* the block's BlockDef (its AIDef, ...) */
+    /* the army (army.c, driven by main): its units' looks are posed with the people's; the buildings' damage scores */
+    Army *army; const char *monster_move;
     /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
      * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
     People *folk; struct City *owner;
@@ -174,7 +179,11 @@ void scene_monster_blend(Scene *s, float seconds);
 void scene_monster_blend_step(Scene *s, float dt);  /* the clip of that name (any case, as MONSTER_DATA names it) */
 /* the root node's translation and rotation in the monster's clip at `seconds`; 0 = ok */
 int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4]);
-int city_camera(City *c, Group *two_tilts);           /* camera.bdp's TwoTilts group; 0 = ok */
+int city_camera(City *c, Group *two_tilts);
+/* a group of a property book by the book's name ("Objects1_Props", "Weapons": <name>.bdp in the Vol) */
+Group city_book_group(City *c, const char *book, const char *name);
+/* a model's bounds in its own frame (its meshes' vertices); 0 = ok */
+int city_shape_box(City *c, const char *shape, float min[3], float max[3]);           /* camera.bdp's TwoTilts group; 0 = ok */
 void scene_free(Scene *s);
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);   /* the 30 monsters (NAME_anims.cmp) */
 

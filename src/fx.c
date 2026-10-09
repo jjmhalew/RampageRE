@@ -1267,6 +1267,13 @@ static Fx *fx_of(const FxWorld *w, int id)
 
 int fx_alive(const FxWorld *w, int id) { return fx_of(w, id) != NULL; }
 
+void fx_move(FxWorld *w, int id, const float pos[3])
+{
+    Fx *f = fx_of(w, id);
+    if (f)
+        memcpy(f->origin, pos, sizeof f->origin);
+}
+
 /* 0x1F7CD0: an emitter shuts down: it stops making particles; +EndOfLifeUponShutdown ends the live ones */
 void fx_stop(FxWorld *w, int id)
 {

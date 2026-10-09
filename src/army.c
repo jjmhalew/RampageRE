@@ -498,6 +498,10 @@ static float ray_hit(const Army *a, const float p[3], const float d[3], float le
         const ArmyBox *bx = &a->b[i];
         if (bx->gone)
             continue;
+        /* [G] a shot that starts in or at a building (a soldier in its window) leaves it unhindered */
+        if (p[0] >= bx->min[0] - 0.5f && p[0] <= bx->max[0] + 0.5f && p[1] >= bx->min[1] - 0.5f &&
+            p[1] <= bx->max[1] + 0.5f && p[2] >= bx->min[2] - 0.5f && p[2] <= bx->max[2] + 0.5f)
+            continue;
         float t0 = 0, t1 = len;
         int ok = 1, axis = -1;
         for (int k = 0; k < 3 && ok; k++) {
