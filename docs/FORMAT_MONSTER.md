@@ -106,8 +106,15 @@ fills through the button table at 0x3B18B0:
 | 4, 5, 6, 7 | d-pad up, down, left, right | 20, 21 | R3, L3 |
 | 8, 9 | Start, Select | 22 … 29 | pressures (28 R2, 29 L2) |
 | 10, 11 | R2, L2 | 30, 31 | right, left stick size: max(\|x\|, \|y\|) |
-| 32 … 47 | the left stick's sector in the monster's own frame (0x2C03E0; two sets of eight bits, the stick size where set) | 48 … 55 | the left stick's eighth: up, down, left, up-left, down-left, right, up-right, down-right (0x2C0870: (x, −y) turned by π/8, none under 0.2) |
+| 32 … 47 | the left stick in the monster's own frame, its size where it points, else 0 (0x2C03E0; see below) | 48 … 55 | the left stick's eighth: up, down, left, up-left, down-left, right, up-right, down-right (0x2C0870: (x, −y) turned by π/8, none under 0.2) |
 | 56, 57 | true, false | | |
+
+The stick in the monster's frame (0x2C0AD0 → 0x2C03E0, bits of the controller's +0x3B4, variable = 30 + bit): the
+stick in the world as the monster reads it (0x2E8410, see "Steering") against the monster's right (a) and forward
+(b) axes. 32 … 35 the quadrant by the larger of the two: front, left, right, back; 36 … 39 the halves: front, back,
+right, left; 40 … 47 the eighth, the same tests with the stick turned by π / 8 first: front, front-right,
+front-left, right, left, back, back-right, back-left. None below a stick size of 0.01. `tools/monster.py` names
+them `M.front`, `M.front8`, ...; mirrored, the condition reader swaps 33 / 34, 41 / 42, 43 / 44 and 46 / 47.
 
 Ids 4 … 21 and 48 … 57 are booleans, the rest floats. When the monster is mirrored (+0x7DA1 of the monster) the
 left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). Variable 57 reads 0 and is never new

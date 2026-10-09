@@ -200,13 +200,36 @@ int moves_find(const MoveGraph *g, const char *state)
 
 /* ---------------------------------------------------------------- input (0x2C0AD0, 0x2C1590, 0x2C0870) */
 
+void moves_sectors(MoveInput *in, float a, float b)
+{
+    float *v = in->v, size = v[MV_L_SIZE];
+    for (int k = MV_M_FRONT; k <= MV_M_BACKLEFT8; k++)
+        v[k] = 0;
+    if (size < 0.01f)                                /* 0x2C0BC0: no direction */
+        return;
+    /* halves, and the quadrant by the larger of the two (0x2C0740) */
+    v[b >= 0 ? MV_M_FRONTHALF : MV_M_BACKHALF] = size;
+    v[a >= 0 ? MV_M_RIGHTHALF : MV_M_LEFTHALF] = size;
+    int q = b >= 0 ? (a >= 0 ? (b - a >= 0 ? MV_M_FRONT : MV_M_RIGHT) : (a + b >= 0 ? MV_M_FRONT : MV_M_LEFT))
+                   : (a >= 0 ? (a + b >= 0 ? MV_M_RIGHT : MV_M_BACK) : (b - a >= 0 ? MV_M_LEFT : MV_M_BACK));
+    v[q] = size;
+    /* the eighths: the same tests with the stick turned by pi / 8 (0x2C0660) */
+    const float c = 0.92387953f, s = 0.38268343f;
+    float ra = a * c - b * s, rb = a * s + b * c;
+    int e = rb >= 0 ? (ra >= 0 ? (rb - ra >= 0 ? MV_M_FRONTRIGHT8 : MV_M_RIGHT8)
+                               : (ra + rb >= 0 ? MV_M_FRONT8 : MV_M_FRONTLEFT8))
+                    : (ra >= 0 ? (ra + rb >= 0 ? MV_M_BACKRIGHT8 : MV_M_BACK8)
+                               : (rb - ra >= 0 ? MV_M_LEFT8 : MV_M_BACKLEFT8));
+    v[e] = size;
+}
+
 void moves_derive(MoveInput *in)
 {
     float *v = in->v;
     v[MV_R_SIZE] = fmaxf(fabsf(v[MV_RX]), fabsf(v[MV_RY]));
     v[MV_L_SIZE] = fmaxf(fabsf(v[MV_LX]), fabsf(v[MV_LY]));
-    for (int k = 32; k < 48; k++)                    /* the stick's sector as seen by the monster (0x2C03E0): */
-        v[k] = 0;                                    /* only asked with Monsters::canMount, which says no here */
+    for (int k = MV_M_FRONT; k <= MV_M_BACKLEFT8; k++)   /* the monster's frame: moves_sectors */
+        v[k] = 0;
     for (int k = MV_L_UP; k <= MV_L_DOWNRIGHT; k++)
         v[k] = 0;
     /* 0x2C0870: the eighth the stick points into, (x, -y) turned by pi / 8; none under 0.2 */

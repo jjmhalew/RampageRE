@@ -10,6 +10,11 @@ enum {                                               /* condition variables (too
     MV_UP = 4, MV_DOWN, MV_LEFT, MV_RIGHT, MV_START, MV_SELECT, MV_R2, MV_L2, MV_R1, MV_L1,
     MV_CROSS, MV_CIRCLE, MV_SQUARE, MV_TRIANGLE, MV_R3 = 20, MV_L3 = 21,
     MV_R_SIZE = 30, MV_L_SIZE = 31,                  /* max(|x|, |y|) of each stick */
+    /* the left stick in the monster's own frame (0x2C03E0; its size where it points, else 0): quadrants, halves and
+     * 45-degree sectors */
+    MV_M_FRONT = 32, MV_M_LEFT, MV_M_RIGHT, MV_M_BACK, MV_M_FRONTHALF, MV_M_BACKHALF, MV_M_RIGHTHALF, MV_M_LEFTHALF,
+    MV_M_FRONT8 = 40, MV_M_FRONTRIGHT8, MV_M_FRONTLEFT8, MV_M_RIGHT8, MV_M_LEFT8, MV_M_BACK8, MV_M_BACKRIGHT8,
+    MV_M_BACKLEFT8,
     MV_L_UP = 48, MV_L_DOWN, MV_L_LEFT, MV_L_UPLEFT, MV_L_DOWNLEFT, MV_L_RIGHT, MV_L_UPRIGHT, MV_L_DOWNRIGHT,
     MV_TRUE = 56, MV_FALSE = 57, MV_COUNT = 58
 };
@@ -72,6 +77,9 @@ typedef struct {
 } MoveInput;
 /* fills the derived variables (30, 31, 48..57) from the sticks and buttons already in v */
 void moves_derive(MoveInput *in);
+/* the variables 32 .. 47 from the stick's direction in the monster's frame (a along its right, b its forward; the
+ * stick as 0x2E8410 puts it in the world, against the monster's axes), after moves_derive */
+void moves_sectors(MoveInput *in, float a, float b);
 
 typedef int (*MoveCall)(void *ctx, const char *call);    /* the answer of a script check */
 typedef struct {

@@ -418,6 +418,11 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             if (pressed[k]) in->fresh[k] = 0.2f;
         }
         moves_derive(in);
+        {                                            /* the stick in the monster's frame (0x2C0AD0 -> 0x2C03E0) */
+            float w[3], h = v->heading / 57.2957795f, c = cosf(h), s = sinf(h);
+            stick_world(v, lx, ly, w);
+            moves_sectors(in, c * w[0] + s * w[1], -s * w[0] + c * w[1]);
+        }
         const MoveState *st = &v->graph.states[v->run.state];
         /* the camera frame the stick is read in: every frame (0x2E0738), or, in a NODE_HOLD_FRAME state, only when the
          * stick moves (0x2E8190), so a climb keeps its direction while the camera swings */

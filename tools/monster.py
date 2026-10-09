@@ -43,6 +43,10 @@ SLOTS = 74
 VARIABLES = {0: 'LX', 1: 'LY', 2: 'RX', 3: 'RY', 4: 'Up', 5: 'Down', 6: 'Left', 7: 'Right', 8: 'Start',
              9: 'Select', 10: 'R2', 11: 'L2', 12: 'R1', 13: 'L1', 14: 'Cross', 15: 'Circle', 16: 'Square',
              17: 'Triangle', 20: 'R3', 21: 'L3', 28: 'R2.pressure', 29: 'L2.pressure', 30: '|R|', 31: '|L|',
+             # the stick in the monster's own frame (0x2C03E0): quadrants, halves, 45-degree sectors
+             32: 'M.front', 33: 'M.left', 34: 'M.right', 35: 'M.back', 36: 'M.fronthalf', 37: 'M.backhalf',
+             38: 'M.righthalf', 39: 'M.lefthalf', 40: 'M.front8', 41: 'M.frontright8', 42: 'M.frontleft8',
+             43: 'M.right8', 44: 'M.left8', 45: 'M.back8', 46: 'M.backright8', 47: 'M.backleft8',
              48: 'L.up', 49: 'L.down', 50: 'L.left', 51: 'L.upleft', 52: 'L.downleft', 53: 'L.right',
              54: 'L.upright', 55: 'L.downright', 56: 'true', 57: 'false'}
 OPERATORS = ['>', '>=', '<', '<=', '==']
@@ -60,7 +64,7 @@ def is_bool(var):
 def condition_text(c):
     """{op, variable, value, flags}: flags bit 0 tests the held value, otherwise the input must be new this frame."""
     op, var, value, flags = c
-    name = VARIABLES.get(var, f'L.sector{var - 32}' if 32 <= var < 48 else f'v{var}')
+    name = VARIABLES.get(var, f'v{var}')
     if is_bool(var):
         v = str(value & 0xFF)
     else:
