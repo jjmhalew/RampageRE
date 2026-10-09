@@ -21,7 +21,9 @@ typedef struct {
     Clip clip; int has_clip; float offset;            /* a looping clip, started offset seconds in */
     int vehicle;                                      /* -1, or the vehicle it rides on */
     Mat4 *node;                                       /* per node, relative to base */
-    int still_root;                                   /* keep the root node's x / y at rest (the walk moves base) */
+    /* root motion the monster takes over (0x301080): the root's axes in still_root (bit 0 x, 1 y, 2 z) are held
+     * at root_hold, and its turn about Z is taken out by root_turn degrees */
+    int still_root; float root_hold[3], root_turn;
     float (*pose)[7];                                 /* the monster: each node's last local pose (t, q) */
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
 } Instance;
@@ -64,7 +66,10 @@ void scene_update(Scene *s, double t);               /* pose everything that mov
 /* the monster plays the clip whose name ends in suffix ("_WALK2", "_IDLE"); 0 = ok. *speed: how fast its root
  * travels in that clip (units per second), for moving it by hand */
 int scene_monster_clip(Scene *s, const char *suffix, float *speed);
-void scene_monster_place(Scene *s, float x, float y, float z, float deg, int still_root);
+void scene_monster_place(Scene *s, float x, float y, float z, float deg);
+/* the root's axes held (bit 0 x, 1 y, 2 z) at hold, and turn degrees about Z taken out of it: the motion the
+ * monster itself makes */
+void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn);
 int scene_monster_play(Scene *s, const char *clip);
 /* the next clip blends in over `seconds` from the pose the monster has now, as the game's animation player does
  * (0x2FFA00): call before scene_monster_play; scene_monster_blend_step counts it down */

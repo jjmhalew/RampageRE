@@ -84,9 +84,10 @@ Flags (+0x2C), as the command and the monster update (0x2DE530 ...) test them:
 | 0x4 | the camera frame the stick is read in is kept until the stick moves (otherwise taken every frame, 0x2E0738); climbing |
 | 0x8 | it turns towards the stick (0x2E8190); `Ground_Walk` (0x288), carrying (`Ground_Hold_Walk`), the flip |
 | 0x200 | the right stick turns its head (0x2FBE30, with the settings at +0xA08..+0xA10 of MONSTER_DATA) |
-| 0x80002 | the friction on its velocity (+0xF4 of the monster × dt, against the velocity's direction, 0x2DFDE8) takes z too, not only x and y |
+| 0x40, 0x80, 0x80000 | the root's travel along x, y, z moves the monster ("Root motion"); `Ground_Walk` and the punches y, the kick and the landings x and y, the climbs z |
+| 0x100 | the root's turn about Z turns the monster (`Ground_TurnAround` only) |
 | 0x40000 | when the next clip starts, the root's place and turn in this clip become the monster's (0x2E6580, before it starts the next); the climbs, mounts, knock-downs |
-| 0x40, 0x80, 0x100, 0x80000 | not traced |
+| 0x80002 | either: the friction on its velocity (+0xF4 of the monster × dt, against the velocity's direction, 0x2DFDE8) takes z too, not only x and y |
 
 ## Conditions
 A condition is `variable OP value`, OP 0 `>`, 1 `>=`, 2 `<`, 3 `<=`, 4 `==` (the function tables at 0x3F5950 for
@@ -163,6 +164,15 @@ state has flag 0x4. Both of the following are in the monster's command (0x2E6580
   while speeding up, 100 × dt (gp−0x7230) while slowing down (a state without the flags slows it to 0), and the whole
   is kept to the speed. The update adds it × dt to the monster's x and y in modes 0, 1, 2 and 4 (0x2E0C50), on top
   of the velocity (+0xBD30, `getVelocity` is their sum, 0x2E7460): it is how a jump is steered in the air, at up to 16.
+
+## Root motion
+The animation player takes the root's motion out of the pose (0x301080, every frame and at a clip's start): against
+the root as it was when the clip started (+0x29E4 rotation, +0x29F4 place), the travel along x, y and z goes to the
+monster only for the axes the node's flags name (0x40, 0x80, 0x80000; the others are 0), and the turn only with
+0x100 (0x301400, otherwise none). What is not taken stays in the pose: an idle's sway, a jump's crouch, the walk's
+side-to-side (a clip entered with its phase kept moves that reference, 0x2FFCC4, not traced). George's 186 nodes:
+125 take nothing, 14 y, 9 x and y, 3 x, 14 z, the turn-around its turn; 20 more bake (0x40000), 8 of them with z
+and one with y.
 
 ## Slots
 The game's own events (hits, landing, rampage) start states through the 74 slots: slot k is a start list index at

@@ -95,6 +95,8 @@ enum {
     NODE_HOLD_FRAME = 0x4,                           /* the camera frame for the stick is kept until the stick moves */
     NODE_STEER = 0x8,                                /* it turns towards the stick (0x2E8190) */
     NODE_LOOK = 0x200,                               /* the right stick turns its head (0x2FBE30) */
+    NODE_ROOT_X = 0x40, NODE_ROOT_Y = 0x80, NODE_ROOT_Z = 0x80000,   /* the root's travel along x / y / z and its */
+    NODE_ROOT_TURN = 0x100,                          /* turn move the monster (0x301080); otherwise they stay in the pose */
     NODE_BAKE_ROOT = 0x40000                         /* when the next clip starts, the root's place and turn become
                                                         the monster's (0x2E6580) */
 };

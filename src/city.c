@@ -612,11 +612,13 @@ static void pose_instance(Scene *s, Instance *in, double t)
             memcpy(in->pose[i], tr, sizeof tr);
             memcpy(in->pose[i] + 3, q, sizeof q);
         }
-        if (in->still_root && nd->parent < 0) {
-            tr[0] = nd->t[0];
-            tr[1] = nd->t[1];
-        }
+        if (nd->parent < 0)
+            for (int k = 0; k < 3; k++)
+                if (in->still_root >> k & 1)
+                    tr[k] = in->root_hold[k];
         Mat4 local = mat_tq(tr, q);
+        if (nd->parent < 0 && in->root_turn != 0)
+            local = mat_mul(mat_trs_z(0, 0, 0, -in->root_turn), local);
         int p = nd->parent;
         in->node[i] = p >= 0 && (uint32_t)p < i ? mat_mul(in->node[p], local) : local;
     }
@@ -979,13 +981,20 @@ int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
     return 0;
 }
 
-void scene_monster_place(Scene *s, float x, float y, float z, float deg, int still_root)
+void scene_monster_place(Scene *s, float x, float y, float z, float deg)
+{
+    if (s->monster >= 0)
+        s->instances[s->monster].base = mat_trs_z(x, y, z, deg);
+}
+
+void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn)
 {
     if (s->monster < 0)
         return;
     Instance *in = &s->instances[s->monster];
-    in->base = mat_trs_z(x, y, z, deg);
-    in->still_root = still_root;
+    in->still_root = axes;
+    memcpy(in->root_hold, hold, sizeof in->root_hold);
+    in->root_turn = turn;
 }
 
 int city_camera(City *c, Group *two_tilts)

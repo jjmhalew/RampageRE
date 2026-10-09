@@ -34,7 +34,8 @@ typedef struct {
     float vel[3]; int mode, no_gravity, column;      /* velocity (+0xBD30), movement mode (+0xAD8), no gravity
                                                         (+0xAB8), the slots' column (+0xBAB4) */
     MoveGraph graph; MoveRunner run; MoveInput input; int have_graph;
-    int yaw_axis; float entry_yaw;                   /* the root's axis that tells its turn; its turn at the state's start */
+    int yaw_axis; float entry_yaw, entry_root[3];    /* the root's axis that tells its turn; its turn and place at the
+                                                        state's start */
     float frame[2][3], stick[2];                     /* the camera's right and forward axes the stick is read in
                                                         (+0xA18, +0xA24) and the stick they were taken for (+0xA3C) */
     float air[3];                                    /* the stick's own velocity (+0xA68), NODE_AIR_* */
@@ -67,6 +68,9 @@ static void play_state(Viewer *v)
     if (scene_monster_play(&v->scene, st->clip) != 0)
         printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
     v->entry_yaw = root_yaw(v, v->run.time * st->rate);
+    float q[4];
+    if (root_at(v, v->run.time * st->rate, v->entry_root, q) != 0)
+        memset(v->entry_root, 0, sizeof v->entry_root);
 }
 
 static void start_moves(Viewer *v)
@@ -334,17 +338,28 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         scene_monster_blend_step(&v->scene, dt);
         int switched = ev == 0 || moves_step(&v->run, in, dt, answer, NULL);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
-        float a[3], b[3], q[4];                      /* the root's travel this frame, in the old clip */
+        float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
         if (root_at(v, t0 * st->rate, a, q) == 0 && root_at(v, t1 * st->rate, b, q) == 0) {
             float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
-            float dx = b[0] - a[0], dy = b[1] - a[1];
+            float dx = st->flags & NODE_ROOT_X ? b[0] - a[0] : 0, dy = st->flags & NODE_ROOT_Y ? b[1] - a[1] : 0;
             v->mx += c * dx - s * dy;
             v->my += s * dx + c * dy;
+            if (st->flags & NODE_ROOT_TURN)
+                v->heading += fmodf(root_yaw(v, t1 * st->rate) - root_yaw(v, t0 * st->rate) + 540, 360) - 180;
         }
         clip_events(v, st, t0, t1);                  /* the old clip's events up to now */
         if (switched) {
-            if (st->flags & NODE_BAKE_ROOT)          /* the turn the old clip made becomes the monster's */
-                v->heading += fmodf(root_yaw(v, t1 * st->rate) - v->entry_yaw + 540, 360) - 180;
+            if ((st->flags & NODE_BAKE_ROOT) && root_at(v, t1 * st->rate, b, q) == 0) {
+                /* the place and turn the old clip's root reached (what it did not hand over already) become the
+                 * monster's */
+                float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
+                float dx = st->flags & NODE_ROOT_X ? 0 : b[0] - v->entry_root[0];
+                float dy = st->flags & NODE_ROOT_Y ? 0 : b[1] - v->entry_root[1];
+                v->mx += c * dx - s * dy;
+                v->my += s * dx + c * dy;
+                if (!(st->flags & NODE_ROOT_TURN))
+                    v->heading += fmodf(root_yaw(v, t1 * st->rate) - v->entry_yaw + 540, 360) - 180;
+            }
             const MoveState *to = &v->graph.states[v->run.state];
             if (v->run.from != v->run.state)
                 printf("%s -> %s (%s)\n", st->name ? st->name : "?", to->name ? to->name : "?", to->clip ? to->clip : "-");
@@ -373,7 +388,14 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", v->graph.states[v->run.state].name,
                    v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
-    scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading, 1);
+    scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
+    if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
+        const MoveState *st = &v->graph.states[v->run.state];
+        float turn = st->flags & NODE_ROOT_TURN ?
+            fmodf(root_yaw(v, v->run.time * st->rate) - v->entry_yaw + 540, 360) - 180 : 0;
+        scene_monster_root_motion(&v->scene, (st->flags & NODE_ROOT_X ? 1 : 0) | (st->flags & NODE_ROOT_Y ? 2 : 0),
+                                  v->entry_root, turn);
+    }
     float at[1][3] = { { v->mx, v->my, v->mz } };
     cam_update(&v->cam, (const float (*)[3])at, 1, dt, aspect);
 }

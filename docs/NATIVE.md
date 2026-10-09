@@ -62,9 +62,11 @@ each vertex sits on. Between rotation keys, and blending clips, the viewer slerp
 In play the monster is driven the way the game drives it: the keys fill the pad's variable table (0x2C0AD0), the
 move graph picks the state and its clip (the transitions in their input window, by priority, until their switch
 window), the clip plays at its state's rate and blends in from the pose before it as the transition says (over the
-new state's blend time, [FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Blending"), and the clip's root carries the monster: each frame the root's travel in
-its clip (turned by the monster's heading) moves it, and when a state whose node says so ends (flag 0x40000: the
-climbs, mounts, knock-downs) the turn its root made becomes the monster's. The stick is read in the camera's frame:
+new state's blend time, [FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Blending"), and the clip's root carries the monster as
+its node says: each frame the root's travel along the axes it names (the walk forward, a kick forward and sideways)
+moves it, turned by its heading, and the rest stays in the pose; when a state whose node says so ends (flag
+0x40000: the climbs, mounts, knock-downs) the place and turn its root reached become the monster's
+([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Root motion"; the root's height is not taken yet). The stick is read in the camera's frame:
 where a state allows it (`Ground_Walk`, the flip) the monster turns towards it at 6 × the angle per second (0x2E8190),
 and in a jump it drives the monster at up to 16 units/s (the stick's own velocity, +0xA68)
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "State nodes", "Steering"). The clip's events act too: the movement mode, the
