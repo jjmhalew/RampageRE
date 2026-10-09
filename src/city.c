@@ -1270,6 +1270,39 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
             memcpy(sk->nrm + 3 * v, on, sizeof on);
         }
     }
+    if (sk->cloth && sk->particle) {                 /* hair: simulated in the world (the monster's moves drag it) */
+        static float world[256][16];
+        int nodes = cloth_nodes(sk->cloth);
+        for (int j = 0; j < nodes && j < (int)nb; j++) {
+            Mat4 w = mat_mul(in->base, palette[j]);
+            memcpy(world[j], w.m, sizeof world[j]);
+        }
+        cloth_set_world(sk->cloth, in->base.m);
+        if (!sk->cloth_started) {
+            cloth_reset(sk->cloth, (const float (*)[16])world);
+            sk->cloth_started = 1;
+        } else if (s->cloth_dt > 0) {
+            cloth_step(sk->cloth, s->cloth_dt, (const float (*)[16])world, NULL);
+        }
+        int np = cloth_count(sk->cloth);
+        float *lp = malloc(sizeof(float) * 6 * (size_t)(np ? np : 1)), *ln = lp + 3 * np;
+        cloth_to_local(sk->cloth, lp, ln);
+        float dev = 0;
+        for (uint32_t k = 0; k < sk->nverts; k++) {
+            int32_t q = sk->particle[k];
+            if (q < 0 || q >= np)
+                continue;
+            float d2 = 0;
+            for (int j = 0; j < 3; j++)
+                d2 += (sk->pos[3 * k + j] - lp[3 * q + j]) * (sk->pos[3 * k + j] - lp[3 * q + j]);
+            if (d2 > dev) dev = d2;
+            memcpy(sk->pos + 3 * k, lp + 3 * q, 12);
+            memcpy(sk->nrm + 3 * k, ln + 3 * q, 12);
+        }
+        free(lp);
+        if (getenv("RAMPAGE_CLOTH"))
+            printf("cloth: %d particles, the farthest %.3f from its rigid place\n", np, sqrtf(dev));
+    }
 }
 
 static int ends_with(const char *s, const char *tail);
@@ -1403,6 +1436,7 @@ static void update(Scene *s, double t, int all)
             it->world = it->node >= 0 ? mat_mul(in->base, in->node[it->node]) : in->base;
         }
     }
+    s->cloth_dt = 0;
 }
 
 void scene_update(Scene *s, double t) { update(s, t, 0); }
@@ -1624,9 +1658,12 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
     }
     ClothParticle *cloth = NULL;
     uint32_t ncloth = 0;
+    const BdpEntry *cloth_entry = NULL;
     for (uint32_t i = 0; i < mb->nentries; i++)
-        if (mb->entries[i].type == ET_CLOTH && !cloth)
+        if (mb->entries[i].type == ET_CLOTH && !cloth) {
             ncloth = cloth_particles(&mb->entries[i], &cloth);
+            cloth_entry = &mb->entries[i];
+        }
     for (uint32_t i = 0; i < mb->nentries; i++) {
         const BdpEntry *e = &mb->entries[i];
         if (e->type != ET_SKINNED && e->type != ET_MESH)
@@ -1654,6 +1691,30 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
                         }
                         break;
                     }
+            }
+        }
+        if (!m.parts[0].bones && cloth_entry && m.nparts) {   /* the cloth mesh: on the simulation */
+            sk->cloth = cloth_new(cloth_entry->data, cloth_entry->size);
+            if (sk->cloth) {
+                sk->particle = malloc(sizeof *sk->particle * (sk->nverts ? sk->nverts : 1));
+                for (uint32_t k = 0; k < sk->nverts; k++)
+                    sk->particle[k] = -1;
+                uint32_t base = 0;                   /* a vertex is placed by one of its triangles (cloth_triangle):
+                                                        some bind places hold two or three particles */
+                for (uint32_t pi = 0; pi < m.nparts; base += m.parts[pi].nverts, pi++) {
+                    const MeshPart *p = &m.parts[pi];
+                    for (uint32_t t = 0; t < p->ntris; t++) {
+                        const uint32_t *tri = p->tris + 3 * t;
+                        int out[3];
+                        if (cloth_triangle(sk->cloth, p->pos + 3 * tri[0], p->pos + 3 * tri[1], p->pos + 3 * tri[2], out))
+                            for (int k = 0; k < 3; k++)
+                                if (sk->particle[base + tri[k]] < 0)
+                                    sk->particle[base + tri[k]] = out[k];
+                    }
+                    for (uint32_t j = 0; j < p->nverts; j++)
+                        if (sk->particle[base + j] < 0)
+                            sk->particle[base + j] = cloth_nearest(sk->cloth, p->pos + 3 * j);
+                }
             }
         }
         push_item(s, scene_add_mesh(s, m, mb), id, -1, sk);
@@ -1959,6 +2020,7 @@ void scene_monster_blend(Scene *s, float seconds)
 
 void scene_monster_blend_step(Scene *s, float dt)
 {
+    s->cloth_dt += dt;                               /* for the cloth, at the next posing */
     if (s->monster >= 0 && s->instances[s->monster].blend_left > 0)
         s->instances[s->monster].blend_left -= dt;
     if (s->monster >= 0 && s->instances[s->monster].face_blend_left > 0)
@@ -2036,6 +2098,8 @@ void scene_free(Scene *s)
     for (uint32_t i = 0; i < s->nitems; i++)
         if (s->items[i].skin) {
             Skin *sk = s->items[i].skin;
+            if (sk->cloth) cloth_free(sk->cloth);
+            free(sk->particle);
             free(sk->bones); free(sk->weights); free(sk->pos); free(sk->nrm); free(sk);
         }
     for (uint32_t i = 0; i < s->ninstances; i++) {

@@ -7,6 +7,7 @@
 #include "building.h"
 #include "people.h"
 #include "fx.h"
+#include "cloth.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -16,6 +17,8 @@ typedef struct {                                     /* a skinned mesh's vertice
     uint8_t (*bones)[4]; float (*weights)[4];         /* per vertex of all parts, in part order */
     float *pos, *nrm;                                 /* the posed vertices */
     uint32_t nverts;
+    /* a cloth mesh (hair, fur, whiskers): its vertices follow the simulation (cloth.c), each on its particle */
+    Cloth *cloth; int32_t *particle; int cloth_started;
 } Skin;
 
 typedef struct {
@@ -93,6 +96,7 @@ typedef struct {
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
+    float cloth_dt;                                   /* play time not yet simulated by the monster's cloth */
     /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
      * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
     People *folk; struct City *owner;

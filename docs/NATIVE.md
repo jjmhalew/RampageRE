@@ -84,7 +84,8 @@ monster grabs one from a window (`canGrabPerson`) or the street (`doGrabObject` 
 eats (health, energy) or throws them, and its attacks send them flying. Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
-hides them): the punch's fist, the kick's foot. The face plays its own clip over the body's (the game's face layer:
+hides them): the punch's fist, the kick's foot. The monsters' hair, fur and whiskers are the game's cloth simulation (src/cloth.c,
+[CLOTH_NOTES.md](CLOTH_NOTES.md)), stepped in the world so the monster's moves drag them. The face plays its own clip over the body's (the game's face layer:
 `Expression_Idle` by default, the clip events' `faceAnim` expressions; FORMAT_MONSTER.md "The face"). A clip plays mirrored when its events (type 8, `setMirrorState`)
 say so: the skin takes each bone's other side reflected across the monster's x (for a symmetric mesh the same as
 the game's pose mirroring, 0x194BA0), and root motion, steering, the conditions and the spheres follow
@@ -120,8 +121,7 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- `queueFacialAnim`, the head turning towards a target, cloth
-  simulation;
+- `queueFacialAnim`, the head turning towards a target, the cities' flags in the wind (cloth.c has the wind);
 - friction on the velocity, the head turning with the right stick;
 - scoring;
 - effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the GUI, sound;
