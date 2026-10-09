@@ -42,6 +42,7 @@ Las Vegas. The 3D picture still has errors (black ground), it runs slowly and th
 | People and traffic in the blocks (379 people, 375 vehicles; lanes from the game's traffic code) | ✅ |
 | Lighting: the game's lights, fog, drifting clouds; every block also at night | ✅ |
 | Effects (297, rebuilt byte for byte), string tables (13, 9 languages), GUI layouts (XML) | ✅ [docs/FORMAT_EDF.md](docs/FORMAT_EDF.md) |
+| Native viewer in C (`rampage.exe`): every city block from `RAMPAGE.VOL`, lit, day and night, traffic | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -63,6 +64,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | Path | |
 |---|---|
 | `build.ps1` | the whole pipeline: disc → split ELF → C++ → `ps2EntryRunner.exe` |
+| `build_viewer.bat`, `src/` | the native viewer `rampage.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
 | `recomp/config.toml` | PS2Recomp config: stub bindings for the SCE libraries and newlib, plus Rampage fixes |
 | `recomp/funcmap.csv` | function map (Ghidra CSV format) the current state was tested with |
 | `tools/split_elf.py` | splits the retail ELF's single code+data segment into real sections |

@@ -1,0 +1,302 @@
+/* render_gl.c - Win32 window, WGL context and an OpenGL 1.1 renderer for a Scene (city.c). */
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#include "plat.h"
+#include <GL/gl.h>
+#include "render_gl.h"
+
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+
+/* ---------------------------------------------------------------- window */
+
+static Window *g_win;
+
+static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    Window *w = g_win;
+    static int last_x, last_y;
+    switch (msg) {
+    case WM_CLOSE: if (w) w->quit = 1; return 0;
+    case WM_SIZE: if (w) { w->width = LOWORD(lp); w->height = HIWORD(lp); } return 0;
+    case WM_KEYDOWN: case WM_SYSKEYDOWN:
+        if (w && wp < 256) { if (!w->keys[wp]) w->pressed[wp] = 1; w->keys[wp] = 1; }
+        return 0;
+    case WM_KEYUP: case WM_SYSKEYUP: if (w && wp < 256) w->keys[wp] = 0; return 0;
+    case WM_RBUTTONDOWN: if (w) { w->mouse_right = 1; last_x = (short)LOWORD(lp); last_y = (short)HIWORD(lp); SetCapture(hwnd); } return 0;
+    case WM_RBUTTONUP: if (w) w->mouse_right = 0; ReleaseCapture(); return 0;
+    case WM_MOUSEMOVE:
+        if (w && w->mouse_right) {
+            int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
+            w->mouse_dx += x - last_x; w->mouse_dy += y - last_y;
+            last_x = x; last_y = y;
+        }
+        return 0;
+    case WM_MOUSEWHEEL: if (w) w->wheel += GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA; return 0;
+    case WM_KILLFOCUS: if (w) memset(w->keys, 0, sizeof w->keys); return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+int win_open(Window *w, const char *title, int width, int height)
+{
+    memset(w, 0, sizeof *w);
+    g_win = w;
+    HINSTANCE inst = GetModuleHandleA(NULL);
+    WNDCLASSA wc = { 0 };
+    wc.style = CS_OWNDC;
+    wc.lpfnWndProc = wnd_proc;
+    wc.hInstance = inst;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.lpszClassName = "RampageRE";
+    RegisterClassA(&wc);
+    RECT rc = { 0, 0, width, height };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowA("RampageRE", title, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
+                              rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, inst, NULL);
+    if (!hwnd)
+        return -1;
+    HDC hdc = GetDC(hwnd);
+    PIXELFORMATDESCRIPTOR pfd = { sizeof pfd, 1, PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER, PFD_TYPE_RGBA,
+                                  32, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 24, 8, 0, PFD_MAIN_PLANE, 0, 0, 0, 0 };
+    int pf = ChoosePixelFormat(hdc, &pfd);
+    if (!pf || !SetPixelFormat(hdc, pf, &pfd))
+        return -1;
+    HGLRC rc_gl = wglCreateContext(hdc);
+    if (!rc_gl || !wglMakeCurrent(hdc, rc_gl))
+        return -1;
+    typedef BOOL (WINAPI *SwapInterval)(int);
+    SwapInterval swap = (SwapInterval)(void *)wglGetProcAddress("wglSwapIntervalEXT");
+    if (swap)
+        swap(1);
+    w->hwnd = hwnd; w->hdc = hdc; w->hglrc = rc_gl;
+    w->width = width; w->height = height;
+    return 0;
+}
+
+void win_poll(Window *w)
+{
+    MSG msg;
+    memset(w->pressed, 0, sizeof w->pressed);
+    w->mouse_dx = w->mouse_dy = w->wheel = 0;
+    while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+}
+
+void win_swap(Window *w) { SwapBuffers((HDC)w->hdc); }
+void win_title(Window *w, const char *title) { SetWindowTextA((HWND)w->hwnd, title); }
+
+void win_close(Window *w)
+{
+    wglMakeCurrent(NULL, NULL);
+    if (w->hglrc) wglDeleteContext((HGLRC)w->hglrc);
+    if (w->hwnd) DestroyWindow((HWND)w->hwnd);
+    g_win = NULL;
+}
+
+double win_time(void)
+{
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER now;
+    if (!freq.QuadPart)
+        QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart / (double)freq.QuadPart;
+}
+
+/* ---------------------------------------------------------------- renderer */
+
+struct Renderer {
+    const Scene *scene;
+    GLuint *tex;            /* per city bundle name index: GL texture, 0 = not made yet, ~0 = none */
+    uint32_t ntex;
+    uint32_t drawn;
+};
+
+Renderer *rnd_create(void) { return calloc(1, sizeof(Renderer)); }
+
+static void drop_textures(Renderer *r)
+{
+    for (uint32_t i = 0; i < r->ntex; i++)
+        if (r->tex[i] && r->tex[i] != ~0u)
+            glDeleteTextures(1, &r->tex[i]);
+    free(r->tex);
+    r->tex = NULL;
+    r->ntex = 0;
+}
+
+void rnd_scene(Renderer *r, const Scene *s)
+{
+    drop_textures(r);
+    r->scene = s;
+    r->ntex = s->city->nnames;
+    r->tex = calloc(r->ntex ? r->ntex : 1, sizeof *r->tex);
+}
+
+void rnd_free(Renderer *r)
+{
+    if (!r)
+        return;
+    drop_textures(r);
+    free(r);
+}
+
+uint32_t rnd_triangles(const Renderer *r) { return r->drawn; }
+
+static GLuint texture(Renderer *r, uint32_t name)
+{
+    if (!name || name >= r->ntex)
+        return 0;
+    if (!r->tex[name]) {
+        uint8_t *rgba;
+        int w, h;
+        r->tex[name] = ~0u;
+        if (tex_decode(r->scene->city, bdp_entry(r->scene->city, name), &rgba, &w, &h) == 0) {
+            GLuint id;
+            glGenTextures(1, &id);
+            glBindTexture(GL_TEXTURE_2D, id);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            free(rgba);
+            r->tex[name] = id;
+        }
+    }
+    return r->tex[name] == ~0u ? 0 : r->tex[name];
+}
+
+static void perspective(float fov_deg, float aspect, float zn, float zf)
+{
+    float f = 1.0f / tanf(fov_deg * 3.14159265f / 360.0f);
+    float m[16] = { f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (zf + zn) / (zn - zf), -1, 0, 0, 2 * zf * zn / (zn - zf), 0 };
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(m);
+}
+
+static void look(const Camera *c)
+{
+    float cp = cosf(c->pitch), f[3] = { cp * cosf(c->yaw), cp * sinf(c->yaw), sinf(c->pitch) };
+    float s[3] = { f[1], -f[0], 0 };                       /* f x up(0, 0, 1) */
+    float sl = sqrtf(s[0] * s[0] + s[1] * s[1]);
+    s[0] /= sl; s[1] /= sl;
+    float u[3] = { s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0] };
+    float m[16] = { s[0], u[0], -f[0], 0, s[1], u[1], -f[1], 0, s[2], u[2], -f[2], 0, 0, 0, 0, 1 };
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(m);
+    glTranslatef(-c->pos[0], -c->pos[1], -c->pos[2]);
+}
+
+static void draw_mesh(Renderer *r, const Mesh *m, double t)
+{
+    const Scene *s = r->scene;
+    for (uint32_t i = 0; i < m->nparts; i++) {
+        const MeshPart *p = &m->parts[i];
+        if (!p->ntris)
+            continue;
+        GLuint id = texture(r, material_texture(s->city, p->material));
+        if (id) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, id);
+        } else {
+            glDisable(GL_TEXTURE_2D);
+        }
+        int scroll = s->cloud_material && p->material == s->cloud_material;
+        if (scroll) {                                        /* the drifting cloud band (AnimatingSkyData) */
+            glMatrixMode(GL_TEXTURE);
+            glLoadIdentity();
+            glTranslatef((float)fmod(s->cloud_rate[0] * t, 1.0), (float)fmod(s->cloud_rate[1] * t, 1.0), 0);
+            glMatrixMode(GL_MODELVIEW);
+        }
+        glVertexPointer(3, GL_FLOAT, 0, p->pos);
+        if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, p->nrm); }
+        else { glDisableClientState(GL_NORMAL_ARRAY); glNormal3f(0, 0, 1); }
+        if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, p->uv); }
+        else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
+        else { glDisableClientState(GL_COLOR_ARRAY); glColor4f(1, 1, 1, 1); }
+        glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+        r->drawn += p->ntris;
+        if (scroll) {
+            glMatrixMode(GL_TEXTURE);
+            glLoadIdentity();
+            glMatrixMode(GL_MODELVIEW);
+        }
+    }
+}
+
+void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fog)
+{
+    const Scene *s = r->scene;
+    r->drawn = 0;
+    glViewport(0, 0, w->width, w->height);
+    float sky[3] = { 0.47f, 0.6f, 0.89f };
+    if (s && s->fog_end > 0)
+        memcpy(sky, s->fog_colour, sizeof sky);
+    glClearColor(sky[0], sky[1], sky[2], 1);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if (!s)
+        return;
+    perspective(cam->fov_deg, w->height ? (float)w->width / w->height : 1, 0.5f, 3000);
+    look(cam);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);                               /* the meshes are drawn from both sides */
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.5f);
+    glEnable(GL_NORMALIZE);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_FALSE);      /* both sides drawn, the normal as it is (no flip) */
+    float amb[4] = { s->ambient[0], s->ambient[1], s->ambient[2], 1 };
+    if (!s->nlights)
+        amb[0] = amb[1] = amb[2] = 1;
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
+    for (int i = 0; i < 4; i++) {
+        if (i >= s->nlights) {
+            glDisable(GL_LIGHT0 + i);
+            continue;
+        }
+        const float *d = s->light_dir[i];
+        float to_light[4] = { -d[0], -d[1], -d[2], 0 }, col[4] = { s->light_colour[i][0], s->light_colour[i][1], s->light_colour[i][2], 1 };
+        float zero[4] = { 0, 0, 0, 1 };
+        glLightfv(GL_LIGHT0 + i, GL_POSITION, to_light);  /* with the view matrix loaded: world-space directions */
+        glLightfv(GL_LIGHT0 + i, GL_DIFFUSE, col);
+        glLightfv(GL_LIGHT0 + i, GL_AMBIENT, zero);
+        glLightfv(GL_LIGHT0 + i, GL_SPECULAR, zero);
+        glEnable(GL_LIGHT0 + i);
+    }
+    if (fog && s->fog_end > 0) {
+        float fc[4] = { s->fog_colour[0], s->fog_colour[1], s->fog_colour[2], 1 };
+        glEnable(GL_FOG);
+        glFogi(GL_FOG_MODE, GL_LINEAR);
+        glFogfv(GL_FOG_COLOR, fc);
+        glFogf(GL_FOG_START, s->fog_start);
+        glFogf(GL_FOG_END, s->fog_end);
+    } else {
+        glDisable(GL_FOG);
+    }
+    glEnableClientState(GL_VERTEX_ARRAY);
+    for (uint32_t i = 0; i < s->nitems; i++) {
+        const DrawItem *it = &s->items[i];
+        glPushMatrix();
+        if (it->vehicle >= 0) {
+            const Vehicle *v = &s->vehicles[it->vehicle];
+            Mat4 m = mat_mul(mat_trs_z(vehicle_x(v, t), v->y, 0, v->turn_deg), it->local);
+            glMultMatrixf(m.m);
+        } else {
+            glMultMatrixf(it->world.m);
+        }
+        draw_mesh(r, &s->meshes[it->mesh].mesh, t);
+        glPopMatrix();
+    }
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+}

@@ -1,0 +1,49 @@
+# The native viewer (`src/`, `rampage.exe`)
+
+The second half of the hybrid approach: next to the recompiled game, a hand-written C program that reads the game's
+data with what the format work found and draws it, the way WoodyRE reimplements its game. The first piece is a viewer
+for the city blocks; it reads `RAMPAGE.VOL` itself (no extracted files, no Python), so it is the C port of the
+Python tools' readers and of `tools/city.py`.
+
+## Building and running
+```bat
+build_viewer.bat
+rampage.exe                                   :: build\disc\RAMPAGE.VOL, Chicago, block 1
+rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit
+```
+`build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
+from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256. The disc
+must have been extracted by `build.ps1` first (or pass the path to your own `RAMPAGE.VOL`).
+
+Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
+Page Up / Page Down the block, 1-7 the city, N day or night, F fog, F12 a screenshot, Esc quit. The console prints
+what each block holds (models, people, vehicles, anything not found).
+
+## Source
+| File | |
+|---|---|
+| `src/data.h` | the formats: declarations and little-endian readers |
+| `src/vol.c` | `RAMPAGE.VOL` (`tools/pvol.py`) |
+| `src/bundle.c` | Pipeworks bundles, segment 0 (`tools/bdp.py`) |
+| `src/tex.c` | textures to RGBA: PSMT8 unswizzle, CSM1 palettes, PSMCT32 / PSMCT16 (`tools/tex.py`) |
+| `src/mesh.c` | meshes, strips to triangles (`tools/mesh.py`) |
+| `src/prb.c` | property books read in place, with `ParentPropertySet` inheritance across bundles (`tools/prb.py`) |
+| `src/tree.c` | node trees and their rest pose (RawAnim at time 0, or the skeleton's bind pose) (`tools/anim.py`) |
+| `src/city.c` | a block: ground, buildings with generated facades, objects, people, traffic, lighting (`tools/city.py`) |
+| `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
+| `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
+| `src/main.c` | the viewer: arguments, camera, keys |
+
+The game lights its city at run time: texture × (ambient + Σ colour × N·L) from the light file
+([FORMAT_BDP.md](FORMAT_BDP.md) "Lighting"), which is OpenGL's fixed-function lighting, so the light file's ambient
+colour and directional lights become `GL_LIGHT_MODEL_AMBIENT` and `GL_LIGHT0..2`. Meshes are drawn from both sides
+with their normals as stored; texels with alpha below 0.5 are dropped, as in the glTF export. The cloud band
+scrolls by the `AnimatingSkyData` rate (per second, an assumption). Traffic drives the two lanes of the game's spawn
+code (0x332D90) at 15 units/s with a fixed pick from the block's vehicle mix.
+
+## Not there yet
+- animation: people stand in their rest pose; monsters and skinned meshes are not drawn yet;
+- effects (`tools/edf.py`), the GUI, sound;
+- the game's camera, collision and rules (the game systems come after the renderer);
+- vertex-coloured interiors of damaged buildings, shadows, reflections.

@@ -7,3 +7,9 @@ SLES_*
 *.ELF
 *.VOL
 __pycache__/
+
+# The native viewer and its compiler
+rampage.exe
+shot_*.png
+tools/zig/
+*.pdb
