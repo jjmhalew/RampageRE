@@ -19,8 +19,6 @@
 #define CELL 5.0f
 #define GROUND_FLOOR 6.0f
 #define STOREY 3.0f
-#define LANE_END 75.0f
-#define TRAFFIC_SPEED 15.0f
 #define MAX_BOOKS 32
 #define MAX_REC 512
 
@@ -430,6 +428,16 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     float xyz[3];
     location(inst, xyz);
     Mat4 at = mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)));
+    if (s->placing_building >= 0 && script && !_strnicmp(script, "Rocket.", 7)) {
+        if (s->nrockets < 16) {                      /* a roof rocket: vehicle.c makes it, its Base and BasePipe */
+            s->rockets[s->nrockets].name = group_str(inst, "Name");
+            for (int k = 0; k < 3; k++)
+                s->rockets[s->nrockets].pos[k] = at.m[12 + k];
+            s->rockets[s->nrockets].facing = group_num(inst, "ZRotation", 0) / 57.2957795f;
+            s->rockets[s->nrockets++].building = s->placing_building;
+        }
+        return;
+    }
     int scripted = -1;                               /* a band or a guard's hut: for people.c, once it exists */
     if (s->placing_block && script && s->nscripted < 8 &&
         (!_strnicmp(script, "Band.", 5) || !_strnicmp(script, "RoyalGuardHut.", 14))) {
@@ -679,6 +687,44 @@ int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
     return -1;
 }
 
+/* a vehicle's look (vehicle.c): its shape now (the DamageShape once hit), keyed by the object and the shape */
+static int vehicle_look(City *c, Scene *s, int who, const char *shape)
+{
+    for (int i = 0; i < s->nlooks; i++)
+        if (s->looks[i].who == who && strcmp(s->looks[i].anim, shape) == 0)
+            return s->looks[i].inst;
+    int missing = s->missing;
+    int id = place_model(c, s, shape, mat_identity(), -1);
+    s->missing = missing;
+    if (id >= 0)
+        s->instances[id].dynamic = 1;
+    s->looks = realloc(s->looks, sizeof *s->looks * (size_t)(s->nlooks + 1));
+    struct PersonLook *l = &s->looks[s->nlooks++];
+    l->who = who;
+    snprintf(l->anim, sizeof l->anim, "%s", shape);
+    l->inst = id;
+    return id;
+}
+
+/* each frame: every vehicle at its matrix (looks keyed from 2 << 20) */
+static void vehicle_sync(Scene *s)
+{
+    if (!s->traffic || !s->owner)
+        return;
+    for (int i = 0, n = vehicle_count(s->traffic); i < n; i++) {
+        const VehObj *o = vehicle_obj(s->traffic, i);
+        int who = (2 << 20) + i;
+        int show = o->phase != VP_GONE && !o->hidden && o->shape ? vehicle_look(s->owner, s, who, o->shape) : -1;
+        for (int k = 0; k < s->nlooks; k++)
+            if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
+                s->instances[s->looks[k].inst].hidden = 1;
+        if (show >= 0) {
+            s->instances[show].hidden = 0;
+            memcpy(s->instances[show].base.m, o->world, sizeof o->world);
+        }
+    }
+}
+
 /* each frame: every army unit at its place, its clip at anim_time / anim_len of the clip (looks keyed from 1 << 20) */
 static void army_sync(Scene *s, double t)
 {
@@ -859,61 +905,13 @@ int scene_people_boxes(const Scene *s, PeopleBox *out, int max)
 }
 
 
-static uint32_t rng_next(uint32_t *state) { *state = *state * 1664525u + 1013904223u; return *state >> 8; }
 
-static void traffic(City *c, Scene *s, Group block, const char *block_name, float y0)
+/* a block slot's traffic (gAIMgr's TrafficDef, 0x334240): the viewer's vehicle.c drives it from the BlockDef */
+static void traffic(Scene *s, Group block, float y0)
 {
-    Group td = group_sub(block, "TrafficDef"), where;
-    if (!td.at)
-        return;
-    Record r[64];
-    uint32_t n = group_values(td, "VehicleDef|", &where, r, 64);
-    const char *names[64];
-    float freq[64], total = 0;
-    uint32_t m = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        Group v = record_group(where, r[i]);
-        const char *name = group_str(v, "OTRef|Name");
-        float f = group_num(v, "Frequency", 0);
-        if (name && f > 0) {
-            names[m] = name;
-            freq[m] = f;
-            total += f;
-            m++;
-        }
-    }
-    if (!m)
-        return;
-    uint32_t seed = 2166136261u;                   /* the game picks at random; here a fixed draw per block */
-    for (const char *p = block_name; *p; p++)
-        seed = (seed ^ (uint8_t)*p) * 16777619u;
-    int per_lane = (int)lroundf(2 * LANE_END / TRAFFIC_SPEED / 3.5f), cap = (int)group_num(td, "MaxVehicles", 7) / 2;
-    if (per_lane > cap) per_lane = cap;
-    if (per_lane < 1) per_lane = 1;
-    int off = (group_num(td, "NoFrontTraffic", 0) != 0 ? 1 : 0) | (group_num(td, "NoRearTraffic", 0) != 0 ? 2 : 0);
-    static const struct { float y, dir, turn; int bit; } lanes[2] = { { -12.5f, 1, -90, 1 }, { -7.5f, -1, 90, 2 } };
-    s->vehicles = realloc(s->vehicles, sizeof *s->vehicles * (s->nvehicles + 2 * (uint32_t)per_lane));
-    for (int l = 0; l < 2; l++) {
-        if (off & lanes[l].bit)
-            continue;
-        for (int k = 0; k < per_lane; k++) {
-            float pick = (rng_next(&seed) & 0xFFFF) / 65536.0f * total;
-            uint32_t j = 0;
-            while (j + 1 < m && pick >= freq[j]) { pick -= freq[j]; j++; }
-            Group t = template_of(c, names[j]);
-            const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL;
-            Vehicle v = { y0 + lanes[l].y, lanes[l].dir, (float)k / per_lane, lanes[l].turn };
-            s->vehicles[s->nvehicles] = v;
-            if (shape && place_model(c, s, shape, mat_identity(), (int)s->nvehicles) >= 0)
-                s->nvehicles++;
-        }
-    }
-}
-
-static float vehicle_x(const Vehicle *v, double t)
-{
-    double f = fmod(t * TRAFFIC_SPEED / (2 * LANE_END) + v->phase, 1.0);
-    return v->direction * (float)(-LANE_END + 2 * LANE_END * f);
+    int slot = (int)(y0 / 41 + 0.5f);
+    if (slot >= 0 && slot < 3)
+        s->traffic_def[slot] = block;
 }
 
 /* the generated upper storeys: one quad per facade cell, its tile out of the 4 x 4 sheet */
@@ -1433,8 +1431,10 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         top_inst = place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)nfloors, 0)), -1);
     Record obj[MAX_REC];
     uint32_t no = group_values(inst, "ObjectInstance|", &where, obj, MAX_REC);
+    s->placing_building = !scenery && *count > had ? (int)(*count - 1) : -1;
     for (uint32_t i = 0; i < no; i++)
         place_object(c, s, record_group(where, obj[i]), node);
+    s->placing_building = -1;
     if (*count > had) {                              /* its pieces, to move */
         SceneBuilding *sb = &(*list)[*count - 1];
         adornments(c, s, sb, t, nst);
@@ -1771,12 +1771,9 @@ static void update(Scene *s, double t, int all)
 {
     people_sync(s, t);
     army_sync(s, t);
+    vehicle_sync(s);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
-        if (in->vehicle >= 0) {
-            const Vehicle *v = &s->vehicles[in->vehicle];
-            in->base = mat_trs_z(vehicle_x(v, t), v->y, 0, v->turn_deg);
-        }
         if (in->tree.n && (all || in->has_clip)) {
             pose_instance(s, in, t);
             if ((int)i == s->monster)
@@ -1807,6 +1804,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     s->city = &c->bundle;
     s->monster = -1;
     s->sky = -1;
+    s->placing_building = -1;
     s->mesh_of_entry = malloc(sizeof *s->mesh_of_entry * (c->bundle.nentries ? c->bundle.nentries : 1));
     for (uint32_t i = 0; i < c->bundle.nentries; i++)
         s->mesh_of_entry[i] = -1;
@@ -1905,7 +1903,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         for (int k = 0; k < 2; k++)
             s->people += people_crowd(s->folk, runners, nrun, CROWD[k]);
     }
-    traffic(c, s, block, block_name, 0);
+    traffic(s, block, 0);
     /* the next two blocks behind it (0x302AF0): slot 1 at y + 41, slot 2 at y + 82 (hard-coded), their ground, every
      * building (0x3059D0) and the objects LoadWhenWaiting (slot 1) or LoadWhenDistant (slot 2) has (0x3050F0), and
      * their traffic; no people. Every BlockList ends in two buffer blocks, so the last block has them too. */
@@ -1939,7 +1937,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
                     place_object(c, s, o, there);
             }
         }
-        traffic(c, s, nb, next, y0);
+        traffic(s, nb, y0);
     }
     update(s, 0, 1);
     obstacle_boxes(s);
@@ -2395,6 +2393,8 @@ void scene_buildings_update(Scene *s, float dt)
             army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_BUILDING, 0, s->monster_move,
                                 sb->b.width, sb->b.n, fronts, nf, at);
         }
+        if (s->traffic && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING)
+            vehicle_building_gone(s->traffic, (int)i);   /* onBuildingDestruction: its roof rockets fly */
         sb->seen_state = sb->b.state;
         for (int ls = 0; s->folk && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at state 2 or more */
             for (int col = 0; col < sb->b.width; col++) {
@@ -2544,7 +2544,6 @@ void scene_free(Scene *s)
     free(s->mesh_of_entry);
     free(s->instances);
     free(s->items);
-    free(s->vehicles);
     free(s->obstacle_of);
     free(s->obstacles);
     if (s->folk)

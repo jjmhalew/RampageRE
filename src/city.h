@@ -10,6 +10,7 @@
 #include "cloth.h"
 #include "army.h"
 #include "hud.h"
+#include "vehicle.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -51,7 +52,6 @@ typedef struct {
     Skin *skin;                                       /* skinned meshes: draw skin->pos / nrm instead of the mesh's */
 } DrawItem;
 
-typedef struct { float y, direction, phase, turn_deg; } Vehicle;
 
 /* an adornment on a building (record 0x60 bytes at building +0x250): a fire escape, an AC unit, a roof's trim */
 typedef struct {
@@ -95,7 +95,11 @@ typedef struct {
     int32_t *mesh_of_entry;                           /* per city bundle entry: its SceneMesh, -1 = not loaded */
     Instance *instances; uint32_t ninstances, instances_cap;
     DrawItem *items; uint32_t nitems, items_cap;
-    Vehicle *vehicles; uint32_t nvehicles;
+    /* the traffic, the fire truck and the rockets (vehicle.c, the viewer's): the TrafficDef blocks of the three block
+     * slots (0 this one, 1 and 2 behind it) and the roof rockets the buildings carry, for it to make */
+    Vehicles *traffic; Group traffic_def[3];
+    struct { const char *name; float pos[3], facing; int building; } rockets[16]; int nrockets;
+    int placing_building;                             /* the playable building whose objects are placed, -1 none */
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */

@@ -23,6 +23,7 @@
 #include "sound.h"
 #include "army.h"
 #include "hud.h"
+#include "vehicle.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -54,6 +55,9 @@ typedef struct {
     int last_collapse[64];                           /* per building: its collapse when last looked at */
     int held;                                        /* the person in its hand (people.c), -1 none */
     int held_unit;                                   /* or the army unit (army.c), -1 none */
+    int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
+    Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
+    struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
     Army *army;
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
     int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
@@ -209,6 +213,7 @@ static void start_moves(Viewer *v)
     memset(v->hand, 0, sizeof v->hand);
     v->held = -1;
     v->held_unit = -1;
+    v->held_vehicle = -1;
     v->pending_slot = -1;
     v->defeated = 0;
     v->scale = v->scale_to = 1;
@@ -350,6 +355,29 @@ static void build(Viewer *v)
         }
     }
     v->scene.army = v->army;
+    vehicle_free(v->veh);                            /* the traffic of the three block slots, the roof rockets */
+    v->veh = NULL;
+    v->nvfx = 0;
+    v->held_vehicle = -1;
+    if (v->have_scene) {
+        static VehicleHost vh;
+        vh.find = army_find;
+        vh.shape_box = army_shape_box;
+        vh.ctx = v;
+        v->veh = vehicle_new(&vh);
+        if (v->veh) {
+            if (v->army)
+                vehicle_bind_army(v->veh, v->army);
+            for (int k = 0; k < 3; k++)
+                if (v->scene.traffic_def[k].at)
+                    vehicle_load_traffic(v->veh, k, v->scene.traffic_def[k]);
+            vehicle_level_start(v->veh);
+            for (int k = 0; k < v->scene.nrockets; k++)
+                vehicle_spawn(v->veh, v->scene.rockets[k].name, v->scene.rockets[k].pos, v->scene.rockets[k].facing,
+                              v->scene.rockets[k].building);
+        }
+    }
+    v->scene.traffic = v->veh;
     if (v->have_scene && v->scene.folk)
         people_set_visible(v->scene.folk, people_visible, v);
     hud_close(v->hud);                               /* player 1's HUD for this monster (Hud0.ifc) */
@@ -368,8 +396,8 @@ static void build(Viewer *v)
     cam_init(&v->cam, &v->cam_settings);
     if (v->have_scene)
         rnd_scene(v->rnd, &v->scene);
-    printf("%s %s%s: %u models drawn, %d people, %u vehicles, %d not found\n", CITIES[v->city_index],
-           v->blocks[v->block], v->night ? " (night)" : "", v->scene.nitems, v->scene.people, v->scene.nvehicles,
+    printf("%s %s%s: %u models drawn, %d people, %d rockets, %d not found\n", CITIES[v->city_index],
+           v->blocks[v->block], v->night ? " (night)" : "", v->scene.nitems, v->scene.people, v->scene.nrockets,
            v->scene.missing);
 }
 
@@ -437,7 +465,7 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(v, a + 1) >= 0;
     if (!strcmp(call, "Monsters::canDoPunch")) return window_person(v, a + 1) < 0;   /* not at an occupied window */
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
-        return v->held >= 0 || v->held_unit >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
+        return v->held >= 0 || v->held_unit >= 0 || v->held_vehicle >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&v->mount, sc, &c, v->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
@@ -646,6 +674,19 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         } else if (v->army && (who = army_nearest_pickup(v->army, hand, root, fwd, 15)) >= 0) {
             army_grab(v->army, who, 0);
             v->held_unit = who;
+        } else if (v->veh && v->held_vehicle < 0 && (who = vehicle_nearest_pickup(v->veh, hand, root, fwd, 15)) >= 0) {
+            vehicle_grab(v->veh, who, 0);
+            v->held_vehicle = who;
+        }
+        return;
+    }
+    else if (!strcmp(n, "Monsters::grabBoulder")) {  /* Monsters.bsf: a Boulder torn out of the street, 6.5 up */
+        float at[3] = { v->mx, v->my, v->mz + 6.5f };
+        int who = v->veh && v->held < 0 && v->held_unit < 0 && v->held_vehicle < 0 ?
+                  vehicle_spawn(v->veh, "Boulder", at, 0, -1) : -1;
+        if (who >= 0) {
+            vehicle_grab(v->veh, who, 0);
+            v->held_vehicle = who;
         }
         return;
     }
@@ -653,6 +694,11 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         if (v->held_unit >= 0 && v->army) {
             army_throw(v->army, v->held_unit, 0, e->p[0] != 0, e->p + 1, v->heading / 57.2957795f);
             v->held_unit = -1;
+            return;
+        }
+        if (v->held_vehicle >= 0 && v->veh) {
+            vehicle_throw(v->veh, v->held_vehicle, 0, e->p[0] != 0, e->p + 1, v->heading / 57.2957795f);
+            v->held_vehicle = -1;
             return;
         }
         if (v->held < 0 || !v->scene.folk)
@@ -842,6 +888,8 @@ static void hit_spheres(Viewer *v)
         scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
         if (v->army)                                 /* and the army's units (20 a blow [G]) */
             army_hit(v->army, 0, c, c[3], 20);
+        if (v->veh)                                  /* and the vehicles and rockets */
+            vehicle_hit(v->veh, 0, c, c[3], 20);
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
             float from[3] = { v->mx, v->my, v->mz };
@@ -869,6 +917,102 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
 }
 
 /* the army each frame (army.c): the monster as it sees it, the buildings, then what it makes happen */
+/* 0x2D6A50: a hit on the monster: HP off, the reaction by its level and the knock */
+static void monster_hit(Viewer *v, const char *name, float amount, int level, const float knock[3], const float from[3])
+{
+    if (v->defeated)
+        return;
+    v->hp = fmaxf(0, v->hp - amount);
+    float heading = v->heading / 57.2957795f, at[3] = { v->mx, v->my, v->mz };
+    int slot = army_reaction_slot(level, knock, v->mode, army_hit_behind(at, heading, from));
+    if (slot >= 0) {
+        memcpy(v->vel, knock, sizeof v->vel);
+        v->pending_slot = slot;
+    }
+    if (v->hp <= 0) {                                /* 0x2D9364: at 0 HP slot 67, React_Defeated */
+        v->defeated = 1;
+        v->pending_slot = 67;
+        memset(v->vel, 0, sizeof v->vel);
+    }
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  hit by %s: %.1f, HP %.0f, slot %d\n", name ? name : "?", amount, v->hp, slot);
+}
+
+/* the vehicles' frame (vehicle.c): what they see of the monster and the buildings, then what they did */
+static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, const ArmyBox *boxes, int nb)
+{
+    if (!v->veh)
+        return;
+    vehicle_update(v->veh, dt, m, 1, boxes, nb);
+    VehicleEvent ev[64];
+    int ne;
+    while ((ne = vehicle_events(v->veh, ev, 64)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const VehicleEvent *e = &ev[i];
+            switch (e->type) {
+            case VE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    if (id >= 0 && v->nvfx < 64) {   /* to follow its object, or to stop by its handle */
+                        const VehObj *o = e->obj >= 0 ? vehicle_obj(v->veh, e->obj) : NULL;
+                        v->vfx[v->nvfx].id = e->id;
+                        v->vfx[v->nvfx].fx = id;
+                        v->vfx[v->nvfx].obj = o ? e->obj : -1;
+                        for (int k = 0; k < 3; k++)
+                            v->vfx[v->nvfx].off[k] = o ? e->pos[k] - o->pos[k] : 0;
+                        v->nvfx++;
+                    }
+                }
+                break;
+            case VE_EFFECT_STOP:
+                for (int k = 0; k < v->nvfx; k++)
+                    if (v->vfx[k].id == e->id) {
+                        fx_stop(v->fxw, v->vfx[k].fx);
+                        v->vfx[k] = v->vfx[--v->nvfx];
+                        break;
+                    }
+                break;
+            case VE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case VE_HIT: monster_hit(v, e->name, e->amount, e->level, e->v, e->pos); break;
+            case VE_REACTION: v->pending_slot = e->level; break;
+            case VE_SET_VEL: memcpy(v->vel, e->v, sizeof v->vel); break;
+            case VE_HP: if (v->hp > 0) v->hp = fmaxf(0, fminf(200, v->hp + e->amount)); break;
+            case VE_STATS:                           /* id 1: the army applied it (its events follow) */
+                if (e->id == 0) {
+                    v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->v[0])) : v->hp;
+                    v->energy = fmaxf(0, fminf(100, v->energy + e->v[1]));
+                }
+                break;
+            case VE_REMOVED:
+                if (e->obj == v->held_vehicle)
+                    v->held_vehicle = -1;
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE") && e->type != VE_EFFECT && e->type != VE_EFFECT_STOP)
+                printf("  vehicle event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->obj);
+        }
+    for (int k = 0; k < v->nvfx; k++) {              /* the effects that follow their vehicle, while it is there */
+        if (v->vfx[k].obj < 0) {
+            if (!fx_alive(v->fxw, v->vfx[k].fx))
+                v->vfx[k--] = v->vfx[--v->nvfx];
+            continue;
+        }
+        const VehObj *o = vehicle_obj(v->veh, v->vfx[k].obj);
+        if (!o || o->phase == VP_GONE) {
+            v->vfx[k].obj = -1;                      /* it stays where it is */
+            continue;
+        }
+        float at[3] = { o->pos[0] + v->vfx[k].off[0], o->pos[1] + v->vfx[k].off[1], o->pos[2] + v->vfx[k].off[2] };
+        fx_move(v->fxw, v->vfx[k].fx, at);
+    }
+    if (v->held_vehicle >= 0) {                      /* one in its hand */
+        Mat4 h;
+        if (attach_world(v, "Helper R Hand", &h) == 0)
+            vehicle_hold(v->veh, v->held_vehicle, h.m, v->mirror);
+    }
+}
+
 static void army_step(Viewer *v, float dt)
 {
     if (!v->army || !v->have_graph || v->scene.monster < 0)
@@ -914,6 +1058,7 @@ static void army_step(Viewer *v, float dt)
     army_set_view(v->army, v->cam.pos[0] - 45, v->cam.pos[0] + 45);   /* the view's x range [G] */
     v->scene.monster_move = m.move;
     army_update(v->army, dt, &m, 1, boxes, nb);
+    vehicle_step(v, dt, &m, boxes, nb);
     ArmyEvent ev[64];
     int ne;
     while ((ne = army_events(v->army, ev, 64)) > 0)
@@ -952,25 +1097,7 @@ static void army_step(Viewer *v, float dt)
                 if (e->level == 0) sound_kill_name(e->name);
                 else sound_play(e->name, e->pos, 1);
                 break;
-            case AE_HIT: {                           /* 0x2D6A50: HP off, the reaction by its level and the knock */
-                if (v->defeated)
-                    break;
-                v->hp = fmaxf(0, v->hp - e->amount);
-                float heading = v->heading / 57.2957795f, at[3] = { v->mx, v->my, v->mz };
-                int slot = army_reaction_slot(e->level, e->v, v->mode, army_hit_behind(at, heading, e->pos));
-                if (slot >= 0) {
-                    memcpy(v->vel, e->v, sizeof v->vel);
-                    v->pending_slot = slot;
-                }
-                if (v->hp <= 0) {                    /* 0x2D9364: at 0 HP slot 67, React_Defeated */
-                    v->defeated = 1;
-                    v->pending_slot = 67;
-                    memset(v->vel, 0, sizeof v->vel);
-                }
-                if (getenv("RAMPAGE_TRACE"))
-                    printf("  hit by %s: %.1f, HP %.0f, slot %d\n", e->name ? e->name : "?", e->amount, v->hp, slot);
-                break;
-            }
+            case AE_HIT: monster_hit(v, e->name, e->amount, e->level, e->v, e->pos); break;
             case AE_REACTION: v->pending_slot = e->level; break;
             case AE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
             case AE_STATS_HEALTH: v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->amount)) : v->hp; break;
@@ -1665,6 +1792,8 @@ int main(int argc, char **argv)
             if (v.have_scene) {
                 scene_buildings_update(&v.scene, dt > 0.1f ? 0.1f : dt);
                 v.scene.cloth_dt += dt > 0.1f ? 0.1f : dt;   /* the flags fly in the free camera too */
+                if (v.veh)                           /* and the traffic drives on, with no monster about */
+                    vehicle_update(v.veh, dt > 0.1f ? 0.1f : dt, NULL, 0, NULL, 0);
             }
             if (cam.use_rows) {                        /* back to the free camera where the game camera was */
                 cam.use_rows = 0;
