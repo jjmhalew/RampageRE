@@ -6,6 +6,7 @@
 #include "data.h"
 #include "building.h"
 #include "people.h"
+#include "fx.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -52,6 +53,7 @@ typedef struct {
     int cell, flags, detach;                          /* +0x48; AdornmentFlags (+0x3C); CellDetachDamage (+0x50) */
     float x, y, deg, zoff;                            /* in the building's frame; +0x34 */
     float lo[3], hi[3];                               /* its model's box, in its own frame */
+    const char *fx;                                   /* DislodgedFx (+0x54): played when it is knocked off */
     int gone;                                         /* flag 0x10: off the building */
 } Adornment;
 
@@ -72,6 +74,10 @@ typedef struct {                                      /* a building's cells and 
     float outline[4][4]; int inner_wall; float crack_k, crack_tint[3];
     Adornment *adorn; int nadorn;
     uint8_t broke[BUILDING_STOREYS][BUILDING_CELLS];  /* a front cell at state 2 or more, its window people told */
+    uint8_t seen[BUILDING_STOREYS][BUILDING_CELLS];   /* each cell's state when its effects were last played */
+    int seen_collapse;
+    /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
+    const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
@@ -89,6 +95,9 @@ typedef struct {
     /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
      * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
     People *folk; struct City *owner;
+    /* effects to start (fx.c, by main) and the particles to draw this frame */
+    struct SceneFx { const char *name; float pos[3], dir[3]; } fxreq[64]; int nfxreq;
+    const FxQuad *fx; int nfx;
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer;
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
@@ -139,6 +148,7 @@ int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
 /* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
  * ones, flag 4, nor obstacles, flag 2); how many */
 int scene_adornments_hit(Scene *s, const float centre[3], float radius);
+void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]);   /* an effect to start */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
 int scene_monster_node(const Scene *s, const char *name, Mat4 *world);
 /* the window occupants (0x318650's stand-in: the rates were not found): every 2 s, with the block's FillRate, one

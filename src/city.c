@@ -855,6 +855,9 @@ static void adornments(City *c, Scene *s, SceneBuilding *sb, Group from, int nst
         }
         a.flags = (int)group_num(e, "AdornmentFlags", group_num(at, "AdornmentFlags", 0));
         a.detach = (int)group_num(e, "CellDetachDamage", group_num(at, "CellDetachDamage", 0));
+        a.fx = group_str(e, "DislodgedFx");
+        if (!a.fx)
+            a.fx = group_str(at, "DislodgedFx");
         int face = a.side < 4 ? a.side : origin;
         float along = a.side < 4 ? CELL * (float)a.cell + u : u;
         if (face == FACE_LEFT) { a.x = -hw; a.y = hd - along; a.deg = -90; }
@@ -927,6 +930,16 @@ static void adornments_place(Scene *s, SceneBuilding *sb, Mat4 sway)
     }
 }
 
+void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3])
+{
+    if (!name || s->nfxreq >= 64)
+        return;
+    struct SceneFx *f = &s->fxreq[s->nfxreq++];
+    f->name = name;
+    memcpy(f->pos, pos, sizeof f->pos);
+    memcpy(f->dir, dir, sizeof f->dir);
+}
+
 int scene_adornments_hit(Scene *s, const float centre[3], float radius)
 {
     int n = 0;
@@ -945,7 +958,10 @@ int scene_adornments_hit(Scene *s, const float centre[3], float radius)
                 dd += c * c;
             }
             if (dd <= r * r) {
-                a->gone = 1;                         /* flag 0x10 (its DislodgedFx, an effect, is not drawn) */
+                a->gone = 1;                         /* flag 0x10, and its DislodgedFx where it was */
+                const float *w = s->instances[a->inst].base.m;
+                float at[3] = { w[12], w[13], w[14] }, dir[3] = { -w[4], -w[5], -w[6] };   /* out of the wall */
+                scene_fx(s, a->fx, at, dir);
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  knocked off building %u's adornment %d (side %d)\n", bi, i, a->side);
                 s->instances[a->inst].hidden = 1;
@@ -1028,6 +1044,12 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->moving = 0;
         sb->adorn = NULL;
         sb->nadorn = 0;
+        memset(sb->seen, 0, sizeof sb->seen);
+        sb->seen_collapse = -1;
+        sb->fx_glass = group_str(t, "Glass_Small");
+        sb->fx_wall_small = group_str(t, "Wall_Small");
+        sb->fx_wall_large = group_str(t, "Wall_Large");
+        sb->fx_floor = group_str(t, "Floor_Large");
         memset(sb->broke, 0, sizeof sb->broke);
         sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
@@ -1860,6 +1882,29 @@ void scene_buildings_update(Scene *s, float dt)
         }
         sb->b.dirty = 0;
         facade_passes(s, sb);
+        /* the cells' effects as their state rises (0x2BB580: glass at the first crack, wall debris as it breaks, the
+         * heavy debris when destroyed; which of the props' Small / Large goes with which state is a stand-in) */
+        for (int ls = 0; ls < sb->b.n; ls++)
+            for (int col = 0; col < sb->b.width; col++) {
+                int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];
+                if (ci < 0)
+                    continue;
+                int st = sb->b.cell[o][ci].state, was = sb->seen[o][ci];
+                if (st <= was)
+                    continue;
+                sb->seen[o][ci] = (uint8_t)st;
+                const char *name = st == 1 ? sb->fx_glass : st == 2 ? sb->fx_wall_small : sb->fx_wall_large;
+                float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
+                                sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls + STOREY / 2 }, in[3] = { 0, 1, 0 };
+                scene_fx(s, name, at, in);
+            }
+        if (sb->b.collapse > 0 && sb->b.collapse != sb->seen_collapse) {   /* a floor comes down */
+            int k = sb->b.collapse;
+            float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
+                            sb->b.min[2] + GROUND_FLOOR + STOREY * (float)(k - 1) }, in[3] = { 0, 1, 0 };
+            scene_fx(s, sb->fx_floor, at, in);
+        }
+        sb->seen_collapse = sb->b.collapse;
         for (int ls = 0; s->folk && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at state 2 or more */
             for (int col = 0; col < sb->b.width; col++) {
                 int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];

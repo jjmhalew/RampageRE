@@ -19,6 +19,7 @@
 #include "moves.h"
 #include "climb.h"
 #include "ik.h"
+#include "fx.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -49,6 +50,8 @@ typedef struct {
     uint32_t shake_seed;
     int last_collapse[64];                           /* per building: its collapse when last looked at */
     int held;                                        /* the person in its hand (people.c), -1 none */
+    Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
+    FxLib *fxlib; FxWorld *fxw;
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
     const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
 } Viewer;
@@ -668,6 +671,33 @@ static void hit_spheres(Viewer *v)
 
 static void hands_step(Viewer *v, float dt);
 
+/* a composite effect's camerashake part (fx.c): camshake or camshake_collapse at strength 1 where it plays */
+static void fx_shake(void *ctx, const char *name, const float pos[3])
+{
+    Viewer *v = ctx;
+    int slot = 1;
+    for (int j = 2; j < 8; j++)                      /* a free one, else the oldest */
+        if (!v->shakes[j].def || v->shakes[j].age > v->shakes[slot].age)
+            slot = j;
+    const ShakeDef *d = name && _stricmp(name, "camshake_collapse") == 0 ? &SHAKE_COLLAPSE : &SHAKE_MONSTER;
+    shake_start(&v->shakes[slot], d, pos, 1, 0, &v->shake_seed);
+}
+
+/* the effects the scene and the people asked for, started; the world's particles moved on */
+static void fx_step(Viewer *v, float dt)
+{
+    for (int i = 0; i < v->scene.nfxreq; i++)
+        if (v->fxw) {
+            const struct SceneFx *f = &v->scene.fxreq[i];
+            int id = fx_spawn(v->fxw, f->name, f->pos, f->dir, 1);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  effect %s at %.1f %.1f %.1f -> %d\n", f->name, f->pos[0], f->pos[1], f->pos[2], id);
+        }
+    v->scene.nfxreq = 0;
+    if (v->fxw)
+        fx_update(v->fxw, dt, 0);
+}
+
 static int ends_with_i(const char *s, const char *tail)
 {
     size_t a = strlen(s), b = strlen(tail);
@@ -894,6 +924,10 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         PeopleEvent ev[32];
         int ne = people_events(v->scene.folk, ev, 32);
         for (int i = 0; i < ne; i++) {
+            if (ev[i].type == PE_EFFECT && !ev[i].node) {
+                float up[3] = { 0, 1, 0 };
+                scene_fx(&v->scene, ev[i].name, ev[i].v, up);
+            }
             if (ev[i].type == PE_MONSTER_HP)
                 v->hp = fmaxf(0, fminf(200, v->hp + ev[i].amount));
             else if (ev[i].type == PE_MONSTER_KNOCK) {   /* setVel(v, world), setReaction(2) */
@@ -905,21 +939,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         }
     }
     scene_buildings_update(&v->scene, dt);
-    /* a floor that starts to fall plays its Floor_Large / Floor_Small effect (Collapse_Floor_*_comp), which holds
-     * camshake.edf at strength 1 where it falls */
-    for (uint32_t i = 0; i < v->scene.nbuildings && i < 64; i++) {
-        const SceneBuilding *sb = &v->scene.buildings[i];
-        int k = sb->b.collapse;
-        if (k > 0 && k != v->last_collapse[i]) {
-            int slot = 1;
-            for (int j = 2; j < 8; j++)              /* a free one, else the oldest */
-                if (!v->shakes[j].def || v->shakes[j].age > v->shakes[slot].age)
-                    slot = j;
-            float at[3] = { sb->node.m[12], sb->node.m[13], 6 + 3 * (float)(k - 1) };
-            shake_start(&v->shakes[slot], &SHAKE_MONSTER, at, 1, 0, &v->shake_seed);
-        }
-        v->last_collapse[i] = k;
-    }
+    fx_step(v, dt);
     shake_step(v->shakes, 8, dt);
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
@@ -1111,6 +1131,24 @@ int main(int argc, char **argv)
     }
     v.fog = v.fog < 0 ? 0 : 1;                       /* the game's fog (LightingData FogStart / FogEnd), F toggles it */
     v.rnd = rnd_create();
+    {                                                /* the effects: fx.bdp, its words from RAMPAGE.ELF beside the VOL */
+        uint32_t size = 0;
+        uint8_t *data = vol_read(&v.vol, "fx.bdp", &size);
+        if (data && bdp_load(&v.fx_bundle, data, size) == 0) {
+            char elf[512];
+            snprintf(elf, sizeof elf, "%s", pos[0]);
+            char *slash = strrchr(elf, '\\'), *fwd = strrchr(elf, '/');
+            if (fwd > slash) slash = fwd;
+            snprintf(slash ? slash + 1 : elf, sizeof elf - (size_t)(slash ? slash + 1 - elf : 0), "RAMPAGE.ELF");
+            const Bundle *bl[1] = { &v.fx_bundle };
+            v.have_fx_bundle = 1;
+            v.fxlib = fx_open(elf, bl, 1);
+            v.fxw = v.fxlib ? fx_world(v.fxlib) : NULL;
+            if (v.fxw)
+                fx_on_shake(v.fxw, fx_shake, &v);
+        } else
+            free(data);
+    }
     v.night = night;
     v.mx = 0; v.my = -18; v.heading = 180;          /* in the street, facing the camera */
     v.show_hits = 1;
@@ -1222,6 +1260,15 @@ int main(int argc, char **argv)
                 hit_spheres(&v);
             else
                 v.scene.nspheres = 0;
+        }
+        {                                            /* this frame's particles */
+            static FxQuad quads[8192];
+            v.scene.fx = quads;
+            v.scene.nfx = v.fxw ? fx_quads(v.fxw, quads, 8192) : 0;
+            if (shot && getenv("RAMPAGE_TRACE") && v.fxw)
+                printf("particles %d, quads %d (first at %.1f %.1f %.1f, size %.2f, alpha %.2f)\n", fx_particles(v.fxw),
+                       v.scene.nfx, v.scene.nfx ? quads[0].pos[0] : 0, v.scene.nfx ? quads[0].pos[1] : 0,
+                       v.scene.nfx ? quads[0].pos[2] : 0, v.scene.nfx ? quads[0].size[0] : 0, v.scene.nfx ? quads[0].col[3] : 0);
         }
         if (have_view) {
             Camera fixed = { { view[0], view[1], view[2] }, view[3] / 57.2957795f, view[4] / 57.2957795f, 60 };

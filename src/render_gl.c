@@ -356,6 +356,78 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
     }
 }
 
+/* the particles (fx.c): after the world, not writing depth, tested against it unless the effect says not to
+ * (-TestZBuffer); additive or alpha blended; the colour times the texture (the game's 128 = 1) */
+static void draw_fx(Renderer *r, const Camera *cam)
+{
+    const Scene *s = r->scene;
+    float M[16];
+    glGetFloatv(GL_MODELVIEW_MATRIX, M);
+    float right[3] = { M[0], M[4], M[8] }, up[3] = { M[1], M[5], M[9] };
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+    glAlphaFunc(GL_GREATER, 0.004f);
+    for (int i = 0; i < s->nfx; i++) {
+        const FxQuad *q = &s->fx[i];
+        GLuint id = q->b ? texture(r, q->b, q->tex) : 0;
+        if (id) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, id);
+        } else {
+            glDisable(GL_TEXTURE_2D);
+        }
+        if (q->ztest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        glBlendFunc(GL_SRC_ALPHA, q->additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+        glColor4fv(q->col);
+        float c[4][3];                                     /* top-left, top-right, bottom-right, bottom-left */
+        if (q->kind == FXQ_BILLBOARD) {
+            float cs = cosf(q->rot), sn = sinf(q->rot), rr[3], uu[3];
+            for (int k = 0; k < 3; k++) {
+                rr[k] = (cs * right[k] + sn * up[k]) * q->size[0] / 2;
+                uu[k] = (-sn * right[k] + cs * up[k]) * q->size[1] / 2;
+            }
+            for (int k = 0; k < 3; k++) {
+                c[0][k] = q->pos[k] - rr[k] + uu[k];
+                c[1][k] = q->pos[k] + rr[k] + uu[k];
+                c[2][k] = q->pos[k] + rr[k] - uu[k];
+                c[3][k] = q->pos[k] - rr[k] - uu[k];
+            }
+        } else if (q->kind == FXQ_FLAT) {
+            for (int k = 0; k < 3; k++) {
+                c[0][k] = q->pos[k] - q->axis[0][k] + q->axis[1][k];
+                c[1][k] = q->pos[k] + q->axis[0][k] + q->axis[1][k];
+                c[2][k] = q->pos[k] + q->axis[0][k] - q->axis[1][k];
+                c[3][k] = q->pos[k] - q->axis[0][k] - q->axis[1][k];
+            }
+        } else {                                           /* a streak, head (v 0) to tail (v 1), facing the camera */
+            float view[3] = { q->pos[0] - cam->pos[0], q->pos[1] - cam->pos[1], q->pos[2] - cam->pos[2] }, wd[3];
+            const float *a = q->axis[0];
+            wd[0] = a[1] * view[2] - a[2] * view[1];
+            wd[1] = a[2] * view[0] - a[0] * view[2];
+            wd[2] = a[0] * view[1] - a[1] * view[0];
+            float l = sqrtf(wd[0] * wd[0] + wd[1] * wd[1] + wd[2] * wd[2]);
+            for (int k = 0; k < 3; k++) {
+                wd[k] = l > 1e-6f ? wd[k] / l * q->size[1] / 2 : 0;
+                c[0][k] = q->pos[k] + a[k] - wd[k];
+                c[1][k] = q->pos[k] + a[k] + wd[k];
+                c[2][k] = q->pos[k] - a[k] + wd[k];
+                c[3][k] = q->pos[k] - a[k] - wd[k];
+            }
+        }
+        glBegin(GL_QUADS);
+        glTexCoord2f(q->uv[0], q->uv[1]); glVertex3fv(c[0]);
+        glTexCoord2f(q->uv[2], q->uv[1]); glVertex3fv(c[1]);
+        glTexCoord2f(q->uv[2], q->uv[3]); glVertex3fv(c[2]);
+        glTexCoord2f(q->uv[0], q->uv[3]); glVertex3fv(c[3]);
+        glEnd();
+    }
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+    glAlphaFunc(GL_GREATER, 0.5f);
+}
+
 void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fog)
 {
     const Scene *s = r->scene;
@@ -447,6 +519,8 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
     glDisable(GL_CULL_FACE);
+    if (s->nfx)                                            /* the effects' particles, over the world */
+        draw_fx(r, cam);
     if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
