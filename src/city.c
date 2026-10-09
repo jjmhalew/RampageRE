@@ -531,9 +531,20 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         sb->b.seed = s->nbuildings;
         sb->mesh = mesh;
         memset(sb->quad, 0xFF, sizeof sb->quad);
+        memset(sb->skeleton, 0xFF, sizeof sb->skeleton);
+        memset(sb->damaged_skeleton, 0xFF, sizeof sb->damaged_skeleton);
         int32_t v = 0;
         for (int st = 0; st < nst && st < BUILDING_STOREYS; st++) {
             sb->b.floor_hp[st] = (int)group_num(floors[st], "FloorHP", (float)sb->b.floor_hp[st]);
+            sb->skeleton_hp[st] = (int)group_num(floors[st], "DamagedSkeletonHP", (float)(sb->b.floor_hp[st] / 2));
+            Mat4 at = mat_mul(node, mat_trs_z(0, 0, z[st], 0));
+            const char *sk = group_str(floors[st], "Skeleton"), *dsk = group_str(floors[st], "DamagedSkeleton");
+            int missing = s->missing;
+            sb->skeleton[st] = sk ? place_model(c, s, sk, at, -1) : -1;
+            sb->damaged_skeleton[st] = dsk ? place_model(c, s, dsk, at, -1) : -1;
+            s->missing = missing;                    /* an interior not found is not counted as missing */
+            if (sb->skeleton[st] >= 0) s->instances[sb->skeleton[st]].hidden = 1;
+            if (sb->damaged_skeleton[st] >= 0) s->instances[sb->damaged_skeleton[st]].hidden = 1;
             for (int k = 0; k < 2 * depth + width && (uint32_t)k < ntiles[st]; k++) {
                 int face = k < depth ? FACE_LEFT : k < depth + width ? FACE_FRONT : FACE_RIGHT;
                 int col = k < depth ? k : k < depth + width ? k - depth : k - depth - width;
@@ -985,6 +996,14 @@ void scene_buildings_redraw(Scene *s)
                 for (int k = 0; k < 4; k++)
                     p->uv[2 * (v + k) + 1] = row + (k & 1 ? 0 : 0.25f);
             }
+        for (int st = 0; st < sb->b.nstoreys; st++) {    /* the interiors */
+            int damaged = 0;
+            for (int c = 0; c < BUILDING_CELLS && !damaged; c++)
+                damaged = sb->b.cell[st][c].state > 0;
+            int worn = sb->b.floor_hp[st] <= sb->skeleton_hp[st] && sb->damaged_skeleton[st] >= 0;
+            if (sb->skeleton[st] >= 0) s->instances[sb->skeleton[st]].hidden = !damaged || worn;
+            if (sb->damaged_skeleton[st] >= 0) s->instances[sb->damaged_skeleton[st]].hidden = !damaged || !worn;
+        }
     }
 }
 

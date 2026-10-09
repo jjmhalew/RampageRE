@@ -301,6 +301,8 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glEnableClientState(GL_VERTEX_ARRAY);
     for (uint32_t i = 0; i < s->nitems; i++) {
         const DrawItem *it = &s->items[i];
+        if (s->instances[it->instance].hidden)
+            continue;
         glPushMatrix();
         glMultMatrixf(it->world.m);
         draw_mesh(r, &s->meshes[it->mesh], it->skin, t);

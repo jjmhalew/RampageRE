@@ -27,6 +27,7 @@ typedef struct {
     int still_root; float root_hold[3], root_turn;
     float (*pose)[7];                                 /* the monster: each node's last local pose (t, q) */
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
+    int hidden;                                       /* not drawn (a building's interior until it is damaged) */
 } Instance;
 
 typedef struct {
@@ -42,6 +43,9 @@ typedef struct {                                      /* a building's cells and 
     Building b;
     int mesh;                                         /* the facade's scene mesh, -1 none */
     int32_t quad[BUILDING_STOREYS][BUILDING_CELLS];   /* per cell (building.h order) its quad's first vertex, -1 */
+    /* per storey its interior models (instances, -1 none): Skeleton once a cell is damaged, DamagedSkeleton once
+     * FloorHP is down to DamagedSkeletonHP (half of FloorHP unless set; drawn around 0x2CD898) */
+    int skeleton[BUILDING_STOREYS], damaged_skeleton[BUILDING_STOREYS], skeleton_hp[BUILDING_STOREYS];
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
