@@ -95,8 +95,14 @@ a person punched this way is never deleted. The port keeps this behaviour.
   chance MilitaryStartRate + min(1, t / MilitaryTimeRange) × (End − Start) (t from 0x347DC0 on 0x4D5190, a game
   clock) it looks among the military slots (count +0x40), otherwise among the civilian ones (+0x3C, after them);
   from a random slot on, the first free one (+0x14 empty, +0xD an occupant) whose building's x lies in the view
-  (0x318390) and that 0x31AD00 allows. How the slots are made from `FillRate` / `NonMilitaryRate` was not read: the
-  viewer gives a `FillRate` share of the front windows with an outline a civilian slot each.
+  (0x318390) and that 0x31AD00 allows. The slots (0x31A540 calls 0x3196F0 per building with the
+  Occupants' `FillRate` and `NonMilitaryRate` and the Edibles' `FillRate`): of the building's n windows (its list
+  from 0x2BE750; the viewer takes the front cells with an outline), round(n × FillRate) in a shuffled order, the
+  first total − int(total × NonMilitaryRate) of them military (+0x40), the rest civilian (+0x3C). The building's
+  `NumNonMilitaryOccupants` (then all n windows, that many civilians) and `NumMilitaryOccupants` override the
+  counts, each capped at n. A slot's kind is a random one of the sort's list (0x318B40 makes it from the
+  `MilitaryInstance|` / `OccupantInstance|` records; the viewer weighs them by `Frequency`). A military occupant
+  is the army's window soldier (`army_spawn_window`, Military_Window.bsf).
 - **Placement** (0x2BE660): the actor stands at the window's bottom middle:
   - x: the grid's min x + 5 × column + the middle of the column's `Outline`;
   - y: the front's y;

@@ -118,7 +118,11 @@ typedef struct {
     const HudQuad *hud; int nhud;                     /* the HUD and the floating scores, over everything (hud.c) */
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
-    struct WindowSlot { int building, storey, column, occupant; } *slots; int nslots, slots_made;
+    struct WindowSlot { int building, storey, column, occupant, military, unit; } *slots; int nslots, slots_made;
+    /* the Occupants group's soldiers (MilitaryInstance|: Military_Window.bsf templates, the army's window soldiers)
+     * and its rates (0x31A540: +0x48 MilitaryStartRate 0.1, +0x4C MilitaryEndRate 0.9, +0x50 MilitaryTimeRange 240) */
+    const char *military[16]; float military_freq[16]; int nmilitary;
+    float nonmilitary_rate, military_start, military_end, military_range, spawn_clock;
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
