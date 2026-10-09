@@ -331,6 +331,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         }
         if (st->flags & NODE_STEER)
             v->heading += steer(v, st, lx, ly, dt);
+        scene_monster_blend_step(&v->scene, dt);
         int switched = ev == 0 || moves_step(&v->run, in, dt, answer, NULL);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
         float a[3], b[3], q[4];                      /* the root's travel this frame, in the old clip */
@@ -347,8 +348,12 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             const MoveState *to = &v->graph.states[v->run.state];
             if (v->run.from != v->run.state)
                 printf("%s -> %s (%s)\n", st->name ? st->name : "?", to->name ? to->name : "?", to->clip ? to->clip : "-");
+            /* the transition says whether the new clip blends in (over the new state's blend time) or cuts; a start
+             * the game forces (a slot) takes no transition, and its blend is not traced: it blends */
+            int blend = ev == 0 ? BLEND_IN : v->run.via >= 0 ? st->trans[v->run.via].blend : st->end_blend;
+            scene_monster_blend(&v->scene, blend == BLEND_IN ? to->blend : 0);
             play_state(v);
-            v->column = -1;                          /* 0x2E7F70: a new state starts without the old one's effects */
+            v->column = -1;                         /* 0x2E7F70: a new state starts without the old one's effects */
             v->no_gravity = 0;
             /* and the new one's first: those at its start (its set-up: mode, column) and, entered part-way (phase
              * kept), those where it starts; the game's own event playback (under 0x2FFA00) is not read yet */

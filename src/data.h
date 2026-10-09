@@ -95,6 +95,8 @@ int clip_read(const BdpEntry *e, Clip *c);               /* 0 = ok */
 void clip_free(Clip *c);
 int clip_moves(const Clip *c);                           /* RawAnims mostly hold one pose; 1 = this one moves */
 int clip_pose(const Clip *c, double seconds, uint32_t bone, float t[3], float q[4]);   /* looping; 0 = bone not in it */
+/* the shortest-way slerp from a to b at f (0: a, 1: b), normalised; nearly equal ones lerp */
+void quat_slerp(const float a[4], const float b[4], float f, float out[4]);
 
 /* ---- cloth (type 25): the particles of a monster's hair, each held by up to four bones (docs/FORMAT_BDP.md "Cloth") */
 typedef struct { float pos[3]; uint16_t bones[4]; float weights[4]; int nbones; } ClothParticle;

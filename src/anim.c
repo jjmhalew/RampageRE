@@ -38,7 +38,7 @@ static void decode_rotation(const uint8_t *key, float q[4])
     q[0] = x; q[1] = y; q[2] = z; q[3] = w;
 }
 
-static void nlerp_slerp(const float a[4], const float b[4], float f, float out[4])
+void quat_slerp(const float a[4], const float b[4], float f, float out[4])
 {
     float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3], bb[4] = { b[0], b[1], b[2], b[3] };
     if (d < 0) { d = -d; for (int k = 0; k < 4; k++) bb[k] = -bb[k]; }
@@ -164,7 +164,7 @@ int clip_pose(const Clip *c, double seconds, uint32_t bone, float t[3], float q[
                 float b[4], t0 = (rd16(rk + 8 * k) & 0xFFFE) / 65534.0f, t1 = (rd16(rk + 8 * (k + 1)) & 0xFFFE) / 65534.0f;
                 float fr = t1 > t0 ? (tn - t0) / (t1 - t0) : 0;
                 decode_rotation(rk + 8 * (k + 1), b);
-                nlerp_slerp(a, b, fr < 0 ? 0 : fr, q);
+                quat_slerp(a, b, fr < 0 ? 0 : fr, q);
             } else {
                 memcpy(q, a, sizeof a);
             }

@@ -21,6 +21,7 @@ typedef struct {
     float in0, in1, sw0, sw1;                        /* input window, switch window (seconds into the state) */
     int priority, ncond; MoveCond cond[4];
     const char *call;                                /* a script check (Monsters::canMount, ...), NULL = none */
+    int blend;                                       /* +0x0: how the next clip comes in, BLEND_* (0x2FFA00) */
 } MoveTrans;
 typedef struct {                                     /* a timed event of the state's clip (MONSTER_DATA's coded items) */
     uint32_t type;                                   /* 21 a script call, 7 the movement mode, 6 a sound, ... */
@@ -31,6 +32,7 @@ typedef struct {                                     /* a timed event of the sta
 typedef struct {
     const char *name, *clip;                         /* the clip by name, as in the anims bundle (any case) */
     float length; int next;                          /* the state that follows when the clip ends */
+    int end_blend;                                   /* BLEND_* into it (+0x10, the "clip ended" transition) */
     /* the state's node: the clip plays at `rate` (length = the clip's duration / rate); with NODE_STEER the monster
      * turns towards the stick at `turn` × the angle per second (0x2E8190), its forward axis `fwd` (x, y); with
      * NODE_AIR_* the stick drives it at up to `speed` units / s; `blend` seconds to blend into the clip */
@@ -78,6 +80,10 @@ int moves_events_between(const MoveState *s, float from, float to, const MoveEve
 int moves_slot(const MoveGraph *g, int slot, int column);
 void moves_force(MoveRunner *r, int state);           /* the state now, from its start (0x2EBF50) */
 enum { SLOT_LAND = 56, SLOT_LAND_BACK = 57 };         /* 0x2DC450: on its feet / the ground's normal against its up */
+
+/* how a transition brings the next clip in (its +0x0, the low nibble of the clip request's flags >> 4): BLEND_CUT
+ * at once, BLEND_IN from the pose it has over the new state's blend time (unless nothing plays yet) */
+enum { BLEND_CUT = 0, BLEND_IN = 1 };
 
 /* movement modes (event type 7; the monster's +0xAD8): 1 and 2 are airborne (Monster.isAirborne) */
 enum { MODE_GROUND = 0, MODE_AIRBORNE = 1, MODE_TAKEOFF = 2, MODE_PRONE = 4, MODE_BUILDING = 5 };

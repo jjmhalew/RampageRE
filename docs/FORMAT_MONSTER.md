@@ -50,6 +50,11 @@ A state: 0x2C bytes, then 0x74 bytes per transition.
 | +0x18 | its flags, ... | +0x20 | 4 × 16-byte conditions {u32 op, u32 variable, u32 value, u32 flags} |
 | +0x28 | offset of the transitions | +0x60 | name of a script check (−1 = none), +0x64..0x70 four floats for it |
 
+A transition's +0x00 (and the "clip ended" one's, at the state's +0x10) says how the next clip comes in: 0 it cuts,
+1 it blends in (see "Blending"); 0x2ECBE0 puts it in the clip request's flags (<< 4). All 30 monsters: 32,338
+transitions blend and 270 cut; of George's clip ends, 29 of the 30 that loop into their own state cut and 136 of the
+other 146 blend.
+
 Transition flags: 0x10 the transition is open to a pad-controlled monster, 0x8 to the other kind (0x2FF750 decides
 which applies and returns 0, the pad, in this build; nearly all transitions have both, 0x18); 0x1000 switch at once
 (otherwise the switch waits a little); 0x1 the next clip keeps the phase (it starts at the same fraction of its
@@ -185,4 +190,15 @@ A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next on
    short wait counted at +0x14). With none, a state whose time passed its length takes its "clip ended" transition. A pick whose switch
    window has passed is dropped; windows that passed are cleared.
 4. 0x2ECBE0 starts the next clip: at 0, or with flag 0x1 at the same fraction of its length (capped at its end);
-   looping into the same state carries the time over (time − length).
+   looping into the same state carries the time over (time − length). The request it fills (per player, 0x100
+   bytes) holds the new node (+0x0), its blend time (+0x4), the start time (+0x8), the sticks × 255 (+0x1C..+0x28)
+   and flags (+0x2C: the transition's blend mode << 4, 0x1 keep the phase); the monster's command (0x2E6580) plays it.
+
+## Blending
+0x2FFA00 starts a clip in the monster's animation player: with blend mode 0, or 1 while nothing plays yet, it cuts;
+otherwise the two pose buffers swap (+0x29C0 / +0x29C4), so the pose the monster had stays as it was, and the blend
+time (the new state's node +0x14) is set, with 1 / it (+0x4E58, +0x4E5C). Each frame (0x2FFF10) the time left falls
+by dt × the monster's speed, and every bone of the new clip's pose goes towards the kept one by the share left
+(time left / blend time, so from 1 to 0 linearly): the translation by a lerp, the rotation (turned to the kept one's
+side first) by 0x104590. A start the game forces through a slot takes no transition (0x2EBF50 clears the runner's
++0x8); which way it comes in is not traced.

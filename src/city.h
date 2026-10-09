@@ -22,6 +22,8 @@ typedef struct {
     int vehicle;                                      /* -1, or the vehicle it rides on */
     Mat4 *node;                                       /* per node, relative to base */
     int still_root;                                   /* keep the root node's x / y at rest (the walk moves base) */
+    float (*pose)[7];                                 /* the monster: each node's last local pose (t, q) */
+    float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
 } Instance;
 
 typedef struct {
@@ -63,7 +65,11 @@ void scene_update(Scene *s, double t);               /* pose everything that mov
  * travels in that clip (units per second), for moving it by hand */
 int scene_monster_clip(Scene *s, const char *suffix, float *speed);
 void scene_monster_place(Scene *s, float x, float y, float z, float deg, int still_root);
-int scene_monster_play(Scene *s, const char *clip);  /* the clip of that name (any case, as MONSTER_DATA names it) */
+int scene_monster_play(Scene *s, const char *clip);
+/* the next clip blends in over `seconds` from the pose the monster has now, as the game's animation player does
+ * (0x2FFA00): call before scene_monster_play; scene_monster_blend_step counts it down */
+void scene_monster_blend(Scene *s, float seconds);
+void scene_monster_blend_step(Scene *s, float dt);  /* the clip of that name (any case, as MONSTER_DATA names it) */
 /* the root node's translation and rotation in the monster's clip at `seconds`; 0 = ok */
 int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4]);
 int city_camera(City *c, Group *two_tilts);           /* camera.bdp's TwoTilts group; 0 = ok */

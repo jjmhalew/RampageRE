@@ -114,6 +114,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
             }
         }
         s->length = rdf(p + 8);
+        s->end_blend = rd32(p + 0x10) & 0xF;           /* the "clip ended" transition's +0x0 */
         s->ntrans = (int16_t)(p[0xE] | p[0xF] << 8);
         s->trans = t;
         s->next = k;
@@ -123,6 +124,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
         for (int i = 0; i < s->ntrans; i++, t++) {
             const uint8_t *q = p + 0x2C + 0x74 * i;
             t->target = -1;
+            t->blend = rd32(q) & 0xF;
             for (int j = 0; j < n; j++)
                 if (offset[j] == rd32(q + 4))
                     t->target = j;

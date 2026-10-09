@@ -20,9 +20,10 @@ the start of the entry, little endian):
   0xA8C / 0xA90  effect names
   0xA54  the move graph: header 0x34 bytes (+0x2C state count, +0x30 offset of the first state), then the states:
          0x2C bytes (+0x0 index, +0x4 offset of its node, +0x8 f32 clip length, +0xE i16 transitions, +0x14 the
-         state after the clip, +0x28 offset of the transitions) and 0x74 bytes per transition (+0x4 offset of the target state,
-         +0x8 flags, +0xC / +0x10 f32 input window, +0x14 / +0x18 switch window, +0x1C i16 priority, +0x1E i16
-         conditions, +0x20 four 16-byte conditions {u32 op, u32 variable, u32 value, u32 flags}, +0x60 script check)
+         state after the clip, +0x10 its blend mode, +0x28 offset of the transitions) and 0x74 bytes per transition (+0x0
+         blend mode: 0 cut, 1 blend; +0x4 offset of the target state, +0x8 flags, +0xC / +0x10 f32 input window,
+         +0x14 / +0x18 switch window, +0x1C i16 priority, +0x1E i16 conditions, +0x20 four 16-byte conditions
+         {u32 op, u32 variable, u32 value, u32 flags}, +0x60 script check)
   then byte tables to the end (not decoded)
 
 Usage: python tools/monster.py --verify VOLDIR          parse every monster, check that the tables follow each other
@@ -119,12 +120,13 @@ class MonsterData:
                 o = at + 0x2C + 0x74 * t
                 nc = struct.unpack_from('<h', data, o + 0x1E)[0]
                 conds = [struct.unpack_from('<IIII', data, o + 0x20 + 16 * c) for c in range(nc)]
-                transitions.append(dict(target=self.u(o + 4), flags=self.u(o + 8), window=(self.f(o + 0xC),
+                transitions.append(dict(blend=self.u(o) & 0xF, target=self.u(o + 4), flags=self.u(o + 8),
+                                        window=(self.f(o + 0xC),
                                         self.f(o + 0x10)), exit=(self.f(o + 0x14), self.f(o + 0x18)),
                                         priority=struct.unpack_from('<h', data, o + 0x1C)[0], conditions=conds,
                                         call=self.name(self.i(o + 0x60))))
             self.states.append(dict(at=at, node=self.u(at + 4), length=self.f(at + 8), next=self.u(at + 0x14),
-                                    transitions=transitions))
+                                    end_blend=self.u(at + 0x10) & 0xF, transitions=transitions))
             at += 0x2C + 0x74 * count
         self.part('states', first, at - first)
         self.tail = (at, len(data))
@@ -195,7 +197,7 @@ class MonsterData:
         for k, s in enumerate(self.states):
             node = self.node_by_offset.get(s['node'])
             out.append(f'state {self.state_name(s["at"])}  clip {node[1] if node else "?"}  length {s["length"]:.3g}'
-                       f'  then {self.state_name(s["next"])}')
+                       f'  then {self.state_name(s["next"])}{"" if s["end_blend"] else " (cut)"}')
             if node:
                 o = node[0]
                 out.append(f'    node: rate {self.f(o):.3g}  turn {self.f(o + 4):.3g}  speed {self.f(o + 8):.3g}  blend '
@@ -210,7 +212,7 @@ class MonsterData:
                 call = f' call {t["call"]}' if t['call'] else ''
                 out.append(f'    -> {self.state_name(t["target"])}  [{conds}]  input {t["window"][0]:.3g}..'
                            f'{t["window"][1]:.3g}  switch {t["exit"][0]:.3g}..{t["exit"][1]:.3g}  priority '
-                           f'{t["priority"]}  flags {t["flags"]:#x}{call}')
+                           f'{t["priority"]}  flags {t["flags"]:#x}{call}{"" if t["blend"] else "  cut"}')
         return '\n'.join(out) + '\n'
 
     def list_state(self, index):

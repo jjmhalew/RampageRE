@@ -596,11 +596,22 @@ static void lighting(City *c, Scene *s, Group ld)
 
 static void pose_instance(Scene *s, Instance *in, double t)
 {
+    float w = in->held && in->blend_left > 0 && in->blend_time > 0 ? in->blend_left / in->blend_time : 0;
     for (uint32_t i = 0; i < in->tree.n; i++) {
         TreeNode *nd = &in->tree.nodes[i];
         float tr[3] = { nd->t[0], nd->t[1], nd->t[2] }, q[4] = { nd->q[0], nd->q[1], nd->q[2], nd->q[3] };
         if (in->has_clip)
             clip_pose(&in->clip, t + in->offset, i, tr, q);
+        if (w > 0) {                                 /* towards the held pose by the share of the blend left */
+            const float *h = in->held[i];
+            for (int k = 0; k < 3; k++)
+                tr[k] += (h[k] - tr[k]) * w;
+            quat_slerp(q, h + 3, w > 1 ? 1 : w, q);
+        }
+        if (in->pose) {
+            memcpy(in->pose[i], tr, sizeof tr);
+            memcpy(in->pose[i] + 3, q, sizeof q);
+        }
         if (in->still_root && nd->parent < 0) {
             tr[0] = nd->t[0];
             tr[1] = nd->t[1];
@@ -785,6 +796,8 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
     Instance *in = &s->instances[id];
     tree_read(mb, te, NULL, &in->tree);
     in->node = calloc(in->tree.n ? in->tree.n : 1, sizeof *in->node);
+    in->pose = calloc(in->tree.n ? in->tree.n : 1, sizeof *in->pose);
+    in->held = calloc(in->tree.n ? in->tree.n : 1, sizeof *in->held);
     /* its clips: the keyframed ones for this skeleton; -1 picks the body idle (SKELETON_n_IDLE, else ..._SHORT) */
     const BdpEntry *pick = NULL;
     int k = 0, pick_rank = 0;
@@ -923,6 +936,25 @@ int scene_monster_play(Scene *s, const char *clip)
     return -1;
 }
 
+void scene_monster_blend(Scene *s, float seconds)
+{
+    if (s->monster < 0)
+        return;
+    Instance *in = &s->instances[s->monster];
+    if (!in->pose || !in->held || !in->has_clip || !(seconds > 0)) {
+        in->blend_left = 0;
+        return;
+    }
+    memcpy(in->held, in->pose, sizeof *in->held * in->tree.n);
+    in->blend_left = in->blend_time = seconds;
+}
+
+void scene_monster_blend_step(Scene *s, float dt)
+{
+    if (s->monster >= 0 && s->instances[s->monster].blend_left > 0)
+        s->instances[s->monster].blend_left -= dt;
+}
+
 int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
 {
     if (s->monster < 0)
@@ -979,6 +1011,8 @@ void scene_free(Scene *s)
         if (s->instances[i].has_clip)
             clip_free(&s->instances[i].clip);
         free(s->instances[i].node);
+        free(s->instances[i].pose);
+        free(s->instances[i].held);
     }
     for (int i = 0; i < s->nown; i++) {
         bdp_free(s->own[i]);
