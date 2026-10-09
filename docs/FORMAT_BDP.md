@@ -308,6 +308,19 @@ X, in a front row (0) and a back row (1). `<City>_buildings.prb` defines the tem
 floors (`Floor|` with ground, middle and top floor shapes, damaged variants), texture sheet, debris effects
 (`.edf`) and the script (`DefaultBuilding.bsf`).
 
+### The blocks behind
+The game draws the next two blocks of `BlockData.BlockList` behind the one being played (the block manager
+0x4D4E80, 0x302AF0): slot 0 the block at y 0, slot 1 the next at y + 41, slot 2 the one after at y + 82 (both
+hard-coded). Slots 1 and 2 get their `Shape|GroundShape`, every `BuildingInstance` (0x3059D0) and only the objects
+with `LoadWhenWaiting` (slot 1) or `LoadWhenDistant` (slot 2) set (0x3050F0), and their traffic; no people or AI.
+Three block grounds (y -20 .. 21 each) fill the hole in the backdrop's ground plane exactly (`Chicago_Ground`: x
+-108 .. 107, y -17 .. 98, the same in New York and Las Vegas). Every `BlockList` ends in two buffer blocks
+(`*_BufferBlock01`, `02`), so the last block has two behind it too; entry 0 repeats entry 1.
+
+The sky (`Shape|SkyBox`) is drawn first around the camera (0x2A53E0): scaled by 0.01 at the camera's (x, y, 0.99 z)
+with the depth test off (GS TEST 0x31001) and no fog (PRIM.FGE cleared for its render state 0xB), a background
+that hides nothing; the backdrop then at the origin, fogged like the world (FogR/G/B, FogStart / FogEnd, 0x2BFF60).
+
 ### Assembling a block (`tools/city.py`)
 All seven cities export (Chicago, New York, San Francisco, Los Angeles, Las Vegas, London, Hong Kong: one glTF per
 block, every building and object model found). Game units, Z up, the street towards −Y; one cell is 5 × 5:

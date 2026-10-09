@@ -30,7 +30,7 @@ buildings; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
-world). `--fog` starts with the fog on (F).
+world). The fog is on (F toggles it, `--nofog` starts without).
 
 ## Source
 | File | |

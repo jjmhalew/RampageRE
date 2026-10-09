@@ -83,6 +83,7 @@ typedef struct {
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
+    int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
@@ -94,6 +95,9 @@ typedef struct {
     const Bundle *monster_bundle;                     /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
     float spheres[64][4]; int nspheres;               /* drawn over the scene as wire spheres: centre, radius */
     SceneBuilding *buildings; uint32_t nbuildings;
+    /* the next two blocks of the city's BlockList, drawn behind this one at y + 41 and y + 82 (the block manager
+     * 0x4D4E80's slots 1 and 2, 0x302AF0): their buildings are scenery, out of the play */
+    SceneBuilding *scenery; uint32_t nscenery;
     /* the monster's arm IK (ik.c), per hand (0 left, 1 right, as drawn): its share, where the hand goes (model space,
      * as drawn: rotation 3 x 3 column-major), the chain (upper arm, forearm, hand; -1 none), and the hand as the
      * clips posed it before the IK (model space, as drawn) */

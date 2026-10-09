@@ -410,9 +410,32 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         glDisable(GL_FOG);
     }
     glEnableClientState(GL_VERTEX_ARRAY);
+    /* the sky first, around the camera (0x2A53E0): x 0.01 at the camera's (x, y, 0.99 z), the depth test off
+     * (GS TEST 0x31001) and no fog (PRIM.FGE cleared for its state 0xB), so it is a background that nothing shows
+     * through and that hides nothing */
+    if (s->sky >= 0) {
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_FOG);
+        for (uint32_t i = 0; i < s->nitems; i++) {
+            const DrawItem *it = &s->items[i];
+            if (it->instance != s->sky)
+                continue;
+            glPushMatrix();
+            glTranslatef(cam->pos[0], cam->pos[1], 0.99f * cam->pos[2]);
+            glScalef(0.01f, 0.01f, 0.01f);
+            glMultMatrixf(it->world.m);
+            draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
+            glPopMatrix();
+        }
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+        if (fog && s->fog_end > 0)
+            glEnable(GL_FOG);
+    }
     for (uint32_t i = 0; i < s->nitems; i++) {
         const DrawItem *it = &s->items[i];
-        if (s->instances[it->instance].hidden)
+        if (s->instances[it->instance].hidden || it->instance == s->sky)
             continue;
         glPushMatrix();
         glMultMatrixf(it->world.m);

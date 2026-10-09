@@ -416,7 +416,7 @@ static void place_actor(City *c, Scene *s, Group inst)
 
 static uint32_t rng_next(uint32_t *state) { *state = *state * 1664525u + 1013904223u; return *state >> 8; }
 
-static void traffic(City *c, Scene *s, Group block, const char *block_name)
+static void traffic(City *c, Scene *s, Group block, const char *block_name, float y0)
 {
     Group td = group_sub(block, "TrafficDef"), where;
     if (!td.at)
@@ -457,7 +457,7 @@ static void traffic(City *c, Scene *s, Group block, const char *block_name)
             while (j + 1 < m && pick >= freq[j]) { pick -= freq[j]; j++; }
             Group t = template_of(c, names[j]);
             const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL;
-            Vehicle v = { lanes[l].y, lanes[l].dir, (float)k / per_lane, lanes[l].turn };
+            Vehicle v = { y0 + lanes[l].y, lanes[l].dir, (float)k / per_lane, lanes[l].turn };
             s->vehicles[s->nvehicles] = v;
             if (shape && place_model(c, s, shape, mat_identity(), (int)s->nvehicles) >= 0)
                 s->nvehicles++;
@@ -851,17 +851,19 @@ int scene_adornments_hit(Scene *s, const float centre[3], float radius)
     return n;
 }
 
-static void building(City *c, Scene *s, Group inst, float row_offset)
+static void building(City *c, Scene *s, Group inst, float row_offset, float y0, int scenery)
 {
+    SceneBuilding **list = scenery ? &s->scenery : &s->buildings;
+    uint32_t *count = scenery ? &s->nscenery : &s->nbuildings;
     Group t = template_of(c, group_str(inst, "TemplateName")), where;
     if (!t.at) {
         s->missing++;
         return;
     }
     int width = (int)group_num(t, "width", 1), depth = (int)group_num(t, "depth", 2);
-    Mat4 node = mat_trs_z(group_num(inst, "LeftEdgeXPos", 0) + width * CELL / 2, row_offset * group_num(inst, "Row", 0), 0, 0);
+    Mat4 node = mat_trs_z(group_num(inst, "LeftEdgeXPos", 0) + width * CELL / 2, y0 + row_offset * group_num(inst, "Row", 0), 0, 0);
     int first = (int)s->ninstances, ground_inst = -1, facade_inst = -1, top_inst = -1;
-    uint32_t had = s->nbuildings;
+    uint32_t had = *count;
     const char *ground = str_item(group_sub(t, "ShapeSet|GroundFloorShapes"), 0);
     if (ground)
         ground_inst = place_model(c, s, ground, node, -1);
@@ -902,15 +904,15 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     }
     /* its cells (the game's grid, 0x2D1A30): the box is 6 + 3 x storeys + 1.5 (the roof's band) high */
     if (nst && width > 0 && depth > 0 && 2 * depth + width <= BUILDING_CELLS) {
-        s->buildings = realloc(s->buildings, sizeof *s->buildings * (s->nbuildings + 1));
-        SceneBuilding *sb = &s->buildings[s->nbuildings++];
+        *list = realloc(*list, sizeof **list * (*count + 1));
+        SceneBuilding *sb = &(*list)[(*count)++];
         float cx = node.m[12], cy = node.m[13];
         float lo[3] = { cx - width * CELL / 2, cy - depth * CELL / 2, 0 };
         float hi[3] = { cx + width * CELL / 2, cy + depth * CELL / 2, GROUND_FLOOR + STOREY * (float)nst + 1.5f };
         building_init(&sb->b, lo, hi, width, depth, nst);
         sb->b.row = (int)group_num(inst, "Row", 0);
         sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
-        sb->b.seed = s->nbuildings;
+        sb->b.seed = *count;
         sb->mesh = mesh;
         sb->node = node;
         sb->ground = ground_inst;
@@ -960,8 +962,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     uint32_t no = group_values(inst, "ObjectInstance|", &where, obj, MAX_REC);
     for (uint32_t i = 0; i < no; i++)
         place_object(c, s, record_group(where, obj[i]), node);
-    if (s->nbuildings > had) {                       /* its pieces, to move */
-        SceneBuilding *sb = &s->buildings[s->nbuildings - 1];
+    if (*count > had) {                              /* its pieces, to move */
+        SceneBuilding *sb = &(*list)[*count - 1];
         adornments(c, s, sb, t, nst);
         adornments(c, s, sb, inst, nst);
         const char *rubble = group_str(t, "Shape|RubbleShape");
@@ -1257,6 +1259,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     memset(s, 0, sizeof *s);
     s->city = &c->bundle;
     s->monster = -1;
+    s->sky = -1;
     s->mesh_of_entry = malloc(sizeof *s->mesh_of_entry * (c->bundle.nentries ? c->bundle.nentries : 1));
     for (uint32_t i = 0; i < c->bundle.nentries; i++)
         s->mesh_of_entry[i] = -1;
@@ -1269,7 +1272,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     if (ld.at) {
         const char *backdrop = group_str(ld, "Shape|Backdrop"), *sky = group_str(ld, "Shape|SkyBox");
         if (backdrop) place_model(c, s, backdrop, root, -1);
-        if (sky) place_model(c, s, sky, root, -1);
+        if (sky) s->sky = place_model(c, s, sky, root, -1);
         lighting(c, s, ld);
     }
     const char *ground = group_str(block, "Shape|GroundShape");
@@ -1279,7 +1282,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     static Record r[MAX_REC];
     uint32_t n = group_values(block, "BuildingInstance|", &where, r, MAX_REC);
     for (uint32_t i = 0; i < n; i++)
-        building(c, s, record_group(where, r[i]), row_offset);
+        building(c, s, record_group(where, r[i]), row_offset, 0, 0);
     static const char *const objects[] = { "ObjectInstance|", "AttackObjectInstance|", "XObjectInstance|" };
     for (int k = 0; k < 3; k++) {
         n = group_values(block, objects[k], &where, r, MAX_REC);
@@ -1292,7 +1295,42 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         if (a.at && group_num(a, "SpawnedItem", 0) == 0)
             place_actor(c, s, a);
     }
-    traffic(c, s, block, block_name);
+    traffic(c, s, block, block_name, 0);
+    /* the next two blocks behind it (0x302AF0): slot 1 at y + 41, slot 2 at y + 82 (hard-coded), their ground, every
+     * building (0x3059D0) and the objects LoadWhenWaiting (slot 1) or LoadWhenDistant (slot 2) has (0x3050F0), and
+     * their traffic; no people. Every BlockList ends in two buffer blocks, so the last block has them too. */
+    Group bl = group_sub(group_sub(c->world, "BlockData"), "BlockList");
+    Record lr[MAX_REC];
+    uint32_t nl = group_items(bl, lr, MAX_REC);
+    int at = -1;
+    for (uint32_t i = 0; i < nl; i++)                /* its last place: entry 0 repeats entry 1 */
+        if (_stricmp(record_str(bl, lr[i]), block_name) == 0)
+            at = (int)i;
+    for (int slot = 1; slot <= 2 && at >= 0 && at + slot < (int)nl; slot++) {
+        const char *next = record_str(bl, lr[at + slot]);
+        snprintf(key, sizeof key, "BlockDef|%s", next);
+        Group nb = group_sub(group_sub(c->world, "BlockData"), key);
+        if (!nb.at)
+            continue;
+        float y0 = 41.0f * (float)slot;
+        Mat4 there = mat_trs_z(0, y0, 0, 0);
+        const char *g = group_str(nb, "Shape|GroundShape");
+        if (g)
+            place_model(c, s, g, there, -1);
+        float bro = group_num(nb, "BackRowOffset", 10);
+        n = group_values(nb, "BuildingInstance|", &where, r, MAX_REC);
+        for (uint32_t i = 0; i < n; i++)
+            building(c, s, record_group(where, r[i]), bro, y0, 1);
+        for (int k = 0; k < 3; k++) {
+            n = group_values(nb, objects[k], &where, r, MAX_REC);
+            for (uint32_t i = 0; i < n; i++) {
+                Group o = record_group(where, r[i]);
+                if (group_num(o, slot == 1 ? "LoadWhenWaiting" : "LoadWhenDistant", 0) != 0)
+                    place_object(c, s, o, there);
+            }
+        }
+        traffic(c, s, nb, next, y0);
+    }
     update(s, 0, 1);
     obstacle_boxes(s);
     return 0;
@@ -1791,5 +1829,10 @@ void scene_free(Scene *s)
         free(s->buildings[i].adorn);
     }
     free(s->buildings);
+    for (uint32_t i = 0; i < s->nscenery; i++) {
+        free(s->scenery[i].rest);
+        free(s->scenery[i].adorn);
+    }
+    free(s->scenery);
     memset(s, 0, sizeof *s);
 }
