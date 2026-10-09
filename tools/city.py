@@ -310,7 +310,7 @@ class CityExporter:
             return
         width, depth = t.get('width', 1), t.get('depth', 2)
         x = float(inst.get('LeftEdgeXPos', 0)) + width * CELL / 2
-        y = row_offset * inst.get('Row', 0)
+        y = 5 + (row_offset if inst.get('Row', 0) else 0)   # 0x305E78: the fronts behind the far sidewalk
         node = g.node(f'{inst.get("TemplateName")} @ {x:g}', None, (x, y, 0), None, parent)
         ground = t.get('ShapeSet|GroundFloorShapes')
         if ground and ground.items():

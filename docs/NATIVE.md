@@ -12,7 +12,7 @@ rampage.exe                                   :: build\disc\RAMPAGE.VOL, Chicago
 rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit (offscreen: no window)
-rampage.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -9, up 1" --cam 10 -15 8 30 5 --shot s.png
+rampage.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -4, up 1" --cam 10 -10 8 30 5 --shot s.png
 ```
 `build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
 from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256. The disc

@@ -982,7 +982,10 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         return;
     }
     int width = (int)group_num(t, "width", 1), depth = (int)group_num(t, "depth", 2);
-    Mat4 node = mat_trs_z(group_num(inst, "LeftEdgeXPos", 0) + width * CELL / 2, y0 + row_offset * group_num(inst, "Row", 0), 0, 0);
+    /* 0x305E78 .. 0x305F08: x = LeftEdgeXPos + 2.5 x width, y = the slot's + 5 + (Row ? BackRowOffset : 0): the front
+     * row's fronts at y 0, behind the street's far sidewalk (y -5 .. 0) */
+    Mat4 node = mat_trs_z(group_num(inst, "LeftEdgeXPos", 0) + width * CELL / 2,
+                          y0 + 5 + (group_num(inst, "Row", 0) != 0 ? row_offset : 0), 0, 0);
     int first = (int)s->ninstances, ground_inst = -1, facade_inst = -1, top_inst = -1;
     uint32_t had = *count;
     const char *ground = str_item(group_sub(t, "ShapeSet|GroundFloorShapes"), 0);

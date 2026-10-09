@@ -325,7 +325,8 @@ that hides nothing; the backdrop then at the origin, fogged like the world (FogR
 All seven cities export (Chicago, New York, San Francisco, Los Angeles, Las Vegas, London, Hong Kong: one glTF per
 block, every building and object model found). Game units, Z up, the street towards −Y; one cell is 5 × 5:
 - the block's ground shape, the city's day backdrop (`*_Backdrop`) and sky (`*_Skydome_Main`) at the origin;
-- a building's centre is at x = `LeftEdgeXPos` + width × 2.5, y = `Row` × `BackRowOffset`;
+- a building's centre is at x = `LeftEdgeXPos` + width × 2.5, y = 5 + (`Row` ? `BackRowOffset` : 0) (0x305E78 …
+  0x305F08): the front row's fronts at y 0, behind the street's far sidewalk (y −5 … 0; the road is y −15 … −5);
 - the ground-floor shape (`ShapeSet|GroundFloorShapes`, 6 high) at z 0, then a storey 3 high per `Floor|` entry
   with tiles (the template name is width × storeys: `CG2_2x7` has 7 such entries and an empty eighth, and the
   game's grid counts storeys as entries − 1), then the top shape (`ShapeSet|TopFloorShapes`, 1.5 high: the roof's
