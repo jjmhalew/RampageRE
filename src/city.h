@@ -104,7 +104,8 @@ typedef struct {
     struct SceneFx { const char *name; float pos[3], dir[3]; } fxreq[64]; int nfxreq;
     const FxQuad *fx; int nfx;
     struct PersonLook *looks; int nlooks;
-    Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer;
+    Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
+    struct WindowSlot { int building, storey, column, occupant; } *slots; int nslots, slots_made;
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
@@ -158,8 +159,8 @@ int scene_adornments_hit(Scene *s, const float centre[3], float radius);
 void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]);   /* an effect to start */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
 int scene_monster_node(const Scene *s, const char *name, Mat4 *world);
-/* the window occupants (0x318650's stand-in: the rates were not found): every 2 s, with the block's FillRate, one
- * of its Occupants comes to an intact window with an outline of a standing building, up to 6 at a time */
+/* the window occupants (0x318650): every SpawnRate seconds (0.75) one comes to a random free slot of a building in
+ * view; the slots are the block's windows, a FillRate share of them, each with an occupant picked by Frequency */
 void scene_people_spawn(Scene *s, float dt);
 /* the playable buildings as people.c sees them */
 int scene_people_boxes(const Scene *s, PeopleBox *out, int max);

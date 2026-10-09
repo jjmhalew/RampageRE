@@ -50,9 +50,15 @@ The window and walker scripts call `onPickup` after `smash`, which sets the stat
 a person punched this way is never deleted. The port keeps this behaviour.
 
 ## Window occupants
-- **Spawning** (0x318650, from the world update 0x2B6CE0): on a timer, with a chance that ramps between two rates
-  (fields +0x44 … +0x50 of the manager at 0x4D5F00; where these are set was not found), the game picks a random
-  free slot whose building is in view.
+- **Spawning** (0x318650, from the world update 0x2B6CE0): the manager at 0x4D5F00 counts up to its interval and
+  then places one occupant. Its fields come from the block's `Occupants` group (0x31A540): +0x44 `SpawnRate`
+  (the interval, 0.75 s by default), +0x48 `MilitaryStartRate` (0.1), +0x4C `MilitaryEndRate` (0.9) and +0x50
+  `MilitaryTimeRange` (240 s); `FillRate`, `NonMilitaryRate` and `DropRate` are read too. On the interval, with the
+  chance MilitaryStartRate + min(1, t / MilitaryTimeRange) × (End − Start) (t from 0x347DC0 on 0x4D5190, a game
+  clock) it looks among the military slots (count +0x40), otherwise among the civilian ones (+0x3C, after them);
+  from a random slot on, the first free one (+0x14 empty, +0xD an occupant) whose building's x lies in the view
+  (0x318390) and that 0x31AD00 allows. How the slots are made from `FillRate` / `NonMilitaryRate` was not read: the
+  viewer gives a `FillRate` share of the front windows with an outline a civilian slot each.
 - **Placement** (0x2BE660): the actor stands at the window's bottom middle:
   - x: the grid's min x + 5 × column + the middle of the column's `Outline`;
   - y: the front's y;

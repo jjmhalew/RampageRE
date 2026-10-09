@@ -461,46 +461,57 @@ static void people_sync(Scene *s, double t)
     }
 }
 
+static uint32_t spawn_seed = 12345;
+static float spawn_rand(void)                        /* the LCG of the stand-ins, 0 .. 1 */
+{
+    spawn_seed = spawn_seed * 1664525u + 1013904223u;
+    return (float)(spawn_seed >> 8) / 16777216.0f;
+}
+
 void scene_people_spawn(Scene *s, float dt)
 {
     if (!s->folk || !s->noccupants)
         return;
-    s->spawn_timer -= dt;
-    if (s->spawn_timer > 0)
-        return;
-    s->spawn_timer = 2;
-    int windows = 0;
-    for (int i = 0; i < people_count(s->folk); i++) {
-        const Person *p = people_get(s->folk, i);
-        windows += p->kind == PK_WINDOW && p->phase != PP_GONE && p->building >= 0;
+    if (!s->slots_made) {                            /* the windows' slots: a FillRate share of the front windows with
+                                                        an outline, each with an occupant by Frequency (the slots'
+                                                        own setup was not read) */
+        s->slots_made = 1;
+        float total = 0;
+        for (int k = 0; k < s->noccupants; k++)
+            total += s->occupant_freq[k];
+        for (uint32_t bi = 0; bi < s->nbuildings; bi++) {
+            const SceneBuilding *sb = &s->buildings[bi];
+            for (int o = 0; o < sb->b.storeys; o++)
+                for (int col = 0; col < sb->b.width; col++) {
+                    int ci = building_cell_index(&sb->b, FACE_FRONT, col);
+                    if (ci < 0 || sb->outline[sb->b.cell[o][ci].tile & 3][0] < 0 || spawn_rand() >= s->fill_rate)
+                        continue;
+                    float pick = spawn_rand() * total;
+                    int k = 0;
+                    while (k + 1 < s->noccupants && pick >= s->occupant_freq[k]) { pick -= s->occupant_freq[k]; k++; }
+                    s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
+                    struct WindowSlot ws = { (int)bi, o, col, k };
+                    s->slots[s->nslots++] = ws;
+                }
+        }
     }
-    static uint32_t seed = 12345;
-    seed = seed * 1664525u + 1013904223u;
-    if (windows >= 6 || (float)(seed >> 8) / 16777216.0f >= s->fill_rate || !s->nbuildings)
+    s->spawn_timer += dt;                            /* +0x30 against SpawnRate (+0x44) */
+    if (s->spawn_timer < s->spawn_rate || !s->nslots)
         return;
-    float total = 0;                                 /* an occupant by its Frequency */
-    for (int k = 0; k < s->noccupants; k++)
-        total += s->occupant_freq[k];
-    seed = seed * 1664525u + 1013904223u;
-    float pick = (float)(seed >> 8) / 16777216.0f * total;
-    int k = 0;
-    while (k + 1 < s->noccupants && pick >= s->occupant_freq[k]) { pick -= s->occupant_freq[k]; k++; }
-    for (int tries = 0; tries < 8; tries++) {        /* an intact front window with an outline */
-        seed = seed * 1664525u + 1013904223u;
-        uint32_t bi = (seed >> 8) % s->nbuildings;
-        SceneBuilding *sb = &s->buildings[bi];
+    s->spawn_timer = 0;
+    int start = (int)(spawn_rand() * (float)s->nslots);
+    for (int i = 0; i < s->nslots; i++) {            /* the first free slot from a random one */
+        const struct WindowSlot *ws = &s->slots[(start + i) % s->nslots];
+        SceneBuilding *sb = &s->buildings[ws->building];
         const Building *b = &sb->b;
-        if (b->state != BUILDING_STANDING || b->n < 1)
+        int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
+        if (b->state != BUILDING_STANDING || ls < 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
+            people_window_at(s->folk, ws->building, ls, ws->column) >= 0)
             continue;
-        int ls = (int)((seed >> 4) % (uint32_t)b->n), col = (int)((seed >> 12) % (uint32_t)b->width);
-        int ci = building_cell_index(b, FACE_FRONT, col), o = b->live[ls];
-        if (ci < 0 || b->cell[o][ci].state != 0 || sb->outline[b->cell[o][ci].tile & 3][0] < 0 ||
-            people_window_at(s->folk, (int)bi, ls, col) >= 0)
-            continue;
-        const float *ol = sb->outline[b->cell[o][ci].tile & 3];
-        float at[3] = { b->min[0] + CELL * (float)col + (ol[0] + ol[2]) / 2, b->min[1],
+        const float *ol = sb->outline[b->cell[ws->storey][ci].tile & 3];
+        float at[3] = { b->min[0] + CELL * (float)ws->column + (ol[0] + ol[2]) / 2, b->min[1],
                         b->min[2] + GROUND_FLOOR + STOREY * (float)ls + ol[1] };
-        people_add_window(s->folk, s->occupant[k], at, (int)bi, ls, col);
+        people_add_window(s->folk, s->occupant[ws->occupant], at, ws->building, ls, ws->column);
         return;
     }
 }
@@ -1496,6 +1507,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     }
     Group occ = group_sub(block, "Occupants"), runners[16];
     s->fill_rate = group_num(occ, "FillRate", 0);
+    s->spawn_rate = group_num(occ, "SpawnRate", 0.75f);   /* 0x31A540: the Occupants group's, 0.75 unless set */
     int nrun = 0;
     n = occ.at ? group_values(occ, "OccupantInstance|", &where, r, MAX_REC) : 0;
     for (uint32_t i = 0; i < n && s->noccupants < 16; i++) {
@@ -2128,6 +2140,7 @@ void scene_free(Scene *s)
     if (s->folk)
         people_free(s->folk);
     free(s->looks);
+    free(s->slots);
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         free(s->buildings[i].rest);
         free(s->buildings[i].adorn);

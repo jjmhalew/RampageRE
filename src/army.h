@@ -1,0 +1,223 @@
+/* army.h - the army and the city's other attackers, their weapons, the droppables and the score (docs/ARMY_NOTES.md).
+ *
+ * [R] What the game has, and what this is the port of:
+ *   - gAIMgr (0x4D7800): the current block's AIDef { AIInstance| { OTRef|Name, MinDelay, OffsetDelay, RespawnDelay,
+ *     MaxOccurances } } read by 0x334C40 / 0x3350F0, spawned by its update 0x3333F0 once the block is activated
+ *     (Levels.scr BeginBlockNI: gAIMgr.activate(1)), with the bindings removeAIObject (0x332A50), enableRespawn
+ *     (0x3329B0) and the saved object name (0x2A6338 / 0x2A6420);
+ *   - the attackers' scripts: Vehicle_Attack.bsf (tanks, with the native AttackMover 0x314B40 / 0x313F80),
+ *     Vehicle_Helicopter.bsf, CombatTruck.bsf (army trucks, SWAT vans, police cars), Swat.bsf (the troops and cops
+ *     they drop), Military_Window.bsf (soldiers in windows), StationaryAttackObject.bsf, Bomber.bsf and
+ *     Droppable.bsf (what falls from a window);
+ *   - the weapons (Weapons.bdp, read by 0x297DC0 / 0x296830 / 0x2960D0 / 0x33B860 / 0x33B5F0, the template's own
+ *     Weapon group read over the book's, 0x299EC8): RProjectileWeapon (0x44B8F0; fire 0x2963C0, its shot
+ *     RProjectile 0x44B9A0: init 0x2944F0, update 0x293120, step 0x294300, impact 0x33BCA0) and RBeamWeapon
+ *     (0x44B840; fire 0x295C70, update 0x295C20, the beam's hit 0x295750, impact 0x33B440), their common countdown
+ *     (0x2971A0, 0x297760);
+ *   - the monster's weapon hit (0x2D9650 -> 0x2D6A50): the slot a ReactionLevel starts;
+ *   - gCommon.addStats (0x2C51A0), Player.addPoints (0x33F530) and the buildings' Scoring (0x2BA4B0).
+ *
+ * Engine-agnostic: nothing here draws, plays a sound or starts an effect. The caller gives each frame what the units
+ * see of the monsters and the buildings, and gets back what to draw (units, shots) and what happened (events:
+ * effects by name, sounds, the monsters' hits, reactions, knocks, score). Positions are the game's: z up, the street
+ * at z = 0, the buildings' fronts towards +y, the camera at -y; matrices column-major 4 x 4; facings in radians about
+ * z as the game keeps them (0 faces +y, pi / 2 faces -x, -pi / 2 faces +x). */
+#ifndef RAMPAGE_ARMY_H
+#define RAMPAGE_ARMY_H
+#include <stdint.h>
+#include "data.h"
+
+typedef struct Army Army;
+typedef struct ArmyUnit ArmyUnit;
+
+/* ---- what the module asks of its host */
+typedef struct {
+    /* a property group by book and name: book "Objects1_Props" for a template (OTRef), "Weapons" for a weapon
+     * (Weapons.bdp). Group.at = 0 when absent */
+    Group (*find)(void *ctx, const char *book, const char *name);
+    /* the length in seconds of the clip anim (NULL: the shape's own RawAnim) of shape; 0 = unknown */
+    float (*clip_seconds)(void *ctx, const char *anim, const char *shape);
+    /* optional: node (a weapon's WeaponNode: "Weapon_0", "MuzzleFlash_Small", "Bombs_Here") of the unit as drawn
+     * now, in the world; 0 = unknown (the shot then leaves from the unit's place, a stand-in) */
+    int (*node_world)(void *ctx, const ArmyUnit *u, const char *node, float out[16]);
+    /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (4 x 6 x 3 stands in) */
+    int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
+    void *ctx;
+} ArmyHost;
+
+/* ---- what the units see of a monster, this frame (index = the monster's slot, 0 .. 3) */
+typedef struct {
+    float pos[3];                                    /* its place (the root, on the ground) */
+    float heading;                                   /* the game's facing z, radians */
+    const char *move;                                /* its state name: "Ground..." matters to CombatTruck */
+    int mode;                                        /* movement mode (+0xAD8): 0 ground, 1 / 2 air, 4 landing, 5 on a building */
+    const float (*spheres)[4]; int nspheres;         /* its collision spheres in the world (centre, radius): what shots hit */
+    float box_min[3], box_max[3];                    /* its collision box in the world (0x2E2C50): used without spheres */
+} ArmyMonster;
+
+/* a building as the units see it: its box in the world, its grid (columns of 5 along x, storeys of 3 above 6) */
+typedef struct { float min[3], max[3]; int width, storeys, gone; } ArmyBox;
+
+/* ---- the units */
+enum {                                               /* by the template's Script|ScriptName */
+    AK_TANK,                                         /* Vehicle_Attack.bsf */
+    AK_HELI,                                         /* Vehicle_Helicopter.bsf */
+    AK_TRUCK,                                        /* CombatTruck.bsf: army trucks, SWAT vans, police cars */
+    AK_TROOP,                                        /* Swat.bsf: soldiers, SWAT, cops on the street */
+    AK_WINDOW,                                       /* Military_Window.bsf: a soldier or cop in a window */
+    AK_TURRET,                                       /* StationaryAttackObject.bsf (PirateShip) */
+    AK_BOMBER,                                       /* Bomber.bsf */
+    AK_DROP,                                         /* Droppable.bsf */
+    AK_OTHER                                         /* any other script: plays its DefaultAnim where it was made */
+};
+enum { AU_ALIVE, AU_HELD, AU_DYING, AU_GONE };
+
+typedef struct {                                     /* one weapon (a Weapon| group, over its Weapons.bdp group) */
+    const char *name;                                /* WeaponName */
+    int type;                                        /* 0 RProjectileWeapon, 1 RBeamWeapon, 2 other (Shockwave: not fired) */
+    const char *node;                                /* WeaponNode */
+    int ammo_max, start_ammo, axis, axis_neg, damage_type, reaction;
+    float firing_offset, refire, charge_time, gravity, velocity, range, duration, damage, impact_delay, vis_range,
+          mobility, accel, init_vel, dps, radius, h_knock, v_knock;
+    const char *fire_fx, *charge_fx, *impact_fx;
+    uint32_t def_flags;                              /* +0x4: 2 it counts its ammo */
+    /* the weapon (0x296760): +0xB4 the countdown, +0xEC ammo, +0xF5 firing (a beam), +0xF6 charging, +0x1B8 first */
+    float timer, beam_left, scale;
+    int ammo, on, firing, charging, first;
+    float yaw, pitch;                                /* a cluster's turn from the unit's front [G] */
+    float rot_range, rot_rate, elev_range, elev_rate;   /* the WeaponCluster's, radians */
+    int shot;                                        /* a beam's shot id, -1 none */
+} ArmyWeapon;
+
+#define ARMY_WEAPONS 4
+struct ArmyUnit {
+    const char *name;                                /* template name */
+    Group tmpl, inst;                                /* the template, and the AIInstance group it came from (or none) */
+    int kind, phase;                                 /* AK_*, AU_* */
+    int state, flags;                                /* the script's own (Def.state / nState, Def.flags) */
+    float pos[3], facing, tilt[2];                   /* tilt: turns about x and y (a wreck's tumble, a pitch) */
+    float world[16];                                 /* column-major; always kept up to date */
+    /* the look */
+    const char *shape;                               /* the model now: Shape|Shape (DestShape once wrecked); actors: their look's */
+    char anim[40];                                   /* actors: the ActorAnimShape| record they play */
+    const char *clip;                                /* actors: its Anim|AnimName (NULL: the shape's own RawAnim) */
+    float anim_time, anim_len; int anim_loop, anim_done;   /* seconds into the play, one play's length */
+    /* the scripts' numbers (army.c says which is which per script) */
+    float hp, hp_start, state_time, explode_time, pulse_delay, pulse_time, life, aux[8];
+    int ihp, count, sub, side, life_state, bounce;
+    float bounce_vel[3], vel[3], spin[3];
+    int group_index, is_cop, is_grenadier, troops_left[4], troop_i;
+    float reload, voice[4];
+    const char *vehicle;                             /* Swat.bsf's vehicleType: the truck that brought it */
+    struct { float pts[8][3], dist[8]; int n, seg, active, kind; float t, speed, resp2; uint32_t flags; } mv;
+    struct { float vmax, app2, flee2, speed, timer, sign, goal, driven; int state, target, tread; } am;   /* AttackMover */
+    int target;                                      /* the monster its weapons aim at, -1 none */
+    float lock[3];                                   /* StationaryAttackObject's lTarget */
+    ArmyWeapon w[ARMY_WEAPONS]; int nw;
+    int weapons_on;
+    uint32_t oflags;                                 /* object flags: 0x4000 PushOutMonsters, 0x8000 OnlyHitWithEffNodes, 0x10000 Pickupable, 0x20000 BeingHeld */
+    int spawner, counted, friend_of, person;
+};
+
+typedef struct {                                     /* a shot in the air, or a beam */
+    int id, beam, alive;
+    const char *weapon, *effect;                     /* WeaponName, its FireEffect (the shot's look) */
+    int owner;                                       /* the unit, -1 (a person's) */
+    float pos[3], dir[3], speed, age, length;        /* a beam: from pos along dir, length long */
+    float damage, gravity, duration, mobility, accel, velocity, h_knock, v_knock, vis_range, impact_delay;   /* +0xF0 .. */
+    int damage_type, reaction, target;
+    uint32_t flags;
+    float phase;
+    const char *impact_fx;
+} ArmyShot;
+
+/* ---- what happened */
+enum {
+    AE_EFFECT,        /* start effect `name` at pos along dir; id its handle; unit >= 0: it follows that unit (offset
+                       * pos - the unit's place); shot >= 0: it is that shot's look and follows the shot */
+    AE_EFFECT_STOP,   /* the effect with handle id stops */
+    AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads) */
+    AE_HIT,           /* a weapon reached monster `monster`: amount damage, id the DamageType, level the ReactionLevel
+                       * (-1: none, plain TakeDamage), v the knock (0x2D9650's), pos where, dir the shot's way, name the
+                       * weapon. The monster side (0x2D6A50): see army_reaction_slot */
+    AE_REACTION,      /* monster.setReaction(level): slot `level` (columns override as for any slot) */
+    AE_PUSH,          /* monster.queuePushRequest(v) */
+    AE_STATS_HEALTH,  /* addStats: monster's HP = max(1, HP + amount) within its most, only while HP > 0 */
+    AE_STATS_ENERGY,  /* addStats: monster's energy + amount within 0 .. 100 (100: startRage) */
+    AE_SCORE,         /* points: monster's category level (0 .. 5) got amount (army_stats has the totals) */
+    AE_FLOAT,         /* a floating score number (0x331D50, scale 0.8) of amount at pos; level 1 a building's */
+    AE_FART,          /* Monsters::timedDoFart on monster, amount (2) seconds from now */
+    AE_REMOVED        /* unit is gone (requestDelete) */
+};
+typedef struct { int type, id, unit, shot, monster, level; const char *name; float v[3], dir[3], pos[3], amount; } ArmyEvent;
+
+Army *army_new(const ArmyHost *host);
+void army_free(Army *a);
+void army_seed(Army *a, uint32_t seed);              /* gWorld.frand()'s stand-in */
+/* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
+void army_set_view(Army *a, float xmin, float xmax);
+
+/* the block's AIDef (its BlockDef| group in <City>_Props; 0x334C40): the spawner's records; their count */
+int army_load_block(Army *a, Group block_def);
+void army_activate(Army *a, int on);                 /* gAIMgr.activate: the spawner's clocks run from here */
+void army_clear(Army *a);                            /* every unit and shot gone (a new block) */
+
+/* a unit made by name (createAttackObject + callOnInit / createActor) at pos facing facing (its script may move it:
+ * the tanks, helicopters, trucks and bombers place themselves); -1 if unknown */
+int army_spawn(Army *a, const char *tmpl_name, const float pos[3], float facing);
+/* a window soldier (a Military_Window.bsf template) the occupant system put in a window at pos */
+int army_spawn_window(Army *a, const char *tmpl_name, const float pos[3]);
+/* PE_DROP: the block's droppable template falls from a window at from (Droppable.bsf onInit) */
+int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
+/* PE_WEAPON from people.c: person `who`'s weapon WeaponName on (at its world matrix, at target_monster) or off (NULL) */
+void army_person_weapon(Army *a, int who, const char *weapon, const float person_world[16], int target_monster);
+void army_person_moved(Army *a, int who, const float person_world[16]);
+
+void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
+
+int army_count(const Army *a);                       /* units (some may be AU_GONE: skip those) */
+const ArmyUnit *army_unit(const Army *a, int i);
+int army_shots(const Army *a);                       /* shots (skip !alive) */
+const ArmyShot *army_shot(const Army *a, int i);
+int army_events(Army *a, ArmyEvent *out, int max);   /* takes the events since the last call */
+
+/* ---- the monster's side */
+/* an armed attack sphere reaching units (their TakeDamage(monster, amount, ...)): how many it hit */
+int army_hit(Army *a, int monster, const float centre[3], float radius, float amount);
+/* doGrabObject's search (0x2D99C0) over the units: Pickupable, not held, in front of root (forward), nearest within
+ * radius of hand; -1 none */
+int army_nearest_pickup(const Army *a, const float hand[3], const float root[3], const float forward[3], float radius);
+void army_grab(Army *a, int unit, int monster);      /* the hold (0x2DA310): onPickup */
+void army_hold(Army *a, int unit, const float hand_world[16]);
+/* throwObject(eat, vel): onThrow; an actor eaten counts (addStats 1) and is gone, one not eaten is smashed; a
+ * vehicle is thrown with vel */
+void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], float monster_heading);
+
+/* [R] 0x2D6A50: the slot an AE_HIT starts. ReactionLevel 4 (pistols, rifles, the pulse cannon) and < 0 start none
+ * (-1; the damage still counts). In the air: mode 2 42 / 44 (from behind), mode 1 43 / 45. On the ground or a
+ * building (mode 0, 5): by the knock's direction made 1 long, z > 0.707 24 + level (27 + level from behind),
+ * z < -0.707 18 + level (21 +), otherwise 0 + level (3 +), and level 2 with a knock of z <= 0.001 71 (72). The
+ * column override applies after; the hit is ignored while the monster is not interruptible (+0xAA2), held in a
+ * grab, or at 0 HP; the HP falls by the damage after the slot is chosen, and at 0 slot 67 (React_Defeated) */
+int army_reaction_slot(int level, const float knock[3], int mode, int behind);
+int army_hit_behind(const float monster_pos[3], float monster_heading, const float at[3]);   /* the hit came from behind */
+
+/* ---- the score (gCommon.addStats, Player.addPoints) */
+#define ARMY_MONSTERS 4
+/* per player (0x4D7CA8 + slot x 0x60): +0x04 points[7], +0x20 kills[7]: 0 destruction, 1 civilian, 2 vehicle,
+ * 3 bonus, 4 time bonus, 5 challenge, 6 the total */
+typedef struct { float points[7]; int kills[7]; } ArmyStats;
+const ArmyStats *army_stats(const Army *a, int monster);
+/* addStats(object of template tmpl, monster, type) for what is not a unit here (people.c's eaten people: type 1) */
+void army_add_stats(Army *a, int monster, Group tmpl, int type);
+/* the buildings' Scoring (DefBuildingProps, 0x2BA4B0) for building index `building` (< 64), hit by monster (-1: no
+ * attacker, the chain is reset): event ARMY_SCORE_CELL (a front cell hit, state its state after the hit),
+ * ARMY_SCORE_FLOOR (a floor's FloorHP gone), ARMY_SCORE_BUILDING (its BuildingHP gone: front_states the front
+ * cells' states). monster_move: the monster's state name (MultiFloor's key); width, storeys: the front's columns and
+ * the storeys standing; at: the monster's place (the floating number). Returns the points */
+enum { ARMY_SCORE_CELL, ARMY_SCORE_FLOOR, ARMY_SCORE_BUILDING };
+float army_score_building(Army *a, int monster, int building, Group building_props, int event, int state,
+                          const char *monster_move, int width, int storeys, const int *front_states, int nfront,
+                          const float at[3]);
+
+#endif
