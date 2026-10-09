@@ -1,7 +1,8 @@
-# Footsteps and landings
+# Footsteps, landings and the foot IK
 
-The dust (or splash) under a monster's foot and the bigger one when it lands, traced from the ELF; `src/footstep.c`
-ports them. [R] read in the code, [G] guessed.
+The dust (or splash) under a monster's foot and the bigger one when it lands, and the foot lock and leg IK that hold
+a planted foot on the ground, traced from the ELF; `src/footstep.c` ports them, `src/ik.c` bends the legs. [R] read
+in the code, [G] guessed.
 
 ## The names (MonsterFx)
 All seven property books (`Amanda_prop`, `Cal_prop`, `George_prop`, `Jill_prop`, `Lizzie_prop`, `Ralph_prop`,
@@ -43,15 +44,27 @@ Set up by 0x33D4E0 (from the monster setup 0x2E98C0 at 0x2EAB48):
 
 | Off | |
 |---|---|
-| +0x00, +0x28 | two foot records of 0x28 bytes: +0x0 weight (1 held, 0 free), +0xC place (world; +0x14 its z), +0x18 a second vector, +0x24 flags (1 planted, 2 dragged) |
-| +0x50 | added to the ground's height for a planted foot: −(a component of the right foot's bind-pose place, 0x174A90) [G: the ankle's height; sign and meaning not settled] |
-| +0x54, +0x58 | 0.5, 0.5; +0x5C, +0x60 0.7 (not followed) |
-| +0x64 | `MiscData|RTWSmoothFactor` (0.7; Lizzie and Ralph 0.85), the share the root keeps of the planted foot's slip |
+| +0x00, +0x28 | two foot records of 0x28 bytes (below) |
+| +0x50 | the ankle: added to the ground's height for a planted foot. −(row z of the inverse bind rotation · its translation) of the node at monster +0x7DAC (`Bip01 R Foot`) in the skeleton's bind pose (MONSTER_DATA +0xC8A0 → +0xA30 → +0x3C, 0x50 bytes a node, the matrix from +0x4; 0x174B20 transposes, 0x174A90 turns back): **the right foot's height in the bind pose**, George 0.528, Rhett 0.648, Ralph and Lizzie 0.514 (the bosses without feet: whatever node −1 reads) |
+| +0x54, +0x58 | 0.5, 0.5: the share a planted foot keeps a frame of its target (+0x18) and of its IK share (+0x4) |
+| +0x5C, +0x60 | 0.7, 0.7: the same for a foot that is not planted |
+| +0x64 | `MiscData|RTWSmoothFactor` (0.7 until read; Lizzie and Ralph 0.85, a float key only): the share of the anchor's slip the root does not take up a frame |
 | +0x68 | a byte: a footfall waiting for 0x33BF10 (see below); only ever cleared |
-| +0x69 | `MiscData|DisableFootDrag` (Lizzie and Ralph 1) |
+| +0x69 | `MiscData|DisableFootDrag` (an int key; Lizzie and Ralph 1) |
 | +0x6C | the anchor: the planted foot the root follows, −1 none |
 | +0x70 | the monster |
-| +0x74 | the current state node (0x33CCA0, from the command 0x2E6580: monster +0x10C) |
+| +0x74 | **the state node the monster is leaving**: 0x33CCA0 is the first thing the state command 0x2E6580 does (with a new node), +0x74 = monster +0x10C, and +0x10C only takes the new node at 0x2E6848; the new clip's events (0x2F45D0 at 0x2E6858) come after |
+
+A foot record (the records are indexed by the foot as drawn: 0 left, 1 right, see the mirror swap below):
+
+| Off | |
+|---|---|
+| +0x0 | weight: 1 held (planted or dragged), 0 free |
+| +0x4 | the IK's share, eased towards the weight (flag 0x10) |
+| +0x8 | a dragged foot's arc height (0x33C5A0) |
+| +0xC | the place (world): planted, where (z the ground + the ankle, every frame); else the foot as posed |
+| +0x18 | the IK's target, eased towards +0xC (flag 4) |
+| +0x24 | flags: 1 planted, 2 dragged, 4 +0x18 has started, 0x10 +0x4 has started (both set by 0x33CDE0 the first time, never cleared) |
 
 The records are indexed by the foot **after the mirror swap**: when the monster is mirrored (+0x7DA1) each method
 first turns the foot into (foot + 1) & 1.
@@ -95,25 +108,102 @@ is not pressed (the wading does that every frame on its own, WATER_NOTES.md).
 ### cancelFootStep (0x33CA10) [R]
 Every standing clip sends it for both feet at its start (Ground_Idle, the reactions, the jumps' starts ...), but
 **only foot 0 does anything** (`bnez $s2` on the argument before the swap). Then, unless the debug byte, with a state
-node (+0x74) whose flags have 0x50 or 0x1080 and the monster still:
+node at +0x74 — **the state just left** — whose flags have 0x50 or 0x1080 (NODE_AIR_X | NODE_ROOT_X, NODE_AIR_Y |
+NODE_ROOT_Y: a state that travels; Ground_Walk has 0x80) and the monster still:
 - s2 = record 0 (1 mirrored), s1 the other; both feet's places, less the monster's place, into its frame (0x101190:
   the dots with its axes); if s2's y (forward) is less than s1's they swap: **s2 is the foot further forward**;
-- s2: weight 1, flags |= 1 (planted), its place (0x2E5C40), z = the ground (0x2E8530) + the object's +0x50;
+- s2: weight 1, flags |= 1 (planted), its place (0x2E5C40), z = the ground (0x2E8530) + the ankle (+0x50);
 - s1: with DisableFootDrag weight 0 (its flags kept); otherwise weight 1, flags |= 2, 0x33C5A0 sets the drag up,
   flags &= ~1;
 - +0x6C = s2.
 
-No effect. The name fits loosely: it ends whatever step was going and sets the feet down where they stand.
+No effect. So: **coming to a stop** (a walk into an idle, a reaction ...), the forward foot is planted where it stands
+and becomes the anchor, the other one is dragged into the new clip's stance. A standing clip entered from a standing
+state plants nothing (Ground_Idle's own flags are 0).
 
-### The foot lock (0x33BF10, called at 0x2E0EFC in the monster update 0x2E03A8)
-With an anchor: if the +0x68 byte is set, a footfall at the anchor's record place (z the ground; record 1 → 0x2DC350,
-else 0x2DC3D0) and the byte cleared. Then the anchor is dropped (−1) unless the state locks the feet (0x50 / 0x1080)
-or its record is planted; otherwise the planted foot's posed place (0x33C290 with the own IK, else the animation
-player's vtable +0x34 on node +0x72C0 / +0x72C4, swapped when mirrored) is compared with where it was planted, and
-the root is moved by (1 − RTWSmoothFactor) of that slip so the foot stays put (gone within 1e−6: the anchor is
-dropped). **No code sets +0x68** (every `sb` to +0x68 / +0xC884 in the monster and foot code stores zero), so this
-footfall never happens [R]: the footfalls are footPlant's alone. The lock and the drag (0x33C5A0, 0x33CDE0,
-0x33CF90) are not ported.
+**The drag (0x33C5A0, s3 the dragged record, s2 the planted)**: the planted foot as the clip now poses it (0x33C290
+mirrored, else the clip's own query, animation player +0x2A24 — the clip 0x2FFA00 started — vtable +0x34, time offset
+0), through the monster's matrix, is short of where it was just planted by d (x, y; z 0); the dragged foot as the
+clip poses it, through the matrix moved by d, is a distance (x, y) from where it is now (0x2E5C40). 0.333 (0x3EAA7EFA)
+of that, at most 3 × the ankle (worked out the first time any monster drags and kept for good: gp−0x6C68, flag
+gp−0x6C64), × `FootIKDragHeightScale` (monster +0xAC4: 1 until read; Lizzie and Ralph 0.5), is the arc's height
+(record +0x8). So the arc scales with how far the foot will be dragged.
+
+## The foot lock and the foot IK
+
+### The frame [R]
+The monster update (vtable +0x10, 0x2DE530) runs the clip events (0x2F46D0, 0x2DE96C / 0x2DE9B0: cancelFootStep
+among them), the animation player's frame (0x2FFF10 at 0x2DE9BC: the clocks, the blend, the pose), then the mode's
+case (jump table 0x431290: 0x2DF6F0, 0x2DEBD8, 0x2DF300, 0x2E03A8) and the shared tail from 0x2E0738 (every case
+branches there). In the tail: the frame's new matrix is made (the move, the turn, 0x2E0E40 ..), **the foot lock**
+(0x33BF10 at 0x2E0EFC) may move its place, 0x2DCCE0 sets it, the arm IK (+0x2588: 0x323130, vtable +0x8 at 0x2E1310),
+then **the foot object's update** (0x33D450 at 0x2E1324) and **the foot IK** (+0x258C, vtable +0x8 at 0x2E1338). So
+at cancelFootStep the pose array still holds last frame's pose, IK and all; at 0x33D450 it holds this frame's pose,
+before the IK.
+
+### The foot lock (0x33BF10: a1 the frame's new matrix, a2 the matrix out, 1 = take it) [R]
+Nothing under the debug byte. With an anchor: if the +0x68 byte is set, a footfall at the anchor's record place (z the
+ground; record 1 → 0x2DC350, else 0x2DC3D0) and the byte cleared. **No code sets +0x68** (every `sb` to +0x68 /
++0xC884 in the monster and foot code stores zero), so this footfall never happens: the footfalls are footPlant's
+alone. Then the anchor is dropped (−1) **when the state now (monster +0x10C) travels** (0x50 / 0x1080: 0x33BFE8 ..
+0x33C000 branch to the drop at 0x33C018) **or its record is no longer planted** (footStep). Otherwise the anchor's
+foot as the clip alone poses it now (0x33C290 mirrored, else the player's clip query on node +0x72C0 / +0x72C4,
+swapped when mirrored), through the new matrix, against the record's place, (x, y): within 1e−6 squared
+(0x358637BE) the anchor is dropped and nothing moves; else the matrix's place moves by **(1 − RTWSmoothFactor) of the
+slip**, its rotation kept. The root eases after the planted foot; the IK holds the foot meanwhile.
+
+### The foot object's update (0x33D450 = 0x33CF90 for 0 and 1, then 0x33D490 = 0x33CDE0 for 0 and 1) [R]
+Run only when the monster has a foot IK. 0x33CF90, per record:
+- once flag 0x10: +0x4 = weight × (1 − k) + +0x4 × k, k = +0x58 planted, else +0x60; then 0 within 0.001 of 0
+  (0x3A83126F) and 1 within 0.001 of 1;
+- planted: z = the ground (0x2E8530) + the ankle; the leg's first node (0x2F8F50: chain record, link 0, the thigh)
+  through the monster's matrix; a place farther from it than the leg's length (0x2F9060: the links' lengths as posed)
+  is brought back onto that sphere;
+- else the place is the foot as posed (0x2E5C40, record 0 node +0x7DA8, 1 +0x7DAC: as drawn); dragged: once the
+  player's blend is over (+0x4E58, the time left of the clip blend 0x2FFA00 set, ≤ 0) the drag ends (flags &= ~2,
+  weight 0), else z is raised to at least ground + ankle + sin(π (1 − left × +0x4E5C)) × the arc (+0x8; +0x4E5C is
+  1 / the blend time): **the dragged foot follows its clip, lifted on an arc over the blend**;
+- once flag 4: +0x18 = place + k (+0x18 − place), k = +0x54 planted, else +0x5C.
+
+0x33CDE0, per record (also run by the state command, 0x2E67DC): the first time +0x4 = weight (flags |= 0x10) and
++0x18 = the place (flags |= 4); the target is +0x18 in the monster's frame (0x101190) with the rotation of the posed
+foot (animation player +0xC + node × 0x30, 0x24 bytes), handed to the IK's chain of that record (0x2F8FF0: chain
++0x18; 0x2F8FE0: the share +0x4 to chain +0x48).
+
+### The foot IK (monster +0x258C = animation player +0x1AA4) [R]
+Made by 0x2E5640 from the player's setup 0x301AE0 (0x302458) **only when `Bip01 L Foot` and `Bip01 R Foot` both exist**
+(+0x72C0 ≠ +0x72C4; the five bosses Cal, Eyegore, Jill, Natalie, Venus have no feet) and the book has `MiscData`
+(no group: NULL, no foot IK, no 0x33D450). `MiscData|Use3LinkFootIK` (an int) ≠ 0: the 3-link (0x2F7D70, 0xB0
+bytes, vtable 0x44AF60); 0 or absent: the 2-link, which is **StdIKPairAnimator**, the arms' class (0x2F8ED0, vtable
+0x44AFA0). 0x2F9720 (vtable +0x1C, with the two foot nodes) points it at the player's pose (+0xAE8, the pose at +0xC)
+and sets chains 0 and 1 up (vtable +0x14): the 2-link's 0x2F8D20 takes the foot, its parent and grandparent (thigh,
+calf, foot), the 3-link's 0x2F7BC0 one more (thigh, calf, horselink, foot); each starts with the identity target and
+the share 0. A chain (0x40 bytes from +0x18): the target matrix (0x30), the share +0x48, the node list +0x4C, its
+count +0x54.
+
+The update (vtable +0x8, 0x2F9560): each chain of share > 0 is solved and blended (vtable +0x18: 2-link 0x2F7E10, the
+arms' — ik_arm ports it; 3-link 0x2F66D0), then 0x2F9320 makes the nodes below follow (the toes).
+
+**The 3-link solve (0x2FCA70)**: the thigh is first aimed at the target, its x turned the shortest way onto the
+target's direction in its own frame (0x101190, 0x104E90 from (1, 0, 0) at 0x40A008, 0x104BB0). The thigh and the
+horselink are kept parallel, so the chain is the triangle (D, L2, L1 + L3); the game scales it by k = L3 / (L1 + L3)
+(0x2FCC98: 1 / (1 + L1 / L3)): cos a = (D'² + L3² − L2'²) / (2 D' L3), cos g = (L2'² + L3² − D'²) / (2 L2' L3),
+each clamped to −1 .. 1. The thigh turns by a about its own z (0x101570), the calf by g + π under it (0x101570 with
+−sin g, −cos g, the bone's place the thigh's plus L1 along the thigh's x), the horselink back by the transpose of
+that turn (parallel to the thigh again, L2 along the calf's x). Reached: D ≤ L1 + L2 + L3 and no clamp. 0x2F66D0 at
+the full share puts the solution in, the foot at the target when reached (else riding on the horselink: 0x2F79A0)
+with the target's rotation, and 0x1017F0 on each node.
+
+**The settings** (`MiscData` of the seven books; Ralph's book also serves Dick, Jack, Leon, Rojo and Wally — the
+seven with `Bip01 L/R HorseLink`):
+
+| Book | Use3LinkFootIK | FootIKDragHeightScale | RTWSmoothFactor | DisableFootDrag | ankle |
+|---|---|---|---|---|---|
+| Amanda, Cal, George, Jill, Rhett | 0 | 1 | 0.7 | — | by skeleton: 0.648 (Amanda, Batty, Crock, Kingston, Philbert, Rhett), else 0.528 |
+| Lizzie, Ralph | 1 | 0.5 | 0.85 | 1 | 0.514 |
+
+`LiftNodeName` (Cal, Jill: `Helper R Hand`) is not the feet's: the setup reads it to monster +0x100, the node a lifted
+person hangs from (PEOPLE_NOTES.md).
 
 ## The landing (0x2DC450) [R]
 Every landing from the air (from 0x2E2980), whatever the fall speed: p = the place of `Bip01 Spine1` (0x2E6000:
@@ -134,11 +224,34 @@ Of the clip events of the 30 monsters: 1,254 footStep, 1,091 footPlant, 598 canc
 
 ## The port
 `src/footstep.c`: `foot_props_read` (MonsterFx), `foot_bone` (the bone per clip foot and mirror), `foot_plant`
-(the footfall: when, where, which), `foot_step` and `foot_cancel` (the records and the anchor, kept as the game keeps
-them for a foot lock to come), `foot_impact` (the landing).
+(the footfall: when, where, which), `foot_step`, `foot_command` (+0x74: the state left) and `foot_cancel` (the
+records, the anchor, the drag's arc), `foot_ik_props` / `foot_ankle` (MiscData, +0x50), `foot_lock` (0x33BF10),
+`foot_update` (0x33D450: the records and the IK's shares and targets), `foot_impact` (the landing).
+`src/ik.c`: `ik_leg3` (the 3-link: 0x2FCA70 in 0x2F66D0), `ik_feet` (the foot IK object: the chains, the posed feet
+noted, the 2-link through `ik_arm`, the 3-link through `ik_leg3`), `ik_clip_node` (the player's clip query).
+
+The viewer drives it like the game's frame: the state command calls `foot_command` with the old state's flags before
+the new clip's events; at the end of the frame's move (before the place is clamped and pushed out) `foot_lock` with
+each foot as the clip alone poses it (`ik_clip_node`); the city's posing calls `ik_feet` after the arm IK, and
+`ik_feet` calls back into the viewer (`IkFeet.update`) between noting the feet and bending the legs, where
+`foot_update` runs once a frame on this very pose — so there is no frame of lag between the pose, the targets and the
+IK. Checked in a scratch build: walking into Ground_Idle plants the forward foot on the ground (z = ankle) while the
+root eases back by 0.3 of the slip a frame until it is within 1e−3; the dragged foot rises on its arc (0.359 for
+George; capped at 1.584 = 3 × 0.528 after a long stride) and lets go at the blend's end; the drawn foot sits on its
+target to 1e−3 for the 2-link (George) and the 3-link (Ralph, Lizzie), mirrored or not; walking off drops the anchor
+at once and the walk is as fast as without the IK.
 - Faithful [R]: the four names and their absence, the stillness test, the foot's (x, y), the ground or water z, the
-  mirror swap, the per-foot slot, the forward foot as the anchor, Spine1 for the landing.
+  mirror swap, the per-foot slot, the forward foot as the anchor, Spine1 for the landing; the state left as the
+  cancel's test, the drop rule, the slip's share, the easing shares and snaps, the planted z and reach clamp, the
+  drag's arc and its end, the two IK classes and their chains, the 3-link solve at the full share, the ankle.
 - [G]: that the viewer's `scene_monster_node` side convention equals the game's swap (argued from the two, not run);
   the frame gp−0x70F0 being the identity; restarting a foot's effect (the game) versus starting a new one (the
-  viewer) is the same for these one-shot effects; the +0x50 offset (left at 0 by `foot_init`).
-- Not ported: the foot lock and drag (0x33BF10, 0x33C290, 0x33C5A0, 0x33CDE0, 0x33CF90), the debug byte.
+  viewer) is the same for these one-shot effects; the 3-link's blend below the full share, read as 0x2F7E10's (the
+  same blocks with one bone less, as ik_arm ports it) and not traced line by line; 0x1017F0 taken as a no-op on rigid
+  matrices; the arc cap kept per monster (the game keeps the first monster's for the whole game); the shares applied
+  once a viewer frame (the game's frame rate: 60 [G]); `ik_clip_node` holding and turning the root as the viewer's
+  posing does (the player's own clip query was not traced into); the mirrored 3-link solved on the other side's nodes
+  with the target reflected (as the arms), where the game solves the mirrored pose itself — the same up to the bend's
+  sense, which both put forward.
+- Not ported: the debug byte; the dynamic scale in 0x2E5C40 (+0xA78; the viewer draws at 1); the state command's own
+  0x33D490 refresh (the next frame's update does the same).

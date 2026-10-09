@@ -11,7 +11,7 @@ hard-coded at 0x2B9928 into +0x308 of the lighting object (0x4D2680 + 0x308 = 0x
 | monster ground blob | the monster | the street, or the roof it stands on | `shadow_blob` under its body, fades with height |
 | monster wall blob | the monster while climbing | the climbed building's front face, and its right side face | `shadow_blob`, no depth test |
 | ground grid | the buildings | the play block's ground (the lot) | 23 × 6 vertex-coloured cells, a ray per sample |
-| facade darkening | neighbour buildings | a building's front / right face | its vertex light colour minus `MShadowRGB` |
+| facade darkening | neighbour buildings | a back-row building's front / right face | its vertex light colour minus `MShadowRGB` |
 
 ## The keys
 
@@ -25,6 +25,7 @@ through the key-name table at 0x3F5990 (indices 0x70–0x7D). All seven cities, 
 | `GroundShadowIntensity` | 0.8 | +0x340 | the ground grid |
 | `Texture\|MonsterBlob` | `shadow_blob` | +0x338, a material of shader 0x35 | both monster blobs |
 | `MShadowR/G/B` | 0.4, 0.25, 0 | +0x314 … +0x31C | facade darkening; +0x324 = 0.2 is set beside it |
+| `RampStart/RampEnd/RampIntensity` | 6, 35, 0.35 (night −0.5) | +0x27C … +0x288 | the building light's height ramp ([BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)) |
 | `MShadowRampDist` | 5 | — | no key name in the ELF: never read (the code's 0.2 is 1/5) |
 
 0x326AB0 packs the tint into the object shadows' manager (0x4D6AB0): +0xD14 = RGB bytes (×255 + 0.5, R low), +0xD18
@@ -131,8 +132,11 @@ The render states (0x25ABA0 / 0x25A900 / 0x25A5B0 into GS TEST at 0x4CC140) take
 
 ## Facade darkening (0x31C7B0 → 0x31D6B0; applied by 0x31D560 / 0x31D7F0)
 
-Per building, from its box and two neighbours (its +0xC8 = A and +0xD0 = B; which neighbours those are was not
-followed): front_y = min y + 0.1, right_x = max x − 1.
+Per building (its shadow object at building +0x914), from its box and two neighbours, A (+0xC8) and B (+0xD0):
+only a back-row building has them (0x31C8C0), A the first front-row building whose min x is past its own, B the first
+of its own row whose min x is at or past its own max x (its right-hand neighbour); the shape is made again whenever
+A's or B's top changes (0x31C860 → 0x31C7B0). Who lights with it and how is in
+[BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md). front_y = min y + 0.1, right_x = max x − 1.
 - **front** (0x31DD90, 0x31DC00), from A with its top + 2: A's left edge (x = A's min x) carried along the light onto
   the plane y = own min y from A's front and back corners gives (x0, z0), (x1, z1); three planes: x ≥ x0, x ≤ x1, under
   the line (x0, z0)–(x1, z1). It counts when x1 − x0 ≥ 0.001 and the span meets own min x − 2 … max x + 2. (0x31DC00
@@ -143,7 +147,9 @@ followed): front_y = min y + 0.1, right_x = max x − 1.
 
 A lit vertex colour at p: on the front (p.y ≤ front_y) inside the three planes, depth = min(distance from x0, from the
 top line); on the right face (p.x > right_x) inside a box, depth = min(p.y − its min y, its top − p.z); then each
-channel −= MShadow · min(0.2 · depth, 1), not below 0. The callers are in the building render (0x2CD220, 0x2CE300).
+channel −= MShadow · min(0.2 · depth, 1), not below 0 (0x31D560, for the ground-floor and top models, 0x31CCA0). The
+facade grid (0x2CE300) calls the two halves itself: 0x31DA60 for its front face's vertices, 0x31D7F0 for its right
+face's. `shadow_facade_front`, `shadow_facade_right`, `shadow_facade_darken`; city.c drives them.
 
 ## Other strings
 
@@ -168,4 +174,6 @@ gives GL-scale colours.
   `GL_MODULATE`, the same blend, depth test `GL_LEQUAL`, depth mask off, `glPolygonOffset(-1, -1)` for the 0.01 lift.
 - **The wall blob** (`SHADOW_PASS_WALL`): after the buildings and before the monster's mesh, depth test off, depth mask
   off (as the game). If the monster is drawn first, use depth test `GL_LEQUAL` with a polygon offset instead.
+- **Facade darkening** has no pass of its own: it is in the buildings' vertex colours, drawn unlit
+  ([BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)).
 - Fog: as the scene's [G].

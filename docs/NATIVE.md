@@ -132,16 +132,17 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- the goals of scripts not ported (trains, cable cars, freighters, hot dog
-  carts, bikers, parade balloons, chimneys and gongs, street lamps) never count; hideChallengeCompletionUI;
 - the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
-- the feet locked to the ground and dragged (0x33BF10 and kin; footstep.c keeps the records for it);
-- vertex-coloured interiors of damaged buildings, the facades darkened by their neighbours' shadows.
+- the game's collision world (every module has its stand-in), PushOutMonsters, TakeImpact's callers;
+- more than one player, the front end and the profile (saving, the moves locked until an upgrade).
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
-the bosses (boss.c), the cryotube's monster reveal and the rubble's points (reveal.c), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
+the bosses (boss.c), the cryotube's monster reveal and the rubble's points (reveal.c), the trains, cable cars and freighters (rail.c,
+[RAIL_NOTES.md](RAIL_NOTES.md)), the parade balloons, bikers and food carts (parade.c, [PARADE_NOTES.md](PARADE_NOTES.md)),
+the street and roof objects (streetobj.c, [STREETOBJ_NOTES.md](STREETOBJ_NOTES.md)), the buildings' light and
+neighbours' shadows (building.c, city.c, [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
 choreography and camera modes (director.c), the block challenges and their upgrades (challenge.c,
 [CHALLENGE_NOTES.md](CHALLENGE_NOTES.md)), the Pause menu (hud.c, [PAUSE_NOTES.md](PAUSE_NOTES.md)), the face queue, head turn and friction (look.c), shadows (shadow.c),
-effects with their mesh debris and sounds (fx.c), the footfalls and landings' dust and splashes (footstep.c,
+effects with their mesh debris and sounds (fx.c), the footfalls, the foot lock and drag with the legs' IK (footstep.c, ik.c,
 [FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md)) and sound (sound.c).

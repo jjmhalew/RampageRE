@@ -3,7 +3,8 @@
  * monster's blobs (ROMonster, vtable 0x44B040: constructor 0x2FF510, update 0x2FDA50 / 0x2FDD00, ground blob 0x2FEA20,
  * wall blob 0x2FDEB0), the ground grid of the buildings' shadows (setup 0x31FC40, mesh 0x31F340, a building's top
  * 0x31F790, the cells 0x31F690, the colours 0x31F540, the draw 0x31F8B0, the colour 0x320040) and the facade darkening
- * (0x31D6B0, 0x31DD90, 0x31DC00, 0x31D9A0, 0x31D560, 0x31DA60, 0x31D8F0).
+ * (0x31D6B0, 0x31DD90, 0x31DC00, 0x31D9A0, 0x31D560, 0x31DA60, 0x31D7F0, 0x31D8F0; who uses it: building.c's
+ * building_light_grid and city.c's building light, docs/BUILDING_LIGHT_NOTES.md).
  * [R] = read in that code, [G] = a guess or a stand-in where it matters.
  *
  * Colours: the game hands the GS bytes where 128 is 1.0. Vertex colours go through as they are [G: formats 0x42 and
@@ -535,40 +536,51 @@ void shadow_facade_build(ShadowFacade *f, const float own[6], const float *nb_a,
         right_box(f, nb_b, own[3]);
 }
 
-int shadow_facade_darken(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3])
+/* colour -= MShadowRGB x min(depth / 5, 1), not below 0 [R 0x31D5D8 .. 0x31D678, 0x31DB48 .., 0x31D828 ..] */
+static int shade(const ShadowLighting *l, float depth, float rgb[3])
 {
-    float depth = 1e10f, k;
-    int i, in = 0;
-    if (p[1] <= f->front_y) {                        /* the front face: 0x31DA60 */
-        float e0, e2;
-        if (!f->front || dot3(f->plane[1], p) < f->plane[1][3])
-            return 0;
-        e0 = dot3(f->plane[0], p) - f->plane[0][3];
-        e2 = dot3(f->plane[2], p) - f->plane[2][3];
-        if (e0 < 0 || e2 < 0)
-            return 0;
-        depth = fminf(e0, e2);
-        in = 1;
-    } else if (p[0] <= f->right_x)
-        return 0;
-    else {                                           /* the right face: 0x31D8F0 */
-        for (i = 0; i < f->nright; i++) {
-            const float *b = f->right[i];
-            float dy = p[1] - b[1], dz = b[5] - p[2];
-            if (dy < 0 || b[4] - p[1] < 0 || dz < 0)
-                continue;
-            depth = fminf(fminf(depth, dy), dz);
-            in = 1;
-        }
-        if (!in)
-            return 0;
-    }
-    /* colour -= MShadowRGB x min(depth / 5, 1), not below 0 [R 0x31D5D8 .. 0x31D678] */
-    k = fminf(depth * RAMP, 1.0f);
+    float k = fminf(depth * RAMP, 1.0f);
+    int i;
     for (i = 0; i < 3; i++) {
         rgb[i] -= l->mshadow[i] * k;
         if (rgb[i] < 0)
             rgb[i] = 0;
     }
     return 1;
+}
+
+int shadow_facade_front(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3])
+{
+    float e0, e2;
+    if (!f->front || dot3(f->plane[1], p) < f->plane[1][3])   /* 0x31DA60 */
+        return 0;
+    e0 = dot3(f->plane[0], p) - f->plane[0][3];
+    e2 = dot3(f->plane[2], p) - f->plane[2][3];
+    if (e0 < 0 || e2 < 0)
+        return 0;
+    return shade(l, fminf(e0, e2), rgb);
+}
+
+int shadow_facade_right(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3])
+{
+    float depth = 1e10f;                             /* 0x501502F9 */
+    int i, in = 0;
+    for (i = 0; i < f->nright; i++) {                /* 0x31D8F0: y and z only, x is not tested */
+        const float *b = f->right[i];
+        float dy = p[1] - b[1], dz = b[5] - p[2];
+        if (dy < 0 || b[4] - p[1] < 0 || dz < 0)
+            continue;
+        depth = fminf(fminf(depth, dy), dz);
+        in = 1;
+    }
+    return in ? shade(l, depth, rgb) : 0;
+}
+
+int shadow_facade_darken(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3])
+{
+    if (p[1] <= f->front_y)                          /* the front face [R 0x31D56C] */
+        return shadow_facade_front(f, l, p, rgb);
+    if (p[0] <= f->right_x)                          /* [R 0x31D590] */
+        return 0;
+    return shadow_facade_right(f, l, p, rgb);
 }

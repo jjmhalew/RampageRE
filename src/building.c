@@ -489,3 +489,95 @@ int building_live_of(const Building *b, int o)
             return s;
     return -1;
 }
+
+/* ---------------------------------------------------------------- the building light */
+
+void building_light_init(BuildingLight *l, const float ambient[3], int nlights, const float (*dir)[3],
+                         const float (*colour)[3], float ramp_start, float ramp_end, float ramp_intensity)
+{
+    memset(l, 0, sizeof *l);
+    memcpy(l->ambient, ambient, sizeof l->ambient);  /* +0x2EC: the light file's ambient (0x2B9518) */
+    for (int i = 0; i < 3 && i < nlights; i++) {     /* 0x2B93E8 ..: the first three lights; the rest stay black */
+        float d2 = dir[i][0] * dir[i][0] + dir[i][1] * dir[i][1] + dir[i][2] * dir[i][2];
+        if (d2 < 1e-6f) {                            /* (1, 0, 0) when shorter than 1e-3 (0x2B9438) */
+            l->dir[i][0] = 1;
+        } else {
+            float k = 1 / sqrtf(d2);
+            for (int c = 0; c < 3; c++)
+                l->dir[i][c] = dir[i][c] * k;
+        }
+        memcpy(l->colour[i], colour[i], sizeof l->colour[i]);
+    }
+    l->ramp_start = ramp_start;                      /* +0x27C .. +0x284, and +0x288 (0x2B9570 .. 0x2B9620) */
+    l->ramp_end = ramp_end;
+    l->ramp_intensity = ramp_intensity;
+    l->ramp_k = ramp_end != ramp_start ? ramp_intensity / (ramp_end - ramp_start) : 0;
+}
+
+float building_light_ramp(const BuildingLight *l, float z)
+{
+    if (z <= l->ramp_start)                          /* 0x2B8C40's first lines */
+        return 0;
+    if (z < l->ramp_end)
+        return l->ramp_k * (z - l->ramp_start);
+    return l->ramp_intensity;
+}
+
+static float clamp01(float x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+
+void building_light_at(const BuildingLight *l, const float p[3], const float n[3], float rgb[3])
+{
+    float r = building_light_ramp(l, p[2]);
+    for (int c = 0; c < 3; c++)
+        rgb[c] = l->ambient[c];                      /* +0x2EC .. +0x2F4 */
+    for (int i = 0; i < 3; i++) {                    /* the lights +0x2A4 / +0x2C8, +0x2B0 / +0x2D4, +0x2BC / +0x2E0 */
+        float d = -(n[0] * l->dir[i][0] + n[1] * l->dir[i][1] + n[2] * l->dir[i][2]);
+        if (d < 0)
+            d = 0;
+        for (int c = 0; c < 3; c++)
+            rgb[c] += d * l->colour[i][c];
+    }
+    for (int c = 0; c < 3; c++)                      /* the ramp onto every channel, then 0 .. 1 */
+        rgb[c] = clamp01(rgb[c] + r);
+}
+
+void building_light_ambient(const BuildingLight *l, float z, float rgb[3])
+{
+    float r = building_light_ramp(l, z);
+    for (int c = 0; c < 3; c++)
+        rgb[c] = clamp01(l->ambient[c] + r);
+}
+
+void building_light_grid(const Building *b, const BuildingLight *l, const ShadowFacade *f, const ShadowLighting *sl,
+                         uint8_t faces[3], BuildingLightRow *out)
+{
+    static const float NORMAL[3][3] = { { -1, 0, 0 }, { 1, 0, 0 }, { 0, -1, 0 } };   /* 0x430EE0 */
+    uint8_t test[3] = { 0, 0, 0 };                   /* the faces shaded last time (none without a shadow, 0x2CE360) */
+    if (f)
+        memcpy(test, faces, sizeof test);
+    memset(faces, 0, 3);
+    float cx = (b->min[0] + b->max[0]) / 2, cy = (b->min[1] + b->max[1]) / 2;   /* the grid's matrix, +0x24 / +0x28 */
+    for (int r = 0; r <= b->n; r++) {
+        float z, h;
+        building_storey(b, r, &z, &h);               /* 6 + 3 x its slot, lower by the falling storey's progress */
+        for (int face = 0; face < 3; face++) {
+            int count = face == FACE_FRONT ? b->width : b->depth, shaded = 0;
+            for (int i = 0; i <= count && i < BUILDING_VCOLS; i++) {
+                float p[3];                          /* where the vertex is before its dent (0x2CE504 .. 0x2CE600) */
+                if (face == FACE_LEFT) { p[0] = -2.5f * (float)b->width; p[1] = 2.5f * (float)(b->depth - 2 * i); }
+                else if (face == FACE_RIGHT) { p[0] = 2.5f * (float)b->width; p[1] = 2.5f * (float)(2 * i - b->depth); }
+                else { p[0] = 2.5f * (float)(2 * i - b->width); p[1] = -2.5f * (float)b->depth; }
+                p[0] += cx;
+                p[1] += cy;
+                p[2] = z;
+                float *rgb = out[r][face][i];
+                building_light_at(l, p, NORMAL[face], rgb);
+                if (f && test[face] && face == FACE_FRONT)          /* 0x31DA60 on S itself */
+                    shaded |= shadow_facade_front(f, sl, p, rgb);
+                else if (f && test[face] && face == FACE_RIGHT)     /* 0x31D7F0 on S + 0x88 */
+                    shaded |= shadow_facade_right(f, sl, p, rgb);
+            }
+            faces[face] |= (uint8_t)shaded;          /* 0x2CE998 */
+        }
+    }
+}

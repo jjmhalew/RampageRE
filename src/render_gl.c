@@ -335,6 +335,12 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
         else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
         else { glDisableClientState(GL_COLOR_ARRAY); glColor4f(1, 1, 1, 1); }
+        /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
+         * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
+         * 0x51), the facades and cracks the building light colours, the ground and top models lit with it */
+        int prelit = p->col && !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
+        if (prelit)
+            glDisable(GL_LIGHTING);
         if (p->blend) {                                      /* over what is behind, by its alpha */
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -348,6 +354,8 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
             glDepthMask(GL_TRUE);
         }
         r->drawn += p->ntris;
+        if (prelit)
+            glEnable(GL_LIGHTING);
         if (scroll) {
             glMatrixMode(GL_TEXTURE);
             glLoadIdentity();

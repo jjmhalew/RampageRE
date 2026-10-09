@@ -14,6 +14,7 @@
 #include "water.h"
 #include "edible.h"
 #include "boss.h"
+#include "parade.h"
 #include "shadow.h"
 
 typedef struct { float m[16]; } Mat4;
@@ -92,8 +93,21 @@ typedef struct {                                      /* a building's cells and 
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
     Group inst;                                       /* its BuildingInstance| (EdibleInstance| rows, ...) */
+    /* its light (docs/BUILDING_LIGHT_NOTES.md): per live vertex row, face and column the grid vertex's colour
+     * (building_light_grid, 0x2CE300), which the facade quads (times their storey's FloorTint) and the cracks (times
+     * CrackTint) are drawn with; per storey (template order) FloorTintR/G/B (the cells' tint, 0x2CBC78) */
+    BuildingLightRow *light; float floor_tint[BUILDING_STOREYS][3];
+    /* the neighbours' shadows on its front and right face (+0x914, 0x31C8C0): the shape (0x31D6B0), the two
+     * neighbours (buildings of the block, -1 none) and their tops when it was made (+0xCC, +0xD4), the faces still
+     * shaded (G+0x1EC) */
+    ShadowFacade shade; int shade_nb[2]; float shade_top[2]; uint8_t shade_faces[3];
+    /* its ground-floor and top models' draw items, given meshes of their own whose vertex colours are the building
+     * light and that have no normals (0x31CCA0: lit per vertex, less the shadows), and the shared meshes they were
+     * copied from (the normals the light is made from) */
+    int lit_item[16], lit_src[16], nlit_items;
 } SceneBuilding;
 
+struct IkFeet;
 typedef struct {
     const Bundle *city;
     Bundle *own[4]; int nown;                         /* bundles loaded for this scene (a monster and its clips) */
@@ -104,12 +118,17 @@ typedef struct {
     /* the traffic, the fire truck and the rockets (vehicle.c, the viewer's): the TrafficDef blocks of the three block
      * slots (0 this one, 1 and 2 behind it) and the roof rockets the buildings carry, for it to make */
     Vehicles *traffic; Group traffic_def[3];
+    struct Rail *rail;                               /* the trains, cable cars and freighters (rail.c), drawn here */
     Water *water[16]; int nwater; float water_acc;
     Edibles *edibles;                                 /* the power-ups and hazards behind the windows (edible.c) */
+    Parade *parade;                                   /* the balloons, bikers and food carts (parade.c), driven by main */
     Boss *boss;                                       /* the block's boss and the ambient ones (boss.c) */   /* the block's WaterObject|s (water.c), stepped at 1/60 */
     struct { const char *name; float pos[3], facing; int building; } rockets[16]; int nrockets;
     int placing_building;                             /* the playable building whose objects are placed, -1 none */
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;
+    /* the buildings' light (building_light_*: the light file's ambient and lights, LightingData's Ramp*) and the
+     * facade darkening's MShadowR/G/B (shadow_facade_*) */
+    BuildingLight building_light; ShadowLighting shade_light;
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
@@ -145,6 +164,14 @@ typedef struct {
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
     /* the block's scripted objects for people.c: Band.bsf (a band marching in) and RoyalGuardHut.bsf (a guard's hut) */
     struct { Group t; float pos[3]; int instance, hut, hut_id; float vel[3]; } scripted[8]; int nscripted;
+    /* the StreetObject.bsf and RoofItem.bsf objects of the block and its buildings as placed, for streetobj.c (main
+     * adds them): the template, its ObjectInstance| group, its instances first .. last - 1 (the model, then its
+     * flags' cloths), where it stands, the building whose ObjectInstance| it is (-1 the block's own); model: the
+     * instance of its model now (scene_street_shape), rel: its cloths' places relative to it (scene_street_place) */
+#define SCENE_STREET_MAX 256
+    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel; float world[16]; Mat4 rel[4]; }
+        street[SCENE_STREET_MAX];
+    int nstreet;
     int placing_block;                                /* placing the block's own objects (not those behind) */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
@@ -164,6 +191,7 @@ typedef struct {
     int ik_chain[2][3], ik_ready;
     Mat4 ik_anim[2];
     float ik_shoulder[2][3], ik_reach[2];             /* the upper arm's place (model space, as drawn), the arm's length */
+    struct IkFeet *feet;                             /* the monster's foot IK (ik.c ik_feet), NULL none */
 } Scene;
 
 typedef struct City City;
@@ -193,11 +221,21 @@ int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
 /* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
  * ones, flag 4, nor obstacles, flag 2); how many */
 int scene_adornments_hit(Scene *s, const float centre[3], float radius);
+/* street object k (Scene.street[k], streetobj.c's object) drawn at world (its model's base: StreetObj.world), or
+ * hidden: its model and its flags' cloths move together (the cloths kept where they were relative to the model) */
+void scene_street_place(Scene *s, int k, const float world[16], int hidden);
+/* street object k's model is now `shape` (streetobj.c's SE_SHAPE: setShape(DamageShape)), placed where the old one
+ * is, which is no longer drawn; 0 = ok, -1 no such model (the old one stays) */
+int scene_street_shape(Scene *s, int k, const char *shape);
+/* instance inst's model node `name` (or, name NULL, node number id) in the world now (base x node); 0 = ok */
+int scene_instance_node(const Scene *s, int inst, const char *name, int id, float out[16]);
 /* RoyalGuardHut's TakeDamage: a monster's attack sphere (centre, radius) from the monster at `from` sends the huts it
  * reaches flying (people_hut_hit); what the monster gets, summed */
 PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3]);
 void scene_huts_update(Scene *s, float dt);         /* the flying huts move; a deleted one is no longer drawn */
 Group city_template(City *c, const char *name);     /* an object template by name (the city's template books) */
+/* one play of a look's clip (its AnimName; NULL: the shape's own RawAnim) in seconds; 0 = unknown */
+float city_clip_seconds(City *c, const char *anim, const char *shape);
 void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]);   /* an effect to start */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
 int scene_monster_node(const Scene *s, const char *name, Mat4 *world);
@@ -207,7 +245,8 @@ void scene_people_spawn(Scene *s, float dt);
 /* the playable buildings as people.c sees them */
 int scene_people_boxes(const Scene *s, PeopleBox *out, int max);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
- * storeys and rubble drawn as they now are */
+ * storeys and rubble drawn as they now are, lit again (the building light, its neighbours' shadows) when they moved,
+ * changed or a neighbour's top did */
 void scene_buildings_update(Scene *s, float dt);
 /* the next clip blends in over `seconds` from the pose the monster has now, as the game's animation player does
  * (0x2FFA00): call before scene_monster_play; scene_monster_blend_step counts it down */

@@ -240,15 +240,15 @@ A goal could therefore name `Score` (reach n points) or `Clock` (finish with n s
 | SWATWindow0, SoldierGrenadierFromWindow, SoldierRifleman0 | Military_Window.bsf | 1 | army.c |
 | TouristFemale1 …, Mime, Reader, HumanMaleBusiness, RollerbladerMale, StreetPunk1/2Hard, RoyalGuard | Tourist / Mime / StationaryPerson / Person_Window / WalkingAroundPerson / RoyalGuard.bsf | 1 | people.c `people_eat` (main.c) |
 | BossSaucer, BossTank, BossHelicopter, BossJumper, NYBlimp | Boss_*.bsf | 2 | boss.c BE_STATS (`tmpl`) |
-| SlowCommuterTrain1, SpeedingCommuterTrain1 | ElevatedTrain.bsf | | not ported |
-| TrainNYFlat | NewYorkTrain.bsf | | not ported |
-| CableCarForTurnaround | CableCar.bsf | | not ported |
-| ScumFreighter | freighter.bsf | | not ported |
-| HotdogCart1 | GroundCart.bsf | | not ported (the hot dogs still count) |
-| Biker | Biker.bsf | | not ported |
-| ParadeBalloonGeorge / Lizzie / Ralph | ParadeBalloon.bsf | | not ported |
-| ChimneyLondon, HKPagodaGongAdorn_Roof | RoofItem.bsf | 0 | not ported |
-| StreetLamp2, HKPagodaGongAdorn_Street | StreetObject.bsf | 0 | not ported |
+| SlowCommuterTrain1, SpeedingCommuterTrain1 | ElevatedTrain.bsf | | rail.c (RE_STATS; a speeding train never: 1000 HP) |
+| TrainNYFlat | NewYorkTrain.bsf | | rail.c (RE_STATS) |
+| CableCarForTurnaround | CableCar.bsf | | rail.c (RE_STATS) |
+| ScumFreighter | freighter.bsf | | rail.c (RE_STATS) |
+| HotdogCart1 | GroundCart.bsf | | parade.c: only eating counts (PAE_STATS) |
+| Biker | Biker.bsf | | parade.c (PAE_STATS, eaten) |
+| ParadeBalloonGeorge / Lizzie / Ralph | ParadeBalloon.bsf | | parade.c (PAE_STATS, popped) |
+| ChimneyLondon, HKPagodaGongAdorn_Roof | RoofItem.bsf | 0 | streetobj.c (SE_STATS) |
+| StreetLamp2, HKPagodaGongAdorn_Street | StreetObject.bsf | 0 | streetobj.c (SE_STATS) |
 
 **The goal marker** [R] (0x30D280, every world object's init): when its template is a goal (0x3466A0), the object
 gets the effect named by its `Effect|ChallengeEffect`, from the instance book or else the template. Only

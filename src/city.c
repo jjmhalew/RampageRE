@@ -15,6 +15,7 @@
 #include "plat.h"
 #include "city.h"
 #include "ik.h"
+#include "rail.h"
 
 #define CELL 5.0f
 #define GROUND_FLOOR 6.0f
@@ -456,6 +457,8 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     }
     if (t.at && boss_is_boss_template(t))           /* a boss's part (the NY generators): boss.c's */
         return;
+    if (s->placing_block && parade_script_ours(script))   /* a balloon or a food cart: parade.c's (main) */
+        return;
     int scripted = -1;                               /* a band or a guard's hut: for people.c, once it exists */
     if (s->placing_block && script && s->nscripted < 8 &&
         (!_strnicmp(script, "Band.", 5) || !_strnicmp(script, "RoyalGuardHut.", 14))) {
@@ -479,6 +482,17 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         s->scripted[scripted].instance = id;
     if (id >= 0)
         place_flags(c, s, t, at);
+    if (id >= 0 && script && (s->placing_block || s->placing_building >= 0) && s->nstreet < SCENE_STREET_MAX &&
+        (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf"))) {
+        struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
+        so->t = t;
+        so->inst = inst;
+        so->first = so->model = id;
+        so->last = (int)s->ninstances;
+        so->building = s->placing_building;
+        so->nrel = -1;                               /* the cloths' places: taken at its first move */
+        memcpy(so->world, at.m, sizeof so->world);
+    }
     const char *flags = group_str(t, "Flags");
     if (id >= 0 && flags && strstr(flags, "IsObstacle")) {   /* 0x335ED0: IsObstacle sets object flag 0x40000 */
         s->obstacle_of = realloc(s->obstacle_of, sizeof *s->obstacle_of * (s->nobstacles + 1));
@@ -511,6 +525,82 @@ static void obstacle_boxes(Scene *s)
                 }
         }
     }
+}
+
+/* the inverse of a rigid placement (a rotation and a place) */
+static Mat4 rigid_inverse(Mat4 m)
+{
+    Mat4 r = mat_identity();
+    for (int c = 0; c < 3; c++)
+        for (int k = 0; k < 3; k++)
+            r.m[c * 4 + k] = m.m[k * 4 + c];
+    for (int k = 0; k < 3; k++)
+        r.m[12 + k] = -(r.m[k] * m.m[12] + r.m[4 + k] * m.m[13] + r.m[8 + k] * m.m[14]);
+    return r;
+}
+
+void scene_street_place(Scene *s, int k, const float world[16], int hidden)
+{
+    if (k < 0 || k >= s->nstreet)
+        return;
+    struct SceneStreetObj *so = &s->street[k];
+    if (so->model < 0 || (uint32_t)so->model >= s->ninstances)
+        return;
+    if (so->nrel < 0) {                              /* its cloths relative to the model, as they stand now */
+        Mat4 inv = rigid_inverse(s->instances[so->first].base);
+        so->nrel = 0;
+        for (int i = so->first + 1; i < so->last && so->nrel < 4; i++)
+            so->rel[so->nrel++] = mat_mul(inv, s->instances[i].base);
+    }
+    Mat4 w;
+    memcpy(w.m, world, sizeof w.m);
+    Instance *in = &s->instances[so->model];
+    in->dynamic = 1;
+    in->base = w;
+    in->hidden = hidden;
+    if (so->model != so->first)                      /* the model it had before its DamageShape */
+        s->instances[so->first].hidden = 1;
+    for (int i = 0; i < so->nrel; i++) {
+        Instance *c = &s->instances[so->first + 1 + i];
+        c->dynamic = 1;
+        c->base = mat_mul(w, so->rel[i]);
+        c->hidden = hidden;
+    }
+}
+
+int scene_street_shape(Scene *s, int k, const char *shape)
+{
+    if (k < 0 || k >= s->nstreet || !s->owner || !shape)
+        return -1;
+    struct SceneStreetObj *so = &s->street[k];
+    if (so->nrel < 0)                                /* the cloths' places before anything moves */
+        scene_street_place(s, k, s->instances[so->first].base.m, s->instances[so->first].hidden);
+    Mat4 at = s->instances[so->model].base;
+    int missing = s->missing;
+    int id = place_model(s->owner, s, shape, at, -1);
+    s->missing = missing;
+    if (id < 0)
+        return -1;
+    s->instances[id].dynamic = 1;
+    s->instances[id].shadow = s->instances[so->model].shadow;
+    s->instances[so->model].hidden = 1;
+    so->model = id;
+    return 0;
+}
+
+int scene_instance_node(const Scene *s, int inst, const char *name, int id, float out[16])
+{
+    if (inst < 0 || (uint32_t)inst >= s->ninstances)
+        return -1;
+    const Instance *in = &s->instances[inst];
+    int k = -1;
+    for (uint32_t i = 0; in->node && i < in->tree.n && k < 0; i++)
+        if (name ? _stricmp(in->tree.nodes[i].name, name) == 0 : (int)i == id)
+            k = (int)i;
+    if (k < 0)
+        return -1;
+    memcpy(out, mat_mul(in->base, in->node[k]).m, sizeof(float) * 16);
+    return 0;
 }
 
 /* the people: one look (instance) per person and ActorAnimShape|<anim> it has shown */
@@ -557,6 +647,8 @@ int city_shape_box(City *c, const char *shape, float min[3], float max[3])
 
 static Group people_template(void *ctx, const char *name) { return template_of(ctx, name); }
 Group city_template(City *c, const char *name) { return template_of(c, name); }
+static float people_clip_seconds(void *ctx, const char *anim, const char *shape);
+float city_clip_seconds(City *c, const char *anim, const char *shape) { return people_clip_seconds(c, anim, shape); }
 
 PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3])
 {
@@ -780,6 +872,39 @@ static void boss_sync(Scene *s, double t)
     }
 }
 
+/* each frame: every balloon, biker, bike and food cart at its matrix x RenderScale, an actor's clip at its time (looks
+ * keyed from 5 << 20) */
+static void parade_sync(Scene *s, double t)
+{
+    if (!s->parade || !s->owner)
+        return;
+    for (int i = 0, n = parade_count(s->parade); i < n; i++) {
+        const ParadeObj *o = parade_obj(s->parade, i);
+        int who = (5 << 20) + i, show = -1;
+        if (o->phase != PAP_GONE && o->shape) {
+            ArmyUnit look;                           /* the army's look: a shape and its clip */
+            memset(&look, 0, sizeof look);
+            look.shape = o->shape;
+            look.clip = o->clip;
+            look.tmpl = o->tmpl;
+            show = unit_look(s->owner, s, who, &look);
+        }
+        for (int k = 0; k < s->nlooks; k++)
+            if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
+                s->instances[s->looks[k].inst].hidden = 1;
+        if (show < 0)
+            continue;
+        Instance *in = &s->instances[show];
+        in->hidden = 0;
+        memcpy(in->base.m, o->world, sizeof in->base.m);
+        for (int c = 0; c < 12; c++)
+            if ((c & 3) != 3)
+                in->base.m[c] *= o->scale > 0 ? o->scale : 1;
+        if (in->has_clip && o->anim_len > 0 && o->clip)
+            in->offset = (float)(o->anim_time / o->anim_len * in->clip.duration - t);
+    }
+}
+
 /* each frame: every vehicle at its matrix (looks keyed from 2 << 20) */
 static void vehicle_sync(Scene *s)
 {
@@ -789,6 +914,27 @@ static void vehicle_sync(Scene *s)
         const VehObj *o = vehicle_obj(s->traffic, i);
         int who = (2 << 20) + i;
         int show = o->phase != VP_GONE && !o->hidden && o->shape ? vehicle_look(s->owner, s, who, o->shape) : -1;
+        for (int k = 0; k < s->nlooks; k++)
+            if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
+                s->instances[s->looks[k].inst].hidden = 1;
+        if (show >= 0) {
+            s->instances[show].hidden = 0;
+            memcpy(s->instances[show].base.m, o->world, sizeof o->world);
+            if (o->tmpl.at && !s->instances[show].shadow.at)
+                s->instances[show].shadow = group_sub(o->tmpl, "ShadowData");
+        }
+    }
+}
+
+/* each frame: every rail object at its matrix (looks keyed from 6 << 20) */
+static void rail_sync(Scene *s)
+{
+    if (!s->rail || !s->owner)
+        return;
+    for (int i = 0, n = rail_count(s->rail); i < n; i++) {
+        const RailObj *o = rail_obj(s->rail, i);
+        int who = (6 << 20) + i;
+        int show = o->phase != RP_GONE && !o->hidden && o->shape ? vehicle_look(s->owner, s, who, o->shape) : -1;
         for (int k = 0; k < s->nlooks; k++)
             if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
                 s->instances[s->looks[k].inst].hidden = 1;
@@ -990,7 +1136,8 @@ static void traffic(Scene *s, Group block, float y0)
         s->traffic_def[slot] = block;
 }
 
-/* the generated upper storeys: one quad per facade cell, its tile out of the 4 x 4 sheet */
+/* the generated upper storeys: one quad per facade cell, its tile out of the 4 x 4 sheet. No normals: the game lights
+ * the facade itself, a colour per grid vertex (building_light_grid), and draws it with that (light_facade) */
 static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record (*tiles)[64], const uint32_t *ntiles,
                    int nstoreys)
 {
@@ -1002,21 +1149,21 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
     MeshPart *p = m.parts;
     p->material = sheet;
     p->pos = malloc(sizeof(float) * 12 * (nq ? nq : 1));
-    p->nrm = malloc(sizeof(float) * 12 * (nq ? nq : 1));
+    p->col = malloc(sizeof(float) * 16 * (nq ? nq : 1));
     p->uv = malloc(sizeof(float) * 8 * (nq ? nq : 1));
     p->tris = malloc(sizeof(uint32_t) * 6 * (nq ? nq : 1));
     float hw = width * CELL / 2, hd = depth * CELL / 2;
     for (int st = 0; st < nstoreys; st++) {
         for (int cell = 0; cell < cells && (uint32_t)cell < ntiles[st]; cell++) {
-            float ax, ay, bx, by, nx, ny;
+            float ax, ay, bx, by;
             if (cell < depth) {                       /* left side, back to front, facing -X */
-                ax = -hw; ay = hd - CELL * cell; bx = -hw; by = ay - CELL; nx = -1; ny = 0;
+                ax = -hw; ay = hd - CELL * cell; bx = -hw; by = ay - CELL;
             } else if (cell < depth + width) {        /* front, left to right, facing -Y */
                 int k = cell - depth;
-                ax = -hw + CELL * k; ay = -hd; bx = ax + CELL; by = -hd; nx = 0; ny = -1;
+                ax = -hw + CELL * k; ay = -hd; bx = ax + CELL; by = -hd;
             } else {                                  /* right side, front to back, facing +X */
                 int j = cell - depth - width;
-                ax = hw; ay = -hd + CELL * j; bx = hw; by = ay + CELL; nx = 1; ny = 0;
+                ax = hw; ay = -hd + CELL * j; bx = hw; by = ay + CELL;
             }
             float u0 = (float)((int)record_num(tiles[st][cell]) % 4) * 0.25f;
             float corner[4][5] = { { ax, ay, z[st], u0, 0.25f }, { ax, ay, z[st] + STOREY, u0, 0 },
@@ -1024,7 +1171,8 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
             uint32_t v0 = p->nverts;
             for (int k = 0; k < 4; k++) {
                 memcpy(p->pos + 3 * p->nverts, corner[k], 12);
-                p->nrm[3 * p->nverts] = nx; p->nrm[3 * p->nverts + 1] = ny; p->nrm[3 * p->nverts + 2] = 0;
+                for (int c = 0; c < 4; c++)
+                    p->col[4 * p->nverts + c] = 1;
                 p->uv[2 * p->nverts] = corner[k][3]; p->uv[2 * p->nverts + 1] = corner[k][4];
                 p->nverts++;
             }
@@ -1134,7 +1282,8 @@ static void face_normal(int face, float n[3])
  *   game halves its vertex colours, 0x80 = 1);
  * - the cracks on the front, faded in by the vertex rows' levels (level x 85, halved: level / 3), around the window
  *   below state 2, CrackTexture running on across the faces at 1 / CrackScale (here just in front of the face: the
- *   game puts it 0.015 behind and must draw it over the facade some other way);
+ *   game puts it 0.015 behind and must draw it over the facade some other way), coloured by the building light at
+ *   its grid vertex times CrackTint (the vertex's +0x0, 0x2CE7B8), drawn unlit as the facade;
  * - while a corner front cell is damaged, a wall 5 deep just inside the side wall (0.3 in at its back), the sheet's
  *   InnerWallColumn at the side cell's state, grey (0x80 halved). */
 static void facade_passes(Scene *s, SceneBuilding *sb)
@@ -1211,7 +1360,13 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
                         pos[k][2] += cv[who[k]]->up;
                         uv[k][0] = (start + az[k][0]) * sb->crack_k;
                         uv[k][1] = -(up + az[k][1]) * sb->crack_k;
-                        memcpy(col4[k], sb->crack_tint, 12);
+                        /* its grid vertex's light (corners 0 .. 3: bottom left, bottom right, top right, top left) */
+                        const float *lit = sb->light ? sb->light[ls + (who[k] >= 2)][face][col + (who[k] == 1 || who[k] == 2)]
+                                                     : NULL;
+                        for (int c = 0; c < 3; c++) {
+                            float v = (lit ? lit[c] : 1) * sb->crack_tint[c];
+                            col4[k][c] = v < 0 ? 0 : v > 1 ? 1 : v;
+                        }
                         col4[k][3] = al[k] / 3;
                     }
                     part_quad(crack, pos, uv, col4, n);
@@ -1235,6 +1390,8 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
             part_quad(inner, pos, uv, grey, n);
         }
     }
+    free(crack->nrm);                                /* the cracks carry their light: drawn unlit (render_gl.c) */
+    crack->nrm = NULL;
 }
 
 /* a group's Adornment| entries (0x2D1A30: the template's, then the instance's), placed by 0x30FAA0 / 0x30F710:
@@ -1479,8 +1636,17 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         memset(sb->quad, 0xFF, sizeof sb->quad);
         memset(sb->skeleton, 0xFF, sizeof sb->skeleton);
         memset(sb->damaged_skeleton, 0xFF, sizeof sb->damaged_skeleton);
+        sb->light = calloc(BUILDING_STOREYS + 1, sizeof *sb->light);   /* lit at the block's end (light_buildings) */
+        sb->shade_nb[0] = sb->shade_nb[1] = -1;
+        sb->shade_top[0] = sb->shade_top[1] = -1e20f;   /* +0xCC, +0xD4: so the first look builds the shape */
+        memset(&sb->shade, 0, sizeof sb->shade);
+        memset(sb->shade_faces, 1, sizeof sb->shade_faces);   /* G+0x1EC: 0xFF at the grid's making (0x2D2824) */
+        sb->nlit_items = 0;
         int32_t v = 0;
         for (int st = 0; st < nst && st < BUILDING_STOREYS; st++) {
+            sb->floor_tint[st][0] = group_num(floors[st], "FloorTintR", 1);   /* the cells' tint (0x2CBC78) */
+            sb->floor_tint[st][1] = group_num(floors[st], "FloorTintG", 1);
+            sb->floor_tint[st][2] = group_num(floors[st], "FloorTintB", 1);
             sb->b.floor_hp[st] = (int)group_num(floors[st], "FloorHP", (float)sb->b.floor_hp[st]);
             sb->skeleton_hp[st] = (int)group_num(floors[st], "DamagedSkeletonHP", (float)(sb->b.floor_hp[st] / 2));
             Mat4 at = mat_mul(node, mat_trs_z(0, 0, z[st], 0));
@@ -1586,6 +1752,16 @@ static void lighting(City *c, Scene *s, Group ld)
     }
     for (int k = 0; k < 3; k++)
         s->cube_tint[k] = group_num(ld, k == 0 ? "CubeTintR" : k == 1 ? "CubeTintG" : "CubeTintB", 192);
+    /* the buildings' light (0x2B92F0: the light file's ambient and first three lights, the Ramp keys; a missing
+     * float key reads as 0) and the facade darkening's colour (MShadowR/G/B, +0x314 ..) */
+    static const float WHITE[3] = { 1, 1, 1 };       /* no light file: everything at full light, as rnd_frame does */
+    building_light_init(&s->building_light, s->nlights ? s->ambient : WHITE, s->nlights, (const float (*)[3])s->light_dir,
+                        (const float (*)[3])s->light_colour, group_num(ld, "RampStart", 0), group_num(ld, "RampEnd", 0),
+                        group_num(ld, "RampIntensity", 0));
+    shadow_lighting_default(&s->shade_light);
+    s->shade_light.mshadow[0] = group_num(ld, "MShadowR", s->shade_light.mshadow[0]);
+    s->shade_light.mshadow[1] = group_num(ld, "MShadowG", s->shade_light.mshadow[1]);
+    s->shade_light.mshadow[2] = group_num(ld, "MShadowB", s->shade_light.mshadow[2]);
     s->fog_colour[0] = group_num(ld, "FogR", 0) / 255;
     s->fog_colour[1] = group_num(ld, "FogG", 0) / 255;
     s->fog_colour[2] = group_num(ld, "FogB", 0) / 255;
@@ -1599,6 +1775,227 @@ static void lighting(City *c, Scene *s, Group ld)
         s->cloud_rate[0] = group_num(sky, "UAnimRate", 0);
         s->cloud_rate[1] = group_num(sky, "VAnimRate", 0);
     }
+}
+
+/* ---------------------------------------------------------------- the building light (BUILDING_LIGHT_NOTES.md) */
+
+static void box_of(const Building *b, float box[6])
+{
+    memcpy(box, b->min, 3 * sizeof(float));
+    memcpy(box + 3, b->max, 3 * sizeof(float));
+}
+
+/* 0x31C8C0, as a playable building is made: only one in the back row (Row 1) has neighbours whose shadows can reach
+ * it. A: the first of the front row's buildings (the row list 0x4D0918, in the order 0x2A5110 added them: the block's
+ * BuildingInstance| order) whose min x is past its own; B: the first of its own row's whose min x is at or past its
+ * own max x (its neighbour on the right) */
+static void shade_neighbours(Scene *s, uint32_t bi)
+{
+    SceneBuilding *sb = &s->buildings[bi];
+    sb->shade_nb[0] = sb->shade_nb[1] = -1;
+    if (sb->b.row != 1)
+        return;
+    for (uint32_t i = 0; i < s->nbuildings; i++)
+        if (s->buildings[i].b.row == 0 && !(s->buildings[i].b.min[0] <= sb->b.min[0])) {
+            sb->shade_nb[0] = (int)i;
+            break;
+        }
+    for (uint32_t i = 0; i < s->nbuildings; i++)
+        if (s->buildings[i].b.row == sb->b.row && !(s->buildings[i].b.min[0] < sb->b.max[0])) {
+            sb->shade_nb[1] = (int)i;
+            break;
+        }
+}
+
+/* 0x31C860: has a neighbour's top (+0x1F0) changed since the shape was made */
+static int shade_changed(const Scene *s, const SceneBuilding *sb)
+{
+    for (int k = 0; k < 2; k++)
+        if (sb->shade_nb[k] >= 0 && s->buildings[sb->shade_nb[k]].b.max[2] != sb->shade_top[k])
+            return 1;
+    return 0;
+}
+
+/* 0x31C7B0: the shape again from the neighbours as they now are; when it leaves no shadow on either face, the
+ * neighbours are dropped for good */
+static void shade_update(Scene *s, SceneBuilding *sb)
+{
+    if (!shade_changed(s, sb))
+        return;
+    float own[6], nb[2][6];
+    const float *at[2] = { NULL, NULL };
+    box_of(&sb->b, own);
+    for (int k = 0; k < 2; k++)
+        if (sb->shade_nb[k] >= 0) {
+            box_of(&s->buildings[sb->shade_nb[k]].b, nb[k]);
+            sb->shade_top[k] = nb[k][5];             /* +0xCC, +0xD4 */
+            at[k] = nb[k];
+        }
+    shadow_facade_build(&sb->shade, own, at[0], at[1]);
+    if (!sb->shade.front && sb->shade.nright <= 0)
+        sb->shade_nb[0] = sb->shade_nb[1] = -1;
+}
+
+/* the facade quads' colours (the facade passes 0x2C81A0 .., 0x2C6790): each corner its grid vertex's light times its
+ * storey's FloorTint (bytes x the tint's u16 >> 8, at most 255, then halved for the GS: 1.0 at most) */
+static void light_facade(SceneBuilding *sb, MeshPart *p)
+{
+    const Building *b = &sb->b;
+    if (!p->col)
+        return;
+    for (int o = 0; o < b->storeys; o++) {
+        int ls = building_live_of(b, o);
+        for (int c = 0; c < BUILDING_CELLS; c++) {
+            int32_t v = sb->quad[o][c];
+            if (v < 0 || (uint32_t)v + 4 > p->nverts)
+                continue;
+            int face = c < b->depth ? FACE_LEFT : c < 2 * b->depth ? FACE_RIGHT : FACE_FRONT;
+            int col = face == FACE_LEFT ? c : face == FACE_RIGHT ? c - b->depth : c - 2 * b->depth;
+            for (int k = 0; k < 4; k++) {            /* corners: bottom, top, bottom, top; left, left, right, right */
+                const float *lit = ls >= 0 ? sb->light[ls + (k & 1)][face][col + (k >> 1)] : NULL;
+                float *out = p->col + 4 * (v + k);
+                for (int ch = 0; ch < 3; ch++) {
+                    float x = (lit ? lit[ch] : 1) * sb->floor_tint[o][ch];
+                    out[ch] = x < 0 ? 0 : x > 1 ? 1 : x;
+                }
+                out[3] = 1;
+            }
+        }
+    }
+}
+
+/* a copy of a mesh whose parts with normals and no colours get colours instead of the normals (lit here, drawn
+ * unlit); the others as they are */
+static Mesh mesh_copy_lit(const Mesh *m)
+{
+    Mesh c = { 0 };
+    c.parts = calloc(m->nparts ? m->nparts : 1, sizeof *c.parts);
+    c.nparts = m->nparts;
+    for (uint32_t i = 0; i < m->nparts; i++) {
+        const MeshPart *p = &m->parts[i];
+        MeshPart *q = &c.parts[i];
+        size_t nv = p->nverts ? p->nverts : 1, nt = p->ntris ? p->ntris : 1;
+        q->material = p->material;
+        q->nverts = p->nverts;
+        q->ntris = p->ntris;
+        q->blend = p->blend;
+        q->pos = malloc(12 * nv);
+        memcpy(q->pos, p->pos, 12 * (size_t)p->nverts);
+        q->tris = malloc(12 * nt);
+        memcpy(q->tris, p->tris, 12 * (size_t)p->ntris);
+        if (p->uv) {
+            q->uv = malloc(8 * nv);
+            memcpy(q->uv, p->uv, 8 * (size_t)p->nverts);
+        }
+        if (p->nrm && !p->col) {
+            q->col = malloc(16 * nv);
+            for (uint32_t k = 0; k < 4 * p->nverts; k++)
+                q->col[k] = 1;
+            continue;
+        }
+        if (p->nrm) {
+            q->nrm = malloc(12 * nv);
+            memcpy(q->nrm, p->nrm, 12 * (size_t)p->nverts);
+        }
+        if (p->col) {
+            q->col = malloc(16 * nv);
+            memcpy(q->col, p->col, 16 * (size_t)p->nverts);
+        }
+    }
+    return c;
+}
+
+/* the ground-floor and top models' items get meshes of their own (the building light is per building) */
+static void light_items_make(Scene *s, SceneBuilding *sb)
+{
+    sb->nlit_items = 0;
+    for (uint32_t i = 0; i < s->nitems && sb->nlit_items < 16; i++) {
+        DrawItem *it = &s->items[i];
+        if (it->skin || (it->instance != sb->ground && it->instance != sb->top))
+            continue;
+        uint32_t src = it->mesh;
+        Mesh copy = mesh_copy_lit(&s->meshes[src].mesh);
+        uint32_t mi = scene_add_mesh(s, copy, s->meshes[src].b);
+        s->items[i].mesh = mi;
+        sb->lit_item[sb->nlit_items] = (int)i;
+        sb->lit_src[sb->nlit_items++] = (int)src;
+    }
+}
+
+/* 0x31CCA0: the ground-floor and top models' vertices lit where they are (the light at the vertex, its normal turned
+ * into the world), less the neighbours' shadows (0x31D560: the front's planes where p.y <= front y + 0.1, the right
+ * face's boxes where p.x > max x - 1) */
+static void light_models(Scene *s, SceneBuilding *sb, const ShadowFacade *f)
+{
+    for (int k = 0; k < sb->nlit_items; k++) {
+        const DrawItem *it = &s->items[sb->lit_item[k]];
+        const Instance *in = &s->instances[it->instance];
+        Mat4 w = it->node >= 0 && in->node ? mat_mul(in->base, in->node[it->node]) : in->base;
+        const float *m = w.m;
+        const Mesh *src = &s->meshes[sb->lit_src[k]].mesh;
+        Mesh *dst = &s->meshes[it->mesh].mesh;
+        for (uint32_t pi = 0; pi < src->nparts && pi < dst->nparts; pi++) {
+            const MeshPart *sp = &src->parts[pi];
+            MeshPart *dp = &dst->parts[pi];
+            if (!sp->nrm || sp->col || !dp->col || dp->nrm || sp->nverts != dp->nverts)
+                continue;
+            for (uint32_t v = 0; v < sp->nverts; v++) {
+                const float *q = sp->pos + 3 * v, *nn = sp->nrm + 3 * v;
+                float p[3], n[3], rgb[3];
+                for (int r = 0; r < 3; r++) {
+                    p[r] = m[r] * q[0] + m[4 + r] * q[1] + m[8 + r] * q[2] + m[12 + r];
+                    n[r] = m[r] * nn[0] + m[4 + r] * nn[1] + m[8 + r] * nn[2];
+                }
+                float l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                if (l > 1e-6f)
+                    for (int r = 0; r < 3; r++)
+                        n[r] /= l;
+                building_light_at(&s->building_light, p, n, rgb);
+                if (f)
+                    shadow_facade_darken(f, &s->shade_light, p, rgb);
+                memcpy(dp->col + 4 * v, rgb, sizeof rgb);
+                dp->col[4 * v + 3] = 1;
+            }
+        }
+    }
+}
+
+/* a building's light as it now is (0x2BF180 for a playable one, play 1: its neighbours' shadow shape again if one's
+ * top changed, then 0x2CE300 with it; 0x3059D0's 0x2CE300 without one for the blocks behind): the grid vertices'
+ * colours, the facade quads with them, the ground-floor and top models */
+static void light_building(Scene *s, SceneBuilding *sb, int play)
+{
+    if (!sb->light)
+        return;
+    const ShadowFacade *f = play ? &sb->shade : NULL;
+    if (play)
+        shade_update(s, sb);
+    building_light_grid(&sb->b, &s->building_light, f, &s->shade_light, sb->shade_faces, sb->light);
+    if (sb->mesh >= 0 && s->meshes[sb->mesh].mesh.nparts)
+        light_facade(sb, &s->meshes[sb->mesh].mesh.parts[0]);
+    light_models(s, sb, f);
+}
+
+/* at the block's end, everything placed and posed: the neighbours, the models' own meshes, the first light */
+static void light_buildings(Scene *s)
+{
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        shade_neighbours(s, i);
+        light_items_make(s, &s->buildings[i]);
+    }
+    for (uint32_t i = 0; i < s->nscenery; i++)
+        light_items_make(s, &s->scenery[i]);
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        light_building(s, &s->buildings[i], 1);
+        const SceneBuilding *sb = &s->buildings[i];
+        if (getenv("RAMPAGE_TRACE") && (sb->shade_faces[FACE_FRONT] || sb->shade_faces[FACE_RIGHT]))
+            printf("building %u (x %.0f .. %.0f): its %s%s%s in the shadow of building %d / %d\n", i, sb->b.min[0],
+                   sb->b.max[0], sb->shade_faces[FACE_FRONT] ? "front" : "", sb->shade_faces[FACE_FRONT] &&
+                   sb->shade_faces[FACE_RIGHT] ? " and " : "", sb->shade_faces[FACE_RIGHT] ? "right face" : "",
+                   sb->shade_nb[0], sb->shade_nb[1]);
+    }
+    for (uint32_t i = 0; i < s->nscenery; i++)
+        light_building(s, &s->scenery[i], 0);
 }
 
 /* ---------------------------------------------------------------- posing */
@@ -1807,6 +2204,8 @@ static void monster_ik(Scene *s, Instance *in)
         }
         ik_arm(in->node, &in->tree, c, p, r, s->ik_w[h]);
     }
+    if (s->feet)                                     /* the feet after the arms (0x2E1338) */
+        ik_feet(in->node, &in->tree, in->mirrored, s->feet);
 }
 
 int scene_monster_node(const Scene *s, const char *name, Mat4 *world)
@@ -1849,8 +2248,10 @@ static void update(Scene *s, double t, int all)
     people_sync(s, t);
     army_sync(s, t);
     vehicle_sync(s);
+    rail_sync(s);
     edible_sync(s);
     boss_sync(s, t);
+    parade_sync(s, t);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
         if (in->tree.n && (all || in->has_clip || in->dynamic)) {   /* a model made later is posed too */
@@ -1894,6 +2295,9 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     if (!block.at)
         return -1;
     Mat4 root = mat_identity();
+    static const float WHITE[3] = { 1, 1, 1 };       /* no LightingData: the buildings at full light */
+    building_light_init(&s->building_light, WHITE, 0, NULL, NULL, 0, 0, 0);
+    shadow_lighting_default(&s->shade_light);
     if (ld.at) {
         const char *backdrop = group_str(ld, "Shape|Backdrop"), *sky = group_str(ld, "Shape|SkyBox");
         if (backdrop) place_model(c, s, backdrop, root, -1);
@@ -1949,6 +2353,8 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
             s->missing++;
             continue;
         }
+        if (parade_script_ours(group_str(t, "Script|ScriptName")))   /* a biker: parade.c's (main) */
+            continue;
         float xyz[3];
         location(a, xyz);
         people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0));
@@ -2031,6 +2437,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     }
     update(s, 0, 1);
     obstacle_boxes(s);
+    light_buildings(s);
     return 0;
 }
 
@@ -2437,9 +2844,14 @@ void scene_buildings_update(Scene *s, float dt)
                      (sb->b.state != BUILDING_STANDING && sb->b.state != BUILDING_FLOOR_FALLING);
         if (moving || sb->moving || sb->b.dirty)
             building_place(s, sb);
+        /* its light again (0x2BF180: when it changed, +0x154, or a neighbour's top did, 0x31C860), before the passes
+         * that use it */
+        int relit = moving || sb->moving || sb->b.dirty || shade_changed(s, sb);
+        if (relit)
+            light_building(s, sb, 1);
         sb->moving = moving;
         if (!sb->b.dirty || sb->mesh < 0) {
-            if (moving)
+            if (moving || relit)
                 facade_passes(s, sb);
             continue;
         }
@@ -2657,11 +3069,13 @@ void scene_free(Scene *s)
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         free(s->buildings[i].rest);
         free(s->buildings[i].adorn);
+        free(s->buildings[i].light);
     }
     free(s->buildings);
     for (uint32_t i = 0; i < s->nscenery; i++) {
         free(s->scenery[i].rest);
         free(s->scenery[i].adorn);
+        free(s->scenery[i].light);
     }
     free(s->scenery);
     memset(s, 0, sizeof *s);

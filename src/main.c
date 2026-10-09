@@ -24,6 +24,7 @@
 #include "army.h"
 #include "hud.h"
 #include "vehicle.h"
+#include "rail.h"
 #include "edible.h"
 #include "game.h"
 #include "look.h"
@@ -33,6 +34,8 @@
 #include "challenge.h"
 #include "reveal.h"
 #include "boss.h"
+#include "streetobj.h"
+#include "parade.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -74,7 +77,14 @@ typedef struct {
     int held;                                        /* the person in its hand (people.c), -1 none */
     int held_unit;                                   /* or the army unit (army.c), -1 none */
     int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
+    Parade *parade;                                  /* the balloons, bikers and food carts (parade.c) */
+    int held_parade;                                 /* or a biker or a cart's food (parade.c), -1 none */
+    int blow;                                        /* counts the attacks armed: one TakeDamage per blow (parade.c) */
+    struct { int fx, obj; float off[3]; } pfx[32]; int npfx;   /* the parade's effects that follow their object */
     Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
+    Rail *rail; int held_rail, rail_knock;          /* the trains, cable cars and freighters (rail.c) */
+    struct { int id, fx, obj; float off[3]; } rfx[64]; int nrfx;   /* their effects (following them) */
+    struct { int id, h, obj; } rsnd[64]; int nrsnd;                /* and sounds */
     Edibles *edibles;                                /* the power-ups and hazards behind the windows (edible.c) */
     Game *game;                                      /* the world's states, the lives, the clock (game.c) */
     Boss *boss;                                      /* the block's boss and the ambient ones (boss.c) */
@@ -85,6 +95,11 @@ typedef struct {
     EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
     struct { int fx, edible; float off[3]; } efx[32]; int nefx;   /* the edibles' effects that follow them */
     struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
+    StreetObjs *sobj;                                /* the street and roof objects (streetobj.c) */
+    int sobj_of[SCENE_STREET_MAX];                   /* per Scene.street entry its streetobj index, -1 */
+    int street_of[SCENE_STREET_MAX];                 /* per streetobj index its Scene.street entry */
+    /* their effects that follow an object (obj >= 0: at its point off, or its model node) or the monster's node */
+    struct { int id, fx, obj, node_id; const char *node; char mnode[32]; float off[3]; } sofx[64]; int nsofx;
     Army *army;
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
     int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
@@ -112,6 +127,7 @@ typedef struct {
     Camera hud_cam;                                  /* the frame's camera, for the floating scores */
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
     const MoveNode *face;                            /* the face layer's node playing now */
+    IkFeet feet_ik; int feet_due;                   /* the legs bent to the held feet (ik.c), once a frame */
     FootProps feet_fx; FootState feet;              /* the footfalls' names and the foot records (footstep.c) */
     Challenge challenge;                             /* the block's challenge, its goals counted (challenge.c) */
     uint32_t upgrades[64];                           /* the moves each monster took from upgrades (the profile's
@@ -133,6 +149,7 @@ typedef struct {
 static int water_at(const Viewer *v, float x, float y);
 static void challenge_stats(Viewer *v, const char *name, int points);
 static void upgrade_touch(Viewer *v, const float centre[3], float radius);
+static void street_step(Viewer *v, float dt);
 static float water_surface(const Water *w);
 static float ground_at(const Viewer *v, float x, float y, float z);
 
@@ -289,6 +306,10 @@ static void start_moves(Viewer *v)
         foot_props_read(&v->feet_fx, g);
         g = book[0] ? city_book_group(v->city, book, "MiscData") : (Group){ 0 };
         foot_init(&v->feet, g.at && group_num(g, "DisableFootDrag", 0) != 0);
+        if (v->scene.monster >= 0)                   /* Use3LinkFootIK, RTWSmoothFactor, the ankle (0x2E5640) */
+            foot_ik_props(&v->feet, g, &v->scene.instances[v->scene.monster].tree);
+        memset(&v->feet_ik, 0, sizeof v->feet_ik);
+        v->feet_ik.links = v->feet.links;
     }
     if (v->have_ag)
         dir_graph_free(&v->ag);
@@ -310,6 +331,8 @@ static void start_moves(Viewer *v)
     v->held = -1;
     v->held_unit = -1;
     v->held_vehicle = -1;
+    v->held_rail = -1;
+    v->held_parade = -1;
     v->game_block = -1;
     v->upgrade_fx = -1;
     if (!v->game_built) {
@@ -438,6 +461,10 @@ static int army_node_world(void *ctx, const ArmyUnit *u, const char *node, float
         printf("  %s node %s: %s\n", u->name ? u->name : "?", node, ok ? "found" : "not found");
     return ok;
 }
+static float parade_clip_seconds(void *ctx, const char *anim, const char *shape)
+{
+    return city_clip_seconds(((Viewer *)ctx)->city, anim, shape);
+}
 static float army_clip_seconds(void *ctx, const char *anim, const char *shape)
 {
     (void)ctx; (void)anim; (void)shape;
@@ -513,6 +540,7 @@ static void build(Viewer *v)
     v->veh = NULL;
     v->nvfx = 0;
     v->held_vehicle = -1;
+    v->held_rail = -1;
     if (v->have_scene) {
         static VehicleHost vh;
         vh.find = army_find;
@@ -532,6 +560,97 @@ static void build(Viewer *v)
         }
     }
     v->scene.traffic = v->veh;
+    streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
+    v->sobj = NULL;
+    v->nsofx = 0;
+    if (v->have_scene) {
+        static StreetHost sh;
+        sh.shape_box = army_shape_box;
+        sh.ctx = v;
+        v->sobj = streetobj_new(&sh);
+        static StreetBuilding sbs[64];
+        int nb = 0;
+        for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
+            memcpy(sbs[nb].min, v->scene.buildings[i].b.min, sizeof sbs[nb].min);
+            memcpy(sbs[nb].max, v->scene.buildings[i].b.max, sizeof sbs[nb].max);
+            sbs[nb].falling = v->scene.buildings[i].b.collapse >= 0;
+        }
+        for (int k = 0; k < v->scene.nstreet; k++) {
+            const struct SceneStreetObj *so = &v->scene.street[k];
+            v->sobj_of[k] = v->sobj ? streetobj_add(v->sobj, so->t, so->inst, so->world, so->building) : -1;
+            if (v->sobj_of[k] >= 0)
+                v->street_of[v->sobj_of[k]] = k;
+        }
+        if (v->sobj)
+            streetobj_start(v->sobj, sbs, nb);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("street objects: %d\n", v->sobj ? streetobj_count(v->sobj) : 0);
+    }
+    parade_free(v->parade);                          /* the block's balloons, bikers and food carts */
+    v->parade = NULL;
+    v->held_parade = -1;
+    v->npfx = 0;
+    if (v->have_scene) {
+        static ParadeHost ph;
+        ph.find = army_find;
+        ph.shape_box = army_shape_box;
+        ph.clip_seconds = parade_clip_seconds;
+        ph.ctx = v;
+        v->parade = parade_new(&ph);
+        if (v->parade) {
+            int n = parade_load_block(v->parade, v->scene.block);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("parade: %d objects\n", n);
+        }
+    }
+    v->scene.parade = v->parade;
+    rail_free(v->rail);                              /* the trains, cable cars and freighters (rail.c) */
+    v->rail = NULL;
+    v->nrfx = v->nrsnd = 0;
+    v->held_rail = -1;
+    if (v->have_scene) {
+        static RailHost rh;
+        rh.find = army_find;
+        rh.shape_box = army_shape_box;
+        rh.ctx = v;
+        v->rail = rail_new(&rh);
+        if (v->rail) {
+            if (v->army)
+                rail_bind_army(v->rail, v->army);
+            rail_load_block(v->rail, v->scene.block);
+            rail_activate(v->rail, 1);
+            static const char *const OBJ[] = { "ObjectInstance|", "AttackObjectInstance|", "XObjectInstance|" };
+            for (int k = 0; k < 3; k++) {
+                Group bd = k == 0 ? v->scene.block : v->scene.traffic_def[k];
+                if (!bd.at)
+                    continue;
+                for (int j = 0; j < 3; j++) {
+                    Group where;
+                    Record rr[256];
+                    uint32_t n = group_values(bd, OBJ[j], &where, rr, 256);
+                    for (uint32_t i = 0; i < n; i++) {
+                        Group o = record_group(where, rr[i]);
+                        if (k && group_num(o, k == 1 ? "LoadWhenWaiting" : "LoadWhenDistant", 0) == 0)
+                            continue;
+                        const char *name = group_str(o, "Name");
+                        if (!name || rail_kind_of(v->rail, name) < 0)
+                            continue;
+                        Group loc = group_sub(o, "Location");
+                        Record lr[3];
+                        uint32_t nl = loc.at ? group_items(loc, lr, 3) : 0;
+                        float p[3];
+                        for (uint32_t q = 0; q < 3; q++)
+                            p[q] = q < nl ? record_num(lr[q]) : 0;
+                        p[1] += 41.0f * (float)k;
+                        int id = rail_spawn(v->rail, name, p, group_num(o, "ZRotation", 0) / 57.2957795f, o);
+                        if (getenv("RAMPAGE_TRACE"))
+                            printf("rail: %s at %.1f %.1f %.1f -> %d\n", name, p[0], p[1], p[2], id);
+                    }
+                }
+            }
+        }
+    }
+    v->scene.rail = v->rail;
     edible_free(v->edibles);                         /* the edibles behind the block's windows */
     v->edibles = NULL;
     v->nefx = 0;
@@ -740,7 +859,7 @@ static int answer(void *ctx, const char *call, const float *a)
     if (strstr(call, "::canGrabPowerup") || strstr(call, "::checkForHazard"))
         return edible_call(v, call, a + 1) > 0;
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
-        return v->held >= 0 || v->held_unit >= 0 || v->held_vehicle >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
+        return v->held >= 0 || v->held_unit >= 0 || v->held_vehicle >= 0 || v->held_rail >= 0 || v->held_parade >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&v->mount, sc, &c, v->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
@@ -836,6 +955,12 @@ static void foot_pose(const Viewer *v, FootPose *m)
     m->water_z = wk >= 0 ? water_surface(v->scene.water[wk]) : 0;
     m->node_flags = v->have_graph ? v->graph.states[v->run.state].flags : 0;
     m->mirrored = v->mirror;
+    if (v->have_graph && v->scene.monster >= 0) {    /* the clip now started, on its own (0x33C5A0) */
+        const Instance *in = &v->scene.instances[v->scene.monster];
+        double ct = clip_at(v, &v->graph.states[v->run.state], v->run.time);
+        m->clip_ok = ik_clip_node(in, ct, foot_bone(0, v->mirror), m->clip_foot[0]) == 0 &&
+                     ik_clip_node(in, ct, foot_bone(1, v->mirror), m->clip_foot[1]) == 0;
+    }
 }
 
 static void clip_event(Viewer *v, const MoveEvent *e)
@@ -871,6 +996,10 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     }
     if (e->type == 0) {                              /* 0x2E7880: the parts' bones armed with this attack, or not */
         v->armed = e->p[0] != 0 ? v->armed | e->value : v->armed & ~e->value;
+        if (e->p[0] != 0 && v->sobj)                 /* a new attack: its hit list is empty (0x2E33A0) */
+            streetobj_arm(v->sobj);
+        if (e->p[0] != 0)
+            v->blow++;                               /* a new blow: parade.c's objects take one TakeDamage each */
         if (getenv("RAMPAGE_TRACE"))
             printf("  attack %x %s (%g %g %g)\n", e->value, e->p[0] != 0 ? "on" : "off", e->p[1], e->p[2], e->p[3]);
         return;
@@ -1028,9 +1157,15 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         } else if (v->army && (who = army_nearest_pickup(v->army, hand, root, fwd, 15)) >= 0) {
             army_grab(v->army, who, 0);
             v->held_unit = who;
+        } else if (v->parade && v->held_parade < 0 && (who = parade_nearest_pickup(v->parade, hand, root, fwd, 15)) >= 0) {
+            parade_grab(v->parade, who, 0, 0.1f);    /* on the sidewalk: before the street's vehicles */
+            v->held_parade = who;
         } else if (v->veh && v->held_vehicle < 0 && (who = vehicle_nearest_pickup(v->veh, hand, root, fwd, 15)) >= 0) {
             vehicle_grab(v->veh, who, 0);
             v->held_vehicle = who;
+        } else if (v->rail && v->held_rail < 0 && (who = rail_nearest_pickup(v->rail, hand, root, fwd, 15)) >= 0) {
+            rail_grab(v->rail, who, 0);
+            v->held_rail = who;
         }
         return;
     }
@@ -1053,6 +1188,16 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         if (v->held_vehicle >= 0 && v->veh) {
             vehicle_throw(v->veh, v->held_vehicle, 0, e->p[0] != 0, e->p + 1, v->heading / 57.2957795f);
             v->held_vehicle = -1;
+            return;
+        }
+        if (v->held_parade >= 0 && v->parade) {
+            parade_throw(v->parade, v->held_parade, 0, e->p[0] != 0, v->heading / 57.2957795f);
+            v->held_parade = -1;
+            return;
+        }
+        if (v->held_rail >= 0 && v->rail) {
+            rail_throw(v->rail, v->held_rail, 0, e->p[0] != 0, e->p + 1);
+            v->held_rail = -1;
             return;
         }
         if (v->held < 0 || !v->scene.folk)
@@ -1281,9 +1426,17 @@ static void hit_spheres(Viewer *v)
             army_hit(v->army, 0, c, c[3], 20);
         if (v->veh)                                  /* and the vehicles and rockets */
             vehicle_hit(v->veh, 0, c, c[3], 20);
+        if (v->rail)                                 /* and the trains, cable cars and freighters */
+            rail_hit(v->rail, 0, c, c[3], 20);
         if (v->boss)                                 /* and the bosses */
             boss_hit(v->boss, 0, c, c[3], 20);
+        if (v->parade)                               /* and the balloons, bikers and food carts */
+            parade_hit(v->parade, 0, c, c[3], v->blow);
         upgrade_touch(v, c, c[3]);                   /* and the MonsterUpgrade object */
+        if (v->sobj) {                               /* and the street and roof objects (TakeDamage, type 0) */
+            StreetMonster me = { { v->mx, v->my, v->mz }, v->heading / 57.2957795f };
+            streetobj_hit(v->sobj, 0, &me, c, c[3], 20);
+        }
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
             float from[3] = { v->mx, v->my, v->mz };
@@ -1297,6 +1450,41 @@ static void hit_spheres(Viewer *v)
 }
 
 static void hands_step(Viewer *v, float dt);
+
+/* the foot object's update (0x33D450), from ik_feet between the posing and the foot IK, once a game frame */
+static void feet_update(void *ctx, IkFeet *f)
+{
+    Viewer *v = ctx;
+    if (!v->feet_due || v->scene.monster < 0)
+        return;
+    v->feet_due = 0;
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    FootFrame m;
+    memset(&m, 0, sizeof m);
+    m.place[0] = v->mx; m.place[1] = v->my; m.place[2] = v->mz;
+    m.heading = v->heading;
+    m.ground = ground_at(v, v->mx, v->my, v->mz);
+    for (int r = 0; r < 2; r++) {
+        m.ok[r] = f->ok[r];
+        memcpy(m.foot[r], f->foot[r], sizeof m.foot[r]);
+        memcpy(m.hip[r], f->hip[r], sizeof m.hip[r]);
+        m.reach[r] = f->reach[r];
+    }
+    m.blend_left = in->blend_left;
+    m.blend_time = in->blend_time;
+    foot_update(&v->feet, &m, f->w, f->pos);
+}
+
+/* the end of the frame's move: the foot object updates at the next posing */
+static void feet_step(Viewer *v)
+{
+    if (v->scene.monster < 0)
+        return;
+    v->scene.feet = &v->feet_ik;
+    v->feet_ik.update = feet_update;
+    v->feet_ik.ctx = v;
+    v->feet_due = 1;
+}
 
 /* the frame's shadows (shadow.c): the buildings' on the lot (redone where a top came down), every object whose
  * template has ShadowData, the monster's blobs on the ground or roof and on the wall it climbs */
@@ -1509,7 +1697,8 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am)
                 break;
             case BE_FORCE_DAMAGE:                    /* RoofItem.bsf's forceDamage: the roof item there is knocked
                                                       * off (the adornment nearest pos, within 2 units [G]) */
-                scene_adornments_hit(&v->scene, e->pos, 2);
+                if (!v->sobj || streetobj_force_damage(v->sobj, e->name, e->pos) < 0)
+                    scene_adornments_hit(&v->scene, e->pos, 2);
                 break;
             case BE_CAMERA_RMH:                      /* Levels::changeTwoTiltCameraRMH: how tall the camera frames */
                 v->cam.s.rep_monster_height = e->amount;
@@ -2005,6 +2194,328 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, const ArmyBo
     }
 }
 
+/* the rail objects' frame (rail.c): what they see of the monster and the buildings, then what they did */
+static void rail_step(Viewer *v, float dt, const ArmyMonster *m)
+{
+    if (!v->rail)
+        return;
+    static RailBox rb[64];
+    int nb = 0;
+    for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
+        const Building *b = &v->scene.buildings[i].b;
+        memcpy(rb[nb].min, b->min, sizeof rb[nb].min);
+        memcpy(rb[nb].max, b->max, sizeof rb[nb].max);
+        rb[nb].destroyed = b->state == BUILDING_GONE;
+        rb[nb].falling = b->collapse != -1;
+    }
+    rail_update(v->rail, dt, m, 1, rb, nb);
+    if (v->pending_slot < 0)
+        v->rail_knock = 0;
+    else if (v->rail_knock == 1)                     /* the frame after the knock: the repeats are dropped */
+        v->rail_knock = 2;
+    RailEvent ev[64];
+    int ne;
+    while ((ne = rail_events(v->rail, ev, 64)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const RailEvent *e = &ev[i];
+            const RailObj *o = e->obj >= 0 ? rail_obj(v->rail, e->obj) : NULL;
+            switch (e->type) {
+            case RE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    if (id >= 0 && v->nrfx < 64) {
+                        v->rfx[v->nrfx].id = e->id;
+                        v->rfx[v->nrfx].fx = id;
+                        v->rfx[v->nrfx].obj = o ? e->obj : -1;
+                        for (int k = 0; k < 3; k++)
+                            v->rfx[v->nrfx].off[k] = o ? e->pos[k] - o->pos[k] : 0;
+                        v->nrfx++;
+                    }
+                }
+                break;
+            case RE_EFFECT_STOP:
+                for (int k = 0; k < v->nrfx; k++)
+                    if (v->rfx[k].id == e->id) {
+                        fx_stop(v->fxw, v->rfx[k].fx);
+                        v->rfx[k] = v->rfx[--v->nrfx];
+                        break;
+                    }
+                break;
+            case RE_SOUND: {
+                int h = sound_add3d(e->name, e->pos, 0, 0, 1);
+                if (h && v->nrsnd < 64) {
+                    v->rsnd[v->nrsnd].id = e->id;
+                    v->rsnd[v->nrsnd].h = h;
+                    v->rsnd[v->nrsnd++].obj = e->obj;
+                }
+                break;
+            }
+            case RE_SOUND_STOP:
+                for (int k = 0; k < v->nrsnd; k++)
+                    if (v->rsnd[k].id == e->id) {
+                        sound_kill(v->rsnd[k].h);
+                        v->rsnd[k] = v->rsnd[--v->nrsnd];
+                        break;
+                    }
+                break;
+            /* a knock-down is asked again every frame until its slot starts (the viewer takes pending_slot at the
+             * clip's next event): one is enough [G] */
+            case RE_REACTION: if (v->pending_slot < 0) { v->pending_slot = e->level; v->rail_knock = 1; } break;
+            case RE_SET_VEL: if (v->rail_knock < 2) memcpy(v->vel, e->v, sizeof v->vel); break;
+            case RE_HP: if (v->hp > 0 && v->rail_knock < 2) v->hp = fmaxf(0, fminf(200, v->hp + e->amount)); break;
+            case RE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
+            case RE_STATS:
+                if (e->id == 0) {
+                    monster_stats(v, e->v[0], e->v[1]);
+                    challenge_stats(v, e->name, (int)e->amount);
+                }
+                break;
+            case RE_REMOVED:
+                if (e->obj == v->held_rail)
+                    v->held_rail = -1;
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE") && e->type != RE_PUSH && e->type != RE_SOUND && e->type != RE_SOUND_STOP)
+                printf("  rail event %d (%s) from %d (%s) at %.1f %.1f %.1f\n", e->type, e->name ? e->name : "-", e->obj,
+                       o && o->name ? o->name : "-", e->pos[0], e->pos[1], e->pos[2]);
+        }
+    for (int k = 0; k < v->nrfx; k++) {              /* the effects that follow their object, while it is there */
+        if (v->rfx[k].obj < 0) {
+            if (!fx_alive(v->fxw, v->rfx[k].fx))
+                v->rfx[k--] = v->rfx[--v->nrfx];
+            continue;
+        }
+        const RailObj *o = rail_obj(v->rail, v->rfx[k].obj);
+        if (!o || o->phase == RP_GONE) {
+            v->rfx[k].obj = -1;
+            continue;
+        }
+        float at[3] = { o->pos[0] + v->rfx[k].off[0], o->pos[1] + v->rfx[k].off[1], o->pos[2] + v->rfx[k].off[2] };
+        fx_move(v->fxw, v->rfx[k].fx, at);
+    }
+    for (int k = 0; k < v->nrsnd; k++) {             /* the sounds that follow theirs */
+        const RailObj *o = rail_obj(v->rail, v->rsnd[k].obj);
+        if (o && o->phase != RP_GONE)
+            sound_move(v->rsnd[k].h, o->pos);
+    }
+    if (v->held_rail >= 0) {
+        Mat4 h;
+        if (attach_world(v, "Helper R Hand", &h) == 0)
+            rail_hold(v->rail, v->held_rail, h.m, v->mirror);
+    }
+}
+
+/* the balloons', bikers' and food carts' frame (parade.c): what they see of the monster and the camera, then what
+ * they did; the one in the monster's hand follows it */
+static void parade_step(Viewer *v, float dt, const ArmyMonster *m)
+{
+    if (!v->parade)
+        return;
+    parade_update(v->parade, dt, m, m ? 1 : 0, v->view.pos[0]);
+    ParadeEvent ev[64];
+    int ne;
+    while ((ne = parade_events(v->parade, ev, 64)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const ParadeEvent *e = &ev[i];
+            switch (e->type) {
+            case PAE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
+                    const ParadeObj *o = e->obj >= 0 ? parade_obj(v->parade, e->obj) : NULL;
+                    if (id >= 0 && o && v->npfx < 32) {   /* attached: it follows its object while it is there */
+                        v->pfx[v->npfx].fx = id;
+                        v->pfx[v->npfx].obj = e->obj;
+                        for (int k = 0; k < 3; k++)
+                            v->pfx[v->npfx].off[k] = e->pos[k] - o->pos[k];
+                        v->npfx++;
+                    }
+                }
+                break;
+            case PAE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case PAE_MONSTER_SOUND: {
+                float at[3] = { v->mx, v->my, v->mz };
+                sound_play(e->name, at, 1);
+                break;
+            }
+            case PAE_STATS:                          /* gCommon.addStats: the score through the army (its AE_SCORE
+                                                      * counts the challenge), HP and energy */
+                if (v->army)
+                    army_add_stats(v->army, 0, e->tmpl, e->level);
+                else {
+                    monster_stats(v, e->v[0], e->v[1]);
+                    challenge_stats(v, e->name, (int)e->amount);
+                }
+                break;
+            case PAE_POINTS:                         /* gCommon.addPoints: the category only */
+                if (v->game)
+                    game_add_points(v->game, 0, e->level, (int)e->amount);
+                break;
+            case PAE_FART: {                         /* Monsters::timedDoFart -> doFart */
+                Mat4 n;
+                face_play(v, "Expression_Smile", 0, 0, 1);
+                if (v->fxw && scene_monster_node(&v->scene, "fxNode_Fart", &n) == 0) {
+                    float at[3] = { n.m[12], n.m[13], n.m[14] };
+                    fx_spawn(v->fxw, "Fart", at, NULL, 1);
+                }
+                v->vel[2] += 20;                     /* addVel((0, 0, 20), 1) */
+                break;
+            }
+            case PAE_WEAPON:                         /* the biker's bottle: the army's person weapons */
+                if (v->army) {
+                    const ParadeObj *o = parade_obj(v->parade, e->obj);
+                    army_person_weapon(v->army, 1000 + e->obj, e->name, o ? o->world : NULL, 0);
+                }
+                break;
+            case PAE_REMOVED:
+                if (e->obj == v->held_parade)
+                    v->held_parade = -1;
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  parade event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->obj);
+        }
+    for (int k = 0; k < v->npfx; k++) {              /* the effects that follow their object, while it is there */
+        const ParadeObj *o = parade_obj(v->parade, v->pfx[k].obj);
+        if (!o || o->phase == PAP_GONE || !fx_alive(v->fxw, v->pfx[k].fx)) {
+            v->pfx[k--] = v->pfx[--v->npfx];
+            continue;
+        }
+        float at[3] = { o->pos[0] + v->pfx[k].off[0], o->pos[1] + v->pfx[k].off[1], o->pos[2] + v->pfx[k].off[2] };
+        fx_move(v->fxw, v->pfx[k].fx, at);
+    }
+    for (int i = 0, n = parade_count(v->parade); v->army && i < n; i++) {   /* the bikers' weapons go with them */
+        const ParadeObj *o = parade_obj(v->parade, i);
+        if (o->kind == PAK_BIKER && o->weapon_on)
+            army_person_moved(v->army, 1000 + i, o->world);
+    }
+    if (v->held_parade >= 0) {                       /* one in its hand */
+        Mat4 h;
+        if (attach_world(v, "Helper R Hand", &h) == 0)
+            parade_hold(v->parade, v->held_parade, h.m, v->mirror, dt);
+    }
+}
+
+/* the street and roof objects' frame (streetobj.c): the monster's body against them (TakeDamage, Collision), what
+ * they see of it and of the buildings, then what they did; they are drawn where they are now */
+static void street_step(Viewer *v, float dt)
+{
+    if (!v->sobj)
+        return;
+    StreetMonster me = { { v->mx, v->my, v->mz }, v->heading / 57.2957795f };
+    if (v->monster >= 0 && v->have_graph) {          /* its box: 3 each way across, 8.5 tall */
+        float lo[3] = { v->mx - MONSTER_HALF_WIDTH, v->my - MONSTER_HALF_WIDTH, v->mz };
+        float hi[3] = { v->mx + MONSTER_HALF_WIDTH, v->my + MONSTER_HALF_WIDTH, v->mz + MONSTER_HEIGHT };
+        streetobj_touch(v->sobj, 0, &me, lo, hi);
+    }
+    static StreetBuilding sbs[64];
+    int nb = 0;
+    for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
+        memcpy(sbs[nb].min, v->scene.buildings[i].b.min, sizeof sbs[nb].min);
+        memcpy(sbs[nb].max, v->scene.buildings[i].b.max, sizeof sbs[nb].max);
+        sbs[nb].falling = v->scene.buildings[i].b.collapse >= 0;
+    }
+    streetobj_update(v->sobj, dt, v->monster >= 0 ? &me : NULL, v->monster >= 0, sbs, nb);
+    StreetEvent ev[64];
+    int ne;
+    while ((ne = streetobj_events(v->sobj, ev, 64)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const StreetEvent *e = &ev[i];
+            int k = e->obj >= 0 ? v->street_of[e->obj] : -1;
+            switch (e->type) {
+            case SE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
+                    if (id >= 0 && v->nsofx < 64) {
+                        v->sofx[v->nsofx].id = e->id;
+                        v->sofx[v->nsofx].fx = id;
+                        v->sofx[v->nsofx].obj = e->level ? e->obj : -1;
+                        v->sofx[v->nsofx].node = e->node;
+                        v->sofx[v->nsofx].node_id = e->node_id;
+                        v->sofx[v->nsofx].mnode[0] = 0;
+                        memcpy(v->sofx[v->nsofx].off, e->off, sizeof e->off);
+                        v->nsofx++;
+                    }
+                }
+                break;
+            case SE_EFFECT_STOP:
+                for (int j = 0; j < v->nsofx; j++)
+                    if (v->sofx[j].id == e->id) {
+                        fx_stop(v->fxw, v->sofx[j].fx);
+                        v->sofx[j] = v->sofx[--v->nsofx];
+                        break;
+                    }
+                break;
+            case SE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case SE_SHAPE: scene_street_shape(&v->scene, k, e->name); break;
+            case SE_STATS:                           /* gCommon.addStats(obj, monster, 0) */
+                if (v->army)
+                    army_add_stats(v->army, e->monster, e->tmpl, 0);
+                else
+                    challenge_stats(v, e->name, (int)e->amount);
+                break;
+            case SE_MONSTER_EFFECT:                  /* on the monster's node: fxNode_Belch, fxNode_Shoulder1 .. */
+                for (int n = 1; v->fxw && n <= (e->level ? 20 : 1); n++) {
+                    char node[32];
+                    Mat4 m;
+                    if (e->level) snprintf(node, sizeof node, "%s%d", e->node, n);
+                    else snprintf(node, sizeof node, "%s", e->node);
+                    if (scene_monster_node(&v->scene, node, &m) != 0)
+                        break;
+                    int id = fx_spawn(v->fxw, e->name, m.m + 12, NULL, 1);
+                    if (id >= 0 && v->nsofx < 64) {
+                        v->sofx[v->nsofx].id = 0;
+                        v->sofx[v->nsofx].fx = id;
+                        v->sofx[v->nsofx].obj = -1;
+                        v->sofx[v->nsofx].node = NULL;
+                        snprintf(v->sofx[v->nsofx].mnode, sizeof v->sofx[v->nsofx].mnode, "%s", node);
+                        v->nsofx++;
+                    }
+                }
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  street event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->obj);
+        }
+    for (int i = 0, n = streetobj_count(v->sobj); i < n; i++) {   /* drawn where they are now */
+        const StreetObj *o = streetobj_get(v->sobj, i);
+        if (o->moved)
+            scene_street_place(&v->scene, v->street_of[i], o->world, !o->alive);
+    }
+    for (int j = 0; j < v->nsofx; j++) {             /* the effects that follow */
+        float at[3];
+        Mat4 m;
+        if (v->sofx[j].mnode[0]) {
+            if (scene_monster_node(&v->scene, v->sofx[j].mnode, &m) != 0 || !fx_alive(v->fxw, v->sofx[j].fx)) {
+                v->sofx[j--] = v->sofx[--v->nsofx];
+                continue;
+            }
+            memcpy(at, m.m + 12, sizeof at);
+        } else if (v->sofx[j].obj >= 0) {
+            const StreetObj *o = streetobj_get(v->sobj, v->sofx[j].obj);
+            int k = v->street_of[v->sofx[j].obj];
+            if (!o || !o->alive) {
+                v->sofx[j].obj = -1;                 /* it stays where it is */
+                continue;
+            }
+            if ((v->sofx[j].node || v->sofx[j].node_id > 0) &&
+                scene_instance_node(&v->scene, v->scene.street[k].model, v->sofx[j].node, v->sofx[j].node_id, m.m) == 0) {
+                for (int r = 0; r < 3; r++)
+                    at[r] = m.m[12 + r] + m.m[r] * v->sofx[j].off[0] + m.m[4 + r] * v->sofx[j].off[1] +
+                            m.m[8 + r] * v->sofx[j].off[2];
+            } else
+                streetobj_point(v->sobj, v->sofx[j].obj, v->sofx[j].off, at);
+        } else {
+            if (!fx_alive(v->fxw, v->sofx[j].fx))
+                v->sofx[j--] = v->sofx[--v->nsofx];
+            continue;
+        }
+        fx_move(v->fxw, v->sofx[j].fx, at);
+    }
+}
+
 static void army_step(Viewer *v, float dt)
 {
     if (!v->army || !v->have_graph || v->scene.monster < 0)
@@ -2051,6 +2562,8 @@ static void army_step(Viewer *v, float dt)
     v->scene.monster_move = m.move;
     army_update(v->army, dt, &m, 1, boxes, nb);
     vehicle_step(v, dt, &m, boxes, nb);
+    parade_step(v, dt, &m);
+    rail_step(v, dt, &m);
     edible_step(v, dt);
     boss_step(v, dt, &m);
     game_step(v, dt);
@@ -2400,6 +2913,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
              * the game forces (a slot) takes no transition, and its blend is not traced: it blends */
             int blend = ev == 0 ? BLEND_IN : v->run.via >= 0 ? st->trans[v->run.via].blend : st->end_blend;
             scene_monster_blend(&v->scene, blend == BLEND_IN ? to->blend : 0);
+            foot_command(&v->feet, st->flags);      /* 0x33CCA0: the foot object keeps the state left */
             play_state(v);
             if (bake && root_at(v, v->entry_t, b, q) == 0) {
                 /* 0x2E6580: the monster moves and turns so that the new clip's root, where it starts, is where the old
@@ -2427,6 +2941,17 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
              * event and fires, in order, every one at or before the start, so a state entered part-way (phase
              * kept) still gets its set-up (mode, column) */
             clip_events(v, to, -1, v->run.time);
+        }
+        if (v->scene.monster >= 0 && v->feet.anchor >= 0) {   /* the foot lock (0x33BF10): the root eases onto
+                                                      * the planted foot */
+            const Instance *in = &v->scene.instances[v->scene.monster];
+            double ct = clip_at(v, &v->graph.states[v->run.state], v->run.time);
+            float feet[2][3], place[3] = { v->mx, v->my, v->mz };
+            if (ik_clip_node(in, ct, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, ct, "Bip01 R Foot", feet[1]) == 0 &&
+                foot_lock(&v->feet, v->graph.states[v->run.state].flags, (const float (*)[3])feet, place, v->heading)) {
+                v->mx = place[0];
+                v->my = place[1];
+            }
         }
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
@@ -2463,6 +2988,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             if ((k & 3) != 3)
                 v->scene.instances[v->scene.monster].base.m[k] *= v->scale;
     hands_step(v, dt);
+    feet_step(v);
     if (v->scene.folk) {                             /* the people, the one in its hand, what they make happen */
         PeopleMonster pm = { { v->mx, v->my, v->mz }, v->have_graph ? v->graph.states[v->run.state].name : NULL };
         scene_people_spawn(&v->scene, dt);
@@ -2519,6 +3045,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         }
     }
     scene_buildings_update(&v->scene, dt);
+    street_step(v, dt);
     army_step(v, dt);
     fx_step(v, dt);
     shake_step(v->shakes, 8, dt);
@@ -3017,6 +3544,8 @@ int main(int argc, char **argv)
                 v.scene.cloth_dt += dt > 0.1f ? 0.1f : dt;   /* the flags fly in the free camera too */
                 if (v.veh)                           /* and the traffic drives on, with no monster about */
                     vehicle_update(v.veh, dt > 0.1f ? 0.1f : dt, NULL, 0, NULL, 0);
+                if (v.parade)                        /* and the balloons drift, the bikers ride */
+                    parade_update(v.parade, dt > 0.1f ? 0.1f : dt, NULL, 0, cam.pos[0]);
             }
             if (cam.use_rows) {                        /* back to the free camera where the game camera was */
                 cam.use_rows = 0;

@@ -12,7 +12,7 @@
  *   4. the buildings' shadows on the block's ground (0x31F8B0): a 23 x 6 cell vertex-coloured grid over the lot,
  *      shadowed where a ray towards the light hits a building that still stands tall enough (damage lights it).
  * And a lighting tweak, not geometry: facade darkening (0x31D560), the building's vertex light colours minus MShadowRGB
- * where a neighbour's shadow falls on its front or right face.
+ * where a neighbour's shadow falls on its front or right face (building.h's building light, city.c drives it).
  *
  * Everything here is in game space (Z up, the street at z = 0, the play block's ground grid at fixed world x/y).
  * Output is triangles (3 vertices each) in batches that share a texture and GL state; nothing touches OpenGL.
@@ -136,10 +136,18 @@ typedef struct {
     int nright;               /* S+0x88 */
     float right[2][6];        /* shadow boxes on the right face (min xyz, max xyz) */
 } ShadowFacade;
-/* own, nb_a, nb_b: world boxes. nb_a is the building's +0xC8 neighbour (casts on the front, and on the right face
- * when it lies to the right), nb_b its +0xD0 one (casts on the right face) [G: which neighbours those are] */
+/* own, nb_a, nb_b: world boxes (0x31D6B0). Only a back-row building (Row 1) has neighbours (0x31C8C0, at its
+ * creation): nb_a (+0xC8) the first building of the front row's list whose min x is past its own min x (casts on its
+ * front, and on its right face when it lies to the right), nb_b (+0xD0) the first of its own row's list whose min x
+ * is at or past its own max x (casts on its right face); the lists in the order the buildings were added. Built again
+ * whenever one of their tops changed (0x31C860 -> 0x31C7B0); when that leaves no shadow, the neighbours are dropped. */
 void shadow_facade_build(ShadowFacade *f, const float own[6], const float *nb_a, const float *nb_b);
-/* darkens a lit vertex colour rgb (0..1) at world point p; returns 1 if it did */
+/* darkens a lit vertex colour rgb (0..1) at world point p (0x31D560: the front when p.y <= front_y, else the right
+ * face when p.x > right_x); returns 1 if it did */
 int shadow_facade_darken(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3]);
+/* the two halves alone, as the facade's grid light (0x2CE300) calls them for its front and right face vertices:
+ * the front's three planes (0x31DA60), the right face's boxes (0x31D7F0) */
+int shadow_facade_front(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3]);
+int shadow_facade_right(const ShadowFacade *f, const ShadowLighting *l, const float p[3], float rgb[3]);
 
 #endif

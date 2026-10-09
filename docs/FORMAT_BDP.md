@@ -388,6 +388,10 @@ units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.
    → 2 (a neighbour takes 3) → 0 (destroyed).
 4. The facade shows each cell's state as its tile's row; a floor with any damaged cell shows its `Skeleton`, the
    interior, and its `DamagedSkeleton` once `DamagedSkeletonHP` (half of `FloorHP`) is passed (around 0x2CD898).
+   The interiors are prelit: their sections are format 0x142 (colour, no normals; grey shading baked in) and are drawn
+   with no light set; nothing changes their colours with damage or storey. The facade itself is lit on the CPU, a
+   colour per grid vertex times the storey's `FloorTintR/G/B` (the cells' tint): see
+   [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md).
 
 ### Collapse
 The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then its state (jump table 0x42FA00).
@@ -516,13 +520,16 @@ below are the same in all seven cities; Las Vegas has no `AnimatingSkyData`:
 | `FogR/G/B`, `FogStart`, `FogEnd` | 120, 152, 226; −2 … 200.5 | 50, 37, 122; 5 … 200.5 | |
 | `AnimatingSkyData` | `MaterialName` (the cloud band), `UAnimRate` 0.009, `VAnimRate` 0 | – | scrolls the material's texture; given to a material animator |
 | `CubeMap\|EnvMap`, `CubeTintR/G/B` | `Chicago_Cubemap`, 192 | 255 | reflections, not used here |
-| `GroundShadowIntensity`, `MonsterShadowIntensity`, `MShadow*`, `TShadow*`, `Ramp*`, `Texture\|MonsterBlob` | | | shadows, not used here |
+| `GroundShadowIntensity`, `MonsterShadowIntensity`, `MShadow*`, `TShadow*`, `Texture\|MonsterBlob` | | | shadows ([SHADOW_NOTES.md](SHADOW_NOTES.md)) |
+| `RampStart`, `RampEnd`, `RampIntensity` | 6, 35, 0.35 | 6, 35, −0.5 | the buildings' light brightens (night: darkens) with height ([BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)) |
 
 A light file is text: a `BEGIN_AMBIENT` block (`RED`, `GREEN`, `BLUE`) and `BEGIN_LIGHT` blocks (`LIGHT_TYPE
 DIRECTIONAL`, `DIFFUSE_R/G/B`, `DIRECTION_X/Y/Z`: the way the light travels, in game space), `//` comments.
 Day: ambient 0.1 grey, a white key light (0.85) from above and in front (0, 0.5, −1), a warm orange one (0.65,
 0.35, 0.1) from the right (−1, 0.25, 0) and a blue fill (0.2, 0.2, 0.4) from the left (1, 0, 0). Only 21 sections
-of city meshes carry vertex colours (the damaged interiors), so the city is lit by these at run time.
+of city meshes carry vertex colours (the damaged interiors), so the city is lit by these at run time; the buildings'
+facades are lit by them on the CPU, with the height ramp (`Ramp*`) and the neighbours' shadows taken off
+([BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)).
 
 The light file is parsed by 0x16E6B0 (keywords compared after `toupper`, numbers read by 0x106DF0 as doubles and
 narrowed with `dptofp` 0x1450A8, which `recomp/config.toml` lists as a stub with no runtime handler, so the

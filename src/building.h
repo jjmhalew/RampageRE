@@ -8,6 +8,7 @@
 #ifndef RAMPAGE_BUILDING_H
 #define RAMPAGE_BUILDING_H
 #include <stdint.h>
+#include "shadow.h"
 
 #define BUILDING_STOREYS 48
 #define BUILDING_CELLS 48                            /* 2 x depth + width columns per storey */
@@ -71,5 +72,36 @@ int building_live_of(const Building *b, int o);      /* storey o's live place, -
 /* 0x2CEAD0: a vertex's dent level; a new dent moves it 0.1 .. 0.45 (by level) in a random direction in its face's
  * plane, a deeper one further the same way; the front's corners are the sides' too */
 void building_set_level(Building *b, int face, int row, int col, int level);
+
+/* ---- the building light (docs/BUILDING_LIGHT_NOTES.md) ----------------------------------------------------------
+ * The buildings are lit on the CPU, not by the GS's lights: the lighting object (0x4D2680, filled by 0x2B92F0 from
+ * the light file and WorldData.LightingData) gives a point with a normal its colour (0x2B8C40): the ambient, the three
+ * directional lights and a height ramp (RampStart .. RampEnd, up to RampIntensity: brighter higher up by day, darker
+ * by night), clamped 0 .. 1. The facade's grid vertices get it (0x2CE300), less a neighbour's shadow, and the facade
+ * quads, cracks and the playable buildings' shaded models are drawn with it as their vertex colour. */
+typedef struct {
+    float ambient[3];                                /* +0x2EC: the light file's BEGIN_AMBIENT */
+    float dir[3][3], colour[3][3];                   /* +0x2A4, +0x2C8: three lights, the way each travels (unit) */
+    float ramp_start, ramp_end, ramp_intensity;      /* +0x27C .. +0x284: RampStart 6, RampEnd 35, RampIntensity */
+    float ramp_k;                                    /* +0x288: RampIntensity / (RampEnd - RampStart) */
+} BuildingLight;
+/* 0x2B92F0: the light file's ambient and first three lights (dir: the way they travel, normalised here; fewer: the
+ * rest black), and LightingData's ramp (day 6, 35, 0.35; night 6, 35, -0.5 in every city) */
+void building_light_init(BuildingLight *l, const float ambient[3], int nlights, const float (*dir)[3],
+                         const float (*colour)[3], float ramp_start, float ramp_end, float ramp_intensity);
+float building_light_ramp(const BuildingLight *l, float z);   /* 0 to RampStart, rising to RampIntensity at RampEnd */
+/* 0x2B8C40: the colour at world point p of a surface facing n (unit): ambient + ramp(p.z) + each light's colour x
+ * max(-n.dir, 0), each channel clamped 0 .. 1 */
+void building_light_at(const BuildingLight *l, const float p[3], const float n[3], float rgb[3]);
+/* 0x2B8AD0: the ambient a model at height z is given for the GS's own lighting: ambient + ramp(z), clamped */
+void building_light_ambient(const BuildingLight *l, float z, float rgb[3]);
+/* 0x2CE300: every grid vertex's colour, by live vertex row 0 .. n, face (FACE_*), column (building.h order): the light
+ * at its place before the dents (the row's height now, the face's normal), less the neighbours' shadow f casts on it
+ * (the front face's vertices by shadow_facade_front, the right face's by shadow_facade_right; f NULL: none, as for
+ * the blocks behind). faces[3] (G+0x1EC, all 1 at the start) says which faces may still be shaded: a face none of
+ * whose vertices was shaded is not tested again (the shadows only ever shrink). */
+typedef float BuildingLightRow[3][BUILDING_VCOLS][3];
+void building_light_grid(const Building *b, const BuildingLight *l, const ShadowFacade *f, const ShadowLighting *sl,
+                         uint8_t faces[3], BuildingLightRow *out);
 
 #endif

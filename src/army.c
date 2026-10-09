@@ -1102,8 +1102,8 @@ int army_load_block(Army *a, Group block_def)
         if (a->host.find) {                          /* a boss is boss.c's (Boss_*.bsf), not a unit */
             Group t = a->host.find(a->host.ctx, "Objects1_Props", s->name);
             const char *sc = t.at ? gstr(t, "ScriptName") : NULL;
-            if (sc && strncmp(sc, "Boss_", 5) == 0)
-                continue;
+            if (sc && (strncmp(sc, "Boss_", 5) == 0 || _stricmp(sc, "freighter.bsf") == 0))
+                continue;                            /* (and a freighter is rail.c's) */
         }
         s->min_delay = group_num(g, "MinDelay", 10);
         s->respawn = group_num(g, "RespawnDelay", 10);
