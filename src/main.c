@@ -83,6 +83,8 @@ typedef struct {
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
     ShadowList shl; ShadowGround sg; ShadowMonster smon; ShadowLighting slight;   /* the shadows (shadow.c) */
+    int boss_block;                                  /* the block has a boss (the HUD's boss bar) */
+    int unattended;                                  /* --shot: the results screens are answered for the player */
     SceneMesh fx_shapes[32][8]; int fx_nshapes[32]; /* the effects' debris models (fx.bdp's .pwk), by shape */
     Bundle gui_world, gui_common; int have_gui;      /* WorldGui.bdp, CommonGUI.bdp: the HUD (hud.c) */
     Hud *hud; int no_hud;                            /* --nohud: none */
@@ -93,6 +95,9 @@ typedef struct {
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
     float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
 } Viewer;
+
+static void hud_frame(Viewer *v, int after);
+static void rage_started(Viewer *v);
 
 /* seconds into the monster's clip at the state's time: the game runs a clip on a 0 .. 1 clock that the state's rate
  * (node +0x0, 1 / its length) moves (0x2FFF10), so the state's time x rate x the clip's duration */
@@ -466,8 +471,10 @@ static void build(Viewer *v)
         bh.weapon_tick = boss_weapon_tick;
         bh.ctx = v;
         v->boss = boss_new(&bh);
+        v->boss_block = 0;
         if (v->boss) {
             int n = boss_load_block(v->boss, v->scene.block);
+            v->boss_block = n > 0;
             if (v->scene.traffic_def[1].at)
                 n += boss_load_waiting(v->boss, v->scene.traffic_def[1], 41, 1);
             if (v->scene.traffic_def[2].at)
@@ -489,7 +496,6 @@ static void build(Viewer *v)
             GameConfig gc = { GP_CAMPAIGN, 1, 0, 0, 7, city_block_index(v->city, v->blocks[v->block]), 1 };
             v->game = game_new(&gh, &gc);
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
-                game_auto_results(v->game, 3.0f);   /* no results screens here: answered after 3 s */
                 game_start(v->game);
             } else {
                 game_free(v->game);
@@ -499,16 +505,30 @@ static void build(Viewer *v)
     }
     if (v->have_scene && v->scene.folk)
         people_set_visible(v->scene.folk, people_visible, v);
-    hud_close(v->hud);                               /* player 1's HUD for this monster (Hud0.ifc) */
-    v->hud = NULL;
-    if (v->have_gui && v->have_scene && v->monster >= 0 && !v->no_hud) {
-        HudConfig hc = { 0, 1, HUD_PLAY_CAMPAIGN, 0, v->monsters[v->monster] };
-        v->hud = hud_open(&v->gui_world, &v->gui_common, &hc);
-        if (v->hud) {
-            hud_set(v->hud, v->hp, 200, v->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
-            hud_set_project(v->hud, hud_project, v);
+    if (!v->game_built || !v->hud) {                 /* the game's next block keeps the HUD (its results going) */
+        hud_close(v->hud);                           /* player 1's HUD for this monster (Hud0.ifc) */
+        v->hud = NULL;
+        if (v->have_gui && v->have_scene && v->monster >= 0 && !v->no_hud) {
+            HudConfig hc = { 0, 1, HUD_PLAY_CAMPAIGN, 0, v->monsters[v->monster] };
+            v->hud = hud_open(&v->gui_world, &v->gui_common, &hc);
+            if (v->hud) {
+                hud_set(v->hud, v->hp, 200, v->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
+                hud_set_project(v->hud, hud_project, v);
+                hud_add_bundle(v->hud, v->scene.city);   /* <City>.loc: the block names, the challenge texts */
+                hud_results_auto(v->hud, v->unattended ? 2.0f : 0);
+            }
         }
     }
+    if (v->hud) {                                    /* Levels::onActivateBlock: the boss bar on the boss block; the
+                                                      * challenges are not ported (no item count) */
+        HudChallenge ch;
+        memset(&ch, 0, sizeof ch);
+        ch.last_block = v->boss_block;
+        ch.required = -1;
+        hud_challenge(v->hud, &ch);
+    }
+    if (v->game && !v->hud && !v->game_built)        /* no screens to answer the results: after 3 s */
+        game_auto_results(v->game, 3.0f);
     Group tt;
     if (city_camera(v->city, &tt) == 0)
         cam_settings(&v->cam_settings, tt);
@@ -657,6 +677,7 @@ static void hit_building_front(Viewer *v, const float *p)
         edible_power_hit_building(&v->power, 1, v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF, 0)) {
         edible_power_start_rage(&v->power, 0);
         v->pending_slot = 54;
+        rage_started(v);
     }
     v->energy = v->power.energy;
     if (getenv("RAMPAGE_TRACE"))
@@ -1286,6 +1307,10 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am)
             case BE_FACING: v->heading = e->amount * 57.2957795f; break;
             case BE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
             case BE_STATS: if (v->army) army_add_stats(v->army, 0, e->tmpl, e->level); break;
+            case BE_BOSS_HEALTH:                     /* the boss bar; at 0 the challenge is met: 5000 points */
+                if (v->hud && hud_boss_health(v->hud, e->amount) && v->game)
+                    game_add_points(v->game, 0, GPT_CHALLENGE, 5000);
+                break;
             case BE_DEFEATED:                        /* New York's callback finishes the block (isBossBlockFinished) */
                 if (v->game && e->name && strstr(e->name, "NewYork"))
                     game_set_boss_finished(v->game, 0);
@@ -1375,6 +1400,32 @@ static void game_step(Viewer *v, float dt)
                     game_move_done(v->game, e->slot);
                 break;
             case GE_AI_ACTIVATE: if (v->army) army_activate(v->army, 1); break;
+            case GE_HUD: if (v->hud) hud_show(v->hud, (float)e->a); break;
+            case GE_GUI: if (v->hud && e->name) hud_load_interface(v->hud, e->name); break;
+            case GE_RESULTS:                         /* WorldGuiDriver::startResults: filled now (the points are
+                                                      * cleared once it is done) */
+                if (v->hud) {
+                    HudResults r;
+                    memset(&r, 0, sizeof r);
+                    r.play_type = HUD_PLAY_CAMPAIGN;
+                    r.num_players = 1;
+                    for (int c = 0; c < 7; c++) {
+                        r.points[0][c] = game_points(v->game, 0, c);
+                        r.kills[0][c] = game_kills(v->game, 0, c);
+                    }
+                    r.block_played = game_block_name(v->game, 0);
+                    r.block_current = game_block_name(v->game, 1);
+                    for (uint32_t k = 0; k < v->scene.nbuildings; k++)
+                        r.buildings += v->scene.buildings[k].b.state == BUILDING_STANDING ||
+                                       v->scene.buildings[k].b.state == BUILDING_FLOOR_FALLING;
+                    r.city_destroyed = game_city_destroyed(v->game);
+                    r.city = CITIES[v->city_index];
+                    r.city_score = game_city_total(v->game);
+                    r.par_score = game_par_score(v->game);
+                    r.city_flags = game_city_flags(v->game);
+                    hud_results(v->hud, e->a, &r);
+                }
+                break;
             case GE_REVIVE:                          /* cancelRespawn: full HP where it is */
                 v->hp = 200;
                 v->defeated = 0;
@@ -1397,6 +1448,31 @@ static void game_step(Viewer *v, float dt)
         }
 }
 
+/* after the screens ran: a results screen's answer to the game, the sounds they start and stop */
+static void hud_frame(Viewer *v, int after)
+{
+    if (!after || !v->hud)
+        return;
+    int r = hud_result(v->hud);
+    if (r && v->game)
+        game_set_result(v->game, r);
+    HudSound hs[16];
+    int n = hud_sounds(v->hud, hs, 16);
+    for (int i = 0; i < n; i++) {
+        if (hs[i].kill)
+            sound_kill_name(hs[i].name);
+        else
+            sound_play(hs[i].name, NULL, 1);
+    }
+}
+
+/* Monsters::startRage on screen: the RAMPAGE banner (Rage.ifc) */
+static void rage_started(Viewer *v)
+{
+    if (v->hud)
+        hud_banner_rage(v->hud);
+}
+
 /* gCommon.addStats on the monster (0x2C51A0): HP and energy by the rules edible.c keeps (none at 0 HP; while raging
  * only a full Energy restarts it); a full one starts the rage: Monsters::startRage, slot 54 [G: its slot] */
 static void monster_stats(Viewer *v, float health, float energy)
@@ -1405,6 +1481,7 @@ static void monster_stats(Viewer *v, float health, float energy)
         edible_power_start_rage(&v->power, 0);
         if (!v->defeated)
             v->pending_slot = 54;
+        rage_started(v);
         if (getenv("RAMPAGE_TRACE"))
             printf("  rage\n");
     }
@@ -1474,6 +1551,16 @@ static void edible_step(Viewer *v, float dt)
             case EE_BANNER:
                 if (v->hud)
                     hud_float(v->hud, (int)e->amount, e->pos, 0, 1.0f);
+                break;
+            case EE_MESSAGE:                         /* "Instant Rampage", "Speed Increase", ... (Rage.ifc) */
+                if (v->hud)
+                    hud_banner_text(v->hud, e->name, e->v, e->amount, e->name2);
+                break;
+            case EE_REVEAL:                          /* the cryotube: "<monster> Unlocked". Which monster
+                                                      * gWorld.startReveal picks is not read: the next one in the
+                                                      * viewer's list [G] */
+                if (v->hud && v->nmonsters)
+                    hud_banner_reveal(v->hud, v->monsters[(v->monster + 1) % (int)v->nmonsters]);
                 break;
             default: break;
             }
@@ -1818,6 +1905,11 @@ static int window_person(const Viewer *v, const float *xyz)
 
 static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
 {
+    if (v->hud && hud_paused(v->hud)) {              /* GameOver's pauseGame(1): only the screen runs */
+        hud_update(v->hud, dt);
+        hud_frame(v, 1);
+        return;
+    }
     if (v->have_graph) {
         MoveInput *in = &v->input;
         face_step(v, dt);
@@ -2102,6 +2194,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                 v->army ? (int)army_stats(v->army, 0)->points[6] : 0, v->game ? game_lives(v->game, 0) : -1, -1);
         hud_set_clock(v->hud, vis, clock);
         hud_update(v->hud, dt);
+        hud_frame(v, 1);
     }
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
@@ -2229,6 +2322,11 @@ static void play_script(Viewer *v, const char *script, float aspect)
                 printf("no effect %s\n", name);
             continue;
         }
+        if (_stricmp(word, "collapseall") == 0) {    /* every building of the block falls (the end of a block) */
+            for (uint32_t i = 0; i < v->scene.nbuildings; i++)
+                building_destroy(&v->scene.buildings[i].b);
+            continue;
+        }
         if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
             for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
                 Building *b = &v->scene.buildings[i].b;
@@ -2275,7 +2373,7 @@ int main(int argc, char **argv)
     const char *script = NULL;
     char walk_script[48];
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) shot = argv[++i];
+        if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) { shot = argv[++i]; v.unattended = 1; }
         else if (strcmp(argv[i], "--monster") == 0 && i + 1 < argc) monster = argv[++i];
         else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) clip = atoi(argv[++i]);
         else if (strcmp(argv[i], "--time") == 0 && i + 1 < argc) shot_time = atof(argv[++i]);
@@ -2385,6 +2483,16 @@ int main(int argc, char **argv)
         float dt = (float)(now - last);
         last = now;
         if (w.pressed[VK_ESCAPE]) w.quit = 1;
+        if (v.hud && hud_results_showing(v.hud)) {   /* a results screen has the pad: Enter / Space go on,
+                                                      * Backspace quits, the arrows choose, C changes monster */
+            static const struct { int key, ev, button; } KEYS[] = {
+                { VK_RETURN, HUD_EV_ACCEPT, 0 }, { VK_SPACE, HUD_EV_ACCEPT, 0 }, { VK_BACK, HUD_EV_BACK, 0 },
+                { VK_UP, HUD_EV_UP, 0 }, { VK_DOWN, HUD_EV_DOWN, 0 }, { VK_LEFT, HUD_EV_LEFT, 0 },
+                { VK_RIGHT, HUD_EV_RIGHT, 0 }, { 'C', HUD_EV_BUTTON, 0 } };
+            for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
+                if (w.pressed[KEYS[k].key])
+                    hud_input(v.hud, KEYS[k].ev, KEYS[k].button);
+        }
         if (v.game_block >= 0) {                     /* the game moved on to the next block */
             v.block = (uint32_t)v.game_block;
             v.game_block = -1;

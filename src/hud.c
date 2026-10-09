@@ -1,15 +1,22 @@
-/* hud.c - the in-play HUD (docs/FORMAT_GUI.md), transcribed from the PS2 game: the GUI layout files (.ifc, bundle
- * type 24: Hud0..3.ifc and Clock.ifc of WorldGui.bdp), the logic of their scripts (build/scripts/Hud.scr, Clock.scr:
- * Hud::doInterface / updateStats, Clock::updateTime), the GUI objects that draw them (GuiQuad 0x2439E0, GuiSlider
- * layout 0x24A310, GuiText 0x234D30), the bitmap fonts (OFontData loader 0x1B7CD0, OFont defaults 0x1B7200, the line
- * measure 0x1B5AA0 / 0x1B6270, the string draw 0x1B6A80 and its glyph quads 0x1B64B0) and the floating score numbers
- * (PointsBanner, vtable 0x44B6A0: start 0x331D50, advance 0x331B00, draw 0x331960, font setup 0x2B8510).
- * [R] = read in that code or in the files, [G] = a guess where it matters.
+/* hud.c - the game's 2D interface (hud.h; docs/FORMAT_GUI.md, docs/SCREENS_NOTES.md), transcribed from the PS2 game:
+ * the GUI layout files (.ifc, bundle type 24: Hud0..3.ifc, Clock.ifc, Rage.ifc, ChallengeStatus.ifc,
+ * ChallengeText.ifc, Results.ifc, LevelResults.ifc, GameOver.ifc of WorldGui.bdp), the logic of their scripts
+ * (build/scripts/Hud.scr, Clock.scr, Rage.scr, ChallengeStatus.scr, ChallengeText.scr, Results.scr, LevelResults.scr,
+ * GameOver.scr, WorldGuiDriver.scr and the
+ * include files ObjectFader.h, ConfirmQuit.h, ButtonSetup.h), the GUI objects that draw them (GuiQuad 0x2439E0,
+ * GuiSlider layout 0x24A310, GuiText 0x234D30), the bitmap fonts (OFontData loader 0x1B7CD0, OFont defaults 0x1B7200,
+ * the line measure 0x1B5AA0 / 0x1B6270, the string draw 0x1B6A80 and its glyph quads 0x1B64B0), the string tables
+ * (.loc, type 23: tools/loc.py), the floating score numbers (PointsBanner, vtable 0x44B6A0: start 0x331D50, advance
+ * 0x331B00, draw 0x331960, font setup 0x2B8510) and the text banners (PointsBanner's script bindings 0x2A6A40:
+ * createAndStartText 0x2B1640, createAndStartText2 0x2B14E0). [R] = read in that code or in the files, [G] = a guess
+ * where it matters.
  *
  * The GUI is a tree of objects, each with a position p (x y z) and a scale m in its parent's frame [R: GuiObject's
  * 3x3 + position at +0x8 / +0x2C, the children's bounds go through the parent's matrix 0x240200]; a quad's sprite
  * spans its size d (or its texture's size) from the object's origin, or is centred on it (Q 0x2 across, 0x4 down,
- * 0x243C00), a slider is always centred (0x24A310), a text sits on its origin by its justification. */
+ * 0x243C00), a slider is always centred (0x24A310), a text sits on its origin by its justification. A script holds
+ * the objects it found by name and changes their position, scale, fade, colour, text and visibility; here each
+ * interface is its own copy of its layout tree, changed the same way. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,10 +25,17 @@
 #include "hud.h"
 
 #define HUD_PI 3.14159265f
-#define MAX_NODES 96
+#define MAX_NODES 128
 #define MAX_FLOATS 64
-#define MAX_TEXT 64
-#define MAX_SORT 1024
+#define MAX_TEXT 256
+#define MAX_SORT 2048
+#define MAX_FONTS 8
+#define MAX_BUNDLES 8
+#define MAX_LINES 16
+#define MAX_RAGE 8
+#define MAX_SOUNDS 32
+#define MAX_FADERS 6
+#define RAGE_COPIES 15
 
 /* ---------------------------------------------------------------- colours */
 /* the files write RRGGBBAA [R: Hud.scr's rageColor (1, 0.5, 0.25) is the layout's maskColor 0xFF8040FF] */
@@ -41,24 +55,45 @@ static void col_abgr(uint32_t c, float out[4])
     out[2] = (float)(c >> 16 & 255) / 255.0f;
     out[3] = (float)(c >> 24 & 255) / 255.0f;
 }
+static void col_set(float out[4], float r, float g, float b, float a) { out[0] = r; out[1] = g; out[2] = b; out[3] = a; }
 
-/* ---------------------------------------------------------------- textures */
+/* ---------------------------------------------------------------- the resources: bundles, fonts, texts */
 typedef struct { const Bundle *b; uint32_t name; float w, h, us, vs; } TexRef;   /* w h: the used size */
+typedef struct { int ok; float u0, u1, v0, v1, a, w, c, h; } Glyph;
+typedef struct {
+    int ok;
+    TexRef tex;
+    float cell_h, avg_h;        /* OFontData +0x24 (the texture's height / rows), +0x28 */
+    int spacing, linespacing;   /* OFont +0x10, +0x11 */
+    int shadow_dx, shadow_dy;   /* OFont +0x12, +0x13 */
+    int slant;                  /* OFont +0x44 */
+    uint32_t shadow_col, col;   /* OFont +0x18, +0x14 (AABBGGRR) */
+    Glyph g[256];
+} Font;
+typedef struct {
+    const Bundle *bundles[MAX_BUNDLES];
+    int nb;
+    Font fonts[MAX_FONTS];
+    char font_names[MAX_FONTS][32];
+    int nfonts;
+    int lang;
+    float time;                 /* seconds since hud_open: the list highlight's pulse */
+} Gui;
 
-static int tex_find(const Bundle *const *bundles, int nb, const char *name, TexRef *out)
+static int tex_find(const Gui *g, const char *name, TexRef *out)
 {
-    for (int i = 0; i < nb; i++) {
-        if (!bundles[i])
-            continue;
-        int n = bdp_find_name(bundles[i], name);
-        const BdpEntry *e = n >= 0 ? bdp_entry_of(bundles[i], (uint32_t)n, ET_TEXTURE) : NULL;
+    if (!name || !*name)
+        return 0;
+    for (int i = 0; i < g->nb; i++) {
+        int n = bdp_find_name(g->bundles[i], name);
+        const BdpEntry *e = n >= 0 ? bdp_entry_of(g->bundles[i], (uint32_t)n, ET_TEXTURE) : NULL;
         if (!e || e->size < 0x20)
             continue;
         /* texture header: 0x08 u16 width, 0x0A height, 0x14 used width, 0x16 used height [R tools/tex.py]. The floats
          * at 0x18 / 0x1C are used / the GS's power-of-two size (156 / 256 for PointsBanner), the game's UV scale for
          * its GS texture; over the decoded image (tex_decode: width x height) the used part ends at used / size. */
         int w = rd16(e->data + 0x8), h = rd16(e->data + 0xA);
-        out->b = bundles[i];
+        out->b = g->bundles[i];
         out->name = (uint32_t)n;
         out->w = rd16(e->data + 0x14);
         out->h = rd16(e->data + 0x16);
@@ -71,37 +106,22 @@ static int tex_find(const Bundle *const *bundles, int nb, const char *name, TexR
     return 0;
 }
 
-/* ---------------------------------------------------------------- fonts (.fdf, type 2) */
-typedef struct { int ok; float u0, u1, v0, v1, a, w, c, h; } Glyph;
-typedef struct {
-    int ok;
-    TexRef tex;
-    float cell_h, avg_h;        /* OFontData +0x24 (the texture's height / rows), +0x28 */
-    int spacing, linespacing;   /* OFont +0x10, +0x11 */
-    int shadow_dx, shadow_dy;   /* OFont +0x12, +0x13 */
-    int slant;                  /* OFont +0x44 */
-    uint32_t shadow_col, col;   /* OFont +0x18, +0x14 (AABBGGRR) */
-    Glyph g[256];
-} Font;
-
 /* OFontData::load 0x1B7CD0 [R]. File: 0x000 char[0x100] font name, 0x100 char[0x100] bitmap ("POINTSBANNER.BMP"),
  * 0x200 a Windows LOGFONT as text, 0x304 u32 rows of glyphs in the bitmap, 0x308 u32 size of the character list at
  * 0x358, 0x30C u32 size of the alias list after it, 0x310 f32 x4 character spacing, line spacing, shadow dx, dy,
  * 0x320 u32 shadow colour, 0x324 u32 colour, 0x32C f32 slant, 0x330 / 0x334 f32 x / y scale; then 0x24-byte glyphs
  * to the end: f32 u0 u1 v0 v1 (over the bitmap's used size), f32 a (before), w (drawn width), c (after), h (height,
  * < 0: the cell's), char[4] the character. */
-static int font_load(Font *f, const Bundle *const *bundles, int nb, const char *name)
+static int font_load(Font *f, const Gui *gui, const char *name)
 {
     memset(f, 0, sizeof *f);
     char want[80];
     snprintf(want, sizeof want, "%s.fdf", name);
     const BdpEntry *e = NULL;
-    for (int i = 0; i < nb && !e; i++) {
-        if (!bundles[i])
-            continue;
-        int n = bdp_find_name(bundles[i], want);
+    for (int i = 0; i < gui->nb && !e; i++) {
+        int n = bdp_find_name(gui->bundles[i], want);
         if (n >= 0)
-            e = bdp_entry_of(bundles[i], (uint32_t)n, ET_RAW);
+            e = bdp_entry_of(gui->bundles[i], (uint32_t)n, ET_RAW);
     }
     if (!e || e->size < 0x358)
         return 0;
@@ -114,7 +134,7 @@ static int font_load(Font *f, const Bundle *const *bundles, int nb, const char *
     char *base = slash ? slash + 1 : bmp;
     if ((dot = strchr(base, '.')) != NULL)
         *dot = 0;
-    if (!tex_find(bundles, nb, base, &f->tex))
+    if (!tex_find(gui, base, &f->tex))
         return 0;
     uint32_t rows = rd32(d + 0x304), nchars = rd32(d + 0x308), nalias = rd32(d + 0x30C);
     f->cell_h = f->tex.h / (float)(rows ? rows : 1);   /* [R 0x1B8050; G: the texture's height is its used height] */
@@ -150,8 +170,8 @@ static int font_load(Font *f, const Bundle *const *bundles, int nb, const char *
         else if (ch >= 'A' && ch <= 'Z') { upper_n += 1; upper_h += g->h; }
     }
     f->avg_h = lower_n > 0 ? lower_h / lower_n : upper_n > 0 ? upper_h / upper_n : f->cell_h;
-    /* aliases: pairs (character, the character whose glyph it shares) [R 0x1B824C..0x1B8520]; the fonts here only
-     * alias Shift-JIS characters, which are skipped like their glyphs */
+    /* aliases: pairs (character, the character whose glyph it shares) [R 0x1B824C..0x1B8520]: Atrox60's lower case
+     * is its capitals' */
     const uint8_t *s = d + 0x358 + nchars, *end = s + nalias;
     while (s < end && *s) {
         int dst = *s++, dst_wide = (dst >= 0x81 && dst <= 0x9F) || (dst >= 0xE0 && dst <= 0xEF);
@@ -166,14 +186,60 @@ static int font_load(Font *f, const Bundle *const *bundles, int nb, const char *
     return 1;
 }
 
+/* a font by the name the layouts give (<g>ARIALBLACK24</g>): loaded once, from <name>.fdf in the bundles */
+static const Font *find_font(Gui *g, const char *name)
+{
+    for (int i = 0; i < g->nfonts; i++)
+        if (_stricmp(g->font_names[i], name) == 0)
+            return &g->fonts[i];
+    if (g->nfonts >= MAX_FONTS || !font_load(&g->fonts[g->nfonts], g, name))
+        return NULL;
+    snprintf(g->font_names[g->nfonts], sizeof g->font_names[0], "%s", name);
+    return &g->fonts[g->nfonts++];
+}
+
+/* gApp.localizeString(key): the .loc tables (type 23) of the bundles [R tools/loc.py: 0x24 u32 count, 0x28 u32[11]
+ * column offsets: the keys, then one column per language; each column count x u32 string offsets]. Keys are looked
+ * up ignoring case ("Rampage" is the table's "RAMPAGE") [G: the game hashes them]. */
+static const char *loc_find(const Gui *g, const char *key)
+{
+    if (!key || !*key)
+        return NULL;
+    int col = 1 + (g->lang >= 0 && g->lang < 9 ? g->lang : 0);
+    for (int i = 0; i < g->nb; i++) {
+        const Bundle *b = g->bundles[i];
+        for (uint32_t k = 0; k < b->nentries; k++) {
+            const BdpEntry *e = &b->entries[k];
+            if (e->type != ET_LOC || !e->data || e->size < 0x54)
+                continue;
+            const uint8_t *d = e->data;
+            uint32_t n = rd32(d + 0x24), keys = rd32(d + 0x28), vals = rd32(d + 0x28 + 4 * col);
+            if (keys + 4 * n > e->size || vals + 4 * n > e->size)
+                continue;
+            for (uint32_t r = 0; r < n; r++) {
+                uint32_t ko = rd32(d + keys + 4 * r), vo = rd32(d + vals + 4 * r);
+                if (ko < e->size && vo < e->size && _stricmp((const char *)d + ko, key) == 0)
+                    return (const char *)d + vo;
+            }
+        }
+    }
+    return NULL;
+}
+
 /* ---------------------------------------------------------------- the draw list */
-typedef struct { HudQuad *q; float *z; int n, max; } Emit;
+typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; } Emit;
 
 static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                       const float col[4], const Bundle *b, uint32_t tex, float z)
 {
     if (e->n >= e->max || col[3] <= 0.0f)
         return;
+    if (e->clip) {                                       /* a mask's cut across (Results' scrolling title) */
+        if (x1 <= e->cx0 || x0 >= e->cx1 || x1 <= x0)
+            return;
+        if (x0 < e->cx0) { u0 += (u1 - u0) * (e->cx0 - x0) / (x1 - x0); x0 = e->cx0; }
+        if (x1 > e->cx1) { u1 -= (u1 - u0) * (x1 - e->cx1) / (x1 - x0); x1 = e->cx1; }
+    }
     HudQuad *q = &e->q[e->n];
     q->x0 = x0; q->y0 = y0; q->x1 = x1; q->y1 = y1;
     q->u0 = u0; q->v0 = v0; q->u1 = u1; q->v1 = v1;
@@ -185,52 +251,151 @@ static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0,
     e->n++;
 }
 
-/* a string in font space mapped to the screen by (ox + sc * x, oy + sc * y). The game measures each line (0x1B5AA0:
- * width = the glyphs' a + w + c + spacing, less one spacing, plus the slant; height = the tallest glyph's h, an empty
- * line the font's average), shrinks the whole text to maxwidth (0x1B6350: scale maxwidth / width when wider), places
- * it by justify (0 left, 1 centre, 2 right: of each line, OFont +0x7 = 3 [R 0x1B6CB4..0x1B6E18]) and origin (0 top,
- * 1 middle, 2 bottom of the text's height [R 0x1B6B50]), then draws the shadow and the text (0x1B6EB8..0x1B6F38).
- * col / shadow: rgba; spacing: the character spacing in use; sdx sdy: the shadow's offset in font pixels. */
-static void text_emit(Emit *e, const Font *f, const char *s, float ox, float oy, float sc, int justify, int origin,
-                      float maxwidth, int spacing, const float col[4], const float shadow[4], int sdx, int sdy, float z)
+/* ---------------------------------------------------------------- texts */
+typedef struct { const char *s; int n; float w, h; } TLine;
+
+/* "\v1.25Controller_Back\v": a picture in a .loc text (the upgrade hints' buttons) [G: OFont's special glyphs at
+ * +0x25C are not traced; drawn square, the cell's height times the number]. s[0] is the first \v; returns the
+ * characters it takes */
+static int text_icon(const Gui *g, const Font *f, const char *s, int n, TexRef *t, int *ok, float *size)
 {
-    if (!f || !f->ok || !s || !*s)
-        return;
-    enum { MAXL = 8 };
-    const char *line[MAXL];
-    int len[MAXL], nl = 0;
-    float lw[MAXL], lh[MAXL], wmax = 0, hsum = 0;
-    for (const char *p = s; nl < MAXL;) {
-        const char *q = strchr(p, '\n');
-        int n = q ? (int)(q - p) : (int)strlen(p);
-        float w = (float)(f->slant - spacing), h = 0;
-        int any = 0;
-        for (int i = 0; i < n; i++) {
-            const Glyph *g = &f->g[(unsigned char)p[i]];
-            if (!g->ok)
-                continue;                               /* no glyph: no width [R 0x1B5CC0] */
-            w += g->a + g->w + g->c + (float)spacing;
-            if (g->h > h) h = g->h;
+    int i = 1, k = 0;
+    char buf[48];
+    while (i < n && s[i] != '\v') { if (k < 47) buf[k++] = s[i]; i++; }
+    buf[k] = 0;
+    if (i < n) i++;
+    char *end;
+    float sc = strtof(buf, &end);
+    if (end == buf) sc = 1;
+    *size = f->cell_h * sc;
+    *ok = tex_find(g, end, t);
+    return i;
+}
+
+/* the line measure (0x1B5AA0): width = the glyphs' a + w + c + spacing, less one spacing, plus the slant; a character
+ * without a glyph adds nothing; height = the tallest glyph's h, a line without glyphs the font's average */
+static void run_measure(const Gui *g, const Font *f, const char *s, int n, int spacing, float *w_out, float *h_out)
+{
+    float w = 0, h = 0;
+    int any = 0;
+    for (int i = 0; i < n;) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch == '\v') {
+            TexRef t;
+            int ok;
+            float size;
+            i += text_icon(g, f, s + i, n - i, &t, &ok, &size);
+            w += size + (float)spacing;
             any = 1;
+            continue;
         }
-        if (!any) { w = 0; h = f->avg_h; }
-        line[nl] = p; len[nl] = n; lw[nl] = w; lh[nl] = h; nl++;
-        if (w > wmax) wmax = w;
-        hsum += h;
-        if (!q) break;
+        i++;
+        const Glyph *gl = &f->g[ch];
+        if (!gl->ok)
+            continue;
+        w += gl->a + gl->w + gl->c + (float)spacing;
+        if (gl->h > h) h = gl->h;
+        any = 1;
+    }
+    *w_out = any ? w + (float)(f->slant - spacing) : 0;
+    *h_out = any && h > 0 ? h : f->avg_h;
+}
+
+/* the lines of a text: its '\n's, and a wrap at `wrap` font pixels (0: none) at the last space that fits [G: the
+ * game's word wrap (OFont +0x8) is not traced] */
+static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, float wrap, TLine *L, int max)
+{
+    int nl = 0;
+    const char *p = s;
+    while (nl < max) {
+        const char *q = strchr(p, '\n');
+        int n = q ? (int)(q - p) : (int)strlen(p), start = 0;
+        do {
+            int end = n;
+            float w, h;
+            if (wrap > 0) {
+                run_measure(g, f, p + start, n - start, spacing, &w, &h);
+                if (w > wrap) {
+                    int brk = -1;
+                    for (int i = start + 1; i < n; i++) {
+                        if (p[i] != ' ')
+                            continue;
+                        run_measure(g, f, p + start, i - start, spacing, &w, &h);
+                        if (w > wrap)
+                            break;
+                        brk = i;
+                    }
+                    if (brk < 0)                         /* one word wider than the wrap */
+                        for (brk = start + 1; brk < n && p[brk] != ' '; brk++) {}
+                    end = brk;
+                }
+            }
+            TLine *l = &L[nl++];
+            l->s = p + start;
+            l->n = end - start;
+            run_measure(g, f, l->s, l->n, spacing, &l->w, &l->h);
+            start = end;
+            if (start < n)
+                while (start < n && p[start] == ' ') start++;
+        } while (start < n && nl < max);
+        if (!q)
+            break;
         p = q + 1;
     }
+    return nl;
+}
+
+typedef struct {
+    const Font *f;
+    int justify, origin, spacing, linesp;
+    float maxwidth, wrap;                               /* wrap in font pixels */
+} TextStyle;
+
+/* the size of a text in font pixels, after the maxwidth squeeze (GuiText's width() and height() [G: by the text's own
+ * scale, which the caller adds]) */
+static void text_extent(const Gui *g, const TextStyle *ts, const char *s, float *w, float *h)
+{
+    TLine L[MAX_LINES];
+    int nl = text_lines(g, ts->f, s, ts->spacing, ts->wrap, L, MAX_LINES);
+    float wmax = 0, hsum = 0;
+    for (int i = 0; i < nl; i++) {
+        if (L[i].w > wmax) wmax = L[i].w;
+        hsum += L[i].h;
+    }
+    float k = ts->maxwidth > 0 && wmax > ts->maxwidth ? ts->maxwidth / wmax : 1.0f;
+    *w = wmax * k;
+    *h = hsum * k + (float)(ts->linesp * (nl - 1));
+}
+
+/* a string in font space mapped to the screen by (ox + sc * x, oy + sc * y). The game measures each line, shrinks the
+ * whole text to maxwidth (0x1B6350: scale maxwidth / width when wider), places it by justify (0 left, 1 centre, 2
+ * right: of each line, OFont +0x7 = 3 [R 0x1B6CB4..0x1B6E18]) and origin (0 top, 1 middle, 2 bottom of the text's
+ * height [R 0x1B6B50]), then draws the shadow and the text (0x1B6EB8..0x1B6F38). col / shadow: rgba; sdx sdy: the
+ * shadow's offset in font pixels. */
+static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s, float ox, float oy, float sc,
+                      const float col[4], const float shadow[4], int sdx, int sdy, float z)
+{
+    const Font *f = ts->f;
+    if (!f || !f->ok || !s || !*s)
+        return;
+    TLine L[MAX_LINES];
+    int nl = text_lines(g, f, s, ts->spacing, ts->wrap, L, MAX_LINES);
+    float wmax = 0, hsum = 0;
+    for (int i = 0; i < nl; i++) {
+        if (L[i].w > wmax) wmax = L[i].w;
+        hsum += L[i].h;
+    }
     float k = 1.0f;                                     /* OFont +0xC x +0x48 / +0x4C are 1 in every font file */
-    if (maxwidth > 0 && wmax > maxwidth)
-        k = maxwidth / wmax;
-    float total_h = hsum * k + (float)(f->linespacing * (nl - 1));
-    float y = origin == 1 ? -0.5f * total_h : origin == 2 ? -total_h : 0.0f;
-    float cell = f->cell_h * k, slant = (float)f->slant * k;
+    if (ts->maxwidth > 0 && wmax > ts->maxwidth)
+        k = ts->maxwidth / wmax;
+    float total_h = hsum * k + (float)(ts->linesp * (nl - 1));
+    float y = ts->origin == 1 ? -0.5f * total_h : ts->origin == 2 ? -total_h : 0.0f;
+    float cell = f->cell_h * k, slant = (float)f->slant * k, spacing = (float)ts->spacing;
     for (int l = 0; l < nl; l++) {
-        float h = lh[l] * k;
+        float h = L[l].h * k;
         y += h - cell;                                  /* [R 0x1B6CB0] */
         float yoff = h <= cell ? 0.0f : 0.5f * (f->avg_h * k - h);
-        float x = justify == 1 ? -0.5f * lw[l] * k : justify == 2 ? -lw[l] * k : 0.0f;
+        float x = ts->justify == 1 ? -0.5f * L[l].w * k : ts->justify == 2 ? -L[l].w * k : 0.0f;
         if (slant < 0)
             x -= slant;
         for (int pass = 0; pass < 2; pass++) {
@@ -245,50 +410,75 @@ static void text_emit(Emit *e, const Font *f, const char *s, float ox, float oy,
             float cx = x + dx, top = y + yoff + dy, bot = top + cell;
             /* the glyph quads [R 0x1B64B0]: x += a; the glyph from x to x + w, the cell's height, the top edge moved
              * by the slant; x += w + c + spacing. A space only advances (a + w + c + spacing). */
-            for (int i = 0; i < len[l]; i++) {
-                unsigned char ch = (unsigned char)line[l][i];
-                const Glyph *g = &f->g[ch];
-                if (!g->ok)
-                    continue;
-                if (ch == ' ') {
-                    cx += k * (g->a + g->w + g->c + (float)spacing);
+            for (int i = 0; i < L[l].n;) {
+                unsigned char ch = (unsigned char)L[l].s[i];
+                if (ch == '\v') {
+                    TexRef t;
+                    int ok;
+                    float size;
+                    i += text_icon(g, f, L[l].s + i, L[l].n - i, &t, &ok, &size);
+                    if (ok && pass == 1) {
+                        float ic[4] = { 1, 1, 1, c[3] }, it = top + 0.5f * (cell - size * k);
+                        emit_quad(e, ox + sc * cx, oy + sc * it, ox + sc * (cx + size * k), oy + sc * (it + size * k),
+                                  0, 0, t.us, t.vs, ic, t.b, t.name, z);
+                    }
+                    cx += k * (size + spacing);
                     continue;
                 }
-                cx += g->a * k;
-                float x1 = cx + g->w * k;
+                i++;
+                const Glyph *gl = &f->g[ch];
+                if (!gl->ok)
+                    continue;
+                if (ch == ' ') {
+                    cx += k * (gl->a + gl->w + gl->c + spacing);
+                    continue;
+                }
+                cx += gl->a * k;
+                float x1 = cx + gl->w * k;
                 /* the slant leans the top edge; the quads here stay upright (every font file has slant 0) */
-                emit_quad(e, ox + sc * cx, oy + sc * top, ox + sc * x1, oy + sc * bot, g->u0, g->v0, g->u1, g->v1,
+                emit_quad(e, ox + sc * cx, oy + sc * top, ox + sc * x1, oy + sc * bot, gl->u0, gl->v0, gl->u1, gl->v1,
                           c, f->tex.b, f->tex.name, z);
-                cx += k * ((float)spacing + g->w + g->c);
+                cx += k * (spacing + gl->w + gl->c);
             }
         }
-        y += cell + (float)f->linespacing;              /* [R 0x1B6F58] */
+        y += cell + (float)ts->linesp;                  /* [R 0x1B6F58] */
     }
 }
 
 /* ---------------------------------------------------------------- the layout tree (.ifc) */
-enum { N_GROUP, N_QUAD, N_TEXT, N_SLIDER };
+enum { N_GROUP, N_QUAD, N_TEXT, N_SLIDER, N_RECT, N_LIST };
 typedef struct Node {
     int kind;
     char name[32];
     float p[3], m, z;           /* <p> x y z, <m> scale, <z> */
     float d[2]; int has_d;      /* <d> size */
     float col[4];               /* <c> (white when absent) */
-    unsigned F, Q;              /* <F> flags (0x1: hidden [G]), <Q> sprite flags (0x2 / 0x4: centred across / down) */
+    unsigned F, Q, M;           /* <F> flags (0x1: hidden [G]), <Q> sprite flags, <M> (0x310: a mask [G]) */
     TexRef tex; int has_tex;    /* <b> */
-    /* text: <v> / <L>, <g j o s charspacing>font</g>, <maxwidth> */
+    /* text: <v> / <L>, <g j o s charspacing linespacing w>font</g>, <maxwidth> */
     char text[MAX_TEXT];
     const Font *font;
-    int justify, origin, spacing, has_spacing;
-    float tscale, maxwidth;
+    int justify, origin, spacing, has_spacing, linesp, has_linesp;
+    float tscale, maxwidth, wrap;
     float tcol[4]; int has_tcol;
     /* slider: <val>, <hasMaskBar>, <barColor>, <maskColor>; min 0 max 100 [R ctor 0x24ACD0] */
     float val, vmin, vmax;
     int mask_bar;
     float bar_col[4], mask_col[4];
+    /* rect (GuiRect): <st> side and <ct> corner pictures, <bkgdColor>, <bc> the frame's colour, <B> its width,
+     * <bbias> its offset */
+    TexRef side, corner; int has_side, has_corner;
+    float bkgd[4], border[4], B, bbias;
+    /* list box (GuiListBox): <c highlight / normal / disabled / selector>, <b highlight / endcap>, <d highlight> */
+    float hl_col[4], norm_col[4], dis_col[4], sel_col[4];
+    int has_hl, has_norm, has_dis;
+    TexRef hl_tex, endcap; int has_hl_tex, has_endcap;
+    float hl_d[2];
+    int sel, pulse;
+    int clip; float clip_x0, clip_x1;
     int visible;
     float fade;
-    struct Node *child, *next;
+    struct Node *parent, *child, *next;
 } Node;
 
 typedef struct {
@@ -299,6 +489,7 @@ typedef struct {
 
 /* a tiny reader for the layout XML: <tag a="v" ...>text or elements</tag> (no comments, no entities) */
 typedef struct { const char *p, *end; } Xml;
+typedef struct { char k[16], v[64]; } Attr;
 
 static void xml_skip_ws(Xml *x)
 {
@@ -317,19 +508,6 @@ static int xml_name(Xml *x, char *out, int max)
     return n;
 }
 
-static int find_font(void *ctx, const char *name, const Font **out);
-
-#define MAX_FONTS 4
-typedef struct { const Bundle *const *bundles; int nb; Font *fonts; char (*names)[32]; int nfonts, maxfonts; } LoadCtx;
-
-static void apply_g(Node *nd, const char *attr, const char *val)
-{
-    if (strcmp(attr, "j") == 0) nd->justify = val[0] == 'c' ? 1 : val[0] == 'r' ? 2 : 0;   /* [G: the letters] */
-    else if (strcmp(attr, "o") == 0) nd->origin = val[0] == 'm' ? 1 : val[0] == 'b' ? 2 : 0;
-    else if (strcmp(attr, "s") == 0) nd->tscale = strtof(val, NULL);
-    else if (strcmp(attr, "charspacing") == 0) { nd->spacing = atoi(val); nd->has_spacing = 1; }
-}
-
 static void parse_floats(const char *s, float *out, int max)
 {
     char *e;
@@ -341,32 +519,82 @@ static void parse_floats(const char *s, float *out, int max)
     }
 }
 
-/* one property of node nd: tag with its text (and the <g> attributes already applied) */
-static void apply_prop(LoadCtx *lc, Node *nd, const char *tag, const char *text)
+/* GuiText.setText / localizeString (a key without a text keeps the key [G]) */
+static void node_text(Node *nd, const char *s)
 {
+    if (nd)
+        snprintf(nd->text, sizeof nd->text, "%s", s ? s : "");
+}
+static void node_localize(const Gui *g, Node *nd, const char *key)
+{
+    const char *s = loc_find(g, key);
+    node_text(nd, s ? s : key);
+}
+
+/* the <g> attributes [G: the letters' meanings; R: the three justify and origin modes in the string draw] */
+static void apply_g(Node *nd, const char *attr, const char *val)
+{
+    if (strcmp(attr, "j") == 0) nd->justify = val[0] == 'c' ? 1 : val[0] == 'r' ? 2 : 0;
+    else if (strcmp(attr, "o") == 0) nd->origin = val[0] == 'm' ? 1 : val[0] == 'b' ? 2 : 0;
+    else if (strcmp(attr, "s") == 0) nd->tscale = strtof(val, NULL);
+    else if (strcmp(attr, "charspacing") == 0) { nd->spacing = atoi(val); nd->has_spacing = 1; }
+    else if (strcmp(attr, "linespacing") == 0) { nd->linesp = atoi(val); nd->has_linesp = 1; }
+    /* w: the word wrap's width, in the text's parent frame [G: boss_message's p.x 20 + w 480 = its rect's 500,
+     * cq_title's 460 centred in 480, the Results lines' w = the list's width] */
+    else if (strcmp(attr, "w") == 0) nd->wrap = strtof(val, NULL);
+    /* m (l / c), i: not traced */
+}
+
+/* one property of node nd: tag with its text and attributes */
+static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, const Attr *at, int na)
+{
+    const char *which = na > 0 ? at[0].k : "";
     if (strcmp(tag, "p") == 0) parse_floats(text, nd->p, 3);
-    else if (strcmp(tag, "d") == 0) { parse_floats(text, nd->d, 2); nd->has_d = 1; }
-    else if (strcmp(tag, "m") == 0) nd->m = strtof(text, NULL);
+    else if (strcmp(tag, "d") == 0) {
+        if (strcmp(which, "highlight") == 0) parse_floats(text, nd->hl_d, 2);
+        else { parse_floats(text, nd->d, 2); nd->has_d = 1; }
+    } else if (strcmp(tag, "m") == 0) nd->m = strtof(text, NULL);
     else if (strcmp(tag, "z") == 0) nd->z = strtof(text, NULL);
     else if (strcmp(tag, "F") == 0) nd->F = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "Q") == 0) nd->Q = (unsigned)strtoul(text, NULL, 0);
+    else if (strcmp(tag, "M") == 0) nd->M = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "c") == 0) {
         float c[4];
         col_rgba((uint32_t)strtoul(text, NULL, 0), c);
-        if (nd->kind == N_TEXT) { memcpy(nd->tcol, c, sizeof c); nd->has_tcol = 1; }
+        if (strcmp(which, "highlight") == 0) { memcpy(nd->hl_col, c, sizeof c); nd->has_hl = 1; }
+        else if (strcmp(which, "normal") == 0) { memcpy(nd->norm_col, c, sizeof c); nd->has_norm = 1; }
+        else if (strcmp(which, "disabled") == 0) { memcpy(nd->dis_col, c, sizeof c); nd->has_dis = 1; }
+        else if (strcmp(which, "selector") == 0) memcpy(nd->sel_col, c, sizeof c);
+        else if (nd->kind == N_TEXT) { memcpy(nd->tcol, c, sizeof c); nd->has_tcol = 1; }
         else memcpy(nd->col, c, sizeof c);
-    } else if (strcmp(tag, "b") == 0)
-        nd->has_tex = tex_find(lc->bundles, lc->nb, text, &nd->tex);
-    else if (strcmp(tag, "v") == 0 || strcmp(tag, "L") == 0)
-        snprintf(nd->text, sizeof nd->text, "%s", text);   /* <L> is a .loc key; the HUD's texts are all <v> */
-    else if (strcmp(tag, "g") == 0)
-        find_font(lc, text, &nd->font);
-    else if (strcmp(tag, "maxwidth") == 0) nd->maxwidth = strtof(text, NULL);
+    } else if (strcmp(tag, "b") == 0) {
+        if (strcmp(which, "highlight") == 0) nd->has_hl_tex = tex_find(g, text, &nd->hl_tex);
+        else if (strcmp(which, "endcap") == 0) nd->has_endcap = tex_find(g, text, &nd->endcap);
+        else nd->has_tex = tex_find(g, text, &nd->tex);
+    } else if (strcmp(tag, "v") == 0) {
+        char *o = nd->text;                              /* the layouts' texts keep their line breaks, not \r */
+        int n = 0;
+        for (const char *s = text; *s && n < MAX_TEXT - 1; s++)
+            if (*s != '\r') o[n++] = *s;
+        o[n] = 0;
+    } else if (strcmp(tag, "L") == 0)
+        node_localize(g, nd, text);
+    else if (strcmp(tag, "g") == 0) {
+        for (int i = 0; i < na; i++)
+            apply_g(nd, at[i].k, at[i].v);
+        nd->font = find_font(g, text);
+    } else if (strcmp(tag, "maxwidth") == 0) nd->maxwidth = strtof(text, NULL);
     else if (strcmp(tag, "val") == 0) nd->val = strtof(text, NULL);
     else if (strcmp(tag, "hasMaskBar") == 0) nd->mask_bar = atoi(text) != 0;
     else if (strcmp(tag, "barColor") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->bar_col);
     else if (strcmp(tag, "maskColor") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->mask_col);
-    /* sc (script), f (entry function), M, X / xf (child interfaces) and the rest: not needed for drawing */
+    else if (strcmp(tag, "st") == 0) nd->has_side = tex_find(g, text, &nd->side);
+    else if (strcmp(tag, "ct") == 0) nd->has_corner = tex_find(g, text, &nd->corner);
+    else if (strcmp(tag, "bkgdColor") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->bkgd);
+    else if (strcmp(tag, "bc") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->border);
+    else if (strcmp(tag, "B") == 0) nd->B = strtof(text, NULL);
+    else if (strcmp(tag, "bbias") == 0) nd->bbias = strtof(text, NULL);
+    /* sc (script), f (entry function), R, a, sp, growth, X / xf (child interfaces): not needed for drawing */
 }
 
 static int node_kind(const char *tag)
@@ -374,6 +602,8 @@ static int node_kind(const char *tag)
     if (strcmp(tag, "q") == 0) return N_QUAD;
     if (strcmp(tag, "t") == 0) return N_TEXT;
     if (strcmp(tag, "sl") == 0) return N_SLIDER;
+    if (strcmp(tag, "r") == 0) return N_RECT;
+    if (strcmp(tag, "lb") == 0) return N_LIST;
     if (strcmp(tag, "o") == 0 || strcmp(tag, "DD") == 0 || strcmp(tag, "i") == 0) return N_GROUP;
     return -1;
 }
@@ -387,16 +617,28 @@ static Node *node_new(Layout *L, int kind)
     nd->kind = kind;
     nd->m = 1;
     nd->tscale = 1;
-    for (int i = 0; i < 4; i++) nd->col[i] = nd->bar_col[i] = nd->mask_col[i] = 1;
+    for (int i = 0; i < 4; i++) nd->col[i] = nd->bar_col[i] = nd->mask_col[i] = nd->border[i] = 1;
     nd->val = 100;                                       /* [R 0x24AD94: value 100, min 0, max 100, 100 x 20] */
     nd->vmax = 100;
+    nd->sel = -1;
     nd->visible = 1;
     nd->fade = 1;
     return nd;
 }
 
+static void node_attach(Node *nd, Node *parent)
+{
+    nd->parent = parent;
+    nd->next = NULL;
+    if (!parent)
+        return;
+    Node **pp = &parent->child;
+    while (*pp) pp = &(*pp)->next;
+    *pp = nd;
+}
+
 /* reads one element at x->p ('<' expected); nodes become children of parent, properties go to parent */
-static int xml_element(LoadCtx *lc, Layout *L, Xml *x, Node *parent)
+static int xml_element(Gui *g, Layout *L, Xml *x, Node *parent)
 {
     xml_skip_ws(x);
     if (x->p >= x->end || *x->p != '<')
@@ -411,9 +653,8 @@ static int xml_element(LoadCtx *lc, Layout *L, Xml *x, Node *parent)
     xml_name(x, tag, sizeof tag);
     int kind = node_kind(tag);
     Node *nd = kind >= 0 ? node_new(L, kind) : NULL;
-    char gattr[4][2][24];
-    int ngattr = 0;
-    /* attributes */
+    Attr at[8];
+    int na = 0;
     for (;;) {
         xml_skip_ws(x);
         if (x->p >= x->end) return 0;
@@ -435,18 +676,19 @@ static int xml_element(LoadCtx *lc, Layout *L, Xml *x, Node *parent)
         }
         if (nd && strcmp(an, "n") == 0)
             snprintf(nd->name, sizeof nd->name, "%s", av);
-        else if (ngattr < 4) {
-            snprintf(gattr[ngattr][0], 24, "%s", an);
-            snprintf(gattr[ngattr][1], 24, "%s", av);
-            ngattr++;
+        else if (na < 8) {
+            snprintf(at[na].k, sizeof at[na].k, "%s", an);
+            snprintf(at[na].v, sizeof at[na].v, "%s", av);
+            na++;
         }
     }
+    if (nd)                                              /* attach first: its children's frames need the parent */
+        node_attach(nd, parent);
     if (*x->p == '/') {                                  /* <tag/> */
         x->p += 2;
-        goto attach;
+        goto done;
     }
     x->p++;
-    /* content: elements, or text up to the closing tag */
     {
         const char *t0 = x->p;
         xml_skip_ws(x);
@@ -455,55 +697,51 @@ static int xml_element(LoadCtx *lc, Layout *L, Xml *x, Node *parent)
                 xml_skip_ws(x);
                 if (x->p + 1 < x->end && x->p[0] == '<' && x->p[1] == '/')
                     break;
-                if (!xml_element(lc, L, x, nd ? nd : parent))
+                if (!xml_element(g, L, x, nd ? nd : parent))
                     return 0;
             }
         } else {
             x->p = t0;
             const char *t1 = t0;
             while (t1 < x->end && *t1 != '<') t1++;
-            char text[128];
-            int n = (int)(t1 - t0) < 127 ? (int)(t1 - t0) : 127;
+            char text[MAX_TEXT];
+            int n = (int)(t1 - t0) < MAX_TEXT - 1 ? (int)(t1 - t0) : MAX_TEXT - 1;
             memcpy(text, t0, (size_t)n);
             text[n] = 0;
             x->p = t1;
-            if (!nd && parent) {
-                if (strcmp(tag, "g") == 0)
-                    for (int i = 0; i < ngattr; i++)
-                        apply_g(parent, gattr[i][0], gattr[i][1]);
-                apply_prop(lc, parent, tag, text);
-            }
+            if (!nd && parent)
+                apply_prop(g, parent, tag, text, at, na);
         }
-        /* </tag> */
-        while (x->p < x->end && *x->p != '>') x->p++;
+        while (x->p < x->end && *x->p != '>') x->p++;   /* </tag> */
         x->p++;
     }
-attach:
+done:
     if (nd) {
         if (nd->F & 1)
-            nd->visible = 0;                             /* [G: F 0x1 = starts hidden; the HUD script sets them] */
+            nd->visible = 0;                             /* [G: F 0x1 = starts hidden; the scripts show them] */
         if (!parent)
             L->root = nd;
-        else {
-            Node **pp = &parent->child;
-            while (*pp) pp = &(*pp)->next;
-            *pp = nd;
-        }
     }
     return 1;
 }
 
-static int layout_load(LoadCtx *lc, Layout *L, const Bundle *b, const char *name)
+static Layout *layout_load(Gui *g, const Bundle *b, const char *name)
 {
-    memset(L, 0, sizeof *L);
-    int n = bdp_find_name(b, name);
+    int n = b ? bdp_find_name(b, name) : -1;
     const BdpEntry *e = n >= 0 ? bdp_entry_of(b, (uint32_t)n, ET_IFC) : NULL;
     if (!e || !e->data)
-        return 0;
+        return NULL;
+    Layout *L = calloc(1, sizeof *L);
+    if (!L)
+        return NULL;
     Xml x = { (const char *)e->data, (const char *)e->data + e->size };
-    while (x.p < x.end && *x.p && xml_element(lc, L, &x, NULL))
+    while (x.p < x.end && *x.p && xml_element(g, L, &x, NULL))
         xml_skip_ws(&x);
-    return L->root != NULL;
+    if (!L->root) {
+        free(L);
+        return NULL;
+    }
+    return L;
 }
 
 static Node *layout_find(Node *nd, const char *name)
@@ -517,24 +755,202 @@ static Node *layout_find(Node *nd, const char *name)
     }
     return NULL;
 }
+/* GuiObject.copyObject + setParent: a deep copy, the parent's last child [G: last] */
+static Node *node_copy(Layout *L, const Node *src, Node *parent)
+{
+    if (L->n >= MAX_NODES)
+        return NULL;
+    Node *c = &L->nodes[L->n++];
+    *c = *src;
+    c->child = NULL;
+    node_attach(c, parent);
+    for (const Node *k = src->child; k; k = k->next)
+        node_copy(L, k, c);
+    return c;
+}
+
+static void show(Node *nd, int v) { if (nd) nd->visible = v; }
+static void set_fade(Node *nd, float f) { if (nd) nd->fade = f; }
+
+static void text_style(const Node *nd, TextStyle *ts)
+{
+    ts->f = nd->font;
+    ts->justify = nd->justify;
+    ts->origin = nd->origin;
+    ts->spacing = nd->has_spacing ? nd->spacing : nd->font ? nd->font->spacing : 0;
+    ts->linesp = nd->has_linesp ? nd->linesp : nd->font ? nd->font->linespacing : 0;
+    ts->maxwidth = nd->maxwidth;
+    ts->wrap = nd->wrap > 0 && nd->tscale > 0 ? nd->wrap / nd->tscale : 0;
+}
+/* GuiText.width() / height(): the text's size by its own scale s, not the object's m [G: Results::setupButtons
+ * multiplies width() by getScale()] */
+static float text_w(const Gui *g, const Node *nd)
+{
+    if (!nd || !nd->font)
+        return 0;
+    TextStyle ts;
+    float w, h;
+    text_style(nd, &ts);
+    text_extent(g, &ts, nd->text, &w, &h);
+    return w * nd->tscale;
+}
+static float text_h(const Gui *g, const Node *nd)
+{
+    if (!nd || !nd->font)
+        return 0;
+    TextStyle ts;
+    float w, h;
+    text_style(nd, &ts);
+    text_extent(g, &ts, nd->text, &w, &h);
+    return h * nd->tscale;
+}
+
+/* ---------------------------------------------------------------- list boxes (GuiListBox) */
+static int list_count(const Node *l)
+{
+    int n = 0;
+    for (const Node *c = l ? l->child : NULL; c; c = c->next) n++;
+    return n;
+}
+static Node *list_item(Node *l, int i)
+{
+    Node *c = l ? l->child : NULL;
+    while (c && i-- > 0) c = c->next;
+    return i < 0 ? c : NULL;
+}
+/* selectItem(i): the item in the highlight colour, the rest in the normal one [G: the list's colours replace the
+ * items'; the layouts give the items the same ones] */
+static void list_select(Node *l, int i)
+{
+    if (!l)
+        return;
+    l->sel = i;
+    int j = 0;
+    for (Node *c = l->child; c; c = c->next, j++) {
+        if (c->kind != N_TEXT)
+            continue;
+        if (j == i && l->has_hl) { memcpy(c->tcol, l->hl_col, sizeof c->tcol); c->has_tcol = 1; }
+        else if (j != i && l->has_norm) { memcpy(c->tcol, l->norm_col, sizeof c->tcol); c->has_tcol = 1; }
+    }
+}
+/* incrementSelection(delta, 0): to the next item shown, no wrap [G] */
+static void list_increment(Node *l, int delta)
+{
+    if (!l)
+        return;
+    int n = list_count(l);
+    for (int j = l->sel + delta; j >= 0 && j < n; j += delta) {
+        Node *c = list_item(l, j);
+        if (c && c->visible) {
+            list_select(l, j);
+            return;
+        }
+    }
+}
+
+/* ---------------------------------------------------------------- drawing a layout */
+/* GuiRect [G: its draw is not traced]: the background (bkgdColor) over d from the origin, then a frame in bc: the
+ * corner picture (FrameCorner, the top-left one) mirrored to each corner, the side picture (FrameLine, its lower rows
+ * the outside) stretched between, B wide, its outer edge bbias from the rect's (-7: outside). The left and right
+ * sides need the side picture turned, which a quad cannot do: they are drawn as one-pixel strips, each the colour of
+ * one row of it. */
+static void rect_emit(Emit *e, const Node *nd, float ox, float oy, float sc, float z, float fade)
+{
+    float w = nd->has_d ? nd->d[0] : 0, h = nd->has_d ? nd->d[1] : 0;
+    float bg[4] = { nd->bkgd[0], nd->bkgd[1], nd->bkgd[2], nd->bkgd[3] * fade };
+    float bc[4] = { nd->border[0], nd->border[1], nd->border[2], nd->border[3] * fade };
+    if (w <= 0 || h <= 0)
+        return;
+    emit_quad(e, ox, oy, ox + sc * w, oy + sc * h, 0, 0, 1, 1, bg, NULL, 0, z);
+    float B = nd->B;
+    if (B <= 0)
+        return;
+    float x0 = nd->bbias, y0 = nd->bbias, x1 = w - nd->bbias, y1 = h - nd->bbias;
+    if (x1 - x0 < 2 * B) x1 = x0 + 2 * B;
+    if (y1 - y0 < 2 * B) y1 = y0 + 2 * B;
+#define RX(v) (ox + sc * (v))
+#define RY(v) (oy + sc * (v))
+    if (nd->has_corner) {
+        const TexRef *t = &nd->corner;
+        emit_quad(e, RX(x0), RY(y0), RX(x0 + B), RY(y0 + B), 0, 0, t->us, t->vs, bc, t->b, t->name, z);
+        emit_quad(e, RX(x1 - B), RY(y0), RX(x1), RY(y0 + B), t->us, 0, 0, t->vs, bc, t->b, t->name, z);
+        emit_quad(e, RX(x0), RY(y1 - B), RX(x0 + B), RY(y1), 0, t->vs, t->us, 0, bc, t->b, t->name, z);
+        emit_quad(e, RX(x1 - B), RY(y1 - B), RX(x1), RY(y1), t->us, t->vs, 0, 0, bc, t->b, t->name, z);
+    }
+    if (nd->has_side) {
+        const TexRef *t = &nd->side;
+        emit_quad(e, RX(x0 + B), RY(y0), RX(x1 - B), RY(y0 + B), 0, t->vs, t->us, 0, bc, t->b, t->name, z);
+        emit_quad(e, RX(x0 + B), RY(y1 - B), RX(x1 - B), RY(y1), 0, 0, t->us, t->vs, bc, t->b, t->name, z);
+        int ns = (int)(B * sc + 0.5f);
+        if (ns < 1) ns = 1;
+        for (int i = 0; i < ns; i++) {
+            float a = B * (float)i / (float)ns, b = B * (float)(i + 1) / (float)ns;
+            float v = t->vs * (1.0f - ((float)i + 0.5f) / (float)ns);   /* the outside (v = 1) at the edge */
+            emit_quad(e, RX(x0 + a), RY(y0 + B), RX(x0 + b), RY(y1 - B), 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b,
+                      t->name, z);
+            emit_quad(e, RX(x1 - b), RY(y0 + B), RX(x1 - a), RY(y1 - B), 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b,
+                      t->name, z);
+        }
+    }
+#undef RX
+#undef RY
+}
+
+/* the list's highlight behind its selected item [G: GuiListBox's highlight (its growth and pulse) is not traced]:
+ * the segment picture across the item's text, an end cap at each end, hl_d's height, in the selector colour,
+ * pulsing when setHighlightPulse(1) */
+static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, float sc, float z, float fade)
+{
+    if (l->col[3] > 0 && l->has_d)
+        emit_quad(e, ox, oy, ox + sc * l->d[0], oy + sc * l->d[1], 0, 0, 1, 1,
+                  (const float[4]){ l->col[0], l->col[1], l->col[2], l->col[3] * fade }, NULL, 0, z);
+    const Node *it = list_item((Node *)l, l->sel);
+    if (!l->has_hl_tex || !it || !it->visible || it->kind != N_TEXT)
+        return;
+    float w = text_w(g, it) * it->m, h = text_h(g, it) * it->m;
+    float x0 = it->p[0] - (it->justify == 1 ? 0.5f * w : it->justify == 2 ? w : 0), x1 = x0 + w;
+    float cy = it->p[1] + (it->origin == 0 ? 0.5f * h : it->origin == 2 ? -0.5f * h : 0);
+    float bh = l->hl_d[1] > 0 ? l->hl_d[1] : h, cap = 0.5f * bh;
+    float c[4] = { l->sel_col[0], l->sel_col[1], l->sel_col[2], l->sel_col[3] * fade };
+    if (l->pulse)
+        c[3] *= 0.7f + 0.3f * sinf(2.0f * HUD_PI * 1.5f * g->time);
+    float y0 = oy + sc * (cy - 0.5f * bh), y1 = oy + sc * (cy + 0.5f * bh);
+    const TexRef *t = &l->hl_tex;
+    emit_quad(e, ox + sc * x0, y0, ox + sc * x1, y1, 0, 0, t->us, t->vs, c, t->b, t->name, z);
+    if (l->has_endcap) {
+        const TexRef *k = &l->endcap;
+        emit_quad(e, ox + sc * (x0 - cap), y0, ox + sc * x0, y1, k->us, 0, 0, k->vs, c, k->b, k->name, z);
+        emit_quad(e, ox + sc * x1, y0, ox + sc * (x1 + cap), y1, 0, 0, k->us, k->vs, c, k->b, k->name, z);
+    }
+}
 
 /* the layout drawn: the object's frame maps (x, y) to (ox + sc x, oy + sc y); children in it after p and m. The
  * sprite of a quad spans d (or its texture's used size, UVs over the used part) from the origin, or centred (Q); a
  * slider is centred (0x24A310): the bar (barColor) its whole size and the mask (maskColor) from the value's point to
  * its right end (hasMaskBar, flag 0x10), else the bar to the value's point; texts by text_emit. */
-static void layout_emit(Emit *e, const Node *nd, float ox, float oy, float sc, float z, float fade)
+static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float oy, float sc, float z, float fade)
 {
     for (; nd; nd = nd->next) {
         if (!nd->visible)
             continue;
         float nox = ox + sc * nd->p[0], noy = oy + sc * nd->p[1], nsc = sc * nd->m;
         float nz = z + nd->p[2] + nd->z, nf = fade * nd->fade;
+        int clip = e->clip;
+        float cx0 = e->cx0, cx1 = e->cx1;
+        if (nd->clip) {
+            e->clip = 1;
+            e->cx0 = nd->clip_x0;
+            e->cx1 = nd->clip_x1;
+        }
         if (nd->kind == N_QUAD) {
             float w = nd->has_d ? nd->d[0] : nd->has_tex ? nd->tex.w : 0;
             float h = nd->has_d ? nd->d[1] : nd->has_tex ? nd->tex.h : 0;
             float x0 = nd->Q & 2 ? -0.5f * w : 0, y0 = nd->Q & 4 ? -0.5f * h : 0;
             float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
-            if (w > 0 && h > 0)
+            /* M 0x200 (Results' 0x310 boxes at the title's ends): a mask, not drawn [G]; F 0x20 (the challenge
+             * icons): drawn only with a picture [G] */
+            int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
+            if (drawn && w > 0 && h > 0)
                 emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, 0,
                           nd->has_tex ? nd->tex.us : 1, nd->has_tex ? nd->tex.vs : 1, c,
                           nd->has_tex ? nd->tex.b : NULL, nd->has_tex ? nd->tex.name : 0, nz);
@@ -563,15 +979,145 @@ static void layout_emit(Emit *e, const Node *nd, float ox, float oy, float sc, f
             col_abgr(f->shadow_col, s);
             c[3] *= nf;
             s[3] *= nf;
+            TextStyle ts;
+            text_style(nd, &ts);
             /* the text's own scale s goes into its matrix (GuiText 0x234D88 scales the matrix by it) */
-            text_emit(e, f, nd->text, nox, noy, nsc * nd->tscale, nd->justify, nd->origin, nd->maxwidth,
-                      nd->has_spacing ? nd->spacing : f->spacing, c, s, f->shadow_dx, f->shadow_dy, nz);
-        }
-        layout_emit(e, nd->child, nox, noy, nsc, nz, nf);
+            text_emit(e, g, &ts, nd->text, nox, noy, nsc * nd->tscale, c, s, f->shadow_dx, f->shadow_dy, nz);
+        } else if (nd->kind == N_RECT)
+            rect_emit(e, nd, nox, noy, nsc, nz, nf);
+        else if (nd->kind == N_LIST)
+            list_emit(e, g, nd, nox, noy, nsc, nz, nf);
+        layout_emit(e, g, nd->child, nox, noy, nsc, nz, nf);
+        e->clip = clip;
+        e->cx0 = cx0;
+        e->cx1 = cx1;
     }
 }
 
-/* ---------------------------------------------------------------- the HUD */
+/* one interface's quads: back to front by depth, the larger z behind [G: the bars' black backing has z 0.5 and must
+ * lie under the bar], in the layout's order otherwise */
+static int emit_layout(HudQuad *out, int max, const Gui *g, const Layout *L)
+{
+    if (!L || max <= 0)
+        return 0;
+    float z[MAX_SORT];
+    Emit e = { out, z, 0, max < MAX_SORT ? max : MAX_SORT, 0, 0, 0 };
+    layout_emit(&e, g, L->root, 0, 0, 1, 0, 1);
+    for (int i = 1; i < e.n; i++) {                      /* stable insertion sort, z descending */
+        HudQuad q = e.q[i];
+        float k = z[i];
+        int j = i - 1;
+        while (j >= 0 && z[j] < k) {
+            e.q[j + 1] = e.q[j];
+            z[j + 1] = z[j];
+            j--;
+        }
+        e.q[j + 1] = q;
+        z[j + 1] = k;
+    }
+    return e.n;
+}
+
+/* ---------------------------------------------------------------- ObjectFader.h [R] */
+typedef struct { Node *obj[MAX_FADERS]; float dir[MAX_FADERS]; int n; } Faders;
+
+static int fader_find(Faders *fd, Node *obj)
+{
+    for (int i = 0; i < fd->n; i++)
+        if (fd->obj[i] == obj)
+            return i;
+    return -1;
+}
+static void fader_init(Faders *fd, Node *obj, int on)
+{
+    if (!obj)
+        return;
+    int i = fader_find(fd, obj);
+    if (i < 0) {
+        if (fd->n >= MAX_FADERS)
+            return;
+        i = fd->n++;
+        fd->obj[i] = obj;
+    }
+    fd->dir[i] = 0;
+    obj->visible = on;
+    obj->fade = on ? 1.0f : 0.0f;
+}
+static void fader_go(Faders *fd, Node *obj, float dir)
+{
+    int i = fader_find(fd, obj);
+    if (i >= 0)
+        fd->dir[i] = dir;
+}
+/* UpdateObjectFader: 2 a second, at most a tenth of a second a frame */
+static void fader_update(Faders *fd, float dt)
+{
+    if (dt > 0.1f)
+        dt = 0.1f;
+    for (int i = 0; i < fd->n; i++) {
+        if (fd->dir[i] == 0)
+            continue;
+        Node *o = fd->obj[i];
+        float f = o->fade + fd->dir[i] * 2.0f * dt;
+        if (f < 0) { f = 0; fd->dir[i] = 0; }
+        else if (f > 1) { f = 1; fd->dir[i] = 0; }
+        o->fade = f;
+        o->visible = f != 0;
+    }
+}
+
+/* ---------------------------------------------------------------- the interfaces */
+typedef struct { Node *box, *list, *rect, *title; int state; } ConfirmQuit;
+
+/* a text banner: Rage.ifc run by Rage.scr [R] */
+typedef struct {
+    Layout *L;
+    Node *rage, *head, *copies[RAGE_COPIES];
+    int init;
+    float timer, hold, scale, col[4];
+    char message[MAX_TEXT], message2[MAX_TEXT], sound[32];
+} Rage;
+
+typedef struct { Node *obj; float t0, t1, p0[3], p1[3], s0, s1, f0, f1; int done; } Intro;
+
+enum { SCR_STANDIN, SCR_RESULTS, SCR_GAME_OVER, SCR_LEVEL };
+typedef struct {
+    Layout *L;
+    int kind, screen;
+    Faders fd;
+    ConfirmQuit cq;
+    int ended;                                           /* WorldGuiDriver::endResults: unloaded next frame */
+    int exit_fn, exit_val;                               /* the call Results::setExitState holds back a frame */
+    float age, ready;                                    /* seconds shown; seconds it has taken buttons (stand-in) */
+    /* the data */
+    HudResults r;
+    char played[64], current[64], results_text[64], city[64];
+    /* Results.scr (and LevelResults.scr: rating) */
+    int ni_state, do_intro, do_walkout, scroll, count_up, live_vis, cu_index, cu_value, cu_total, sound_on, last_block;
+    int rating;
+    float intro_t, live_delay, cu_progress, pulse_t, left_x, right_x, title_w, save_delay;
+    Node *list, *total, *live, *title1, *title2, *base, *save, *cu_item;
+    Intro intro[16], walk[8];
+    int nintro, nwalk;
+    /* GameOver.scr */
+    Node *choices;
+} Screen;
+
+typedef struct {
+    Layout *L;
+    Node *icon_shadow, *icon, *status, *boss_health, *boss_group, *boss_icon;
+    int cur, goal, show_points, boss, completed, upgrade;
+    float upgrade_delay;
+} ChStatus;
+
+typedef struct {
+    Layout *L;
+    Faders fd;
+    Node *title;
+    float display, cycle, scalar;
+    int upgrade;
+} ChText;
+
 typedef struct {
     float t, scale;
     float start[3], pos[3];
@@ -582,11 +1128,8 @@ typedef struct {
 struct Hud {
     HudConfig cfg;
     char monster[32];
-    Font fonts[MAX_FONTS];
-    char font_names[MAX_FONTS][32];
-    int nfonts;
-    const Bundle *bundles[2];
-    Layout hud, clock;
+    Gui gui;
+    Layout *hud, *clock;
     /* Hud.scr's objects and state */
     Node *health, *rage, *score, *heads, *blocks, *num_text, *block_text, *block;
     float hp, hp_max, energy, energy_max;
@@ -603,24 +1146,31 @@ struct Hud {
     int nbanners;
     HudProject project;
     void *project_ctx;
+    /* the screen's other interfaces */
+    ChStatus cs;
+    ChText *ct;
+    HudChallenge ch;
+    char ch_identifier[64], ch_icon[64];
+    int ch_collected, ch_required;
+    Rage *rages[MAX_RAGE];
+    int nrages;
+    Screen *scr;
+    int result, paused;
+    float auto_press;
+    HudSound sounds[MAX_SOUNDS];
+    int nsounds;
 };
 
-/* a font by the name the layouts give (<g>ARIALBLACK24</g>): loaded once, from <name>.fdf in the bundles */
-static int find_font(void *ctx, const char *name, const Font **out)
+static void sound(Hud *h, const char *name, int kill)
 {
-    LoadCtx *lc = ctx;
-    for (int i = 0; i < lc->nfonts; i++)
-        if (_stricmp(lc->names[i], name) == 0) {
-            *out = &lc->fonts[i];
-            return 1;
-        }
-    if (lc->nfonts >= lc->maxfonts || !font_load(&lc->fonts[lc->nfonts], lc->bundles, lc->nb, name))
-        return 0;
-    snprintf(lc->names[lc->nfonts], sizeof lc->names[0], "%s", name);
-    *out = &lc->fonts[lc->nfonts++];
-    return 1;
+    if (!name || !*name || h->nsounds >= MAX_SOUNDS)
+        return;
+    snprintf(h->sounds[h->nsounds].name, sizeof h->sounds[0].name, "%s", name);
+    h->sounds[h->nsounds].kill = kill;
+    h->nsounds++;
 }
 
+/* ---------------------------------------------------------------- the HUD */
 Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg)
 {
     if (!worldgui || !cfg)
@@ -631,22 +1181,21 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
     h->cfg = *cfg;
     snprintf(h->monster, sizeof h->monster, "%s", cfg->monster ? cfg->monster : "George");
     h->cfg.monster = h->monster;
-    h->bundles[0] = worldgui;
-    h->bundles[1] = common;
-    LoadCtx lc = { h->bundles, 2, h->fonts, h->font_names, 0, MAX_FONTS };
+    h->gui.bundles[h->gui.nb++] = worldgui;
+    if (common)
+        h->gui.bundles[h->gui.nb++] = common;
     char name[32];
     snprintf(name, sizeof name, "Hud%d.ifc", cfg->player >= 0 && cfg->player < 4 ? cfg->player : 0);
-    int ok = layout_load(&lc, &h->hud, worldgui, name);
-    layout_load(&lc, &h->clock, worldgui, "Clock.ifc");
+    h->hud = layout_load(&h->gui, worldgui, name);
+    h->clock = layout_load(&h->gui, worldgui, "Clock.ifc");
     /* gWorld.setBannerFont("PointsBanner") [R build/scripts/<City>.scr] */
-    find_font(&lc, "PointsBanner", &h->banner_font);
-    h->nfonts = lc.nfonts;
-    if (!ok) {
-        free(h);
+    h->banner_font = find_font(&h->gui, "PointsBanner");
+    if (!h->hud) {
+        hud_close(h);
         return NULL;
     }
     /* Hud::doInterface, event 8192 (the interface starts) [R Hud.scr] */
-    Node *r = h->hud.root;
+    Node *r = h->hud->root;
     h->health = layout_find(r, "health");
     h->rage = layout_find(r, "rage");
     if (h->health) h->health = layout_find(h->health->child, "slider");
@@ -661,11 +1210,11 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
     snprintf(tname, sizeof tname, "Hud_%s_Head", h->monster);
     int gt = cfg->play_type, king = gt >= 3 && gt <= 4;
     if (h->heads) {
-        h->heads->has_tex = tex_find(h->bundles, 2, tname, &h->heads->tex);
+        h->heads->has_tex = tex_find(&h->gui, tname, &h->heads->tex);
         h->heads->visible = !king;
     }
     if (h->blocks) {
-        h->blocks->has_tex = tex_find(h->bundles, 2, tname, &h->blocks->tex);
+        h->blocks->has_tex = tex_find(&h->gui, tname, &h->blocks->tex);
         h->blocks->visible = king;
         int i = 0;
         for (Node *c = h->blocks->child; c; c = c->next, i++) {
@@ -689,19 +1238,66 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
     h->lives = -1;
     h->blocks_won = -1;
     /* Clock::doInterface */
-    h->clock_group = layout_find(h->clock.root, "clock");
-    h->digits[0] = layout_find(h->clock.root, "ten_minute");
-    h->digits[1] = layout_find(h->clock.root, "one_minute");
-    h->digits[2] = layout_find(h->clock.root, "ten_second");
-    h->digits[3] = layout_find(h->clock.root, "one_second");
+    if (h->clock) {
+        h->clock_group = layout_find(h->clock->root, "clock");
+        h->digits[0] = layout_find(h->clock->root, "ten_minute");
+        h->digits[1] = layout_find(h->clock->root, "one_minute");
+        h->digits[2] = layout_find(h->clock->root, "ten_second");
+        h->digits[3] = layout_find(h->clock->root, "one_second");
+    }
     h->last_seconds = -1;
     if (h->clock_group)
         h->clock_group->visible = 0;
+    /* <City>::onInit: gCommon.setChallengeHud(screen.loadInterface("ChallengeStatus")) [R LasVegas.scr]; one for the
+     * screen: player 0's */
+    h->ch.required = -1;
+    h->ch_required = -1;
+    if (cfg->player == 0 && (h->cs.L = layout_load(&h->gui, worldgui, "ChallengeStatus.ifc")) != NULL) {
+        /* ChallengeStatus::doInterface 8192 [R] */
+        Node *cr = h->cs.L->root;
+        h->cs.icon_shadow = layout_find(cr, "icon");
+        h->cs.icon = h->cs.icon_shadow ? layout_find(h->cs.icon_shadow->child, "icon") : NULL;
+        h->cs.status = layout_find(cr, "status");
+        h->cs.boss_health = layout_find(cr, "bossHealth");
+        h->cs.boss_group = layout_find(cr, "boss_group");
+        h->cs.boss_icon = h->cs.boss_group ? layout_find(h->cs.boss_group->child, "icon") : NULL;
+        h->cs.upgrade_delay = -1;
+        hud_challenge(h, NULL);
+    }
     hud_update(h, 0);
     return h;
 }
 
-void hud_close(Hud *h) { free(h); }
+static void rage_free(Rage *r) { if (r) { free(r->L); free(r); } }
+static void screen_free(Screen *s) { if (s) { free(s->L); free(s); } }
+static void ctext_free(ChText *c) { if (c) { free(c->L); free(c); } }
+
+void hud_close(Hud *h)
+{
+    if (!h)
+        return;
+    free(h->hud);
+    free(h->clock);
+    free(h->cs.L);
+    ctext_free(h->ct);
+    for (int i = 0; i < h->nrages; i++)
+        rage_free(h->rages[i]);
+    screen_free(h->scr);
+    free(h);
+}
+
+void hud_add_bundle(Hud *h, const Bundle *b)
+{
+    if (!h || !b || h->gui.nb >= MAX_BUNDLES)
+        return;
+    for (int i = 0; i < h->gui.nb; i++)
+        if (h->gui.bundles[i] == b)
+            return;
+    h->gui.bundles[h->gui.nb++] = b;
+}
+
+const char *hud_string(const Hud *h, const char *key) { return h ? loc_find(&h->gui, key) : NULL; }
+void hud_set_language(Hud *h, int lang) { if (h) h->gui.lang = lang; }
 
 void hud_set(Hud *h, float hp, float hp_max, float energy, float energy_max, int score, int lives, int blocks)
 {
@@ -724,6 +1320,17 @@ void hud_set_clock(Hud *h, int visible, float seconds)
     h->clock_time = seconds;
 }
 
+/* gui.setFade(a) on "Hud<i>" and "ChallengeStatus" [R Levels.scr BeginBlockNI / ResultsNI / SkipResultsNI] */
+void hud_show(Hud *h, float fade)
+{
+    if (!h)
+        return;
+    if (h->hud)
+        h->hud->root->fade = fade;
+    if (h->cs.L)
+        h->cs.L->root->fade = fade;
+}
+
 void hud_set_project(Hud *h, HudProject fn, void *ctx)
 {
     if (!h)
@@ -732,6 +1339,7 @@ void hud_set_project(Hud *h, HudProject fn, void *ctx)
     h->project_ctx = ctx;
 }
 
+/* ---------------------------------------------------------------- PointsBanner: the floating numbers */
 /* PointsBanner::advance 0x331B00 [R]: age t (+0x104) grows by the frame time; with a = t / 1.4 the number rises from
  * 2 below its point by 12 (2a - a^3) along Z and shakes across and in depth by 1.5 (1 - a)^2 sin(1.4 + 16 pi t) and
  * sin(2.7 + 20 pi t) (the third sine, for Z, is added times 0); it is gone after 1.4 s. */
@@ -762,11 +1370,41 @@ void hud_float(Hud *h, int amount, const float pos[3], int building, float scale
     banner_place(b);
 }
 
-/* Hud::updateStats [R Hud.scr] and Clock::updateTime [R Clock.scr] */
-void hud_update(Hud *h, float dt)
+/* PointsBanner::draw 0x331960 [R]: a camera-facing frame (the camera's, Y turned down for the font) at the number's
+ * point, scaled by s = max(0.01, 0.75 scale a - a^2) world units per font pixel (0.75 from 0x44CA48), the string
+ * centred across and down (0x2B8480 with t0 = 1), with a shadow 3 3 font pixels off in 0xC4000000 (0x2B855C). */
+static int banners_emit(const Hud *h, HudQuad *out, int max)
 {
-    if (!h)
-        return;
+    const Font *f = h->banner_font;
+    Emit e = { out, NULL, 0, max, 0, 0, 0 };
+    if (!f || !f->ok)
+        return 0;
+    for (int i = 0; i < h->nbanners; i++) {
+        const Banner *b = &h->banners[i];
+        float a = b->t * (1.0f / 1.4f);
+        float s = 0.75f * b->scale * a - a * a;
+        if (s < 0.01f) s = 0.01f;
+        float scr[2], ppu = 8.0f;
+        if (h->project) {
+            if (!h->project(h->project_ctx, b->pos, scr, &ppu))
+                continue;
+        } else {                                         /* pos[0], pos[1] a screen point; the motion at ppu */
+            scr[0] = b->start[0] + (b->pos[0] - b->start[0]) * ppu;
+            scr[1] = b->start[1] - (b->pos[2] - b->start[2]) * ppu;
+        }
+        float col[4], sh[4];
+        col_abgr(b->col, col);
+        col_abgr(0xC4000000u, sh);
+        /* the banner's own shadow (3 3), not the file's 5 5 */
+        TextStyle ts = { f, 1, 1, f->spacing, f->linespacing, 0, 0 };
+        text_emit(&e, &h->gui, &ts, b->text, scr[0], scr[1], s * ppu, col, sh, 3, 3, 0);
+    }
+    return e.n;
+}
+
+/* Hud::updateStats [R Hud.scr] and Clock::updateTime [R Clock.scr] */
+static void hud_stats(Hud *h, float dt)
+{
     int gt = h->cfg.play_type;
     if (gt < 3 || gt > 4) {
         if (h->lives != h->prev_lives && h->lives >= 0 && h->num_text) {
@@ -817,8 +1455,8 @@ void hud_update(Hud *h, float dt)
             if (s != h->last_seconds) {
                 char *d[4];
                 for (int i = 0; i < 4; i++) d[i] = h->digits[i] ? h->digits[i]->text : NULL;
-                if (d[0]) snprintf(d[0], MAX_TEXT, "%s", "");
-                if (d[1]) snprintf(d[1], MAX_TEXT, "%s", "");
+                if (d[0]) d[0][0] = 0;
+                if (d[1]) d[1][0] = 0;
                 if (s >= 60) {
                     if (d[0] && s >= 600) snprintf(d[0], MAX_TEXT, "%d", (s / 60) / 10);
                     if (d[1]) snprintf(d[1], MAX_TEXT, "%d", (s / 60) % 10);
@@ -833,7 +1471,7 @@ void hud_update(Hud *h, float dt)
             }
         }
     }
-    /* the banners */
+    /* the floating numbers */
     int n = 0;
     for (int i = 0; i < h->nbanners; i++) {
         Banner *b = &h->banners[i];
@@ -845,59 +1483,1242 @@ void hud_update(Hud *h, float dt)
     h->nbanners = n;
 }
 
-/* PointsBanner::draw 0x331960 [R]: a camera-facing frame (the camera's, Y turned down for the font) at the number's
- * point, scaled by s = max(0.01, 0.75 scale a - a^2) world units per font pixel (0.75 from 0x44CA48), the string
- * centred across and down (0x2B8480 with t0 = 1), with a shadow 3 3 font pixels off in 0xC4000000 (0x2B855C). */
-static void banners_emit(const Hud *h, Emit *e)
+/* ---------------------------------------------------------------- the text banners (Rage.ifc, Rage.scr) */
+/* screen.loadInterface("Rage"), Rage::doInterface 8192 [R]: the defaults are the RAMPAGE banner's */
+static Rage *rage_load(Hud *h)
 {
-    const Font *f = h->banner_font;
-    if (!f || !f->ok)
-        return;
-    for (int i = 0; i < h->nbanners; i++) {
-        const Banner *b = &h->banners[i];
-        float a = b->t * (1.0f / 1.4f);
-        float s = 0.75f * b->scale * a - a * a;
-        if (s < 0.01f) s = 0.01f;
-        float scr[2], ppu = 8.0f;
-        if (h->project) {
-            if (!h->project(h->project_ctx, b->pos, scr, &ppu))
-                continue;
-        } else {                                         /* pos[0], pos[1] a screen point; the motion at ppu */
-            scr[0] = b->start[0] + (b->pos[0] - b->start[0]) * ppu;
-            scr[1] = b->start[1] - (b->pos[2] - b->start[2]) * ppu;
-        }
-        float col[4], sh[4];
-        col_abgr(b->col, col);
-        col_abgr(0xC4000000u, sh);
-        /* the banner's own shadow (3 3), not the file's 5 5 */
-        text_emit(e, f, b->text, scr[0], scr[1], s * ppu, 1, 1, 0, f->spacing, col, sh, 3, 3, 0);
+    if (h->nrages >= MAX_RAGE) {                         /* [G: the game has no limit; the oldest goes] */
+        rage_free(h->rages[0]);
+        memmove(h->rages, h->rages + 1, sizeof h->rages[0] * (MAX_RAGE - 1));
+        h->nrages--;
     }
+    Rage *r = calloc(1, sizeof *r);
+    if (!r)
+        return NULL;
+    r->L = layout_load(&h->gui, h->gui.bundles[0], "Rage.ifc");
+    r->rage = r->L ? layout_find(r->L->root, "Rage") : NULL;
+    if (!r->rage) {
+        rage_free(r);
+        return NULL;
+    }
+    r->head = layout_find(r->L->root, "Head");
+    if (r->head) {
+        r->head->m = 4.0f;                               /* goHead.setScale(4.0) */
+        /* [G] nothing in Rage.scr hides the head (HUD_GEORGE_HEAD, whatever the monster), yet it would cover the
+         * screen's middle at 160 x 248; taken as not drawn */
+        r->head->visible = 0;
+    }
+    r->rage->fade = 0;
+    snprintf(r->message, sizeof r->message, "Rampage");
+    r->scale = 1.0f;
+    snprintf(r->sound, sizeof r->sound, "v_rampage");
+    col_set(r->col, 1, 0, 0, 1);
+    r->hold = 0.35f;                                     /* [G: fHoldTime is only set by setPointsBannerData; 0.35] */
+    h->rages[h->nrages++] = r;
+    return r;
+}
+
+/* Rage::setPointsBannerData / setPointsBannerData2 (and this.setName("Removeable"): gWorld.hideChallengeCompletionUI
+ * hides those, 0x2B01C0, not ported) */
+static void rage_data(Rage *r, const char *message, const char *message2, const float col[4], float size, float hold,
+                      const char *sfx)
+{
+    snprintf(r->message, sizeof r->message, "%s", message ? message : "");
+    snprintf(r->message2, sizeof r->message2, "%s", message2 ? message2 : "");
+    memcpy(r->col, col, sizeof r->col);
+    r->scale = size;
+    r->hold = hold;
+    if (!sfx || strcmp(sfx, "Default") != 0)
+        snprintf(r->sound, sizeof r->sound, "%s", sfx ? sfx : "");
+}
+
+/* Rage::setupData [R]: the text (a key, or '#' and the text), its colour and scale, the second line, 15 copies of
+ * it with fades 0, 1/15 .. 14/15, the text itself hidden, the sound */
+static void rage_setup(Hud *h, Rage *r)
+{
+    Node *t = r->rage;
+    node_localize(&h->gui, t, r->message);
+    memcpy(t->tcol, r->col, sizeof t->tcol);
+    t->has_tcol = 1;
+    t->m = r->scale;
+    if (r->message[0] == '#')
+        node_text(t, r->message + 1);
+    if (r->message2[0]) {
+        Node *l2 = layout_find(t->child, "line2");
+        if (l2) {
+            node_localize(&h->gui, l2, r->message2);
+            memcpy(l2->tcol, r->col, sizeof l2->tcol);
+            l2->has_tcol = 1;
+            if (r->message2[0] == '#')
+                node_text(l2, r->message2 + 1);
+            l2->visible = 1;
+        }
+    }
+    float fi = 0;
+    for (int i = 0; i < RAGE_COPIES; i++) {
+        Node *c = node_copy(r->L, t, t->parent);
+        if (c) {
+            c->fade = fi;
+            c->visible = 1;
+        }
+        r->copies[i] = c;
+        fi += 1.0f / RAGE_COPIES;
+    }
+    t->visible = 0;
+    if (r->sound[0])
+        sound(h, r->sound, 0);
+}
+
+/* Rage::doInterface 2048 [R]; returns 0 when it unloads itself */
+static int rage_update(Hud *h, Rage *r, float dt)
+{
+    if (!r->init) {
+        r->init = 1;
+        rage_setup(h, r);
+        return 1;
+    }
+    r->timer += dt;
+    float t = r->timer;
+    Node *g = r->rage;
+    if (t < 0.75f) {                                     /* the copies swirl in */
+        float p = t / 0.75f;
+        if (p > 1) p = 1;
+        float sp = sqrtf(p);
+        for (int i = 0; i < RAGE_COPIES; i++) {
+            Node *c = r->copies[i];
+            if (!c)
+                continue;
+            c->fade = sp * (float)(RAGE_COPIES - i) / (float)RAGE_COPIES;
+            float off = (1.0f - sp) * 100.0f * cosf(1.3f * (float)i);
+            float ang = (float)(i - 4) / 6.0f + p;
+            c->p[0] = g->p[0] + off * cosf(ang);
+            c->p[1] = g->p[1] + off * sinf(ang);
+            c->p[2] = g->p[2];
+        }
+    } else if (t < 0.75f + r->hold) {                    /* the text holds, shaking */
+        for (int i = 0; i < RAGE_COPIES; i++) show(r->copies[i], 0);
+        g->visible = 1;
+        g->fade = 1;
+        float a = (t - 0.75f) / r->hold * 2.0f * 3.1415927f;
+        g->p[0] = 320.0f + 3.0f * cosf(a * 2.0f);
+        g->p[1] = 240.0f + 2.0f * sinf(a * 3.0f);
+        g->p[2] = 0;
+    } else if (t < 0.75f + r->hold + 0.5f) {             /* and fades from half */
+        float f = 1.0f - (t - (0.75f + r->hold)) / 0.5f;
+        for (int i = 0; i < RAGE_COPIES; i++) show(r->copies[i], 0);
+        g->visible = 1;
+        g->fade = f / 2.0f;
+    } else
+        return 0;
+    return 1;
+}
+
+void hud_banner_text2(Hud *h, const char *name, const char *name2, const float rgba[4], float scale, float hold,
+                      const char *snd)
+{
+    if (!h || !name)
+        return;
+    Rage *r = rage_load(h);
+    if (!r)
+        return;
+    /* Edible.scr: the first "\n" (backslash, n) of the message becomes a line break */
+    char msg[MAX_TEXT];
+    snprintf(msg, sizeof msg, "%s", name);
+    char *nl = strstr(msg, "\\n");
+    if (nl && nl > msg) {
+        nl[0] = '\n';
+        memmove(nl + 1, nl + 2, strlen(nl + 2) + 1);
+    }
+    static const float red[4] = { 1, 0, 0, 1 };
+    rage_data(r, msg, name2, rgba ? rgba : red, scale, hold, snd);
+}
+
+void hud_banner_text(Hud *h, const char *name, const float rgba[4], float scale, const char *snd)
+{
+    hud_banner_text2(h, name, NULL, rgba, scale, 0.35f, snd);   /* setPointsBannerData: fHoldTime 0.35 */
+}
+
+void hud_banner_rage(Hud *h)
+{
+    if (h)
+        rage_load(h);
+}
+
+void hud_banner_reveal(Hud *h, const char *monster)
+{
+    if (!h)
+        return;
+    /* Cryotube.scr: message.format(localize("MonsterRevealed"), localize(name)); "#" + message */
+    const char *fmt = loc_find(&h->gui, "MonsterRevealed"), *name = loc_find(&h->gui, monster);
+    char msg[MAX_TEXT], text[MAX_TEXT];
+    const char *s = fmt ? strstr(fmt, "%s") : NULL;
+    if (!name)
+        name = monster ? monster : "";
+    if (s)
+        snprintf(text, sizeof text, "%.*s%s%s", (int)(s - fmt), fmt, name, s + 2);
+    else
+        snprintf(text, sizeof text, "%s", fmt ? fmt : name);
+    snprintf(msg, sizeof msg, "#%s", text);
+    float col[4] = { 220.0f / 255.0f, 0, 0, 1 };
+    Rage *r = rage_load(h);
+    if (r)
+        rage_data(r, msg, NULL, col, 0.5f, 0.35f, "V_Monster_Reveal_Seq");
+}
+
+/* ---------------------------------------------------------------- ChallengeStatus [R ChallengeStatus.scr] */
+static void cs_status_text(Hud *h, int count)
+{
+    char s[32];
+    snprintf(s, sizeof s, "%d/%d", count, h->cs.goal);
+    node_text(h->cs.status, s);
+}
+
+/* setupUI (updateBossStatus) */
+void hud_challenge(Hud *h, const HudChallenge *c)
+{
+    if (!h)
+        return;
+    if (c) {
+        h->ch = *c;
+        snprintf(h->ch_identifier, sizeof h->ch_identifier, "%s", c->identifier ? c->identifier : "");
+        snprintf(h->ch_icon, sizeof h->ch_icon, "%s", c->icon ? c->icon : "");
+        h->ch.identifier = h->ch_identifier;
+        h->ch.icon = h->ch_icon;
+        h->ch_required = c->required;
+    }
+    ChStatus *cs = &h->cs;
+    if (!cs->L)
+        return;
+    int pt = h->cfg.play_type;
+    cs->boss = h->ch.last_block && (pt == HUD_PLAY_CAMPAIGN || pt == HUD_PLAY_TIMED);
+    show(layout_find(cs->L->root, "challenge_group"), !cs->boss);
+    show(cs->boss_group, cs->boss);
+    cs->completed = 0;
+    const char *icon = h->ch.icon ? h->ch.icon : "";
+    if (cs->boss) {
+        if (cs->boss_health) cs->boss_health->val = 100;
+        set_fade(cs->boss_group, 1);
+        cs->L->root->visible = 1;
+        if (icon[0] && cs->boss_icon)
+            cs->boss_icon->has_tex = tex_find(&h->gui, icon, &cs->boss_icon->tex);
+        cs->upgrade = 0;
+    } else {
+        char s[32];
+        snprintf(s, sizeof s, "0/%d", cs->goal);
+        node_text(cs->status, s);
+        if (icon[0]) {
+            if (cs->icon_shadow) cs->icon_shadow->has_tex = tex_find(&h->gui, icon, &cs->icon_shadow->tex);
+            if (cs->icon) cs->icon->has_tex = tex_find(&h->gui, icon, &cs->icon->tex);
+        }
+        cs->upgrade = h->ch.upgrade != 0;
+    }
+}
+
+/* doInterface 2048, the item count's part (every frame, and when the numbers come) */
+static int cs_items(Hud *h, int count, int goal)
+{
+    ChStatus *cs = &h->cs;
+    int met = 0;
+    if (!cs->L || cs->boss)
+        return 0;
+    if (cs->goal != goal) {
+        cs->goal = goal;
+        if (count > cs->goal) count = cs->goal;
+        cs_status_text(h, count);
+        cs->L->root->visible = cs->goal != -1;
+    }
+    if (count != cs->cur) {
+        cs->cur = count;
+        if (count > 0 && count >= cs->goal && !cs->completed) {
+            cs->completed = 1;
+            cs->upgrade_delay = 2.0f;
+            cs->show_points = 1;
+            static const float green[4] = { 0, 1, 0, 1 };
+            hud_banner_text(h, "Challenge_Met", green, 1.0f, "v_challenge_complete");
+            met = 1;                                     /* gCommon.addPoints(i, 5, Points / players) */
+        }
+        if (count > cs->goal)
+            count = cs->goal;
+        cs_status_text(h, count);
+    }
+    return met;
+}
+
+int hud_challenge_items(Hud *h, int count, int goal)
+{
+    if (!h)
+        return 0;
+    h->ch_collected = count;
+    h->ch_required = goal;
+    return cs_items(h, count, goal);
+}
+
+int hud_boss_health(Hud *h, float percent)
+{
+    if (!h || !h->cs.L)
+        return 0;
+    ChStatus *cs = &h->cs;
+    if (cs->boss_health)
+        cs->boss_health->val = 100.0f * percent;
+    if (percent > 0)
+        return 0;
+    if (h->cfg.play_type == HUD_PLAY_CAMPAIGN) {
+        static const float green[4] = { 0, 1, 0, 1 };
+        hud_banner_text(h, "Challenge_Met", green, 1.0f, "v_challenge_complete");
+    }
+    cs->boss = 2;
+    return 1;
+}
+
+static void cs_update(Hud *h, float dt)
+{
+    ChStatus *cs = &h->cs;
+    if (!cs->L)
+        return;
+    if (!cs->boss) {
+        cs_items(h, h->ch_collected, h->ch_required);
+        if (cs->show_points) {
+            cs->upgrade_delay -= dt;
+            if (cs->upgrade_delay <= 0) {
+                cs->show_points = 0;
+                static const float green[4] = { 0, 1, 0, 1 };
+                hud_banner_text2(h, "ChallengeReward", "", green, 1.0f, 1.5f, "v_challenge_complete");
+            }
+        }
+    } else if (cs->boss == 2 && cs->boss_group) {        /* the bar fades out, 0.5 a second */
+        float f = cs->boss_group->fade - 0.5f * dt;
+        if (f <= 0) {
+            f = 0;
+            cs->boss = 3;
+        }
+        cs->boss_group->fade = f;
+    }
+}
+
+/* ---------------------------------------------------------------- ChallengeText [R ChallengeText.scr] */
+static void ct_unload(Hud *h)
+{
+    ctext_free(h->ct);
+    h->ct = NULL;
+}
+
+static int ct_load(Hud *h)
+{
+    ct_unload(h);
+    ChText *c = calloc(1, sizeof *c);
+    if (!c)
+        return 0;
+    c->L = layout_load(&h->gui, h->gui.bundles[0], "ChallengeText.ifc");
+    if (!c->L) {
+        free(c);
+        return 0;
+    }
+    h->ct = c;
+    Node *root = c->L->root;
+    const HudChallenge *ch = &h->ch;
+    root->visible = 1;
+    root->fade = 1;
+    int boss = ch->last_block;
+    c->display = boss ? 8.0f : 3.0f;
+    char title[48] = "CT_Challenge";
+    if (ch->upgrade) {
+        c->upgrade = 1;
+        strcat(title, "_Upgrade");
+    }
+    const char *text = ch->identifier ? ch->identifier : "";
+    c->scalar = 1.0f;
+    Node *rect = layout_find(root, "ctRect"), *icon = layout_find(root, "icon1");
+    show(layout_find(root, "challenge"), !boss);
+    show(layout_find(root, "boss"), boss);
+    if (boss) {
+        c->title = layout_find(root, "boss_title");
+        Node *msg = layout_find(root, "boss_message"), *obj = layout_find(root, "boss_objectives");
+        Node *hint = layout_find(root, "boss_hint");
+        node_localize(&h->gui, c->title, "ChallengeBossTitle");
+        node_localize(&h->gui, msg, "ChallengeBoss");
+        node_localize(&h->gui, obj, "ChallengeBossObjectives");
+        node_localize(&h->gui, hint, "ChallengeBossHint");
+        if (msg && obj && hint) {
+            float mh = text_h(&h->gui, msg), oh = text_h(&h->gui, obj), hh = text_h(&h->gui, hint);
+            float y = msg->p[1] + mh + 8.0f;
+            obj->p[0] = msg->p[0];
+            obj->p[1] = y;
+            y += oh + 8.0f;
+            hint->p[0] = msg->p[0];
+            hint->p[1] = y;
+            if (rect) rect->d[1] = 75.0f + 12.0f + mh + oh + hh;
+        }
+        if (icon) { icon->p[0] = 45; icon->p[1] = 35; icon->p[2] = 0; }
+    } else {
+        c->title = layout_find(root, "title");
+        node_localize(&h->gui, c->title, title);
+        node_localize(&h->gui, layout_find(root, "message"), text);
+        if (rect) rect->d[1] = 115.0f;
+        if (icon) { icon->p[0] = 45; icon->p[1] = 60; icon->p[2] = 0; }
+        const char *rw = loc_find(&h->gui, "Reward");
+        char key[24], s[MAX_TEXT];
+        if (ch->upgrade) snprintf(key, sizeof key, "Upgrade%d", ch->upgrade);
+        else snprintf(key, sizeof key, "ChallengeReward");
+        const char *rv = loc_find(&h->gui, key);
+        snprintf(s, sizeof s, "%s %s", rw ? rw : "Reward", rv ? rv : key);
+        node_text(layout_find(root, "reward"), s);
+    }
+    if (c->title)
+        c->title->m = 1.0f;
+    fader_init(&c->fd, root, 1);                         /* InitObjectFader(this, 1); ObjectFaderSetRate(this, 3):
+                                                          * no effect while it is not moving */
+    if (strcmp(text, "Xo oX") == 0 || !text[0] || ch->required <= 0 || h->cfg.play_type != HUD_PLAY_CAMPAIGN) {
+        ct_unload(h);
+        return 0;
+    }
+    if (icon) {
+        icon->has_tex = tex_find(&h->gui, ch->icon, &icon->tex);   /* resetTexture */
+        icon->m = ch->icon_scale;
+        icon->p[0] += ch->icon_shift;
+    }
+    return 1;
+}
+
+static void ct_update(Hud *h, float dt)
+{
+    ChText *c = h->ct;
+    if (!c)
+        return;
+    Node *root = c->L->root;
+    c->display -= dt;
+    if (c->display <= 0 && c->display + dt > 0)
+        fader_go(&c->fd, root, -1);
+    fader_update(&c->fd, dt);
+    if (c->upgrade && c->title) {                        /* the title pulses, less each frame */
+        c->cycle += dt * 6.0f;
+        c->title->m = 1.0f + c->scalar * sinf(c->cycle) / 4.0f;
+        c->scalar *= 0.975f;
+    }
+    if (!root->visible)
+        ct_unload(h);
+}
+
+int hud_load_interface(Hud *h, const char *name)
+{
+    if (!h || !name)
+        return 0;
+    if (_stricmp(name, "ChallengeText") == 0)
+        return ct_load(h);
+    if (_stricmp(name, "Rage") == 0)
+        return rage_load(h) != NULL;
+    return 0;
+}
+
+/* ---------------------------------------------------------------- the results screens */
+/* WorldGuiDriver::setResultState / endResults as the screens call them */
+static void set_result(Hud *h, int v) { h->result = v; }
+
+/* Results::getFormattedValue [R]: "%i,%03i" from 1000 on (one comma only) */
+static void fmt_value(char *out, size_t n, int v)
+{
+    if (v >= 1000)
+        snprintf(out, n, "%i,%03i", v / 1000, v - v / 1000 * 1000);
+    else
+        snprintf(out, n, "%d", v);
+}
+
+/* ConfirmQuit.h [R] */
+static void cq_init(Screen *s)
+{
+    ConfirmQuit *q = &s->cq;
+    q->box = layout_find(s->L->root, "confirmQuit");
+    q->list = q->box ? layout_find(q->box->child, "cq_list") : NULL;
+    q->rect = q->box ? layout_find(q->box->child, "cq_rect") : NULL;
+    q->title = q->box ? layout_find(q->box->child, "cq_title") : NULL;
+    list_select(q->list, 0);
+    if (q->list) q->list->pulse = 1;
+    fader_init(&s->fd, q->box, 0);
+    q->state = 0;
+}
+
+static void cq_show(Hud *h, Screen *s, int shorter)
+{
+    ConfirmQuit *q = &s->cq;
+    if (!q->box)
+        return;
+    node_localize(&h->gui, q->title, shorter ? "ConfirmQuitShort" : "ConfirmQuit");
+    if (q->rect) q->rect->d[0] = 480.0f;
+    float ht = text_h(&h->gui, q->title);
+    if (q->list && q->title)
+        q->list->p[1] = q->title->p[1] + ht + 15.0f;
+    if (q->rect) {
+        q->rect->d[1] = ht + 70.0f;
+        q->rect->p[1] = (480.0f - (ht + 70.0f)) / 2.0f;
+    }
+    fader_go(&s->fd, q->box, 1);
+    q->state = 1;
+}
+
+static void results_quit(Hud *h, Screen *s);
+static void gameover_quit(Hud *h, Screen *s);
+
+static int cq_process(Hud *h, Screen *s, int ev)
+{
+    ConfirmQuit *q = &s->cq;
+    if (!q->state)
+        return 0;
+    if (ev == HUD_EV_ACCEPT) {
+        if (q->list && q->list->sel == 0)
+            fader_go(&s->fd, q->box, -1);
+        else if (s->kind == SCR_RESULTS)
+            results_quit(h, s);
+        else if (s->kind == SCR_LEVEL)
+            set_result(h, HUD_RESULT_QUIT);              /* LevelResults::onQuit */
+        else
+            gameover_quit(h, s);
+        q->state = 0;
+    } else if (ev == HUD_EV_BACK) {
+        fader_go(&s->fd, q->box, -1);
+        q->state = 0;
+    } else if (ev == HUD_EV_UP || ev == HUD_EV_DOWN || ev == HUD_EV_LEFT || ev == HUD_EV_RIGHT) {
+        if (ev == HUD_EV_LEFT) ev = HUD_EV_UP;
+        if (ev == HUD_EV_RIGHT) ev = HUD_EV_DOWN;
+        int sel = q->list ? q->list->sel : 0;
+        list_increment(q->list, -1 + 2 * (ev == HUD_EV_DOWN));
+        if (q->list && q->list->sel != sel)
+            sound(h, "Rollover", 0);
+    }
+    return 1;
+}
+
+/* Results::setupIntroItem: from and to where the object is, scale and fade unchanged */
+static Intro *intro_item(Screen *s, Intro *list, int *n, int max, const char *name)
+{
+    if (*n >= max)
+        return NULL;
+    Node *o = layout_find(s->L->root, name);
+    if (!o)
+        return NULL;                                     /* gCommon.dbgAssert */
+    Intro *it = &list[(*n)++];
+    memset(it, 0, sizeof *it);
+    it->obj = o;
+    memcpy(it->p0, o->p, sizeof it->p0);
+    memcpy(it->p1, o->p, sizeof it->p1);
+    it->s0 = it->s1 = o->m;
+    it->f0 = it->f1 = 1;
+    return it;
+}
+static Intro *intro_x(Screen *s, const char *name, float t0, float t1, float x0, float x1)
+{
+    Intro *it = intro_item(s, s->intro, &s->nintro, 16, name);
+    if (it) { it->t0 = t0; it->t1 = t1; it->p0[0] = x0; it->p1[0] = x1; }
+    return it;
+}
+static Intro *intro_y(Screen *s, const char *name, float t0, float t1, float y0, float y1)
+{
+    Intro *it = intro_item(s, s->intro, &s->nintro, 16, name);
+    if (it) { it->t0 = t0; it->t1 = t1; it->p0[1] = y0; it->p1[1] = y1; }
+    return it;
+}
+static Intro *walk_item(Screen *s, const char *name, float t1, int axis, float a, float b)
+{
+    Intro *it = intro_item(s, s->walk, &s->nwalk, 8, name);
+    if (it) { it->t0 = 0; it->t1 = t1; it->p0[axis] = a; it->p1[axis] = b; }
+    return it;
+}
+
+/* Results::setMarqueText */
+static void res_marquee(Hud *h, Screen *s, const char *text)
+{
+    node_text(s->base, text);
+    s->title_w = text_w(&h->gui, s->base);
+    if (s->title1) {
+        s->title1->p[0] = s->right_x;
+        node_text(s->title1, s->base ? s->base->text : text);
+    }
+    if (s->title2) {
+        s->title2->p[0] = s->right_x + s->title_w + 150.0f;
+        node_text(s->title2, s->base ? s->base->text : text);
+    }
+}
+
+/* fixButtonColors(this, "continue", "quit", "select", "save") on the PS2 (gApp.getPlatform() 2) [R ButtonSetup.h] */
+static void res_button_colours(Screen *s)
+{
+    static const char *const names[4] = { "continue", "quit", "select", "save" };
+    static const float ps2[4][3] = { { 0, 186, 255 }, { 190, 45, 39 }, { 220, 108, 194 }, { 0, 240, 156 } };
+    for (int i = 0; i < 4; i++) {
+        Node *t = layout_find(s->L->root, names[i]);
+        if (t) {
+            col_set(t->tcol, ps2[i][0] / 255.0f, ps2[i][1] / 255.0f, ps2[i][2] / 255.0f, 1);
+            t->has_tcol = 1;
+        }
+    }
+}
+
+/* Results::doInterface 8192 [R] */
+static void results_start(Hud *h, Screen *s)
+{
+    Node *root = s->L->root;
+    const HudResults *r = &s->r;
+    s->do_intro = 1;
+    s->cu_index = -1;
+    s->cu_progress = -1;
+    s->live_vis = 1;
+    s->save = layout_find(root, "save");
+    show(s->save, 0);
+    root->fade = 1;
+    set_result(h, HUD_RESULT_NONE);
+    s->list = layout_find(root, "pointsList");
+    Node *d = layout_find(root, "destruction");
+    node_text(d ? layout_find(d->child, "points") : NULL, "0");
+    s->last_block = strcmp(s->played, s->current) == 0;
+    if (s->last_block)
+        node_localize(&h->gui, layout_find(root, "challenge"), "Results_Points_ChallengeBoss");
+    for (int i = 1; i < list_count(s->list); i++)
+        show(list_item(s->list, i), 0);
+    s->total = layout_find(root, "totalScore");
+    node_text(s->total, "0");
+    s->live = layout_find(root, "live");
+    show(s->live, 1);
+    fader_init(&s->fd, layout_find(root, "checkpoint"), 0);
+    fader_init(&s->fd, layout_find(root, "revealed"), 0);
+    s->title1 = layout_find(root, "goal1");
+    s->title2 = layout_find(root, "goal2");
+    s->base = layout_find(root, "goalbase");
+    s->left_x = 62.0f;
+    s->right_x = 503.0f;
+    s->title_w = text_w(&h->gui, s->title1);
+    /* the title's mask boxes (M 0x310 at x -3 .. 62 and 503 ..) cut it to 62 .. 503 [G] */
+    Node *gg = layout_find(root, "gGoal");
+    if (gg) {
+        gg->clip = 1;
+        gg->clip_x0 = s->left_x;
+        gg->clip_x1 = s->right_x;
+    }
+    char msg[MAX_TEXT];
+    if (s->last_block && r->buildings != 0 && s->results_text[0]) {
+        const char *t = loc_find(&h->gui, s->results_text);
+        res_marquee(h, s, t ? t : s->results_text);
+    } else {
+        const char *fmt = loc_find(&h->gui, "Results_CompletlyDestroyed"), *bn = loc_find(&h->gui, s->played);
+        const char *at = fmt ? strstr(fmt, "%s") : NULL;
+        if (!bn) bn = s->played;
+        if (at) snprintf(msg, sizeof msg, "%.*s%s%s", (int)(at - fmt), fmt, bn, at + 2);
+        else snprintf(msg, sizeof msg, "%s", bn);
+        res_marquee(h, s, msg);
+    }
+    if (s->title1 && s->title2) {
+        s->title2->p[0] = s->left_x + s->title_w + 150.0f;
+        node_text(s->title2, s->title1->text);
+    }
+    if (r->city_destroyed) {
+        show(layout_find(root, "select"), 0);
+        show(layout_find(root, "quit"), 0);
+    }
+    /* setupButtons: the buttons' left edges at 590 less the widest shown */
+    Node *bt = layout_find(root, "buttons");
+    float w = 0;
+    for (Node *c = bt ? bt->child : NULL; c; c = c->next)
+        if (strcmp(c->name, "save") != 0 && c->visible) {
+            float wt = text_w(&h->gui, c) * c->m;
+            if (wt > w) w = wt;
+        }
+    for (Node *c = bt ? bt->child : NULL; c; c = c->next)
+        if (strcmp(c->name, "save") != 0)
+            c->p[0] = 590.0f - w;
+    /* setupIntro */
+    intro_x(s, "titlebarshadow", 0, 0.5f, -640, 0);
+    intro_x(s, "titlebar", 0, 0.5f, -640, 0);
+    intro_y(s, "alert", 0.33f, 0.75f, -44, 44);
+    intro_y(s, "channel", 0.33f, 0.75f, -51, 51);
+    Intro *it = intro_x(s, "channelNumber", 0.33f, 0.75f, 640, 503);
+    if (it) { it->s0 = 3.0f; it->s1 = 0.85f; }
+    intro_y(s, "grayDataField", 0.75f, 1.0f, -280, 80);
+    intro_x(s, "orangeBand", 0.75f, 1.0f, 640, 60);
+    it = intro_x(s, "Live", 0.75f, 1.0f, 640, 487);
+    if (it) { it->p0[1] = 340; it->p1[1] = 340; }
+    intro_x(s, "buttons", 0, 0.1f, 0, 0);
+    intro_x(s, "goal1", 1.25f, 1.5f, 640, 62);
+    intro_y(s, "pointsList", 1.25f, 1.5f, -40, 216);
+    intro_y(s, "totalScore", 1.25f, 1.5f, -93, 163);
+    intro_y(s, "TotalDamage", 1.25f, 1.5f, -121, 135);
+    float save_t = 0;                                    /* 3 x gCommon.getAllowSave(): no saving here */
+    static const char *const fades[3] = { "continue", "select", "quit" };
+    static const float ft[3][2] = { { 2.05f, 2.15f }, { 2.15f, 2.26f }, { 2.25f, 2.36f } };
+    for (int i = 0; i < 3; i++) {
+        it = intro_item(s, s->intro, &s->nintro, 16, fades[i]);
+        if (it) { it->t0 = ft[i][0] + save_t; it->t1 = ft[i][1] + save_t; it->f0 = 0; it->f1 = 1; }
+    }
+    for (int i = 0; i < s->nintro; i++) {
+        memcpy(s->intro[i].obj->p, s->intro[i].p0, sizeof s->intro[i].p0);
+        s->intro[i].obj->m = s->intro[i].s0;
+        s->intro[i].obj->fade = s->intro[i].f0;
+    }
+    /* setupWalkout */
+    walk_item(s, "grayDataField", 0.5f, 1, 80, 480);
+    walk_item(s, "pointsList", 0.5f, 1, 216, 616);
+    walk_item(s, "totalScore", 0.5f, 1, 163, 563);
+    walk_item(s, "TotalDamage", 0.5f, 1, 135, 535);
+    walk_item(s, "orangeBand", 0.5f, 0, 60, 640);
+    walk_item(s, "buttons", 0.5f, 0, 0, 600);
+    it = walk_item(s, "Live", 1.0f, 1, 340, 408);
+    if (it) { it->p0[0] = 487; it->p1[0] = 487; }
+    res_button_colours(s);
+    cq_init(s);
+}
+
+/* Results::processIntro: returns its flag (the script's by-reference niFlag [G: by value, bDoIntro would never clear
+ * and no button would ever be taken]) */
+static int results_intro(Hud *h, Screen *s, float dt)
+{
+    float prev = s->intro_t;
+    s->intro_t += dt;
+    int flag = 0, count;
+    Intro *items;
+    if (s->ni_state == 0) { items = s->intro; count = s->nintro; }
+    else if (s->ni_state == 1) { items = s->walk; count = s->nwalk; }
+    else return 1;
+    for (int i = 0; i < count; i++) {
+        Intro *it = &items[i];
+        if (it->done)
+            continue;
+        flag = 1;
+        if (s->intro_t < it->t0)
+            continue;
+        float p = it->t1 > it->t0 ? (s->intro_t - it->t0) / (it->t1 - it->t0) : 1;
+        if (s->intro_t >= it->t1) {
+            p = 1;
+            it->done = 1;
+        }
+        for (int k = 0; k < 3; k++)
+            it->obj->p[k] = it->p0[k] + (it->p1[k] - it->p0[k]) * p;
+        it->obj->m = it->s0 + p * (it->s1 - it->s0);
+        it->obj->fade = it->f0 + p * (it->f1 - it->f0);
+    }
+    if (s->ni_state == 0 && s->kind == SCR_LEVEL) {
+        /* LevelResults: once the items are in, a star every 0.75 s for each of the city's flags 1 2 4 8 (the first at
+         * once, the items taking longer) */
+        static const char *const ratings[4] = { "allBlocks", "parScore", "challenges", "reveal" };
+        if (!flag) {
+            if (s->intro_t >= 0.75f) {
+                s->intro_t = 0;
+                while (s->rating != 4) {
+                    s->rating++;
+                    if (s->r.city_flags & (1u << s->rating))
+                        break;
+                }
+                if (s->rating != 4) {
+                    Node *o = layout_find(s->L->root, ratings[s->rating]);
+                    show(o ? layout_find(o->child, "star") : NULL, 1);
+                    sound(h, "Tank_Fire", 0);
+                }
+            }
+            flag = s->rating != 4;
+        }
+    } else if (s->ni_state == 0) {
+        (void)prev;                                      /* at 1.5 s: gCommon.updateProfile / saveProfile */
+        s->scroll = s->intro_t >= 1.5f;
+        if (!s->count_up)
+            s->count_up = s->cu_index == -1 && s->intro_t >= 1.5f;
+        if (!s->sound_on) {
+            s->sound_on = 1;
+            sound(h, "Slot_Jackpot", 0);
+        }
+    }
+    if (!flag) {
+        s->ni_state++;
+        s->intro_t = 0;
+    }
+    return flag;
+}
+
+/* Results::scrollTitle: the two copies of the title run left at 150 a second, 150 apart; the "Live" box blinks */
+static void results_scroll(Hud *h, Screen *s, float dt)
+{
+    if (s->title1 && s->title2) {
+        Node *a = s->title1, *b = s->title2;
+        a->p[0] -= 150.0f * dt;
+        if (a->p[0] <= s->left_x - s->title_w - 150.0f) {
+            node_text(a, s->base ? s->base->text : a->text);
+            a->p[0] = b->p[0] + (text_w(&h->gui, b) + 150.0f);
+            if (a->p[0] < s->right_x) a->p[0] = s->right_x;
+        }
+        b->p[0] -= 150.0f * dt;
+        if (b->p[0] <= s->left_x - s->title_w - 150.0f) {
+            node_text(b, s->base ? s->base->text : b->text);
+            b->p[0] = a->p[0] + (text_w(&h->gui, a) + 150.0f);
+            if (b->p[0] < s->right_x) b->p[0] = s->right_x;
+        }
+    }
+    s->live_delay += dt;
+    if (s->live_delay >= 0.5f) {
+        s->live_delay = 0;
+        s->live_vis = !s->live_vis;
+        show(s->live, s->live_vis);
+    }
+}
+
+/* Results::countUpScores: each line (destruction, people, vehicles, bonus, time bonus, challenge: the point
+ * categories 0 .. 5, all players' together) counts up from 0 in half a second, the total with it */
+static void results_count(Hud *h, Screen *s, float dt)
+{
+    char buf[32];
+    const HudResults *r = &s->r;
+    if (s->cu_progress < 0) {
+        s->cu_progress = 0;
+        s->cu_index++;
+        s->cu_total += s->cu_value;
+        int count = list_count(s->list);
+        Node *it = list_item(s->list, s->cu_index);
+        if (s->cu_index >= count || !it) {
+            s->count_up = 0;
+            s->sound_on = 0;
+            sound(h, "Slot_Jackpot", 1);
+            return;
+        }
+        show(it, 1);
+        Node *cnt = layout_find(it->child, "count");
+        s->cu_item = layout_find(it->child, "points");
+        s->cu_value = 0;
+        int kills = 0, np = r->num_players > 0 && r->num_players <= 4 ? r->num_players : 1;
+        for (int i = 0; i < np; i++) {
+            s->cu_value += r->points[i][s->cu_index < 7 ? s->cu_index : 6];
+            kills += r->kills[i][s->cu_index < 7 ? s->cu_index : 6];
+        }
+        node_text(s->cu_item, "0");
+        snprintf(buf, sizeof buf, "%d", kills);
+        node_text(cnt, buf);
+        if (s->cu_index == count - 1 && s->last_block && s->cu_value == 0) {   /* no boss defeated: "No" */
+            s->count_up = 0;
+            s->sound_on = 0;
+            show(s->cu_item, 0);
+            show(layout_find(it->child, "no"), 1);
+            sound(h, "Slot_Jackpot", 1);
+            s->cu_index++;
+            return;
+        }
+    }
+    s->cu_progress += dt / 0.5f;
+    float p = s->cu_progress;
+    if (s->cu_progress >= 1.0f) {
+        p = 1.0f;
+        s->cu_progress = -1.0f;
+    }
+    fmt_value(buf, sizeof buf, (int)((float)s->cu_value * p));
+    node_text(s->cu_item, buf);
+    fmt_value(buf, sizeof buf, s->cu_total + (int)((float)s->cu_value * p));
+    node_text(s->total, buf);
+}
+
+static void results_quit(Hud *h, Screen *s)             /* Results::onQuit */
+{
+    (void)h;
+    if (!s->r.city_destroyed) {
+        s->exit_fn = 1;
+        s->exit_val = HUD_RESULT_QUIT;
+    }
+}
+
+/* Results::doInterface 2048 [R] */
+static void results_frame(Hud *h, Screen *s, float dt)
+{
+    if (s->exit_fn) {                                    /* the held call (gCommon.isSaveGameActive: never) */
+        if (s->exit_fn == 1) set_result(h, s->exit_val);
+        else s->ended = 1;
+        s->exit_fn = 0;
+    }
+    if (dt > 0.5f)
+        return;
+    s->save_delay -= dt;
+    if (s->do_intro)
+        s->do_intro = results_intro(h, s, dt);
+    if (s->scroll)
+        results_scroll(h, s, dt);
+    if (s->count_up)
+        results_count(h, s, dt);
+    if (s->do_walkout)
+        s->do_walkout = results_intro(h, s, dt);
+    if (s->ni_state == 1) {
+        if (!s->last_block && s->r.monster_revealed) {   /* "Monster Revealed" for 1 .. 5 s */
+            Node *o = layout_find(s->L->root, "revealed");
+            if (s->pulse_t < 1.0f) fader_go(&s->fd, o, 1);
+            else if (s->pulse_t > 5.0f) fader_go(&s->fd, o, -1);
+        }
+        s->pulse_t += dt;
+    } else if (s->ni_state == 2) {                       /* walked out: Continue */
+        s->exit_fn = 1;
+        s->exit_val = HUD_RESULT_DONE;
+        s->intro_t = 5.0f;
+        s->ni_state = 3;
+    } else if (s->ni_state == 3) {                       /* 5 s more on screen */
+        s->intro_t -= dt;
+        if (s->intro_t <= 0) {
+            s->intro_t = 1.0f;
+            s->ni_state = 4;
+        }
+    } else if (s->ni_state == 4) {                       /* then fades out in half a second */
+        s->intro_t -= 2.0f * dt;
+        if (s->intro_t <= 0) {
+            s->ni_state = 5;
+            s->exit_fn = 2;
+        } else
+            s->L->root->fade = s->intro_t;
+    }
+    fader_update(&s->fd, dt);
+}
+
+static int results_ready(const Screen *s)
+{
+    return !s->cq.state && !s->do_intro && !s->do_walkout && s->ni_state == 1;
+}
+
+/* Results::doInterface, the buttons [R] */
+static void results_input(Hud *h, Screen *s, int ev, int button)
+{
+    if (cq_process(h, s, ev))
+        return;
+    if (s->do_intro || s->do_walkout || s->ni_state > 1)
+        return;
+    Node *root = s->L->root;
+    if (ev == HUD_EV_START || ev == HUD_EV_ACCEPT) {
+        if (s->save_delay > 0)
+            return;
+        if (s->ni_state == 1 && !s->do_walkout) {
+            sound(h, "Click", 0);
+            if (!s->last_block && strcmp(s->current, s->played) != 0) {   /* "MOVING ON TO <the next block>" */
+                const char *mo = loc_find(&h->gui, "Results_MovingOnTo"), *bn = loc_find(&h->gui, s->current);
+                char msg[MAX_TEXT];
+                snprintf(msg, sizeof msg, "%s%s", mo ? mo : "MOVING ON TO ", bn ? bn : s->current);
+                res_marquee(h, s, msg);
+            }
+            s->do_walkout = 1;
+        }
+    } else if (ev == HUD_EV_BACK) {
+        Node *q = layout_find(root, "quit");
+        if (!s->do_walkout && q && q->visible) {
+            sound(h, "Cancel", 0);
+            cq_show(h, s, !(s->save && s->save->visible));
+        }
+    } else if (ev == HUD_EV_BUTTON && button == 0) {
+        Node *sel = layout_find(root, "select");
+        if (!s->do_walkout && sel && sel->visible) {
+            sound(h, "Click", 0);
+            s->exit_fn = 1;
+            s->exit_val = HUD_RESULT_SELECT;
+        }
+    }
+    /* button 1: "Autosave" (gCommon.setAllowSave): no saving here, the button stays hidden */
+}
+
+/* LevelResults.scr [R]: the city's name, DESTROYED, its score against the par, a star for each goal met */
+static void level_start(Hud *h, Screen *s)
+{
+    static const char *const ratings[4] = { "allBlocks", "parScore", "challenges", "reveal" };
+    Node *root = s->L->root;
+    char buf[32];
+    node_localize(&h->gui, layout_find(root, "cityName"), s->city);
+    s->do_intro = 1;
+    s->rating = -1;
+    root->fade = 1;
+    for (int i = 0; i < 4; i++) {
+        Node *o = layout_find(root, ratings[i]);
+        show(o ? layout_find(o->child, "star") : NULL, 0);
+    }
+    snprintf(buf, sizeof buf, "%d", s->r.city_score);
+    node_text(layout_find(root, "totalScore"), buf);
+    snprintf(buf, sizeof buf, "%d", s->r.par_score);
+    node_text(layout_find(root, "parScoreValue"), buf);
+    if (s->r.show_victory) {
+        show(layout_find(root, "select"), 0);
+        show(layout_find(root, "quit"), 0);
+    }
+    /* setupButtons: left edges at 590 less the widest; setupRatings: the lines centred as a block, 32 for the star */
+    static const char *const groups[2] = { "buttons", "ratings" };
+    for (int gi = 0; gi < 2; gi++) {
+        Node *gob = layout_find(root, groups[gi]);
+        float w = 0;
+        for (Node *c = gob ? gob->child : NULL; c; c = c->next)
+            if (c->visible) {
+                float wt = text_w(&h->gui, c) * c->m;
+                if (wt > w) w = wt;
+            }
+        for (Node *c = gob ? gob->child : NULL; c; c = c->next)
+            c->p[0] = gi == 0 ? 590.0f - w : 320.0f - (w - 32.0f) / 2.0f;
+    }
+    /* setupIntro */
+    intro_x(s, "cityName", 0, 0.5f, -640, 320);
+    intro_x(s, "destroyed", 0, 0.5f, 640, 320);
+    intro_x(s, "TotalDamage", 0, 0.5f, 1024, 350);
+    intro_x(s, "ParScoreTitle", 0, 0.5f, 0, 350);
+    static const char *const fades[3] = { "continue", "select", "quit" };
+    static const float ft[3][2] = { { 1.65f, 1.75f }, { 1.75f, 1.86f }, { 1.85f, 1.96f } };
+    for (int i = 0; i < 3; i++) {
+        Intro *it = intro_item(s, s->intro, &s->nintro, 16, fades[i]);
+        if (it) { it->t0 = ft[i][0]; it->t1 = ft[i][1]; it->f0 = 0; it->f1 = 1; }
+    }
+    float y = 245.0f, t = 0.5f;
+    for (int i = 0; i < 4; i++, y += 30.0f, t += 0.2f)
+        intro_y(s, ratings[i], 0, t, y + 480.0f - 245.0f, y);
+    for (int i = 0; i < s->nintro; i++) {
+        memcpy(s->intro[i].obj->p, s->intro[i].p0, sizeof s->intro[i].p0);
+        s->intro[i].obj->m = s->intro[i].s0;
+        s->intro[i].obj->fade = s->intro[i].f0;
+    }
+    /* setupWalkout: nothing walks out */
+    res_button_colours(s);
+    cq_init(s);
+}
+
+static void level_frame(Hud *h, Screen *s, float dt)
+{
+    if (s->do_intro)
+        s->do_intro = results_intro(h, s, dt);
+    if (s->do_walkout)
+        s->do_walkout = results_intro(h, s, dt);
+    if (s->ni_state == 2) {
+        set_result(h, HUD_RESULT_DONE);
+        s->intro_t = 5.0f;
+        s->ni_state = 3;
+    } else if (s->ni_state == 3) {
+        s->intro_t -= dt;
+        if (s->intro_t <= 0) {
+            s->intro_t = 1.0f;
+            s->ni_state = 4;
+        }
+    } else if (s->ni_state == 4) {
+        s->intro_t -= 2.0f * dt;
+        if (s->intro_t <= 0) {
+            s->ni_state = 5;
+            s->ended = 1;
+        } else
+            s->L->root->fade = s->intro_t;
+    }
+    fader_update(&s->fd, dt);
+}
+
+static void level_input(Hud *h, Screen *s, int ev, int button)
+{
+    if (cq_process(h, s, ev))
+        return;
+    if (s->do_intro || s->do_walkout || s->ni_state > 1)
+        return;
+    Node *root = s->L->root, *o;
+    if (ev == HUD_EV_START || ev == HUD_EV_ACCEPT) {
+        if (s->ni_state == 1 && !s->do_walkout) {
+            sound(h, "Click", 0);
+            s->do_walkout = 1;
+        }
+    } else if (ev == HUD_EV_BACK) {
+        if ((o = layout_find(root, "quit")) != NULL && o->visible) {
+            sound(h, "Cancel", 0);
+            cq_show(h, s, 1);
+        }
+    } else if (ev == HUD_EV_BUTTON && button == 0) {
+        if ((o = layout_find(root, "select")) != NULL && o->visible) {
+            sound(h, "Click", 0);
+            set_result(h, HUD_RESULT_SELECT);
+        }
+    }
+}
+
+/* GameOver.scr [R] */
+static void gameover_start(Hud *h, Screen *s)
+{
+    s->choices = layout_find(s->L->root, "choices");
+    if (s->choices) s->choices->pulse = 1;
+    list_select(s->choices, 0);
+    if (s->r.play_type == HUD_PLAY_TIMED)
+        show(list_item(s->choices, 1), 0);
+    h->paused = 1;                                       /* gApp.pauseGame(1) */
+    cq_init(s);
+}
+
+static void gameover_quit(Hud *h, Screen *s)            /* GameOver::onQuit */
+{
+    h->paused = 0;
+    set_result(h, HUD_RESULT_QUIT);
+    s->ended = 1;
+}
+
+static void gameover_input(Hud *h, Screen *s, int ev)
+{
+    if (cq_process(h, s, ev)) {
+        if (!s->cq.state && s->choices)
+            s->choices->pulse = 1;
+        return;
+    }
+    Node *l = s->choices;
+    int sel = l ? l->sel : 0;
+    if (ev == HUD_EV_LEFT || ev == HUD_EV_UP || ev == HUD_EV_RIGHT || ev == HUD_EV_DOWN) {
+        list_increment(l, ev == HUD_EV_LEFT || ev == HUD_EV_UP ? -1 : 1);
+        if (l && l->sel != sel)
+            sound(h, "Rollover", 0);
+    } else if (ev == HUD_EV_START || ev == HUD_EV_ACCEPT) {
+        sound(h, "Click", 0);
+        if (sel == 2) {
+            if (l) l->pulse = 0;
+            cq_show(h, s, 0);
+            return;
+        }
+        h->paused = 0;
+        if (sel == 0) set_result(h, HUD_RESULT_CONTINUE);
+        else if (sel == 1) set_result(h, HUD_RESULT_SELECT);
+        s->ended = 1;
+    }
+}
+
+static void results_unload(Hud *h)
+{
+    if (h->scr && h->scr->sound_on)
+        sound(h, "Slot_Jackpot", 1);
+    screen_free(h->scr);
+    h->scr = NULL;
+    h->paused = 0;
+}
+
+/* WorldGuiDriver::startResults [R]: the screen's layout by number (7, 8 and 9 are all TimedRunResults) */
+void hud_results(Hud *h, int screen, const HudResults *r)
+{
+    static const char *const names[8] = { "GameOver", "Results", "LevelResults", "WorldResults", "KingBlockResults",
+                                          "KingCityResults", "KingWorldResults", "TimedRunResults" };
+    if (!h)
+        return;
+    results_unload(h);
+    Screen *s = calloc(1, sizeof *s);
+    if (!s)
+        return;
+    h->scr = s;
+    s->screen = screen;
+    if (r) {
+        s->r = *r;
+        snprintf(s->played, sizeof s->played, "%s", r->block_played ? r->block_played : "");
+        snprintf(s->current, sizeof s->current, "%s", r->block_current ? r->block_current : "");
+        snprintf(s->results_text, sizeof s->results_text, "%s", r->results_text ? r->results_text : "");
+        snprintf(s->city, sizeof s->city, "%s", r->city ? r->city : "");
+    } else {
+        s->r.play_type = h->cfg.play_type;
+        s->r.num_players = 1;
+    }
+    s->r.block_played = s->played;
+    s->r.block_current = s->current;
+    s->r.results_text = s->results_text;
+    s->r.city = s->city;
+    h->result = HUD_RESULT_NONE;                         /* nResultState = 0 */
+    char file[40];
+    snprintf(file, sizeof file, "%s.ifc", names[screen >= 0 && screen < 8 ? screen : 7]);
+    s->kind = screen == HUD_SCREEN_RESULTS ? SCR_RESULTS : screen == HUD_SCREEN_GAME_OVER ? SCR_GAME_OVER :
+              screen == HUD_SCREEN_LEVEL ? SCR_LEVEL : SCR_STANDIN;
+    if (s->kind != SCR_STANDIN && (s->L = layout_load(&h->gui, h->gui.bundles[0], file)) == NULL)
+        s->kind = SCR_STANDIN;
+    if (s->kind == SCR_RESULTS)
+        results_start(h, s);
+    else if (s->kind == SCR_LEVEL)
+        level_start(h, s);
+    else if (s->kind == SCR_GAME_OVER)
+        gameover_start(h, s);
+}
+
+int hud_result(Hud *h)
+{
+    if (!h)
+        return HUD_RESULT_NONE;
+    int r = h->result;
+    h->result = HUD_RESULT_NONE;
+    return r;
+}
+
+int hud_results_showing(const Hud *h) { return h && h->scr; }
+int hud_paused(const Hud *h) { return h && h->paused; }
+void hud_results_auto(Hud *h, float seconds) { if (h) h->auto_press = seconds; }
+
+void hud_input(Hud *h, int ev, int button)
+{
+    if (!h || !h->scr || h->scr->ended)
+        return;
+    Screen *s = h->scr;
+    if (s->kind == SCR_RESULTS)
+        results_input(h, s, ev, button);
+    else if (s->kind == SCR_LEVEL)
+        level_input(h, s, ev, button);
+    else if (s->kind == SCR_GAME_OVER)
+        gameover_input(h, s, ev);
+    else if (ev == HUD_EV_ACCEPT || ev == HUD_EV_START) {
+        set_result(h, HUD_RESULT_DONE);
+        s->ended = 1;
+    }
+}
+
+static void screen_update(Hud *h, float dt)
+{
+    Screen *s = h->scr;
+    if (!s)
+        return;
+    if (s->ended) {                                      /* WorldGuiDriver::process 2048: bEndResults -> unload */
+        results_unload(h);
+        return;
+    }
+    s->age += dt;
+    if (s->kind == SCR_RESULTS)
+        results_frame(h, s, dt);
+    else if (s->kind == SCR_LEVEL)
+        level_frame(h, s, dt);
+    else if (s->kind == SCR_GAME_OVER)
+        fader_update(&s->fd, dt);
+    else if (s->age >= 3.0f) {                           /* the stand-in */
+        set_result(h, s->screen == HUD_SCREEN_GAME_OVER ? HUD_RESULT_CONTINUE : HUD_RESULT_DONE);
+        s->ended = 1;
+        return;
+    }
+    int ready = s->kind == SCR_RESULTS || s->kind == SCR_LEVEL ? results_ready(s) :
+                s->kind == SCR_GAME_OVER ? !s->cq.state : 0;
+    s->ready = ready ? s->ready + dt : 0;
+    if (h->auto_press > 0 && ready && s->ready >= h->auto_press) {
+        s->ready = 0;
+        hud_input(h, HUD_EV_ACCEPT, 0);
+    }
+}
+
+/* ---------------------------------------------------------------- every frame */
+void hud_update(Hud *h, float dt)
+{
+    if (!h)
+        return;
+    h->gui.time += dt;
+    hud_stats(h, dt);
+    cs_update(h, dt);
+    ct_update(h, dt);
+    int n = 0;
+    for (int i = 0; i < h->nrages; i++) {
+        if (rage_update(h, h->rages[i], dt))
+            h->rages[n++] = h->rages[i];
+        else
+            rage_free(h->rages[i]);
+    }
+    h->nrages = n;
+    screen_update(h, dt);
+}
+
+int hud_sounds(Hud *h, HudSound *out, int max)
+{
+    if (!h || !out)
+        return 0;
+    int n = h->nsounds < max ? h->nsounds : max;
+    memcpy(out, h->sounds, sizeof *out * (size_t)n);
+    memmove(h->sounds, h->sounds + n, sizeof *out * (size_t)(h->nsounds - n));
+    h->nsounds -= n;
+    return n;
 }
 
 int hud_quads(const Hud *h, HudQuad *out, int max)
 {
     if (!h || !out || max <= 0)
         return 0;
-    Emit e = { out, NULL, 0, max };
-    banners_emit(h, &e);
-    int nb = e.n;
-    /* the GUI: back to front by depth, the larger z behind [G: the bars' black backing has z 0.5 and must lie under
-     * the bar], in the layout's order otherwise */
-    float z[MAX_SORT];
-    Emit g = { out + nb, z, 0, max - nb < MAX_SORT ? max - nb : MAX_SORT };
-    layout_emit(&g, h->hud.root, 0, 0, 1, 0, 1);
-    layout_emit(&g, h->clock.root, 0, 0, 1, 0, 1);
-    for (int i = 1; i < g.n; i++) {                      /* stable insertion sort, z descending */
-        HudQuad q = g.q[i];
-        float k = z[i];
-        int j = i - 1;
-        while (j >= 0 && z[j] < k) {
-            g.q[j + 1] = g.q[j];
-            z[j + 1] = z[j];
-            j--;
-        }
-        g.q[j + 1] = q;
-        z[j + 1] = k;
-    }
-    return nb + g.n;
+    int n = banners_emit(h, out, max);
+    n += emit_layout(out + n, max - n, &h->gui, h->hud);
+    n += emit_layout(out + n, max - n, &h->gui, h->clock);
+    n += emit_layout(out + n, max - n, &h->gui, h->cs.L);
+    if (h->ct)
+        n += emit_layout(out + n, max - n, &h->gui, h->ct->L);
+    for (int i = 0; i < h->nrages; i++)
+        if (h->rages[i]->init)                           /* drawn once set up (its first frame) */
+            n += emit_layout(out + n, max - n, &h->gui, h->rages[i]->L);
+    if (h->scr && h->scr->L)
+        n += emit_layout(out + n, max - n, &h->gui, h->scr->L);
+    return n;
 }

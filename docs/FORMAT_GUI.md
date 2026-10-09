@@ -1,6 +1,7 @@
 # GUI layouts, bitmap fonts and the in-play HUD
 
-How the game draws its 2D interface, and the in-play HUD that `src/hud.c` rebuilds from the game's files. The
+How the game draws its 2D interface, and the in-play HUD that `src/hud.c` rebuilds from the game's files (the text
+banners, the challenge status and the results screens it also runs are in [SCREENS_NOTES.md](SCREENS_NOTES.md)). The
 layout files (`.ifc`, type 24) are introduced in [FORMAT_EDF.md](FORMAT_EDF.md). `tools/gui.py` lists layouts and fonts
 (`list BUNDLE [NAME]`) and parses all of them (`--verify build/vol`: 38 layouts and 6 fonts in the bundles).
 Code addresses refer to `RAMPAGE.ELF`. **[R]** means read in the code or files. **[G]** means inferred.
@@ -24,7 +25,8 @@ GUI coordinates are in a 640 × 480 screen with y pointing down. Full-screen ite
 ## Layout tree
 The XML element names are listed in a table of 20-byte records at 0x3B3240: a string, then a value type (0x2B colour,
 3 float, 2 string, 5 integer, 0xD vector, ...). The order of the records gives each tag its id. Objects:
-`i` interface, `DD` the 2D root (`-.2D.-`), `o` group, `q` quad, `t` text, `sl` slider, `X` child interface. Properties:
+`i` interface, `DD` the 2D root (`-.2D.-`), `o` group, `q` quad, `t` text, `sl` slider, `r` rect (GuiRect), `lb` list
+box (GuiListBox), `X` child interface. Properties:
 
 | Tag | Meaning |
 |---|---|
@@ -37,10 +39,22 @@ The XML element names are listed in a table of 20-byte records at 0x3B3240: a st
 | `c` | colour `0xRRGGBBAA`. It multiplies the texture **[R: Hud.scr's rageColor (1, 0.5, 0.25) = maskColor 0xFF8040FF]** |
 | `Q` | quad sprite flags. 0x2 centres the sprite across its origin and 0x4 centres it vertically (0x243C00 → 0x17C720 / 0x17C6D0 / 0x17C770) **[R]**. Without them the sprite spans from the origin to +d |
 | `F` | object flags. 0x1 marks objects that start hidden (`heads`/`blocks`, `numText`, `line2`, `challenge_group`) **[G]**. Interfaces carry 0x82 |
-| `v`, `L` | text: a literal string, or a `.loc` key |
-| `g` | font name, with attributes `j` (justify: `c` centre, `r` right, else left), `o` (origin: `m` middle, `b` bottom, else top), `s` (scale), `charspacing` **[G: the letter meanings; R: the three modes in the string draw]** |
+| `v`, `L` | text: a literal string, or a `.loc` key (looked up in the bundles' string tables, `tools/loc.py`; a missing key shows itself **[G]**) |
+| `g` | font name, with attributes `j` (justify: `c` centre, `r` right, else left), `o` (origin: `m` middle, `b` bottom, else top), `s` (scale), `charspacing`, `linespacing`, `w` (word wrap width), `m`, `i` (not traced) **[G: the letter meanings; R: the three modes in the string draw]** |
 | `maxwidth` | the text shrinks uniformly when its unscaled width is greater (0x1B6350) **[R]** |
 | `val`, `hasMaskBar`, `barColor`, `maskColor` | slider properties |
+| `M` | 0x310 on Results' two white boxes at the scrolling title's ends: taken as masks that cut the title to x 62..503, not drawn **[G]**; 0x90 on a visible icon |
+| `st`, `ct`, `bkgdColor`, `bc`, `B`, `bbias`, `R` | rect: side and corner pictures (`FrameLine`, `FrameCorner` of CommonGUI.bdp), background, frame colour, frame width, its offset (−7: outside), flags |
+| `c` / `b` / `d` with `highlight`, `normal`, `disabled`, `selector`, `endcap`; `sp`, `a`, `growth` | list box: item colours (selected, others), the highlight bar's pictures (`HighlightSegment`, `HighlightEndcap`) and size, spacing, flags, its growth |
+
+### Rect and list box [G]
+Neither draw is traced. `hud.c` fills the rect's `d` from its origin in `bkgdColor`, then draws the frame `B` wide
+with its outer edge `bbias` from the rect's: `FrameCorner` (the top-left corner) mirrored to the four corners,
+`FrameLine` (its lower rows are the outside, matching the corner's arc) stretched between. A list box gives its
+selected item the highlight colour and the others the normal one, and draws the highlight bar (segment + end caps,
+`d highlight` tall, pulsing) behind the selected item's text. Word wrap: the text breaks at the last space that fits
+`w`, read in the text's parent frame (boss_message's x 20 + w 480 = its rect's 500; cq_title's 460 centred in 480; the
+Results lines' w = the list's width).
 
 ### Slider (GuiSlider, layout 0x24A310)
 Defaults: value 100, range 0..100, size 100 × 20 (constructor 0x24ACD0) **[R]**. The slider is always centred on its origin.
@@ -117,8 +131,10 @@ OFontData loader 0x1B7CD0, read **[R]**. Field-by-field layout is in `tools/gui.
   - PointsBanner spacing is 2.
 
 ## Not traced
-- The direction of `z` (taken as larger = further back), the letters of `j`/`o`, and `F` 0x1.
-- Whether the PS2 sorts GUI sprites by depth at all.
-- The `.loc` lookup for `<L>` texts. The HUD has none.
-- Word wrap (OFont +0x8), the slant (0 in every font), Shift-JIS glyphs and the special glyph images (OFont +0x25C).
+- The direction of `z` (taken as larger = further back), the letters of `j`/`o`, and `F` 0x1 (taken as hidden), 0x20
+  (an icon quad: drawn only with a picture), 0x4.
+- Whether the PS2 sorts GUI sprites by depth at all (here: within each interface, interfaces in load order).
+- The game's word wrap (OFont +0x8), the slant (0 in every font), Shift-JIS glyphs and the special glyph images
+  (OFont +0x25C: the `.loc` texts' `\v1.25Controller_Back\v` pictures, drawn here as a square the cell's height times
+  the number).
 - The mapping of the 640 × 480 screen to the PAL/NTSC frame buffer.
