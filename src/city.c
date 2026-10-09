@@ -454,6 +454,8 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         }
         return;
     }
+    if (t.at && boss_is_boss_template(t))           /* a boss's part (the NY generators): boss.c's */
+        return;
     int scripted = -1;                               /* a band or a guard's hut: for people.c, once it exists */
     if (s->placing_block && script && s->nscripted < 8 &&
         (!_strnicmp(script, "Band.", 5) || !_strnicmp(script, "RoyalGuardHut.", 14))) {
@@ -738,6 +740,38 @@ static void edible_sync(Scene *s)
             s->instances[show].hidden = 0;
             memcpy(s->instances[show].base.m, e->world, sizeof e->world);
         }
+    }
+}
+
+/* each frame: every boss part at its matrix x RenderScale, an actor's clip at its time (looks keyed from 4 << 20) */
+static void boss_sync(Scene *s, double t)
+{
+    if (!s->boss || !s->owner)
+        return;
+    for (int i = 0, n = boss_count(s->boss); i < n; i++) {
+        const BossPart *p = boss_part(s->boss, i);
+        int who = (4 << 20) + i;
+        int show = -1;
+        if (p->alive && p->shape && _stricmp(p->shape, "InvisShape") != 0) {
+            ArmyUnit look;                           /* the army's look: a shape and its clip */
+            memset(&look, 0, sizeof look);
+            look.shape = p->shape;
+            look.clip = p->clip;
+            show = unit_look(s->owner, s, who, &look);
+        }
+        for (int k = 0; k < s->nlooks; k++)
+            if (s->looks[k].who == who && s->looks[k].inst >= 0 && s->looks[k].inst != show)
+                s->instances[s->looks[k].inst].hidden = 1;
+        if (show < 0)
+            continue;
+        Instance *in = &s->instances[show];
+        in->hidden = 0;
+        memcpy(in->base.m, p->world, sizeof in->base.m);
+        float k = p->scale > 0 ? p->scale : 1;
+        for (int c = 0; c < 12; c++)
+            in->base.m[c] *= k;
+        if (in->has_clip && p->anim_len > 0 && p->clip)
+            in->offset = (float)(p->anim_time / p->anim_len * in->clip.duration - t);
     }
 }
 
@@ -1809,9 +1843,10 @@ static void update(Scene *s, double t, int all)
     army_sync(s, t);
     vehicle_sync(s);
     edible_sync(s);
+    boss_sync(s, t);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
-        if (in->tree.n && (all || in->has_clip)) {
+        if (in->tree.n && (all || in->has_clip || in->dynamic)) {   /* a model made later is posed too */
             pose_instance(s, in, t);
             if ((int)i == s->monster)
                 monster_ik(s, in);

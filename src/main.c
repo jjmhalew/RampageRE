@@ -26,6 +26,7 @@
 #include "vehicle.h"
 #include "edible.h"
 #include "game.h"
+#include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -61,6 +62,8 @@ typedef struct {
     Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
     Edibles *edibles;                                /* the power-ups and hazards behind the windows (edible.c) */
     Game *game;                                      /* the world's states, the lives, the clock (game.c) */
+    Boss *boss;                                      /* the block's boss and the ambient ones (boss.c) */
+    struct { int id, fx, obj, monster; float off[3]; } bfx[64]; int nbfx;   /* the bosses' effects that follow */
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
     int streaker;                                    /* the defeated monster's streaker (people.c), -1 none */
@@ -290,6 +293,9 @@ static int edible_cell_state(void *ctx, int building, int storey, int column);
 static int edible_cell_where(void *ctx, int building, int storey, int column, float out[3]);
 static int edible_call(Viewer *v, const char *call, const float *xyz);
 static void monster_stats(Viewer *v, float health, float energy);
+static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g);
+static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target,
+                             float dt);
 
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
 static Group army_find(void *ctx, const char *book, const char *name)
@@ -415,6 +421,30 @@ static void build(Viewer *v)
         }
     }
     v->scene.edibles = v->edibles;
+    boss_free(v->boss);                              /* the block's boss, and the ambient ones of the blocks behind */
+    v->boss = NULL;
+    v->nbfx = 0;
+    if (v->have_scene && v->monster >= 0) {
+        static BossHost bh;
+        bh.find = army_find;
+        bh.clip_seconds = army_clip_seconds;
+        bh.shape_box = army_shape_box;
+        bh.weapon_make = boss_weapon_make;
+        bh.weapon_tick = boss_weapon_tick;
+        bh.ctx = v;
+        v->boss = boss_new(&bh);
+        if (v->boss) {
+            int n = boss_load_block(v->boss, v->scene.block);
+            if (v->scene.traffic_def[1].at)
+                n += boss_load_waiting(v->boss, v->scene.traffic_def[1], 41, 1);
+            if (v->scene.traffic_def[2].at)
+                n += boss_load_waiting(v->boss, v->scene.traffic_def[2], 82, 2);
+            boss_activate(v->boss, 1);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("bosses: %d\n", n);
+        }
+    }
+    v->scene.boss = v->boss;
     v->streaker = -1;
     if (!v->game_built) {                            /* the flow of the city from this block on: campaign, one player */
         game_free(v->game);
@@ -1006,6 +1036,8 @@ static void hit_spheres(Viewer *v)
             army_hit(v->army, 0, c, c[3], 20);
         if (v->veh)                                  /* and the vehicles and rockets */
             vehicle_hit(v->veh, 0, c, c[3], 20);
+        if (v->boss)                                 /* and the bosses */
+            boss_hit(v->boss, 0, c, c[3], 20);
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
             float from[3] = { v->mx, v->my, v->mz };
@@ -1033,6 +1065,136 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
 }
 
 /* the army each frame (army.c): the monster as it sees it, the buildings, then what it makes happen */
+/* a move state of the monster by name, now (playReaction) */
+static void force_state(Viewer *v, const char *name)
+{
+    for (int k = 0; name && v->have_graph && k < v->graph.n; k++)
+        if (!_stricmp(v->graph.states[k].name, name)) {
+            moves_force(&v->run, k);
+            return;
+        }
+}
+
+/* the bosses' host: the army's weapons */
+static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g)
+{
+    Viewer *v = ctx;
+    return v->army ? army_weapon_make(v->army, w, g) : 0;
+}
+static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target,
+                             float dt)
+{
+    Viewer *v = ctx;
+    if (v->army)
+        army_weapon_tick(v->army, w, may, from, dir, target, dt);
+}
+
+/* the bosses' frame: what they see of the monster and the buildings, then what they did */
+static void boss_step(Viewer *v, float dt, const ArmyMonster *am)
+{
+    if (!v->boss)
+        return;
+    BossMonster m;
+    memset(&m, 0, sizeof m);
+    memcpy(m.pos, am->pos, sizeof m.pos);
+    m.heading = am->heading;
+    m.move = am->move;
+    m.climbing = v->mount.at.building >= 0;
+    m.spheres = am->spheres;
+    m.nspheres = am->nspheres;
+    memcpy(m.box_min, am->box_min, sizeof m.box_min);
+    memcpy(m.box_max, am->box_max, sizeof m.box_max);
+    static BossBuilding bl[64];
+    int nb = 0;
+    for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
+        const SceneBuilding *sb = &v->scene.buildings[i];
+        const Building *b = &sb->b;
+        BossBuilding *o = &bl[nb];
+        memset(o, 0, sizeof *o);
+        o->pos[0] = sb->node.m[12]; o->pos[1] = sb->node.m[13]; o->pos[2] = sb->node.m[14];
+        memcpy(o->min, b->min, sizeof o->min);
+        memcpy(o->max, b->max, sizeof o->max);
+        o->width = b->width;
+        o->storeys = b->storeys;
+        o->height = b->max[2];
+        o->destroyed = b->state == BUILDING_GONE || b->state >= BUILDING_CRACKING;
+        o->falling = b->state >= BUILDING_CRACKING;
+        o->standing = !o->destroyed;
+        o->hp_frac = b->hp_max > 0 ? (float)b->hp / (float)b->hp_max : 0;
+        o->inst = sb->inst;
+    }
+    boss_set_view(v->boss, v->cam.pos[0] - 45, v->cam.pos[0] + 45);   /* the view's x range [G], as the army's */
+    boss_update(v->boss, dt, &m, 1, bl, nb);
+    BossEvent ev[64];
+    int ne;
+    while ((ne = boss_events(v->boss, ev, 64)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const BossEvent *e = &ev[i];
+            switch (e->type) {
+            case BE_EFFECT:
+                if (v->fxw) {
+                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    if (id >= 0 && v->nbfx < 64) {   /* to follow its part or the monster, or to stop by its id */
+                        const BossPart *p = e->obj >= 0 ? boss_part(v->boss, e->obj) : NULL;
+                        v->bfx[v->nbfx].id = e->id;
+                        v->bfx[v->nbfx].fx = id;
+                        v->bfx[v->nbfx].obj = p ? e->obj : -1;
+                        v->bfx[v->nbfx].monster = !p && e->monster >= 0;
+                        for (int k = 0; k < 3; k++)
+                            v->bfx[v->nbfx].off[k] = e->pos[k] - (p ? p->pos[k] : k == 0 ? v->mx : k == 1 ? v->my : v->mz);
+                        v->nbfx++;
+                    }
+                }
+                break;
+            case BE_EFFECT_STOP:
+                for (int k = 0; k < v->nbfx; k++)
+                    if (v->bfx[k].id == e->id) {
+                        fx_stop(v->fxw, v->bfx[k].fx);
+                        v->bfx[k] = v->bfx[--v->nbfx];
+                        break;
+                    }
+                break;
+            case BE_SOUND: if (e->level != 0 && e->name) sound_play(e->name, e->pos, 1); break;
+            case BE_REACTION: if (v->hp > 0) force_state(v, e->name); break;
+            case BE_VEL: memcpy(v->vel, e->v, sizeof v->vel); break;
+            case BE_HP: if (v->hp > 0) v->hp = fmaxf(0, fminf(200, v->hp + e->amount)); break;
+            case BE_FACING: v->heading = e->amount * 57.2957795f; break;
+            case BE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
+            case BE_STATS: if (v->army) army_add_stats(v->army, 0, e->tmpl, e->level); break;
+            case BE_DEFEATED:                        /* New York's callback finishes the block (isBossBlockFinished) */
+                if (v->game && e->name && strstr(e->name, "NewYork"))
+                    game_set_boss_finished(v->game, 0);
+                break;
+            case BE_COLLAPSE:
+                if (e->building >= 0 && (uint32_t)e->building < v->scene.nbuildings)
+                    building_destroy(&v->scene.buildings[e->building].b);
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE") && e->type != BE_EFFECT && e->type != BE_EFFECT_STOP && e->type != BE_SOUND)
+                printf("  boss event %d (%s) part %d, %.2f\n", e->type, e->name ? e->name : "-", e->obj, e->amount);
+        }
+    for (int k = 0; k < v->nbfx; k++) {              /* the effects that follow their part or the monster */
+        float at[3];
+        if (v->bfx[k].obj >= 0) {
+            const BossPart *p = boss_part(v->boss, v->bfx[k].obj);
+            if (!p || !p->alive) {
+                v->bfx[k].obj = -1;
+                continue;
+            }
+            for (int j = 0; j < 3; j++)
+                at[j] = p->pos[j] + v->bfx[k].off[j];
+        } else if (v->bfx[k].monster) {
+            at[0] = v->mx + v->bfx[k].off[0]; at[1] = v->my + v->bfx[k].off[1]; at[2] = v->mz + v->bfx[k].off[2];
+        } else {
+            if (!fx_alive(v->fxw, v->bfx[k].fx))
+                v->bfx[k--] = v->bfx[--v->nbfx];
+            continue;
+        }
+        fx_move(v->fxw, v->bfx[k].fx, at);
+    }
+}
+
 /* the game's frame (game.c): what it sees (the monster's HP, the buildings standing), then what it says. The viewer
  * has no intro or walk-out choreography: a move the flow waits for is done at once, the walks and the script cameras
  * are left out [G], and a new block is built after the frame */
@@ -1354,6 +1516,7 @@ static void army_step(Viewer *v, float dt)
     army_update(v->army, dt, &m, 1, boxes, nb);
     vehicle_step(v, dt, &m, boxes, nb);
     edible_step(v, dt);
+    boss_step(v, dt, &m);
     game_step(v, dt);
     ArmyEvent ev[64];
     int ne;

@@ -13,6 +13,7 @@
 #include "vehicle.h"
 #include "water.h"
 #include "edible.h"
+#include "boss.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -102,7 +103,8 @@ typedef struct {
      * slots (0 this one, 1 and 2 behind it) and the roof rockets the buildings carry, for it to make */
     Vehicles *traffic; Group traffic_def[3];
     Water *water[16]; int nwater; float water_acc;
-    Edibles *edibles;                                 /* the power-ups and hazards behind the windows (edible.c) */   /* the block's WaterObject|s (water.c), stepped at 1/60 */
+    Edibles *edibles;                                 /* the power-ups and hazards behind the windows (edible.c) */
+    Boss *boss;                                       /* the block's boss and the ambient ones (boss.c) */   /* the block's WaterObject|s (water.c), stepped at 1/60 */
     struct { const char *name; float pos[3], facing; int building; } rockets[16]; int nrockets;
     int placing_building;                             /* the playable building whose objects are placed, -1 none */
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;

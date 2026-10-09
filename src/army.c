@@ -695,7 +695,8 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     if (mon >= 0) {
         float dmg = w->first ? w->scale * w->damage : w->dps > 0 ? w->scale * w->dps * dt : 0;
         if (dmg > 0)
-            hit_monster(a, mon, w->name, who(a, u), dmg, w->damage_type, w->reaction, w->h_knock, w->v_knock, s->dir, at);
+            hit_monster(a, mon, w->name, u ? who(a, u) : -1, dmg, w->damage_type, w->reaction, w->h_knock, w->v_knock,
+                        s->dir, at);
     }
     if (w->first && w->impact_fx) {
         ArmyEvent *e = emit(a, AE_EFFECT, -1, w->impact_fx, at);
@@ -1098,6 +1099,12 @@ int army_load_block(Army *a, Group block_def)
         s->name = gstr(g, "Name");
         if (!s->name)
             continue;
+        if (a->host.find) {                          /* a boss is boss.c's (Boss_*.bsf), not a unit */
+            Group t = a->host.find(a->host.ctx, "Objects1_Props", s->name);
+            const char *sc = t.at ? gstr(t, "ScriptName") : NULL;
+            if (sc && strncmp(sc, "Boss_", 5) == 0)
+                continue;
+        }
         s->min_delay = group_num(g, "MinDelay", 10);
         s->respawn = group_num(g, "RespawnDelay", 10);
         s->offset = group_num(g, "OffsetDelay", 5);
@@ -1107,6 +1114,12 @@ int army_load_block(Army *a, Group block_def)
         a->nsp++;
     }
     return a->nsp;
+}
+
+int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group) { return weapon_make(a, w, weapon_group); }
+void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target, float dt)
+{
+    weapon_tick(a, NULL, w, may, from, dir, target, dt);
 }
 
 void army_activate(Army *a, int on) { a->active = on; }   /* [R] 0x2A6208: bit 8 of the manager's flags */
