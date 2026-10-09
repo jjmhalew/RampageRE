@@ -129,11 +129,13 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- `queueFacialAnim`, the head turning towards a target, the cities' flags in the wind (cloth.c has the wind);
-- friction on the velocity, the head turning with the right stick;
-- scoring;
-- effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the GUI; the effects' and objects'
-  sounds;
-- the GUI (health, score, floating numbers), becomeHuman's streaker, the real canRespawn (lives), bosses,
-  Vehicle.bsf (Humvee), rockets;
-- vertex-coloured interiors of damaged buildings, shadows, reflections.
+- `queueFacialAnim`, the head turning towards a target, friction on the velocity;
+- effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the effects' and objects' sounds;
+- the game flow's choreography: the intro and walk-out moves, the walks to the next block, the script cameras, the
+  results screens (game.c gives them; the viewer answers them at once); the rage's camera and banner;
+- the edibles' speed power-up on the clips, the Rage and message banners, the boss health bar;
+- vertex-coloured interiors of damaged buildings, shadows.
+
+Ported as modules and driven by the viewer: the HUD (hud.c), people (people.c), the army (army.c), the traffic,
+rockets and fire truck (vehicle.c), the edibles and the rage (edible.c), the bosses (boss.c), the water
+(water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), effects (fx.c) and sound (sound.c).
