@@ -84,7 +84,9 @@ monster grabs one from a window (`canGrabPerson`) or the street (`doGrabObject` 
 eats (health, energy) or throws them, and its attacks send them flying. Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
-hides them): the punch's fist, the kick's foot. The monsters' hair, fur and whiskers are the game's cloth simulation (src/cloth.c,
+hides them): the punch's fist, the kick's foot. The game's sound plays (src/sound.c, [FORMAT_SOUND.md](FORMAT_SOUND.md): Rampage.uber's event programs over
+.samp's PS-ADPCM, 3D by the camera, each block's `.mic` music): the monster's clip sounds and the people's; only in
+a window of one's own (never with `--shot`; `--mute` keeps it quiet). The monsters' hair, fur and whiskers are the game's cloth simulation (src/cloth.c,
 [CLOTH_NOTES.md](CLOTH_NOTES.md)), stepped in the world so the monster's moves drag them. The face plays its own clip over the body's (the game's face layer:
 `Expression_Idle` by default, the clip events' `faceAnim` expressions; FORMAT_MONSTER.md "The face"). A clip plays mirrored when its events (type 8, `setMirrorState`)
 say so: the skin takes each bone's other side reflected across the monster's x (for a symmetric mesh the same as
@@ -124,7 +126,8 @@ x ±75 and y −30.
 - `queueFacialAnim`, the head turning towards a target, the cities' flags in the wind (cloth.c has the wind);
 - friction on the velocity, the head turning with the right stick;
 - scoring;
-- effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the GUI, sound;
+- effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the GUI; the effects' and objects'
+  sounds;
 - the game's rules (scoring, the AI's army), the people's bottles and droppables (their events are raised, not
   acted on), window occupants' real spawn rates;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

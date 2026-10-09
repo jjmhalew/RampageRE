@@ -1506,6 +1506,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         s->people++;
     }
     Group occ = group_sub(block, "Occupants"), runners[16];
+    s->music = group_str(block, "Music");
     s->fill_rate = group_num(occ, "FillRate", 0);
     s->spawn_rate = group_num(occ, "SpawnRate", 0.75f);   /* 0x31A540: the Occupants group's, 0.75 unless set */
     int nrun = 0;

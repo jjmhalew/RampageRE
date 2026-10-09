@@ -97,6 +97,7 @@ typedef struct {
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
     float cloth_dt;                                   /* play time not yet simulated by the monster's cloth */
+    const char *music;                                /* the block's Music (a .mic stream, sound.c) */
     /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
      * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
     People *folk; struct City *owner;

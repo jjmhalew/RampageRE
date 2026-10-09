@@ -20,6 +20,7 @@
 #include "climb.h"
 #include "ik.h"
 #include "fx.h"
+#include "sound.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -229,6 +230,8 @@ static void build(Viewer *v)
         city_monster(v->city, &v->scene, v->monsters[v->monster], v->clip, v->mx, v->my, v->heading) == 0)
         printf("%s: %s\n", v->monsters[v->monster], v->scene.monster_clip ? v->scene.monster_clip : "-");
     start_moves(v);
+    if (v->have_scene && v->scene.music)             /* the block's music, looping (sound.c; silent unless started) */
+        music_play(v->scene.music);
     Group tt;
     if (city_camera(v->city, &tt) == 0)
         cam_settings(&v->cam_settings, tt);
@@ -378,6 +381,13 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     int set = 0, add = 0, relative = 0;
     if (e->type == 7) {                              /* 0x2E7DE0 */
         v->mode = (int)e->value;
+        return;
+    }
+    if (e->type == 6) {                              /* a sound at the monster ({6, at, ?, name}) */
+        float at[3] = { v->mx, v->my, v->mz + 4 };
+        int h = e->name ? sound_play(e->name, at, 1) : 0;
+        if (e->name && getenv("RAMPAGE_TRACE"))
+            printf(h ? "  sound %s\n" : "  no sound %s\n", e->name);
         return;
     }
     if (e->type == 9) {                              /* 0x2E7E18 -> 0x2F5AC0: the camera shakes, f32 strength at +8 */
@@ -926,6 +936,10 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         PeopleEvent ev[32];
         int ne = people_events(v->scene.folk, ev, 32);
         for (int i = 0; i < ne; i++) {
+            if (ev[i].type == PE_SOUND && ev[i].name) {
+                const Person *p = people_get(v->scene.folk, ev[i].who);
+                sound_play(ev[i].name, p ? p->pos : ev[i].v, 1);
+            }
             if (ev[i].type == PE_EFFECT && !ev[i].node) {
                 float up[3] = { 0, 1, 0 };
                 scene_fx(&v->scene, ev[i].name, ev[i].v, up);
@@ -1090,7 +1104,7 @@ int main(int argc, char **argv)
 {
     static Viewer v;
     const char *shot = NULL, *monster = NULL, *pos[3] = { "build\\disc\\RAMPAGE.VOL", "Chicago", "1" };
-    int npos = 0, night = 0, clip = -1, have_view = 0;
+    int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0;
     float view[5] = { 0 };
     double shot_time = 0;
     const char *script = NULL;
@@ -1107,6 +1121,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--do") == 0 && i + 1 < argc) script = argv[++i];
         else if (strcmp(argv[i], "--night") == 0) night = 1;
         else if (strcmp(argv[i], "--nofog") == 0) v.fog = -1;
+        else if (strcmp(argv[i], "--mute") == 0) mute = 1;
         else if (strcmp(argv[i], "--cam") == 0 && i + 5 < argc) {   /* x y z yaw pitch (degrees): a fixed view */
             for (int k = 0; k < 5; k++)
                 view[k] = (float)atof(argv[++i]);
@@ -1133,6 +1148,10 @@ int main(int argc, char **argv)
     }
     v.fog = v.fog < 0 ? 0 : 1;                       /* the game's fog (LightingData FogStart / FogEnd), F toggles it */
     v.rnd = rnd_create();
+    /* the game's sound (sound.c: Rampage.uber / .samp, the .mic music); the output only for a window of one's own,
+     * never for a --shot run, nor with --mute */
+    if (sound_init(&v.vol) > 0 && !shot && !mute && sound_start() != 0)
+        printf("no sound output\n");
     {                                                /* the effects: fx.bdp, its words from RAMPAGE.ELF beside the VOL */
         uint32_t size = 0;
         uint8_t *data = vol_read(&v.vol, "fx.bdp", &size);
@@ -1256,6 +1275,8 @@ int main(int argc, char **argv)
             if (w.keys['Q']) cam.pos[2] -= step;
         }
         double t = shot ? shot_time : now - start;
+        sound_listener(cam.pos, (const float (*)[3])cam.rows);   /* the camera (its rows when it is the game's) */
+        sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
         if (v.have_scene) {
             scene_update(&v.scene, t);
             if (playing)
@@ -1314,6 +1335,8 @@ int main(int argc, char **argv)
     if (v.have_scene)
         scene_free(&v.scene);
     city_close(v.city);
+    sound_end();
+    sound_free();
     win_close(&w);
     return 0;
 }
