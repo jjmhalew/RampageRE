@@ -26,11 +26,15 @@ typedef struct {
     const char **names; uint32_t nnames;
     BdpEntry *entries; uint32_t nentries;
     int32_t *by_name;                                    /* per name index: entry index or -1 */
+    int32_t *mat_by_name, *tex_by_name;                  /* the same for the materials and the textures alone */
 } Bundle;
 int bdp_load(Bundle *b, uint8_t *file, uint32_t size);   /* takes the buffer; 0 = ok */
 void bdp_free(Bundle *b);
 const char *bdp_name(const Bundle *b, uint32_t i);        /* name i without its leading 0x13 */
 const BdpEntry *bdp_entry(const Bundle *b, uint32_t name_index);   /* the entry with that name, NULL if none */
+/* the entry of that type with that name: a name can be shared (Chicago's Citybus is a texture, a node tree and its
+ * animation), so a material's texture is looked up as a texture */
+const BdpEntry *bdp_entry_of(const Bundle *b, uint32_t name_index, int type);
 int bdp_find_name(const Bundle *b, const char *name);    /* name index of a name (case-insensitive), -1 if absent */
 
 /* ---- textures (type 9) to RGBA8, mip level 0 */
@@ -48,6 +52,10 @@ typedef struct { MeshPart *parts; uint32_t nparts; } Mesh;
 int mesh_read(const BdpEntry *e, Mesh *m);               /* 0 = ok */
 void mesh_free(Mesh *m);
 uint32_t material_texture(const Bundle *b, uint32_t material);   /* texture name index of a part's material, 0 = none */
+/* a material's flags (+0x4): MAT_TWO_SIDED on flags, girders, trees, cloth, teeth (65 of the 1,893 materials), 2 on
+ * the see-through ones (fog masks, skylines, tree cards); 0 for a part that names a texture directly */
+enum { MAT_TWO_SIDED = 1 };
+uint32_t material_flags(const Bundle *b, uint32_t material);
 
 /* ---- property books (type 22), read in place; a value of a group-valued record is an offset into the book */
 enum { PK_INT = 0, PK_FLOAT = 1, PK_NAME = 2, PK_GROUP = 3 };

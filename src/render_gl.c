@@ -167,7 +167,7 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
         uint8_t *rgba;
         int w, h;
         bt->tex[name] = ~0u;
-        if (tex_decode(b, bdp_entry(b, name), &rgba, &w, &h) == 0) {
+        if (tex_decode(b, bdp_entry_of(b, name, ET_TEXTURE), &rgba, &w, &h) == 0) {
             GLuint id;
             glGenTextures(1, &id);
             glBindTexture(GL_TEXTURE_2D, id);
@@ -216,6 +216,8 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
         if (!p->ntris)
             continue;
         GLuint id = texture(r, sm->b, material_texture(sm->b, p->material));
+        if (material_flags(sm->b, p->material) & MAT_TWO_SIDED) glDisable(GL_CULL_FACE);
+        else glEnable(GL_CULL_FACE);
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
@@ -262,14 +264,15 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     perspective(cam->fov_deg, w->height ? (float)w->width / w->height : 1, 0.5f, 3000);
     look(cam);
     glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);                               /* the meshes are drawn from both sides */
+    glCullFace(GL_BACK);                                   /* one side, but for the two-sided materials (draw_mesh) */
+    glFrontFace(GL_CCW);
     glEnable(GL_ALPHA_TEST);
     glAlphaFunc(GL_GREATER, 0.5f);
     glEnable(GL_NORMALIZE);
     glEnable(GL_LIGHTING);
     glEnable(GL_COLOR_MATERIAL);
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-    glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_FALSE);      /* both sides drawn, the normal as it is (no flip) */
+    glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_FALSE);      /* a two-sided one's back lit as its front (no flip) */
     float amb[4] = { s->ambient[0], s->ambient[1], s->ambient[2], 1 };
     if (!s->nlights)
         amb[0] = amb[1] = amb[2] = 1;
@@ -312,6 +315,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
+    glDisable(GL_CULL_FACE);
     if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);

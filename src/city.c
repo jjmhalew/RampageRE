@@ -476,7 +476,7 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
                 p->uv[2 * p->nverts] = corner[k][3]; p->uv[2 * p->nverts + 1] = corner[k][4];
                 p->nverts++;
             }
-            uint32_t q[6] = { v0, v0 + 1, v0 + 2, v0 + 2, v0 + 1, v0 + 3 };
+            uint32_t q[6] = { v0, v0 + 2, v0 + 1, v0 + 2, v0 + 3, v0 + 1 };   /* counter-clockwise from outside */
             memcpy(p->tris + 3 * p->ntris, q, sizeof q);
             p->ntris += 2;
         }

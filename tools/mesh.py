@@ -241,7 +241,8 @@ class BundleAssets:
         self.b = bundle
         self.g = gltf
         self.items = list(bundle.items(0))
-        self.by_name = {e.name: (e, a, d2) for e, a, d2 in self.items}
+        # by (name, type): a name can be shared (Chicago's Citybus is a texture, a node tree and its animation)
+        self.by_name = {(e.name, e.type): (e, a, d2) for e, a, d2 in self.items}
         self.palettes = {e.name: (e, a, d2) for e, a, d2 in self.items if e.type == 13}
         self.palettes.update({i: n for i, n in enumerate(bundle.names) if n in tex.BUILTIN})
         self.out, self.texdir = out, texdir
@@ -260,8 +261,8 @@ class BundleAssets:
         """Relative PNG path of a texture entry (written once), or None."""
         if name_index not in self.textures:
             png = None
-            entry = self.by_name.get(name_index)
-            if entry and entry[0].type == 9:
+            entry = self.by_name.get((name_index, 9))
+            if entry:
                 os.makedirs(os.path.join(self.out, self.texdir), exist_ok=True)
                 file = bdp.safe_name(self.b.name(name_index)) + '.png'
                 path = os.path.join(self.out, self.texdir, file)
@@ -274,10 +275,10 @@ class BundleAssets:
     def material(self, name_index):
         """A part names a material (type 6, 3,768 parts) or directly a texture (type 9, 2,524 parts)."""
         png = None
-        mat = self.by_name.get(name_index)
-        if mat and mat[0].type == 6:
+        mat = self.by_name.get((name_index, 6))
+        if mat:
             png = self.texture(struct.unpack_from('<H', mat[1], 0x38)[0])
-        elif mat and mat[0].type == 9:
+        elif (name_index, 9) in self.by_name:
             png = self.texture(name_index)
         return self.g.material(name_index, self.clean(name_index), png)
 

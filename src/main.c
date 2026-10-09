@@ -759,7 +759,8 @@ int main(int argc, char **argv)
 {
     static Viewer v;
     const char *shot = NULL, *monster = NULL, *pos[3] = { "build\\disc\\RAMPAGE.VOL", "Chicago", "1" };
-    int npos = 0, night = 0, clip = -1;
+    int npos = 0, night = 0, clip = -1, have_view = 0;
+    float view[5] = { 0 };
     double shot_time = 0;
     const char *script = NULL;
     char walk_script[48];
@@ -774,6 +775,11 @@ int main(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--do") == 0 && i + 1 < argc) script = argv[++i];
         else if (strcmp(argv[i], "--night") == 0) night = 1;
+        else if (strcmp(argv[i], "--cam") == 0 && i + 5 < argc) {   /* x y z yaw pitch (degrees): a fixed view */
+            for (int k = 0; k < 5; k++)
+                view[k] = (float)atof(argv[++i]);
+            have_view = 1;
+        }
         else if (npos < 3) pos[npos++] = argv[i];
     }
     if (vol_open(&v.vol, pos[0]) != 0) {
@@ -902,7 +908,11 @@ int main(int argc, char **argv)
             else
                 v.scene.nspheres = 0;
         }
-        rnd_frame(v.rnd, &w, &cam, t, v.fog);
+        if (have_view) {
+            Camera fixed = { { view[0], view[1], view[2] }, view[3] / 57.2957795f, view[4] / 57.2957795f, 60 };
+            rnd_frame(v.rnd, &w, &fixed, t, v.fog);
+        } else
+            rnd_frame(v.rnd, &w, &cam, t, v.fog);
         if (shot) {
             if (cam.use_rows)
                 printf("camera at %.2f %.2f %.2f, forward %.3f %.3f %.3f, up %.3f %.3f %.3f, tilt %.3f, state %d\n",

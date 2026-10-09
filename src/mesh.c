@@ -4,7 +4,9 @@
  * Descriptor: u32 vertex count, u32 ?, u32 format, u32 0, u32 offset in data2, u32 size. The streams start on 16-byte
  * boundaries: position (4 x f32; rigid w != 0 closes a triangle, skinned w = u16 weight + 2 bone bytes), 0x010 normal
  * (3 x s8 + u8; skinned 0x7F closes), 0x040 colour (4 x u8, 0x80 = 1), 0x100 uv (2 x s16, 4.12). Every vertex flagged
- * "closes" makes a triangle with the two before it, winding alternating along the strip. */
+ * "closes" makes a triangle with the two before it, its winding by the vertex's place in the section (odd ones turn
+ * it), as the GS's strips do: so wound, the triangles face their vertices' normals (40,468 of Chicago's 40,630, 5,514
+ * of George's and Lizzie's 5,540) and the back faces can be culled. */
 #include <stdlib.h>
 #include <string.h>
 #include "data.h"
@@ -68,16 +70,13 @@ static int read_section(const BdpEntry *e, const uint8_t *desc, int skinned, Mes
         return -1;
     }
     p->tris = malloc(12u * count);
-    int run = 0;
-    for (uint32_t i = 0; i < count; i++) {
-        if (!closes[i]) { run = 0; continue; }
-        run++;
-        if (i >= 2) {
-            uint32_t *t = p->tris + 3 * p->ntris++;
-            if (run & 1) { t[0] = i - 2; t[1] = i - 1; }
-            else { t[0] = i - 1; t[1] = i - 2; }
-            t[2] = i;
-        }
+    for (uint32_t i = 2; i < count; i++) {
+        if (!closes[i])
+            continue;
+        uint32_t *t = p->tris + 3 * p->ntris++;
+        if (i & 1) { t[0] = i - 1; t[1] = i - 2; }
+        else { t[0] = i - 2; t[1] = i - 1; }
+        t[2] = i;
     }
     free(closes);
     return 0;
@@ -119,12 +118,14 @@ void mesh_free(Mesh *m)
 
 uint32_t material_texture(const Bundle *b, uint32_t material)
 {
-    const BdpEntry *e = bdp_entry(b, material);
-    if (!e)
-        return 0;
-    if (e->type == ET_TEXTURE)            /* 2,524 of the 6,292 parts name a texture directly */
-        return material;
-    if (e->type == ET_MATERIAL && e->size >= 0x3A)
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    if (e && e->size >= 0x3A)
         return rd16(e->data + 0x38);
-    return 0;
+    return bdp_entry_of(b, material, ET_TEXTURE) ? material : 0;   /* 2,524 of the 6,292 parts name a texture */
+}
+
+uint32_t material_flags(const Bundle *b, uint32_t material)
+{
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    return e && e->size >= 6 ? rd16(e->data + 4) : 0;
 }

@@ -25,8 +25,10 @@ int bdp_load(Bundle *b, uint8_t *file, uint32_t size)
     uint32_t count = rd16(seg + 2), table = rd32(seg + 4), d_off = rd32(seg + 8), d2_off = rd32(seg + 16);
     b->entries = calloc(count ? count : 1, sizeof *b->entries);
     b->by_name = malloc(sizeof *b->by_name * (b->nnames ? b->nnames : 1));
+    b->mat_by_name = malloc(sizeof *b->mat_by_name * (b->nnames ? b->nnames : 1));
+    b->tex_by_name = malloc(sizeof *b->tex_by_name * (b->nnames ? b->nnames : 1));
     for (uint32_t i = 0; i < b->nnames; i++)
-        b->by_name[i] = -1;
+        b->by_name[i] = b->mat_by_name[i] = b->tex_by_name[i] = -1;
     for (uint32_t i = 0; i < count; i++) {
         const uint8_t *rec = seg + 0x18 + 0x12 * i, *ent = file + table + 16 * i;
         BdpEntry *e = &b->entries[i];
@@ -38,8 +40,11 @@ int bdp_load(Bundle *b, uint8_t *file, uint32_t size)
         e->size2 = rd32(rec + 14);
         e->data = e->size ? file + d_off + rd32(rec + 2) : NULL;
         e->data2 = e->size2 ? file + d2_off + rd32(rec + 10) : NULL;
-        if (e->name < b->nnames)
+        if (e->name < b->nnames) {
             b->by_name[e->name] = (int32_t)i;
+            if (e->type == ET_MATERIAL) b->mat_by_name[e->name] = (int32_t)i;
+            if (e->type == ET_TEXTURE) b->tex_by_name[e->name] = (int32_t)i;
+        }
     }
     b->nentries = count;
     return 0;
@@ -51,6 +56,8 @@ void bdp_free(Bundle *b)
     free((void *)b->names);
     free(b->entries);
     free(b->by_name);
+    free(b->mat_by_name);
+    free(b->tex_by_name);
     memset(b, 0, sizeof *b);
 }
 
@@ -67,6 +74,20 @@ const BdpEntry *bdp_entry(const Bundle *b, uint32_t name_index)
     if (name_index >= b->nnames || b->by_name[name_index] < 0)
         return NULL;
     return &b->entries[b->by_name[name_index]];
+}
+
+const BdpEntry *bdp_entry_of(const Bundle *b, uint32_t name_index, int type)
+{
+    if (name_index >= b->nnames)
+        return NULL;
+    if (type == ET_MATERIAL || type == ET_TEXTURE) {
+        int32_t i = (type == ET_MATERIAL ? b->mat_by_name : b->tex_by_name)[name_index];
+        return i >= 0 ? &b->entries[i] : NULL;
+    }
+    for (uint32_t i = 0; i < b->nentries; i++)
+        if (b->entries[i].name == name_index && b->entries[i].type == type)
+            return &b->entries[i];
+    return NULL;
 }
 
 int bdp_find_name(const Bundle *b, const char *name)
