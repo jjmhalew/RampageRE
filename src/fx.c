@@ -22,6 +22,7 @@
 #define MAX_FX 256
 #define MAX_TEX 8
 #define MAX_CHILD 4
+#define MAX_SHAPE_MESH 8
 
 /* ---------------------------------------------------------------- definitions */
 /* emitter flags (definition +0x0) [R 0x1FBEE8.. the flag names and their bits] */
@@ -76,6 +77,8 @@ typedef struct {
     uint32_t eflags, enorm, pflags, pnorm;   /* +0x0, +0x8, +0xD0, +0xD4 */
     int ptype, pmode, cblend, ablend;        /* +0xD8, +0xDC, +0x1C, +0x20 */
     int gnd, spawn, ntiles[2], tile_step, repeat, fwd_axis, nshapes, ntex;
+    int shape[MAX_TEX];                      /* shapes.name (+0x120 count, +0x124): indices into FxLib.shapes */
+    char sound[2][48];                       /* enum.sound_loop_2d (+0xA4), enum.sound_2d (+0xB0); "" none */
     float cycle[2], shutdown, grav, air, stretch_len, stretch_pct, destretch_pct, offset[3];
     int rgb_const, a_const;                  /* the vertex colour graphs do not change (+0xD0 0x400000 / 0x800000) */
     Graph g[G_COUNT];
@@ -92,10 +95,19 @@ typedef struct {
     int child[MAX_CHILD];
 } Effect;
 
+typedef struct {                                 /* an XForm particle's model: "<name>.pwk", its meshes "<name>|.." */
+    char name[48];
+    const Bundle *b;
+    int nmesh;
+    const BdpEntry *mesh[MAX_SHAPE_MESH];
+} Shape;
+
 struct FxLib {
     char *words[342];
     Effect *fx;
     int nfx;
+    Shape *shapes;
+    int nshapes;
     float *pts;
     uint32_t npts, cap;
     const Bundle *const *bundles;
@@ -477,6 +489,39 @@ static void find_texture(const FxLib *L, const char *name, const Bundle **b, uin
     }
 }
 
+/* a shape by name, added to the library the first time: the model "<name>.pwk" (type 16) of the first bundle that has
+ * one, and that bundle's meshes "<name>|<object>" (the game resolves shapes.name to SimpleShapes at load, refcounted
+ * [R 0x1F91F8]; the lookup by name through the loaded bundles is [G]) */
+static int lib_shape(FxLib *L, const char *name)
+{
+    for (int i = 0; i < L->nshapes; i++)
+        if (_stricmp(L->shapes[i].name, name) == 0)
+            return i;
+    Shape *sh = realloc(L->shapes, (size_t)(L->nshapes + 1) * sizeof *sh);
+    if (!sh)
+        return -1;
+    L->shapes = sh;
+    sh = &L->shapes[L->nshapes];
+    memset(sh, 0, sizeof *sh);
+    snprintf(sh->name, sizeof sh->name, "%s", name);
+    char pwk[64];
+    snprintf(pwk, sizeof pwk, "%s.pwk", name);
+    size_t nl = strlen(name);
+    for (int bi = 0; bi < L->nbundles && !sh->b; bi++) {
+        const Bundle *b = L->bundles[bi];
+        int n = bdp_find_name(b, pwk);
+        if (n < 0 || !bdp_entry_of(b, (uint32_t)n, ET_PWK))
+            continue;
+        sh->b = b;
+        for (uint32_t k = 0; k < b->nentries && sh->nmesh < MAX_SHAPE_MESH; k++) {
+            const char *en = bdp_name(b, b->entries[k].name);
+            if (b->entries[k].type == ET_MESH && _strnicmp(en, name, nl) == 0 && en[nl] == '|')
+                sh->mesh[sh->nmesh++] = &b->entries[k];
+        }
+    }
+    return L->nshapes++;
+}
+
 static void emdef_key(FxLib *L, EmDef *d, const char *key, const char *val)
 {
     for (size_t i = 0; i < sizeof GRAPH_KEYS / sizeof *GRAPH_KEYS; i++)
@@ -546,19 +591,35 @@ static void emdef_key(FxLib *L, EmDef *d, const char *key, const char *val)
                 d->ntex++;
             }
         }
-    } else if (_stricmp(key, "shapes.name") == 0) {
+    } else if (_stricmp(key, "shapes.name") == 0) {          /* a list of model names, as textures.name */
         const char *s = val;
         d->nshapes = 0;
-        while (*s) {
+        while (*s && d->nshapes < MAX_TEX) {
             while (*s == ' ')
                 s++;
-            if (*s)
-                d->nshapes++;
-            while (*s && *s != ' ')
+            char name[48];
+            int n = 0;
+            while (*s && *s != ' ') {
+                if (n < 47)
+                    name[n++] = *s;
                 s++;
+            }
+            name[n] = 0;
+            if (n) {
+                int k = lib_shape(L, name);
+                if (k >= 0)
+                    d->shape[d->nshapes++] = k;
+            }
         }
+    } else if (_stricmp(key, "enum.sound_loop_2d") == 0 || _stricmp(key, "enum.sound_2d") == 0) {
+        /* the name after the '|' ("Rampage|fireball" -> "fireball") [R 0x1FE1D4]; "No Sound" is none [R 0x1F84D4] */
+        const char *bar = strchr(val, '|');
+        char *dst = d->sound[_stricmp(key, "enum.sound_2d") == 0];
+        snprintf(dst, sizeof d->sound[0], "%s", bar ? bar + 1 : val);
+        if (_stricmp(dst, "No Sound") == 0)
+            dst[0] = 0;
     }
-    /* not used here: enum.obj_col_resp / con_col_resp, enum.sound_2d / sound_loop_2d, int.num_emitters_reserved,
+    /* not used here: enum.obj_col_resp / con_col_resp (all "nothing"), int.num_emitters_reserved,
      * int.emitterDatasetType, graph.containment.*, graph.texture_center / radius (no effect has them), val.cost_* */
 }
 
@@ -705,6 +766,7 @@ void fx_close(FxLib *L)
     for (int i = 0; i < L->nfx; i++)
         free(L->fx[i].em);
     free(L->fx);
+    free(L->shapes);
     free(L->pts);
     free(L);
 }
@@ -772,15 +834,19 @@ typedef struct {
     float emvc[4];                 /* +0x34..+0x40: the emitter's colour when it was made */
     float spin, ang0;              /* +0x30 radians a second, +0x2A start angle */
     float stretch, sdir[3];        /* +0x4C length, +0x50 direction of a streak */
+    /* XForm: the start orientation (+0x4C, a quaternion there; here the matrix whose columns are the mesh's axes in
+     * the world), the tumbling axis in the mesh's frame (+0x5C) and its speed in radians a second (+0x68) */
+    float xr0[3][3], xaxis[3], xrate;
     int next, child, em;
     uint16_t tile0;                /* +0x2C */
-    uint8_t tex, used;             /* +0x28 */
+    uint8_t tex, used, shape;      /* +0x28, +0x29 */
 } Part;
 
 typedef struct {
     const EmDef *d;
     const Effect *owner;                   /* the effect whose emitter list d is in (EmitEmitters picks from it) */
     int used, fx, shut, parent, head;
+    int sound[2];                          /* the FxSoundFn handles of its two sounds (+0x0, +0x1 their owners) */
     float age, cycle, inv_cycle, acc;      /* +0x1C, +0x20, +0x24, +0x48 */
     float origin[3], R[3][3];              /* where it emits from (relative, unscaled), its axes (rows) */
 } Emit;
@@ -801,6 +867,8 @@ struct FxWorld {
     Fx fx[MAX_FX];
     FxShakeFn shake;
     void *shake_ctx;
+    FxSoundFn sound;
+    void *sound_ctx;
 };
 
 /* Park-Miller, x 16807 mod 2^31 - 1 [R 0x106BD0]; the float is x * 2^-31 [R 0x213A90] */
@@ -834,8 +902,19 @@ void fx_on_shake(FxWorld *w, FxShakeFn fn, void *ctx)
     w->shake_ctx = ctx;
 }
 
+static void emit_sounds_stop(FxWorld *w, Emit *e);
+
+void fx_on_sound(FxWorld *w, FxSoundFn fn, void *ctx)
+{
+    w->sound = fn;
+    w->sound_ctx = ctx;
+}
+
 void fx_clear(FxWorld *w)
 {
+    for (int i = 0; i < MAX_EMITS; i++)
+        if (w->em[i].used)
+            emit_sounds_stop(w, &w->em[i]);
     memset(w->p, 0, sizeof w->p);
     memset(w->em, 0, sizeof w->em);
     for (int i = 0; i < MAX_FX; i++)
@@ -899,7 +978,20 @@ static int emit_new(FxWorld *w, int fx, const Effect *owner, const EmDef *d, int
     }
     if (parent >= 0)
         memcpy(e->origin, w->p[parent].pos, sizeof e->origin);
+    for (int k = 0; k < 2; k++)                 /* its sounds, at the effect's place [R 0x1F84C0..0x1F8558] */
+        if (d->sound[k][0] && w->sound)
+            e->sound[k] = w->sound(w->sound_ctx, FXS_START, d->sound[k], w->fx[fx].origin, 0);
     return i;
+}
+
+/* the emitter's sounds are killed when it shuts down or ends [R 0x1F7CD0, 0x1F7E40: 0x26D530 on both owners] */
+static void emit_sounds_stop(FxWorld *w, Emit *e)
+{
+    for (int k = 0; k < 2; k++) {
+        if (e->sound[k] && w->sound)
+            w->sound(w->sound_ctx, FXS_STOP, NULL, w->fx[e->fx].origin, e->sound[k]);
+        e->sound[k] = 0;
+    }
 }
 
 /* where in the start area a particle starts (0x212A20): a box (half extents a), an ellipsoid (+EllipsoidalStartArea,
@@ -981,6 +1073,70 @@ static void part_free(FxWorld *w, int i)
 /* the emitter's frame values, read once per frame before its particles are made [R 0x20F454..0x20F5A4] */
 typedef struct { float vfs, lmin, lrange, smin, srange, vel[3], velr[3], ofs[3], area[3], emvc[4]; } EmitFrame;
 
+/* M = the rotation by angle about the unit axis a (M x v turns v; rows of M in M[row]) */
+static void axis_angle(const float a[3], float angle, float M[3][3])
+{
+    float c = cosf(angle), s = sinf(angle), t = 1 - c;
+    M[0][0] = c + t * a[0] * a[0];        M[0][1] = t * a[0] * a[1] - s * a[2]; M[0][2] = t * a[0] * a[2] + s * a[1];
+    M[1][0] = t * a[0] * a[1] + s * a[2]; M[1][1] = c + t * a[1] * a[1];        M[1][2] = t * a[1] * a[2] - s * a[0];
+    M[2][0] = t * a[0] * a[2] - s * a[1]; M[2][1] = t * a[1] * a[2] + s * a[0]; M[2][2] = c + t * a[2] * a[2];
+}
+
+/* a random axis among the XF_RotatesAround* ones: each enabled component 2r - 1 (the third random number on x, the
+ * first on z), the mask itself when that comes out near 0, normalised; (1, 0, 0) when nothing is left [R 0x211B48..
+ * 0x211D24, 0x211F38..0x21210C] */
+static void xform_axis(FxWorld *w, const float mask[3], int naxes, float out[3])
+{
+    if (naxes == 1) {
+        memcpy(out, mask, 3 * sizeof *out);
+        return;
+    }
+    float r1 = rnd01(w), r2 = rnd01(w), r3 = rnd01(w);
+    out[0] = mask[0] * (2 * r3 - 1);
+    out[1] = mask[1] * (2 * r2 - 1);
+    out[2] = mask[2] * (2 * r1 - 1);
+    if (out[0] * out[0] + out[1] * out[1] + out[2] * out[2] < 1e-6f)
+        memcpy(out, mask, 3 * sizeof *out);
+    float l2 = out[0] * out[0] + out[1] * out[1] + out[2] * out[2];
+    if (l2 < 1e-6f) {
+        out[0] = 1;
+        out[1] = out[2] = 0;
+    } else {
+        float k = 1 / sqrtf(l2);
+        for (int i = 0; i < 3; i++)
+            out[i] *= k;
+    }
+}
+
+/* an XForm particle's orientation and tumble (0x2119D0): with +RandomStartRotation and some XF_RotatesAround* axis, a
+ * start turn of 2 pi r about a random axis of those, else none, in the emitter's frame and so in the world's; a tumble
+ * about another such axis at start_rot_distribution(r) radians a second (at the emitter's cycle point with
+ * +XF_AgeNotDistribution), none without an axis or when that graph is the constant 0 */
+static void xform_start(FxWorld *w, const Emit *e, Part *p)
+{
+    const EmDef *d = e->d;
+    float mask[3] = { (d->eflags & EF_XF_ROTX) ? 1.0f : 0.0f, (d->eflags & EF_XF_ROTY) ? 1.0f : 0.0f,
+                      (d->eflags & EF_XF_ROTZ) ? 1.0f : 0.0f };
+    int naxes = (int)(mask[0] + mask[1] + mask[2]);
+    float R0[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+    if ((d->pflags & PF_RANDOMROT) && naxes) {
+        float a[3];
+        xform_axis(w, mask, naxes, a);
+        axis_angle(a, 2 * FX_PI * rnd01(w), R0);
+    }
+    for (int r = 0; r < 3; r++)                            /* into the world: the emitter's axes x R0 [R 0x211DC0] */
+        for (int c = 0; c < 3; c++)
+            p->xr0[r][c] = e->R[0][r] * R0[0][c] + e->R[1][r] * R0[1][c] + e->R[2][r] * R0[2][c];
+    p->xaxis[0] = p->xaxis[1] = 0;
+    p->xaxis[2] = 1;                                       /* [G: the default axis at 0x40A028] */
+    p->xrate = 0;
+    const Graph *g = &d->g[G_SRD];
+    if (!naxes || (g->kind == GR_CONST && g->c[0] == 0))
+        return;
+    xform_axis(w, mask, naxes, p->xaxis);
+    p->xrate = graph_eval(w->lib, g, (d->eflags & EF_XF_AGE) ? e->age * e->inv_cycle : rnd01(w));
+}
+
 static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
 {
     Emit *e = &w->em[ei];
@@ -1043,9 +1199,14 @@ static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
         int n = d->ntiles[0] * d->ntiles[1] / d->tile_step;
         p->tile0 = (uint16_t)((n > 0 ? rnd(w) % (uint32_t)n : 0) * (uint32_t)d->tile_step);
     }
-    if ((d->pmode & 2) && (d->pflags & PF_RANDOMROT)) {     /* 0x219530: a start angle and a spin */
+    /* 0x219530: a start angle and a spin; an XForm particle tumbles instead [G: its emitters take 0x212240] */
+    if ((d->pmode & 2) && (d->pflags & PF_RANDOMROT) && d->ptype != PT_XFORM) {
         p->ang0 = (float)((rnd(w) >> 8) & 0xFF) * (2 * FX_PI / 256);
         p->spin = graph_eval(w->lib, &d->g[G_SRD], rnd01(w));
+    }
+    if (d->ptype == PT_XFORM) {
+        p->shape = (uint8_t)(d->nshapes ? rnd(w) % (uint32_t)d->nshapes : 0);   /* [R 0x212250] */
+        xform_start(w, e, p);
     }
     if ((d->eflags & EF_EMITEMITTERS) && d->spawn < e->owner->nem)   /* the particle carries an emitter of the
                                                                            * same effect (int.emitter_to_spawn) */
@@ -1270,8 +1431,14 @@ int fx_alive(const FxWorld *w, int id) { return fx_of(w, id) != NULL; }
 void fx_move(FxWorld *w, int id, const float pos[3])
 {
     Fx *f = fx_of(w, id);
-    if (f)
-        memcpy(f->origin, pos, sizeof f->origin);
+    if (!f)
+        return;
+    memcpy(f->origin, pos, sizeof f->origin);
+    int slot = (int)(f - w->fx);
+    for (int i = 0; i < MAX_EMITS && w->sound; i++)       /* its sounds follow it (add3DSfx keeps the place's address) */
+        for (int k = 0; k < 2; k++)
+            if (w->em[i].used && w->em[i].fx == slot && w->em[i].sound[k])
+                w->sound(w->sound_ctx, FXS_MOVE, NULL, pos, w->em[i].sound[k]);
 }
 
 /* 0x1F7CD0: an emitter shuts down: it stops making particles; +EndOfLifeUponShutdown ends the live ones */
@@ -1286,6 +1453,7 @@ void fx_stop(FxWorld *w, int id)
         if (!e->used || e->fx != slot)
             continue;
         e->shut = 1;
+        emit_sounds_stop(w, e);
         if (e->d->eflags & EF_ENDOFLIFE)
             for (int p = e->head; p >= 0; p = w->p[p].next)
                 w->p[p].age = w->p[p].life + 1;
@@ -1307,6 +1475,7 @@ void fx_update(FxWorld *w, float dt, float ground_z)
             const Fx *f = &w->fx[w->em[i].fx];
             float ground = (ground_z - f->origin[2]) / f->scale;
             if (emit_step(w, i, FX_STEP, ground)) {
+                emit_sounds_stop(w, &w->em[i]);
                 w->em[i].used = 0;
                 if (--w->fx[w->em[i].fx].nemit <= 0)
                     w->fx[w->em[i].fx].used = 0;     /* the effect is over when its last emitter is */
@@ -1406,6 +1575,67 @@ int fx_quads(const FxWorld *w, FxQuad *out, int max)
                 out[n++] = q;
             if (n >= max)
                 return n;
+        }
+    }
+    return n;
+}
+
+/* ---------------------------------------------------------------- XForm particles (0x21B330, 0x21DC20) */
+int fx_shape_count(const FxLib *L) { return L ? L->nshapes : 0; }
+const char *fx_shape_name(const FxLib *L, int i) { return L && i >= 0 && i < L->nshapes ? L->shapes[i].name : ""; }
+const Bundle *fx_shape_bundle(const FxLib *L, int i) { return L && i >= 0 && i < L->nshapes ? L->shapes[i].b : NULL; }
+
+int fx_shape_meshes(const FxLib *L, int i, const BdpEntry **out, int max)
+{
+    if (!L || i < 0 || i >= L->nshapes)
+        return 0;
+    int n = 0;
+    for (; n < L->shapes[i].nmesh && n < max; n++)
+        out[n] = L->shapes[i].mesh[n];
+    return n;
+}
+
+/* per particle [R 0x21B780..0x21BAA8]: s = size_mul(t) (t over the life with NormalizedSizeMultiplier); s <= 0 is not
+ * drawn, else the renderer state at 0x4CB52C gets s [G: the shape's uniform scale; every XForm effect has a constant
+ * size_mul of 1]; the turn = the start orientation x the tumble about its axis by rate x age (0x185A50 axis-angle,
+ * 0x105340 to a quaternion, 0x196F30 the product, 0x104BB0 to a matrix) [G: the tumble in the mesh's own frame];
+ * the place the particle's; then the shape draws (its vtable +0x10, SimpleShape 0x184BB0). The particle size is only
+ * the ground collision's radius. */
+int fx_meshes(const FxWorld *w, FxMesh *out, int max)
+{
+    if (!w)
+        return 0;
+    const FxLib *L = w->lib;
+    int n = 0;
+    for (int ei = 0; ei < MAX_EMITS && n < max; ei++) {
+        const Emit *e = &w->em[ei];
+        if (!e->used || e->d->ptype != PT_XFORM || (e->d->pflags & PF_NORENDER) || !e->d->nshapes)
+            continue;
+        const EmDef *d = e->d;
+        const Fx *f = &w->fx[e->fx];
+        for (int pi = e->head; pi >= 0 && n < max; pi = w->p[pi].next) {
+            const Part *p = &w->p[pi];
+            float t = p->age * p->inv_life;
+            float s = graph_eval(L, &d->g[G_SIZEMUL], (d->pnorm & 4) ? t : p->age);
+            int shape = d->shape[p->shape < d->nshapes ? p->shape : 0];
+            if (s <= 0 || !L->shapes[shape].nmesh)
+                continue;
+            float T[3][3], R[3][3];
+            axis_angle(p->xaxis, p->xrate * (p->age > 0 ? p->age : 0), T);
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++)
+                    R[r][c] = p->xr0[r][0] * T[0][c] + p->xr0[r][1] * T[1][c] + p->xr0[r][2] * T[2][c];
+            FxMesh *m = &out[n++];
+            s *= f->scale;
+            for (int c = 0; c < 3; c++) {
+                for (int r = 0; r < 3; r++)
+                    m->m[4 * c + r] = R[r][c] * s;
+                m->m[4 * c + 3] = 0;
+            }
+            for (int r = 0; r < 3; r++)
+                m->m[12 + r] = f->origin[r] + p->pos[r] * f->scale;
+            m->m[15] = 1;
+            m->shape = shape;
         }
     }
     return n;

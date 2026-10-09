@@ -160,9 +160,56 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
   to the head, size wide.
 - Textures are the bundle's type-9 entries of those names (fx.bdp holds all of them).
 
+## XForm particles (meshes)
+`enum.particle_type = XForm` (11 emitters in 6 effects: `Debris_sodamachine`, `Debris_Crate`, `Bean_debris`,
+`Debris_megapunch_part2`, `Midway_Sign_explode`, `smokestack_pieces`) draw a shape instead of a quad.
+- **Shapes**: `shapes.name` is a list like `textures.name`; at load each name becomes a refcounted SimpleShape
+  (def +0x120 count, +0x124 array) [R 0x1F91F8]. All ten are models of fx.bdp: `<name>.pwk` (type 16) and one mesh
+  `<name>|<object>` (type 0) each, no node tree (`BeanCan`, `ScumSodaCan`, `girder`, `Midway_M/I/D/W/A/Y`,
+  `SmokeStackRing_02`). Sizes are the meshes' own (a can is 0.5 tall, a girder 2 long).
+- **A particle** (0x2119D0, called for every new particle; it returns unless the type is XForm) [R]: shape = r mod
+  count (byte +0x29, 0x212250). The axes are the `XF_RotatesAroundX/Y/Z` flags (a mask; n of them). Start turn: with
+  +RandomStartRotation and n > 0, 2π r about an axis among them (n = 1: that axis; else each enabled component
+  2r − 1, the third random number on x and the first on z, the mask if that is near 0, normalised), else none; it
+  is taken into the world through the emitter's matrix (and the effect's unless Stationary; EmitterRelative keeps
+  it in the emitter's frame and multiplies at draw), stored as a quaternion (+0x4C). Tumble: none when n = 0 or the
+  `start_rot_distribution` graph is the constant 0; else an axis picked the same way (+0x5C) and a speed
+  start_rot_distribution(r) (+0x68; at the emitter's cycle point with +XF_AgeNotDistribution).
+- **Drawing** (0x21B330 / 0x21DC20, the shape branch) [R]: per particle s = size_mul(t); s ≤ 0 is skipped; the
+  renderer state at 0x4CB52C gets {flags, 1, s} [G: a uniform scale; every XForm effect has size_mul 1]; the matrix
+  is quat(+0x4C) × quat(axis +0x5C, speed × age) with the particle's place (× the emitter's matrix when
+  relative); then the shape's vtable +0x10 draws it (SimpleShape 0x184BB0: culled by its sphere, drawn like a
+  prop). No particle colour or alpha is applied, so the debris does not fade. The particle size is only the ground
+  test's radius.
+- `src/fx.c`: `fx_shape_*`, `fx_meshes` (a column-major model-to-world matrix per particle). [G] the tumble is
+  applied in the mesh's own frame (start turn × tumble); the order of the quaternion product was not read.
+
+## Sounds
+`enum.sound_loop_2d` (def +0xA4) and `enum.sound_2d` (+0xB0) keep the name after the `|` [R 0x1FE1D4]. When an
+emitter starts (0x1F7F90) each that is set and not "No Sound" is started with add3DSfx (0x26D560) at the effect's
+place, owned by the emitter (+0x0 / +0x1) [R 0x1F84C0]; both are killed (0x26D530) when the emitter shuts down
+(0x1F7CD0) or ends (0x1F7E40). Whether a sound loops is the sound event's own business. `src/fx.c`: `fx_on_sound`.
+
+## Collisions
+ParticleSystemFx::advance (0x1F2A48) builds a mask per emitter from the particle flags: CollidesWithGround 1,
+CollidesWithWater 2, CollidesWithObjects 8 (CollidesWithBuildings is not asked for), and asks the world
+(gp −0x6E8C → +0x6C, vtable +0x2C) for the surfaces within 5 + 1.3 × the effect's radius of it, kept at effect +0x74;
+the ground test (0x2106B0 → 0x206140) checks a particle against up to two planes of that set. No effect sets
+anything but CollidesWithGround, and every `obj_col_resp` / `con_col_resp` is `nothing`, so a ground plane is all
+the effects need.
+
+## Ground-level quads and the depth test (the Las Vegas tank's "square" smoke)
+`Carbinator_Shockwave` (the tank boss's blast, at the tank's place on the street, z = 0) has 100–500 `Suds_3`
+billboards a second centred on the ground (start_area.z 0, size up to 6) and a `basic` glow lying flat on the
+ground (+DontBillboard, forward axis Z, size 10 × (1 + 10t)); `Carbinator_Run` / `_Charge` add `smoke_white` puffs at
+0.25–0.6 above it. Depth tested (+TestZBuffer, the default), the lower half of each billboard is behind the street
+and the flat glow z-fights with it, so the street's and the curb's straight edges cut them into steps. The textures
+are right (tex.c: `Suds_3` border alpha ≤ 30/255, `smoke_white` ≤ 26/255, `basic` is black at its corners and drawn
+additive); without the depth test the foam is round. How the PS2 avoids it (the VU1 billboard code, or how the
+street writes Z) was not read.
+
 ## Not done / not known
-- XForm particles (the shapes: meshes such as `ScumSodaCan`, `XF_RotatesAround*`): simulated, not drawn.
-- Streams modes, RenderAsDatapoints, UsesTinyParticles (drawn as ordinary quads here), the collisions with
-  buildings / objects / water, `RelativeDistanceLimit`, the orbit graphs, sounds.
-- The VU1 microcode: the billboard's exact corner layout, uv orientation, UseDiscreteRotation.
+- Streams modes (no effect uses them), RenderAsDatapoints, UsesTinyParticles (drawn as ordinary quads here),
+  `RelativeDistanceLimit`, the orbit graphs.
+- The VU1 microcode: the billboard's exact corner layout, uv orientation, UseDiscreteRotation, the depth it tests.
 - The frame rate the effects were tuned at (gravity is per frame).

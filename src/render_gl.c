@@ -500,6 +500,11 @@ static void draw_fx(Renderer *r, const Camera *cam)
                 c[3][k] = q->pos[k] - a[k] - wd[k];
             }
         }
+        if (q->kind == FXQ_FLAT) {                         /* lying on the street: pulled in front of it [G] */
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(-1, -4);
+        } else
+            glDisable(GL_POLYGON_OFFSET_FILL);
         glBegin(GL_QUADS);
         glTexCoord2f(q->uv[0], q->uv[1]); glVertex3fv(c[0]);
         glTexCoord2f(q->uv[2], q->uv[1]); glVertex3fv(c[1]);
@@ -507,6 +512,7 @@ static void draw_fx(Renderer *r, const Camera *cam)
         glTexCoord2f(q->uv[0], q->uv[3]); glVertex3fv(c[3]);
         glEnd();
     }
+    glDisable(GL_POLYGON_OFFSET_FILL);
     glFogfv(GL_FOG_COLOR, fog_col);
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
@@ -598,6 +604,14 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         glPushMatrix();
         glMultMatrixf(it->world.m);
         draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
+        glPopMatrix();
+    }
+    for (int i = 0; i < s->nfxm; i++) {                    /* the effects' mesh debris, drawn as props (0x21DC20) */
+        const FxMesh *m = &s->fxm[i];
+        glPushMatrix();
+        glMultMatrixf(m->m);
+        for (int k = 0; k < s->fx_nshapes[m->shape]; k++)
+            draw_mesh(r, &s->fx_shapes[m->shape][k], NULL, t);
         glPopMatrix();
     }
     if (s->nwater)

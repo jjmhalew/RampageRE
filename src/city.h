@@ -126,6 +126,8 @@ typedef struct {
     /* effects to start (fx.c, by main) and the particles to draw this frame */
     struct SceneFx { const char *name; float pos[3], dir[3]; } fxreq[64]; int nfxreq;
     const FxQuad *fx; int nfx;
+    const FxMesh *fxm; int nfxm;                     /* the effects' mesh debris (XForm particles) */
+    const SceneMesh (*fx_shapes)[8]; const int *fx_nshapes;   /* their meshes, by fx_shape_* */
     const HudQuad *hud; int nhud;                     /* the HUD and the floating scores, over everything (hud.c) */
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;

@@ -81,6 +81,7 @@ typedef struct {
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
+    SceneMesh fx_shapes[32][8]; int fx_nshapes[32]; /* the effects' debris models (fx.bdp's .pwk), by shape */
     Bundle gui_world, gui_common; int have_gui;      /* WorldGui.bdp, CommonGUI.bdp: the HUD (hud.c) */
     Hud *hud; int no_hud;                            /* --nohud: none */
     Camera hud_cam;                                  /* the frame's camera, for the floating scores */
@@ -1083,6 +1084,19 @@ static void hit_spheres(Viewer *v)
 
 static void hands_step(Viewer *v, float dt);
 
+/* an emitter's sounds (fx.c): add3DSfx at the effect's place as it starts, moved with it, killed as it ends */
+static int fx_sound(void *ctx, int event, const char *name, const float pos[3], int handle)
+{
+    (void)ctx;
+    if (event == FXS_START)
+        return sound_add3d(name, pos, 0, 0, 1);
+    if (event == FXS_MOVE)
+        sound_move(handle, pos);
+    else
+        sound_kill(handle);
+    return 0;
+}
+
 /* a composite effect's camerashake part (fx.c): camshake or camshake_collapse at strength 1 where it plays */
 static void fx_shake(void *ctx, const char *name, const float pos[3])
 {
@@ -2082,7 +2096,8 @@ static void hands_step(Viewer *v, float dt)
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
- * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way) */
+ * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
+ * "fx name" starts that effect 6 units in front of the monster, 3 up */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -2121,6 +2136,17 @@ static void play_script(Viewer *v, const char *script, float aspect)
                 v->heading = (float)strtod(p, &end);
                 p = end;
             }
+            continue;
+        }
+        if (_stricmp(word, "fx") == 0) {             /* fx name: an effect in front of the monster */
+            char name[64];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
+            name[k] = 0;
+            float h = v->heading / 57.2957795f, at[3] = { v->mx - sinf(h) * 6, v->my + cosf(h) * 6, v->mz + 3 };
+            if (v->fxw && fx_spawn(v->fxw, name, at, NULL, 1) < 0)
+                printf("no effect %s\n", name);
             continue;
         }
         if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
@@ -2228,8 +2254,18 @@ int main(int argc, char **argv)
             v.have_fx_bundle = 1;
             v.fxlib = fx_open(elf, bl, 1);
             v.fxw = v.fxlib ? fx_world(v.fxlib) : NULL;
-            if (v.fxw)
+            if (v.fxw) {
                 fx_on_shake(v.fxw, fx_shake, &v);
+                fx_on_sound(v.fxw, fx_sound, &v);
+            }
+            for (int i = 0; v.fxlib && i < fx_shape_count(v.fxlib) && i < 32; i++) {   /* the debris models */
+                const BdpEntry *me[8];
+                int nm = fx_shape_meshes(v.fxlib, i, me, 8);
+                for (int k = 0; k < nm; k++)
+                    if (mesh_read(me[k], &v.fx_shapes[i][v.fx_nshapes[i]].mesh) == 0)
+                        v.fx_shapes[i][v.fx_nshapes[i]++].b = fx_shape_bundle(v.fxlib, i);
+            }
+
         } else
             free(data);
     }
@@ -2364,6 +2400,11 @@ int main(int argc, char **argv)
             static FxQuad quads[8192];
             v.scene.fx = quads;
             v.scene.nfx = v.fxw ? fx_quads(v.fxw, quads, 8192) : 0;
+            static FxMesh fxm[1024];
+            v.scene.fxm = fxm;
+            v.scene.nfxm = v.fxw ? fx_meshes(v.fxw, fxm, 1024) : 0;
+            v.scene.fx_shapes = (const SceneMesh (*)[8])v.fx_shapes;
+            v.scene.fx_nshapes = v.fx_nshapes;
             if (shot && getenv("RAMPAGE_TRACE") && v.fxw)
                 printf("particles %d, quads %d (first at %.1f %.1f %.1f, size %.2f, alpha %.2f)\n", fx_particles(v.fxw),
                        v.scene.nfx, v.scene.nfx ? quads[0].pos[0] : 0, v.scene.nfx ? quads[0].pos[1] : 0,

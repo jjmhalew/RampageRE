@@ -4,7 +4,8 @@
  *
  * Use: fx_open() once with the bundles that hold the effects and their textures (fx.bdp, read from RAMPAGE.VOL with
  * vol_read + bdp_load; others may follow), fx_world() for the live effects, fx_spawn() where something breaks,
- * fx_update() every frame, fx_quads() for what to draw. Nothing here touches OpenGL. */
+ * fx_update() every frame, fx_quads() and fx_meshes() for what to draw, fx_on_sound() for the effects' sounds. Nothing
+ * here touches OpenGL. */
 #ifndef RAMPAGE_FX_H
 #define RAMPAGE_FX_H
 #include <stdint.h>
@@ -35,7 +36,9 @@ int fx_alive(const FxWorld *w, int id);
 void fx_move(FxWorld *w, int id, const float pos[3]);
 void fx_clear(FxWorld *w);
 /* advances everything by dt seconds (run as fixed 1/60 s game frames); ground_z is the height of the ground plane for
- * particles that collide with the ground (+CollidesWithGround) */
+ * particles that collide with the ground (+CollidesWithGround). The game's ground is what the world returns around
+ * the effect for its CollidesWithGround / CollidesWithWater / CollidesWithObjects flags (up to two planes, 0x1F2A48,
+ * 0x206140); CollidesWithBuildings is not asked for, and no effect sets anything but CollidesWithGround. */
 void fx_update(FxWorld *w, float dt, float ground_z);
 typedef void (*FxShakeFn)(void *ctx, const char *effect_name, const float pos[3]);
 void fx_on_shake(FxWorld *w, FxShakeFn fn, void *ctx);   /* a composite's camerashake part (camshake, camshake_collapse) */
@@ -61,6 +64,34 @@ typedef struct {
     int additive, ztest;
 } FxQuad;
 /* the quads of every live particle, emitter by emitter, an emitter's particles by texture and the newest first (the
- * game's list order, 0x211970; it does not sort by depth); returns the count (at most max) */
+ * game's list order, 0x211970; it does not sort by depth); returns the count (at most max). XForm particles are not
+ * in it: they are meshes (fx_meshes). */
 int fx_quads(const FxWorld *w, FxQuad *out, int max);
+
+/* ---- XForm particles: tumbling meshes (debris: soda cans, bean cans, girders, the Midway letters, smoke stack rings).
+ * Their shapes (shapes.name) are models of the bundles: a ".pwk" model (type 16) "<name>.pwk" and its meshes, the type-0
+ * entries "<name>|<object>", each at the model's origin (fx.bdp has no node tree for them). The game draws one as a
+ * SimpleShape, as a prop is drawn (0x184BB0): its own materials and textures, lit like the city's props, depth tested
+ * and written, opaque; the particle colour and alpha graphs are not used for them [R 0x21B714..0x21BAB0]. */
+int fx_shape_count(const FxLib *lib);
+const char *fx_shape_name(const FxLib *lib, int shape);
+const Bundle *fx_shape_bundle(const FxLib *lib, int shape);          /* NULL: no model of that name in the bundles */
+/* the shape's mesh entries (type 0, mesh_read them, their materials name entries of fx_shape_bundle); returns the count */
+int fx_shape_meshes(const FxLib *lib, int shape, const BdpEntry **out, int max);
+
+typedef struct {
+    float m[16];     /* model to world, column-major (m[12..14] the place), as city.c's Mat4: world = m x (x, y, z, 1) */
+    int shape;       /* fx_shape_* */
+} FxMesh;
+/* the meshes of every live XForm particle; returns the count (at most max) */
+int fx_meshes(const FxWorld *w, FxMesh *out, int max);
+
+/* ---- sounds: an emitter definition names two (enum.sound_loop_2d and enum.sound_2d, "Rampage|<event>"; "No Sound"
+ * none). The game starts both when the emitter starts, as 3D sounds at the effect's place (add3DSfx, 0x26D560), and
+ * kills both when the emitter shuts down (fx_stop) or ends [R 0x1F84C0, 0x1F7CD0, 0x1F7E40]. */
+enum { FXS_START, FXS_MOVE, FXS_STOP };
+/* FXS_START: play `sound` (the event name, without "Rampage|") at pos; return a handle (0 = none), kept by the emitter.
+ * FXS_MOVE: the effect moved (fx_move) to pos. FXS_STOP: kill the handle. sound is NULL for MOVE and STOP. */
+typedef int (*FxSoundFn)(void *ctx, int event, const char *sound, const float pos[3], int handle);
+void fx_on_sound(FxWorld *w, FxSoundFn fn, void *ctx);
 #endif
