@@ -35,7 +35,7 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0xA54 | the move graph | header 0x34 bytes at 0x105AC | +0x2C state count, +0x30 offset of the first state |
 | | states | 176 from 0x105E0 | see below |
 | | | states² bytes at the end | a state × state byte matrix (30,976 = 176² for George; 177² for Marco, 179² for Rojo) |
-| 0xAA4 | | | name of the monster's property book (`George_prop.prb`: hand and foot bones, foot IK, effects, weapons) |
+| 0xAA4 | | | name of the monster's property book (`George_prop.prb`: hand and foot bones, foot IK, effects, weapons; the book is `George_prop.bdp`). The setup 0x2E98C0 reads its `MiscData` (`IsFemale` to the monster's +0xAB6, which `Monster.isFemale`, script method 0x96 at 0x2AC0E0, returns; `Use3LinkFootIK`, `FootIKDragHeightScale` to +0xAC4, `RTWSmoothFactor`, `DisableFootDrag`, `LiftNodeName`, `MonsterFx`). Seven books serve the 30: Amanda (Amanda, Snapper), Jill (Jill, Natalie, Venus) and Lizzie are female; Cal, George, Ralph, Rhett are not |
 
 A state: 0x2C bytes, then 0x74 bytes per transition.
 
