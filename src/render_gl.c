@@ -198,6 +198,8 @@ static void look(const Camera *c)
     float sl = sqrtf(s[0] * s[0] + s[1] * s[1]);
     s[0] /= sl; s[1] /= sl;
     float u[3] = { s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0] };
+    if (c->use_rows)
+        for (int k = 0; k < 3; k++) { s[k] = c->rows[0][k]; f[k] = c->rows[1][k]; u[k] = c->rows[2][k]; }
     float m[16] = { s[0], u[0], -f[0], 0, s[1], u[1], -f[1], 0, s[2], u[2], -f[2], 0, 0, 0, 0, 1 };
     glMatrixMode(GL_MODELVIEW);
     glLoadMatrixf(m);

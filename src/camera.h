@@ -1,0 +1,35 @@
+/* camera.h - the game's play camera ("TwoTilts", camera.c; docs/CAMERA.md). */
+#ifndef RAMPAGE_CAMERA_H
+#define RAMPAGE_CAMERA_H
+#include "data.h"
+
+typedef struct {                       /* camera.bdp, group TwoTilts (0x3134F0 stores them at 0x4D5C80 + 4 ..) */
+    float fov;                         /* +0x04 vertical, radians */
+    float smoothing;                   /* +0x08 how much of the last frame's camera stays */
+    float near_tilt, far_extra_tilt;   /* +0x0C, +0x10 */
+    float far_border_scale;            /* +0x14 */
+    float above_tilt;                  /* +0x18 */
+    float state_trans_time;            /* +0x1C seconds the near / above state must hold before it switches */
+    float max_angular_vel;             /* +0x20 tilt change per second */
+    float min_cam_dist, min_cam_height;/* +0x24, +0x28 */
+    float rep_monster_height;          /* +0x2C */
+    float held_obj_min_cam_dist_offset;/* +0x30 */
+    float yaw;                         /* +0x34 */
+    float show_ground_height;          /* +0x38 */
+} CamSettings;
+
+typedef struct {
+    CamSettings s;
+    float inv_sin_h, sin_h, cos_h, sin_hh, cos_hh, inv_sin_hh, cot_hh;   /* +0x3C .. +0x54 */
+    int first, state;                  /* +0x5C, +0x7C (1 = near the ground) */
+    float timer, tilt;                 /* +0x80, +0x84 */
+    float q[4], pos[3];                /* +0x60, +0x70: the smoothed camera */
+    float rot[3][3];                   /* its rows: right, forward, up */
+} GameCamera;
+
+void cam_settings(CamSettings *s, Group g);
+void cam_init(GameCamera *c, const CamSettings *s);
+/* follow the monsters (root positions); aspect_hw = the view's height / width */
+void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw);
+
+#endif

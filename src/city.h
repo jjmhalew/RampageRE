@@ -21,6 +21,7 @@ typedef struct {
     Clip clip; int has_clip; float offset;            /* a looping clip, started offset seconds in */
     int vehicle;                                      /* -1, or the vehicle it rides on */
     Mat4 *node;                                       /* per node, relative to base */
+    int still_root;                                   /* keep the root node's x / y at rest (the walk moves base) */
 } Instance;
 
 typedef struct {
@@ -46,6 +47,7 @@ typedef struct {
     int people, missing;
     int monster;                                      /* instance of the monster, -1 = none */
     const char *monster_clip;                         /* the name of the clip it plays */
+    const Bundle *monster_anims;
 } Scene;
 
 typedef struct City City;
@@ -56,6 +58,11 @@ int city_build(City *c, const char *block, int night, Scene *s);    /* 0 = ok */
 /* a monster in the street at (x, y), turned deg about Z, playing its clip number `clip` (-1: its idle) */
 int city_monster(City *c, Scene *s, const char *monster, int clip, float x, float y, float deg);
 void scene_update(Scene *s, double t);               /* pose everything that moves at time t (seconds) */
+/* the monster plays the clip whose name ends in suffix ("_WALK2", "_IDLE"); 0 = ok. *speed: how fast its root
+ * travels in that clip (units per second), for moving it by hand */
+int scene_monster_clip(Scene *s, const char *suffix, float *speed);
+void scene_monster_place(Scene *s, float x, float y, float deg, int still_root);
+int city_camera(City *c, Group *two_tilts);           /* camera.bdp's TwoTilts group; 0 = ok */
 void scene_free(Scene *s);
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);   /* the 30 monsters (NAME_anims.cmp) */
 

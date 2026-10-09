@@ -22,7 +22,10 @@ void win_close(Window *w);
 void win_title(Window *w, const char *title);
 double win_time(void);
 
-typedef struct { float pos[3], yaw, pitch, fov_deg; } Camera;   /* Z up; yaw 0 looks along +x, pitch up is positive */
+typedef struct {
+    float pos[3], yaw, pitch, fov_deg;               /* Z up; yaw 0 looks along +x, pitch up is positive */
+    int use_rows; float rows[3][3];                  /* or the game camera's axes: right, forward, up */
+} Camera;
 
 typedef struct Renderer Renderer;
 Renderer *rnd_create(void);

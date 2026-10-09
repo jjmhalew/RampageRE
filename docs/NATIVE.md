@@ -10,7 +10,7 @@ Python tools' readers and of `tools/city.py`.
 build_viewer.bat
 rampage.exe                                   :: build\disc\RAMPAGE.VOL, Chicago, block 1
 rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: George idling in the street
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play: walk George about, the game's camera follows
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit
 ```
 `build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
@@ -19,7 +19,10 @@ must have been extracted by `build.ps1` first (or pass the path to your own `RAM
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, M the next monster (none, then all 30), K / L
-the monster's clips, F12 a screenshot, Esc quit. `--clip N` picks a clip by number and `--time T` poses a `--shot`. The console prints
+the monster's clips, G play or the free camera, F12 a screenshot, Esc quit. In play (the default with `--monster`)
+W A S D or the arrows walk the monster about the street and the game's camera follows it ([CAMERA.md](CAMERA.md)).
+`--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a `--shot`, `--walk S` walks
+the monster right for S seconds before it. The console prints
 what each block holds (models, people, vehicles, anything not found).
 
 ## Source
@@ -34,6 +37,7 @@ what each block holds (models, people, vehicles, anything not found).
 | `src/tree.c` | node trees, their rest pose (RawAnim at time 0, or the skeleton's bind pose) and inverse bind matrices; cloth particles (`tools/anim.py`) |
 | `src/anim.c` | clips: KeyInterpAnim tracks with the game's rotation decode (0x192010), RawAnim segments (`tools/anim.py`) |
 | `src/city.c` | a block: ground, buildings with generated facades, objects, people, traffic, lighting (`tools/city.py`); a monster; posing and CPU skinning every frame |
+| `src/camera.c` | the game's play camera, TwoTilts, transcribed from 0x312B50 (docs/CAMERA.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
 | `src/main.c` | the viewer: arguments, camera, keys |
@@ -54,5 +58,6 @@ yet); root motion stays in, so a walk walks off and jumps back when it loops.
 ## Not there yet
 - the monster's face clips (`<MONSTER>_HEAD_*`) layered over its body, cloth simulation;
 - effects (`tools/edf.py`), the GUI, sound;
-- the game's camera, collision and rules (the game systems come after the renderer);
+- the monster's real movement (here it walks at its walk clip's root speed, anywhere in the street), climbing,
+  attacks, collision and the game's rules;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

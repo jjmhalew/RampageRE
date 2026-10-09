@@ -601,6 +601,10 @@ static void pose_instance(Scene *s, Instance *in, double t)
         float tr[3] = { nd->t[0], nd->t[1], nd->t[2] }, q[4] = { nd->q[0], nd->q[1], nd->q[2], nd->q[3] };
         if (in->has_clip)
             clip_pose(&in->clip, t + in->offset, i, tr, q);
+        if (in->still_root && nd->parent < 0) {
+            tr[0] = nd->t[0];
+            tr[1] = nd->t[1];
+        }
         Mat4 local = mat_tq(tr, q);
         int p = nd->parent;
         in->node[i] = p >= 0 && (uint32_t)p < i ? mat_mul(in->node[p], local) : local;
@@ -655,7 +659,7 @@ static void update(Scene *s, double t, int all)
     for (uint32_t i = 0; i < s->nitems; i++) {
         DrawItem *it = &s->items[i];
         Instance *in = &s->instances[it->instance];
-        if (!all && !in->has_clip && in->vehicle < 0)
+        if (!all && !in->has_clip && in->vehicle < 0 && (int)(in - s->instances) != s->monster)
             continue;
         if (it->skin) {
             skin_item(s, in, it);
@@ -847,8 +851,65 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
     }
     free(cloth);
     s->monster = id;
+    s->monster_anims = ab;
     update(s, 0, 1);
     return 0;
+}
+
+int scene_monster_clip(Scene *s, const char *suffix, float *speed)
+{
+    if (s->monster < 0 || !s->monster_anims)
+        return -1;
+    Instance *in = &s->instances[s->monster];
+    const Bundle *ab = s->monster_anims;
+    for (uint32_t i = 0; i < ab->nentries; i++) {
+        const BdpEntry *e = &ab->entries[i];
+        if (e->type != ET_ANIM || e->size < 0x44 || rd32(e->data + 0x20) != 2 || rd32(e->data + 0x2C) != in->tree.n)
+            continue;
+        const char *n = bdp_name(ab, e->name), *rest;
+        if (!strncmp(n, "000", 3))
+            n += 3;
+        if (_strnicmp(n, "SKELETON_", 9) != 0)      /* exactly SKELETON_<n><suffix>: not ..._REACT_FACEUP_IDLE */
+            continue;
+        for (rest = n + 9; *rest >= '0' && *rest <= '9'; rest++)
+            ;
+        if (_stricmp(rest, suffix) != 0)
+            continue;
+        Clip clip;
+        if (clip_read(e, &clip) != 0)
+            return -1;
+        if (in->has_clip)
+            clip_free(&in->clip);
+        in->clip = clip;
+        in->has_clip = 1;
+        s->monster_clip = n;
+        if (speed) {                                 /* the root's travel over one loop */
+            float a[3] = { 0, 0, 0 }, b[3] = { 0, 0, 0 }, q[4];
+            clip_pose(&clip, 0, 0, a, q);
+            clip_pose(&clip, clip.duration * 0.9999, 0, b, q);
+            *speed = clip.duration > 0 ? sqrtf((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1])) / clip.duration : 0;
+        }
+        return 0;
+    }
+    return -1;
+}
+
+void scene_monster_place(Scene *s, float x, float y, float deg, int still_root)
+{
+    if (s->monster < 0)
+        return;
+    Instance *in = &s->instances[s->monster];
+    in->base = mat_trs_z(x, y, 0, deg);
+    in->still_root = still_root;
+}
+
+int city_camera(City *c, Group *two_tilts)
+{
+    LoadedBook *lb = load_book(c, "camera");
+    if (!lb)
+        return -1;
+    *two_tilts = book_group(&lb->book, "TwoTilts");
+    return two_tilts->at ? 0 : -1;
 }
 
 void scene_free(Scene *s)
