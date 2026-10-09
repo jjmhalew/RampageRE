@@ -57,6 +57,29 @@ int cloth_nearest(const Cloth *c, const float pos[3]);   /* the particle whose b
 int cloth_triangle(const Cloth *c, const float p0[3], const float p1[3], const float p2[3], int out[3]);
 const uint32_t *cloth_triangles(const Cloth *c, int *count);   /* 3 particle indices each, all parts */
 
+/* the cloth's own render mesh, as the game draws it (0x1DAB40, 0x1DA4B0, ClothRenderer 0x1AB120 / 0x1AA960). The
+ * entry <Model>|cloth belongs to a model whose type 0 mesh (<Model>|<Model> for the flags, 000GEORGE_CLOTH|George_Hair
+ * ...) has one mesh part per cloth part, in order. Each mesh part carries, besides its vertex stream (the record's
+ * +0x40), a u16 vertex -> particle table (the record's +0x3C: {u32 count, u32, u32 offset in data2}); every frame the
+ * renderer writes particle (map[v]) position and normal into vertex v and draws the part's strips with its
+ * material. Model names are matched without case (0x19AE80 hashes tolower). A city object reaches its flag
+ * through ClothBit| { ClothRef|Name = "Flagpole_US" }: that names a template in Objects1_props (Flagpole_US {
+ * ClothProps = "Cloth_Test_Props.txt"  Shape|Shape = "Flag_US" }), whose Shape is the model. */
+typedef struct {
+    uint16_t material;                               /* name index (in the mesh's bundle) of the part's material */
+    int nverts;
+    int *particle;                                   /* per vertex: the particle (cloth_positions numbering) */
+    float *uv;                                       /* 2 per vertex, NULL when the part has none (the poles) */
+    int ntris;
+    uint32_t *tris;                                  /* 3 vertex indices each, from the strips, wound as mesh.c */
+} ClothMeshPart;
+int cloth_mesh_parts(const uint8_t *mesh_data, uint32_t size);   /* parts of a type 0 mesh entry, -1 if bad */
+/* mesh part `part` of the model's type 0 mesh entry (its data and data2) for cloth part `part`: 0 = ok, -1 if it
+ * does not parse or does not fit the cloth. Free with cloth_mesh_part_free */
+int cloth_mesh_part(const Cloth *c, int part, const uint8_t *mesh_data, uint32_t size, const uint8_t *data2,
+                    uint32_t size2, ClothMeshPart *out);
+void cloth_mesh_part_free(ClothMeshPart *p);
+
 /* the wind on a city flag (the ClothObject update 0x3473B0): the ClothBit property group of the object */
 typedef struct {
     float dir_freq;                                  /* HorizontalWindDirFreq   (+0x150) */

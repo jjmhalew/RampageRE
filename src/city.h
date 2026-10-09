@@ -20,6 +20,7 @@ typedef struct {                                     /* a skinned mesh's vertice
     uint32_t nverts;
     /* a cloth mesh (hair, fur, whiskers): its vertices follow the simulation (cloth.c), each on its particle */
     Cloth *cloth; int32_t *particle; int cloth_started;
+    ClothWind wind; int has_wind;                     /* a city flag's wind (its object's ClothBit group) */
 } Skin;
 
 typedef struct {
@@ -98,7 +99,8 @@ typedef struct {
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
-    float cloth_dt;                                   /* play time not yet simulated by the monster's cloth */
+    float cloth_dt;                                   /* play time not yet simulated by the cloths */
+    float cloth_time;                                 /* the flags' wind clock */
     const char *music;                                /* the block's Music (a .mic stream, sound.c) */
     Group block;                                      /* the block's BlockDef (its AIDef, ...) */
     /* the army (army.c, driven by main): its units' looks are posed with the people's; the buildings' damage scores */

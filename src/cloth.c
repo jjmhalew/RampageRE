@@ -776,6 +776,91 @@ int cloth_triangle(const Cloth *c, const float p0[3], const float p1[3], const f
     return 0;
 }
 
+/* ---- the cloth's render mesh. A type 0 mesh: u32 part count, bounds, a 0x50-byte record per part from 0x20 (the
+ * game's in-place part object, vtable 0x444970, starts 0xC before: 0x197690, 0x183E50). Record +0x0A u16 material,
+ * +0x3C the offset (from the record) of the vertex -> particle stream {u32 count, u32 0, u32 offset in data2}
+ * (0x183C80 -> 0x25BF60; count 0 on ordinary meshes), +0x40 the offset of the vertex stream {u32 count, u32, u32
+ * format, u32 0, u32 offset in data2, u32 size} (-> 0x25BEA0). The renderer (0x1AB120) takes the first as its +0x7C,
+ * and its draw (0x1AA960) writes each vertex's particle position (and normal, x 127 as s8) through it. Checked: on all
+ * 76 mesh parts of the 44 cloth models the table has one entry per vertex and every vertex sits on its particle's bind
+ * position [R] */
+int cloth_mesh_parts(const uint8_t *d, uint32_t size)
+{
+    if (!d || size < 0x20)
+        return -1;
+    uint32_t n = rd32(d);
+    return n <= 4096 && in_range(0x20, 0x50ull * n, size) ? (int)n : -1;
+}
+
+void cloth_mesh_part_free(ClothMeshPart *p)
+{
+    if (!p)
+        return;
+    free(p->particle); free(p->uv); free(p->tris);
+    memset(p, 0, sizeof *p);
+}
+
+static uint32_t align16u(uint32_t n) { return (n + 15) & ~15u; }
+
+int cloth_mesh_part(const Cloth *c, int part, const uint8_t *d, uint32_t size, const uint8_t *d2, uint32_t size2,
+                    ClothMeshPart *out)
+{
+    if (!out)
+        return -1;
+    memset(out, 0, sizeof *out);
+    int np = cloth_mesh_parts(d, size);
+    if (!c || !d2 || part < 0 || part >= np || part >= c->nparts)
+        return -1;
+    const Part *cp = &c->parts[part];
+    uint32_t rec = 0x20 + 0x50u * (uint32_t)part, map_at = rec + rd32(d + rec + 0x3C), desc = rec + rd32(d + rec + 0x40);
+    if (!in_range(map_at, 12, size) || !in_range(desc, 24, size))
+        return -1;
+    uint32_t count = rd32(d + desc), fmt = rd32(d + desc + 8), off = rd32(d + desc + 16), vsize = rd32(d + desc + 20);
+    uint32_t mcount = rd32(d + map_at), moff = rd32(d + map_at + 8);
+    if (count == 0 || count > 65536 || mcount != count || !in_range(moff, 2ull * count, size2) ||
+        !in_range(off, vsize, size2) || 16ull * count > vsize)
+        return -1;
+    out->material = rd16(d + rec + 0x0A);
+    out->nverts = (int)count;
+    out->particle = malloc(count * sizeof *out->particle);
+    out->tris = malloc(3 * count * sizeof *out->tris);
+    if (!out->particle || !out->tris)
+        goto fail;
+    for (uint32_t v = 0; v < count; v++) {
+        uint16_t q = rd16(d2 + moff + 2 * v);
+        if (q >= (uint32_t)cp->n)
+            goto fail;
+        out->particle[v] = cp->first + q;
+    }
+    const uint8_t *s = d2 + off;
+    uint32_t at = align16u(16 * count);                  /* positions; their w != 0 closes a triangle */
+    if (fmt & 0x010) at += align16u(4 * count);          /* normals */
+    if (fmt & 0x040) at += align16u(4 * count);          /* colours */
+    if (fmt & 0x100) {
+        if ((uint64_t)at + 4ull * count > vsize)
+            goto fail;
+        out->uv = malloc(2 * count * sizeof *out->uv);
+        if (!out->uv)
+            goto fail;
+        for (uint32_t v = 0; v < count; v++) {
+            out->uv[2 * v] = (int16_t)rd16(s + at + 4 * v) / 4096.0f;
+            out->uv[2 * v + 1] = (int16_t)rd16(s + at + 4 * v + 2) / 4096.0f;
+        }
+    }
+    for (uint32_t v = 2; v < count; v++) {
+        if (rdf(s + 16 * v + 12) == 0.0f)
+            continue;
+        uint32_t *t = out->tris + 3 * out->ntris++;
+        if (v & 1) { t[0] = v - 1; t[1] = v - 2; }
+        else { t[0] = v - 2; t[1] = v - 1; }
+        t[2] = v;
+    }
+    return 0;
+fail:
+    cloth_mesh_part_free(out);
+    return -1;
+}
+
 /* ---- the flags' wind (0x3473B0) */
 
 /* 0x13C220: smoothed value noise in -1 .. 1 at x, the integer lattice hashed by the classic

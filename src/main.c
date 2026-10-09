@@ -1486,8 +1486,10 @@ int main(int argc, char **argv)
             cam.use_rows = 1;
             cam.fov_deg = v.cam.s.fov * 57.2957795f;
         } else {
-            if (v.have_scene)
+            if (v.have_scene) {
                 scene_buildings_update(&v.scene, dt > 0.1f ? 0.1f : dt);
+                v.scene.cloth_dt += dt > 0.1f ? 0.1f : dt;   /* the flags fly in the free camera too */
+            }
             if (cam.use_rows) {                        /* back to the free camera where the game camera was */
                 cam.use_rows = 0;
                 cam.fov_deg = 60;

@@ -327,6 +327,99 @@ static int place_model(City *c, Scene *s, const char *name, Mat4 base, int vehic
     return id;
 }
 
+/* an object's flags (ClothBit| groups, the ClothObject 0x3473B0): ClothRef|Name a template whose Shape is the flag's
+ * model, its cloth (<model>|cloth) simulated and drawn through the model's own mesh (one part per cloth part, each
+ * vertex on its particle: cloth_mesh_part), at the object x ClothOffset (rows, then the place), in its wind */
+static Skin *new_skin(const Mesh *m);
+
+static void place_flags(City *c, Scene *s, Group t, Mat4 base)
+{
+    Group where;
+    Record r[8];
+    uint32_t n = group_values(t, "ClothBit|", &where, r, 8);
+    for (uint32_t i = 0; i < n; i++) {
+        Group cb = record_group(where, r[i]), ref = template_of(c, group_str(cb, "ClothRef|Name"));
+        const char *model = ref.at ? group_str(ref, "Shape|Shape") : NULL;
+        if (!model)
+            continue;
+        char key[96];
+        snprintf(key, sizeof key, "%s|cloth", model);
+        const BdpEntry *ce = find_entry(&c->bundle, ET_CLOTH, key), *me = NULL;
+        size_t ml = strlen(model);
+        for (uint32_t k = 0; k < c->bundle.nentries && !me; k++) {   /* the model's mesh: <model>|<object> */
+            const char *en = bdp_name(&c->bundle, c->bundle.entries[k].name);
+            if (c->bundle.entries[k].type == ET_MESH && !_strnicmp(en, model, ml) && en[ml] == '|')
+                me = &c->bundle.entries[k];
+        }
+        Cloth *cl = ce ? cloth_new(ce->data, ce->size) : NULL;
+        if (!cl || !me) {
+            if (cl) cloth_free(cl);
+            continue;
+        }
+        Mesh m = { 0 };
+        int np = cloth_mesh_parts(me->data, me->size), nv = 0;
+        m.parts = calloc((size_t)(np > 0 ? np : 1), sizeof *m.parts);
+        ClothMeshPart *cp = calloc((size_t)(np > 0 ? np : 1), sizeof *cp);
+        for (int k = 0; k < np; k++) {
+            if (cloth_mesh_part(cl, k, me->data, me->size, me->data2, me->size2, &cp[k]) != 0)
+                continue;
+            MeshPart *p = &m.parts[m.nparts++];
+            p->material = cp[k].material;
+            p->nverts = (uint32_t)cp[k].nverts;
+            p->pos = calloc((size_t)cp[k].nverts * 3 + 1, sizeof(float));
+            p->nrm = calloc((size_t)cp[k].nverts * 3 + 1, sizeof(float));
+            if (cp[k].uv) {
+                p->uv = malloc(sizeof(float) * 2 * (size_t)cp[k].nverts + 1);
+                memcpy(p->uv, cp[k].uv, sizeof(float) * 2 * (size_t)cp[k].nverts);
+            }
+            p->ntris = (uint32_t)cp[k].ntris;
+            p->tris = malloc(sizeof(uint32_t) * 3 * (size_t)cp[k].ntris + 4);
+            memcpy(p->tris, cp[k].tris, sizeof(uint32_t) * 3 * (size_t)cp[k].ntris);
+            nv += cp[k].nverts;
+        }
+        if (!m.nparts) {
+            free(m.parts);
+            free(cp);
+            cloth_free(cl);
+            continue;
+        }
+        Mat4 off = mat_identity();
+        float rows[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+        Group og = group_sub(cb, "ClothOffset");
+        Record orr[12];
+        if (og.at && group_items(og, orr, 12) == 12)
+            for (int k = 0; k < 12; k++)
+                rows[k] = record_num(orr[k]);
+        for (int a = 0; a < 3; a++)
+            for (int b = 0; b < 3; b++)
+                off.m[4 * a + b] = rows[3 * a + b];
+        for (int b = 0; b < 3; b++)
+            off.m[12 + b] = rows[9 + b];
+        int id = new_instance(s, mat_mul(base, off), -1);
+        s->instances[id].dynamic = 1;
+        Skin *sk = new_skin(&m);
+        sk->cloth = cl;
+        sk->particle = malloc(sizeof *sk->particle * (size_t)(nv ? nv : 1));
+        int at = 0;
+        for (int k = 0; k < np; k++)
+            for (int v = 0; v < cp[k].nverts; v++)
+                sk->particle[at++] = cp[k].particle ? cp[k].particle[v] : -1;
+        for (int k = 0; k < np; k++)
+            cloth_mesh_part_free(&cp[k]);
+        free(cp);
+        sk->has_wind = 1;
+        sk->wind.dir_freq = group_num(cb, "HorizontalWindDirFreq", 1);
+        sk->wind.force = group_num(cb, "HorizontalWindForce", 10);
+        sk->wind.force_freq = group_num(cb, "HorizontalWindForceFreq", 3);
+        sk->wind.min_angle = group_num(cb, "HorizontalWindMinAngle", 0);
+        sk->wind.max_angle = group_num(cb, "HorizontalWindMaxAngle", 6.28f);
+        sk->wind.vert_freq = group_num(cb, "VerticalWindFreq", 2);
+        sk->wind.vert_force = group_num(cb, "VerticalWindForce", 10);
+        sk->wind.time_offset = group_num(cb, "TimeOffset", 0);
+        push_item(s, scene_add_mesh(s, m, s->city), id, -1, sk);
+    }
+}
+
 static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
 {
     Group t = template_of(c, group_str(inst, "Name"));
@@ -337,7 +430,10 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     }
     float xyz[3];
     location(inst, xyz);
-    int id = place_model(c, s, shape, mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0))), -1);
+    Mat4 at = mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)));
+    int id = place_model(c, s, shape, at, -1);
+    if (id >= 0)
+        place_flags(c, s, t, at);
     const char *flags = group_str(t, "Flags");
     if (id >= 0 && flags && strstr(flags, "IsObstacle")) {   /* 0x335ED0: IsObstacle sets object flag 0x40000 */
         s->obstacle_of = realloc(s->obstacle_of, sizeof *s->obstacle_of * (s->nobstacles + 1));
@@ -1391,7 +1487,10 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
             cloth_reset(sk->cloth, (const float (*)[16])world);
             sk->cloth_started = 1;
         } else if (s->cloth_dt > 0) {
-            cloth_step(sk->cloth, s->cloth_dt, (const float (*)[16])world, NULL);
+            float wind[3] = { 0, 0, 0 };
+            if (sk->has_wind)                        /* 0x3473B0: the flag's wind at the game clock */
+                cloth_flag_wind(&sk->wind, s->cloth_time, wind);
+            cloth_step(sk->cloth, s->cloth_dt, nodes ? (const float (*)[16])world : NULL, sk->has_wind ? wind : NULL);
         }
         int np = cloth_count(sk->cloth);
         float *lp = malloc(sizeof(float) * 6 * (size_t)(np ? np : 1)), *ln = lp + 3 * np;
@@ -1546,6 +1645,7 @@ static void update(Scene *s, double t, int all)
             it->world = it->node >= 0 ? mat_mul(in->base, in->node[it->node]) : in->base;
         }
     }
+    s->cloth_time += s->cloth_dt;
     s->cloth_dt = 0;
 }
 

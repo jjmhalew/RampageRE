@@ -114,11 +114,31 @@ The sincos at 0x106730 returns sin through its first pointer (checked against th
 
 ## The meshes
 
-Each part has a ClothRenderer whose draw (0x1AA960) copies particle positions into the mesh's vertex buffer through
-a u16 vertex → particle table (from the mesh resources, not decoded). The viewer instead matches by bind position:
-every cloth mesh vertex sits on a particle, but a position can hold two or three particles that belong to different
-triangles (Amanda: 16 such places, e.g. particles 1, 25, 26 — strands from one root), so `cloth_triangle()` maps a
-mesh triangle onto the cloth triangle on the same three positions.
+A cloth is drawn from its model's own type 0 mesh. The model of `<Model>|cloth` (all 44 have one) holds a mesh
+`<Model>|<Model>` for the flags (`Flag_US|Flag_US`: part 0 the flag, material `Cloth_US_Art` with texture `Flag_US`;
+part 1 the pole, `Cloth_US_Pole`, no UVs) or `000GEORGE_CLOTH|George_Hair` and the like for the monsters, with one
+mesh part per cloth part, in order. 0x1DAB40 builds the Cloth resource from the model (found by 0x19BA60): the cloth
+entry (type 25), then the model's first skinned mesh, or else every type 0 mesh's parts, one record {part, material
+slot} each; 0x1DA4B0 hands cloth part k's ClothRenderer record k (vt +0x18 the part, vt +0x10 the material) and part
+k's particle states (0x1AAFB0).
+
+A type 0 mesh record (0x50 bytes from 0x20; the game's in-place part object, vtable 0x444970, starts 0xC before it:
+0x197690, 0x183E50) has at +0x3C the offset of a **vertex → particle stream** {u32 count, u32 0, u32 offset in data2}
+beside the vertex stream's at +0x40 (0x183C80: 0x25BF60, 0x25BEA0). It is a u16 per vertex (count 0 on ordinary
+meshes; on the flags it comes before the vertices in data2). ClothRenderer 0x1AB120 keeps it at +0x7C and its draw
+0x1AA960 writes particle map[v]'s position (state +0x18) and normal (+0x30, × 127 as s8) into vertex v every frame,
+then draws the part's strips. On all 76 mesh parts of the 44 cloth models the table has one entry per vertex, every
+vertex sits on its particle's bind position, and the strips make exactly the cloth part's triangle count.
+`cloth_mesh_part()` reads it all (material name index, UVs, strip triangles, vertex → particle).
+
+**Names.** A city object has `ClothBit| { ClothRef|Name = "Flagpole_US" ... }`. That names a template group in
+Objects1_props (`Flagpole_US { ClothProps = "Cloth_Test_Props.txt"  Shape|Shape = "Flag_US" }`) whose Shape is the
+model. Model names match without case (0x19AE80 hashes them through tolower, 0x32EC08): `flagpole_red` →
+`FlagPole_red`, `Flag_Yellow_Lion` → `FLAG_Yellow_Lion`, `flag_red` → `FLAG_RED`. `ClothProps` names a text props
+file that is not on the disc; the entry's own part settings hold.
+
+(Before this table was found the viewer matched vertices by bind position; `cloth_triangle()` still does that, through
+a triangle because a position can hold two or three particles — Amanda: 16 such places.)
 
 ## Port status
 
