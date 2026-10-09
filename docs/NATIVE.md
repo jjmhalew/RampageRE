@@ -95,7 +95,8 @@ around the windows of lightly damaged cells; a broken corner cell shows the inne
 `InnerWallColumn`). The buildings' adornments hang where the game puts them (fire escapes, AC units, awnings, roof
 trims: "Adornments"), ride their storeys down, fall off with their cells and are knocked off by attacks. A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
-and sinks, leaving its rubble ("Collapse"; `--do "collapse"` destroys the building in front of the monster).
+and sinks, leaving its rubble (the camera shakes as each floor falls, and on the monsters' heavy blows: CAMERA.md
+"Shake") ("Collapse"; `--do "collapse"` destroys the building in front of the monster).
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster
 pushed at a building's front mounts it, climbs with the stick (each stroke flipping the clip), hops along the front,
 swings round a corner onto a side unless a neighbour is flush with it, climbs down and steps off at the foot, or
@@ -116,6 +117,6 @@ x ±75 and y −30.
   simulation;
 - friction on the velocity, the head turning with the right stick;
 - debris and dust effects, scoring;
-- effects (`tools/edf.py`), the GUI, sound;
-- grabbing, the hands' grip on the wall (attachHand / detachHand: IK), the game's rules;
+- effects (`tools/edf.py`; the camera shakes are in), the GUI, sound;
+- grabbing, the game's rules;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.
