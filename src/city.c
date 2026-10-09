@@ -704,6 +704,23 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
         memcpy(ib.m, in->tree.nodes[j].inverse_bind, sizeof ib.m);
         palette[j] = mat_mul(in->node[j], ib);
     }
+    if (in->mirrored) {                              /* the game mirrors the pose (0x194BA0); for a mesh that is
+                                                        symmetric this is S x the other side's matrix x S, S the
+                                                        reflection of x */
+        static Mat4 other[256];
+        for (uint32_t j = 0; j < nb; j++) {
+            int m = in->tree.nodes[j].mirror;
+            other[j] = palette[m >= 0 && (uint32_t)m < nb ? (uint32_t)m : j];
+        }
+        for (uint32_t j = 0; j < nb; j++) {
+            Mat4 k = other[j];
+            for (int c = 0; c < 4; c++) {            /* S k S: negate row 0 and column 0, the corner twice */
+                k.m[4 * c] = -k.m[4 * c];
+                k.m[c] = -k.m[c];
+            }
+            palette[j] = k;
+        }
+    }
     const Mesh *m = &s->meshes[it->mesh].mesh;
     uint32_t v = 0;
     for (uint32_t pi = 0; pi < m->nparts; pi++) {

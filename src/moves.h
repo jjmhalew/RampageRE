@@ -74,6 +74,8 @@ int moves_find(const MoveGraph *g, const char *state);   /* -1 = none */
 typedef struct {
     float v[MV_COUNT];                               /* held values (booleans 0 / 1) */
     float fresh[MV_COUNT];                           /* > 0: pressed lately (seconds left), for "new" conditions */
+    int mirrored;                                    /* the monster plays mirrored: conditions with flag 2 swap left
+                                                        and right (0x2C15F8) */
 } MoveInput;
 /* fills the derived variables (30, 31, 48..57) from the sticks and buttons already in v */
 void moves_derive(MoveInput *in);

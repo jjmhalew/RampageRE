@@ -29,6 +29,7 @@ typedef struct {
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
     int hidden;                                       /* not drawn (a building's interior until it is damaged) */
     int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
+    int mirrored;                                     /* skinned mirror-wise: left and right swapped, x reflected */
 } Instance;
 
 typedef struct {

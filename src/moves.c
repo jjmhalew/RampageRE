@@ -253,10 +253,18 @@ static int holds(const MoveCond *c, const MoveInput *in)
 {
     if (c->var >= MV_COUNT)
         return 0;
-    if (!(c->flags & 1) && in->fresh[c->var] <= 0)   /* a "new" condition: the input must have just come */
+    uint32_t var = c->var;
+    if ((c->flags & 2) && in->mirrored) {            /* mirrored: the other side (0x2C1638, 0x2C1688) */
+        static const uint8_t SWAP[][2] = { { 50, 53 }, { 51, 54 }, { 52, 55 }, { 33, 34 }, { 41, 42 }, { 43, 44 },
+                                           { 46, 47 } };
+        for (size_t k = 0; k < sizeof SWAP / sizeof *SWAP; k++)
+            if (var == SWAP[k][0]) { var = SWAP[k][1]; break; }
+            else if (var == SWAP[k][1]) { var = SWAP[k][0]; break; }
+    }
+    if (!(c->flags & 1) && in->fresh[var] <= 0)      /* a "new" condition: the input must have just come */
         return 0;
-    float a = in->v[c->var], b;
-    if (is_bool(c->var)) {
+    float a = in->v[var], b;
+    if (is_bool(var)) {
         a = a != 0;
         b = (c->value & 0xFF) != 0;
     } else {

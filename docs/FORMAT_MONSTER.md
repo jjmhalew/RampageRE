@@ -175,6 +175,17 @@ across (3 for George, scaled by +0xA78) and +0x19C each way up from a centre tha
 3 more each way while on a building (mode 5); the world (0x4D0900, vtable +0x30, mask 0x404000, up to 64) returns
 what it touches, and 0x2801A0 works out the push for each.
 
+## Mirroring
+A monster plays a clip mirrored (left for right, across its own x) when its queued mirror state (+0xAA1) is set as
+the clip starts (0x2E67E8 copies it to +0xAA0, and 0x2FFA00 to the animation player's +0x72B9, the monster's
++0x7DA1). Clip events of type 8 flip the queued state, `Monsters::setMirrorState` sets it, `queueMirrorState` /
+`getMirrorState` are the script bindings. The animation player mirrors the pose after evaluating it (0x194BA0): it
+swaps the skeleton's mirror pairs (skeleton +0x34 pair count, +0x38 table) and turns each bone's rotation and
+translation over, with constant quaternions (0x3B1790 … 0x3B17E0) for the root bones whose axes are not the
+model's; a mirrored root's x is negated (0x194A60), so root motion and turns go the other way. The steering negates
+the forward axis's x (0x2E8190), conditions with flag 2 swap left and right (0x2C15F8), the attack shapes go through
+a mirror map (+0xC4D0), and `Monsters.bsf` negates its x velocities (`jumpNorm`: `if (monster.getMirrorState())`).
+
 ## Steering
 The stick is read in the camera's frame: x along the camera's right axis, −y along its forward axis, the height
 dropped (0x2E8410), using the camera's matrix (gp−0x6CFC +0x660) the monster copies to +0xA18 every frame unless the

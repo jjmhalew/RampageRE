@@ -33,6 +33,17 @@ int tree_read(const Bundle *b, const BdpEntry *te, const BdpEntry *raw, Tree *t)
             t->nodes[i].has_bind = 1;
         }
     }
+    for (uint32_t i = 0; i < n; i++)
+        t->nodes[i].mirror = (int)i;
+    uint32_t pairs = rd32(d + 0x34), mt = rd32(d + 0x38);   /* the mirror table: u16 pairs, then the middle nodes */
+    if (mt && mt + 4 * pairs <= te->size)
+        for (uint32_t k = 0; k < pairs; k++) {
+            uint32_t a = d[mt + 4 * k] | d[mt + 4 * k + 1] << 8, b2 = d[mt + 4 * k + 2] | d[mt + 4 * k + 3] << 8;
+            if (a < n && b2 < n) {
+                t->nodes[a].mirror = (int)b2;
+                t->nodes[b2].mirror = (int)a;
+            }
+        }
     if (raw && raw->size >= 0x38 && rd32(raw->data + 0x20) == 1) {
         const uint8_t *r = raw->data;
         uint32_t count = rd32(r + 0x2C), rtable = rd32(r + 0x30);

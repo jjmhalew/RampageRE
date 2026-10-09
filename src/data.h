@@ -79,6 +79,7 @@ typedef struct {
     int parent; const char *name;
     float t[3], q[4];                                    /* rest pose; q: x, y, z, w, row-vector convention */
     float inverse_bind[16]; int has_bind;                /* skeletons: the stored inverse bind matrix (column-major) */
+    int mirror;                                          /* its other side (left <-> right), itself in the middle */
 } TreeNode;
 typedef struct { TreeNode *nodes; uint32_t n; } Tree;
 int tree_read(const Bundle *b, const BdpEntry *tree, const BdpEntry *rawanim, Tree *t);   /* rawanim may be NULL */

@@ -77,7 +77,10 @@ in its column, so a held Cross jumps higher, a double jump flips, a butt slam la
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
-hides them): the punch's fist, the kick's foot. The clips' `hitBuildingFront` calls damage the buildings by the
+hides them): the punch's fist, the kick's foot. A clip plays mirrored when its events (type 8, `setMirrorState`)
+say so: the skin takes each bone's other side reflected across the monster's x (for a symmetric mesh the same as
+the game's pose mirroring, 0x194BA0), and root motion, steering, the conditions and the spheres follow
+([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Mirroring"; `--do "mirror"` flips it for the next clip). The clips' `hitBuildingFront` calls damage the buildings by the
 game's rules: the front cell takes 2 HP, the hit spreads up or down and sideways as the cell weakens, floors and
 buildings keep their HP pools, and each facade tile shows its cell's state (the sheet's row), so five punches crack,
 break and wreck a cell and its neighbours, and a damaged storey shows its interior (the floor's `Skeleton`, then its

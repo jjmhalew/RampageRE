@@ -40,6 +40,7 @@ typedef struct {
                                                         (+0xA18, +0xA24) and the stick they were taken for (+0xA3C) */
     float air[3];                                    /* the stick's own velocity (+0xA68), NODE_AIR_* */
     uint32_t armed; int show_hits;                   /* body parts an attack event armed (bits); H draws them */
+    int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
 } Viewer;
 
 /* the clip's root at time t (seconds of the clip: the state's time × its rate), held at the clip's last frame
@@ -70,6 +71,10 @@ static void play_state(Viewer *v)
         printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
     v->entry_yaw = root_yaw(v, v->run.time * st->rate);
     v->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed */
+    v->mirror = v->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
+    v->input.mirrored = v->mirror;
+    if (v->scene.monster >= 0)
+        v->scene.instances[v->scene.monster].mirrored = v->mirror;
     float q[4];
     if (root_at(v, v->run.time * st->rate, v->entry_root, q) != 0)
         memset(v->entry_root, 0, sizeof v->entry_root);
@@ -88,6 +93,7 @@ static void start_moves(Viewer *v)
     moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
     memset(&v->input, 0, sizeof v->input);
     memset(v->vel, 0, sizeof v->vel);
+    v->mirror = v->mirror_queued = 0;
     memset(v->air, 0, sizeof v->air);
     memset(v->stick, 0, sizeof v->stick);
     memcpy(v->frame, v->cam.rot, sizeof v->frame);
@@ -169,7 +175,7 @@ static int answer(void *ctx, const char *call)
  * hit (0x2BC150). Sides: 0 the building's left face (looking +x), 1 its right (-x), 2 its front (+y), 5 its roof. */
 static void hit_building_front(Viewer *v, const float *p)
 {
-    int mirror = 0, side = 0, kind = (int)p[0];      /* the viewer's monster is never mirrored */
+    int mirror = v->mirror, side = 0, kind = (int)p[0];
     if (kind == 0 || kind == 1 || kind == 3 || kind == 4) side = mirror;
     else if (kind == 2 || kind == 5) side = 2;
     else if (kind == 6 || kind == 7) {
@@ -212,11 +218,15 @@ static void hit_building_front(Viewer *v, const float *p)
 static void clip_event(Viewer *v, const MoveEvent *e)
 {
     float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
-    float mirror = s > 0 ? -1.0f : 1.0f;            /* Monster.getMirrorState: facing -x */
+    float mirror = v->mirror ? -1.0f : 1.0f;        /* Monster.getMirrorState */
     float w[3] = { 0, 0, 0 }, l[3] = { 0, 0, 0 };   /* world / relative velocity */
     int set = 0, add = 0, relative = 0;
     if (e->type == 7) {                              /* 0x2E7DE0 */
         v->mode = (int)e->value;
+        return;
+    }
+    if (e->type == 8) {                              /* 0x2E7F18: the next clip the other way round */
+        v->mirror_queued = !v->mirror_queued;
         return;
     }
     if (e->type == 23) {                             /* 0x2E7D38 */
@@ -245,6 +255,7 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
     else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
+    else if (!strcmp(n, "Monsters::setMirrorState")) { v->mirror_queued = e->p[0] != 0; return; }
     else if (strstr(n, "::hitBuildingFront")) { hit_building_front(v, e->p); return; }
     else return;
     if (relative) {                                  /* the monster's frame (0x2E7330 / 0x2E74F0: by its matrix) */
@@ -328,11 +339,12 @@ static float steer(const Viewer *v, const MoveState *st, float lx, float ly, flo
     n = 1 / sqrtf(n);
     l[0] *= n;
     l[1] *= n;
-    float d = l[0] * st->fwd[0] + l[1] * st->fwd[1];
+    float fx = v->mirror ? -st->fwd[0] : st->fwd[0];   /* mirrored: its forward axis' x the other way */
+    float d = l[0] * fx + l[1] * st->fwd[1];
     float angle = acosf(d < -1 ? -1 : d > 1 ? 1 : d);
     if (angle <= st->turn * dt)
         return 0;
-    float sign = l[0] * st->fwd[1] - l[1] * st->fwd[0] < 0 ? 1.0f : -1.0f;
+    float sign = l[0] * st->fwd[1] - l[1] * fx < 0 ? 1.0f : -1.0f;
     return sign * angle * st->turn * dt * 57.2957795f;
 }
 
@@ -397,10 +409,16 @@ static void hit_spheres(Viewer *v)
                     armed |= g->part_bone[p][k] == sh->bone;
         if (!armed || sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
             continue;
-        Mat4 m = mat_mul(in->base, in->node[sh->bone]);
+        const float *m = in->node[sh->bone].m;      /* in the monster's frame, then reflected if mirrored */
+        float l[3];
+        for (int r = 0; r < 3; r++)
+            l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
+        if (v->mirror)
+            l[0] = -l[0];
+        const float *bm = in->base.m;
         float *c = v->scene.spheres[v->scene.nspheres++];
         for (int r = 0; r < 3; r++)
-            c[r] = m.m[r] * sh->off[0] + m.m[4 + r] * sh->off[1] + m.m[8 + r] * sh->off[2] + m.m[12 + r];
+            c[r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
         c[3] = sh->radius;
     }
 }
@@ -475,10 +493,11 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (root_at(v, t0 * st->rate, a, q) == 0 && root_at(v, t1 * st->rate, b, q) == 0) {
             float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
             float dx = st->flags & NODE_ROOT_X ? b[0] - a[0] : 0, dy = st->flags & NODE_ROOT_Y ? b[1] - a[1] : 0;
-            v->mx += c * dx - s * dy;
-            v->my += s * dx + c * dy;
+            float m = v->mirror ? -1.0f : 1.0f;      /* mirrored: across the monster's x */
+            v->mx += c * m * dx - s * dy;
+            v->my += s * m * dx + c * dy;
             if (st->flags & NODE_ROOT_TURN)
-                v->heading += fmodf(root_yaw(v, t1 * st->rate) - root_yaw(v, t0 * st->rate) + 540, 360) - 180;
+                v->heading += m * (fmodf(root_yaw(v, t1 * st->rate) - root_yaw(v, t0 * st->rate) + 540, 360) - 180);
         }
         clip_events(v, st, t0, t1);                  /* the old clip's events up to now */
         if (switched) {
@@ -486,12 +505,13 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                 /* the place and turn the old clip's root reached (what it did not hand over already) become the
                  * monster's */
                 float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
-                float dx = st->flags & NODE_ROOT_X ? 0 : b[0] - v->entry_root[0];
+                float m = v->mirror ? -1.0f : 1.0f;
+                float dx = st->flags & NODE_ROOT_X ? 0 : m * (b[0] - v->entry_root[0]);
                 float dy = st->flags & NODE_ROOT_Y ? 0 : b[1] - v->entry_root[1];
                 v->mx += c * dx - s * dy;
                 v->my += s * dx + c * dy;
                 if (!(st->flags & NODE_ROOT_TURN))
-                    v->heading += fmodf(root_yaw(v, t1 * st->rate) - v->entry_yaw + 540, 360) - 180;
+                    v->heading += m * (fmodf(root_yaw(v, t1 * st->rate) - v->entry_yaw + 540, 360) - 180);
             }
             const MoveState *to = &v->graph.states[v->run.state];
             if (v->run.from != v->run.state)
@@ -531,7 +551,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
 }
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
- * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does */
+ * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
+ * "mirror" flips the mirror state for the next clip */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -551,6 +572,10 @@ static void play_script(Viewer *v, const char *script, float aspect)
             char *end;
             seconds = (float)strtod(p, &end);
             p = end;
+        }
+        if (_stricmp(word, "mirror") == 0) {         /* the next clip mirrored, as an event of type 8 would */
+            v->mirror_queued = !v->mirror_queued;
+            continue;
         }
         if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
             for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
