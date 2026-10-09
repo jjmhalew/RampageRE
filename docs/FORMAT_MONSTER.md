@@ -131,11 +131,18 @@ type, table 0x4312F0):
 | Type | | |
 |---|---|---|
 | 21 | {name, f32 p[4]} | a script function of `Monsters.bsf` (or the monster's own, `George::EnableWeapon`) with four arguments, via 0x2E75C0: footsteps, `addVelocity`, `jumpNorm`, `damageRoof`, `fireWeapon`, ... |
-| 6 | {?, name} | a sound |
+| 0 | {i16 part[4], u16 count, u32 flags, ...}, 0x80 bytes | an attack: the collision shapes of the listed body parts (`Arm R` for a punch, `Leg R` for the kick, both arms for `Ground_Punch_Down`) take this record as theirs (+0xBD60 of the monster, 0x1C per shape, through the mirror map at +0xC4D0 when mirrored); flags 7 arms them, 0 disarms them, so an attack is a pair: on, then off. After the flags: u32 +0x18 (0xF, 0x1F), +0x20 (1 or 3), +0x24, +0x28 (4), f32 +0x2C (5 a punch, 20 the kick, 10 or 20), +0x30 (15, 10), +0x34 (0.2 … 0.4), +0x38 (0 or 1), +0x40 (1); their use (0x2D4390 tests the shapes) is not traced |
+| 6 | {u16, u16, name} | a sound: +0xA set, a world sound (0x26B960), otherwise one of the monster's own (+0x8, 0x287860) |
 | 7 | {mode} | the movement mode (+0xAD8 of the monster): 0 on the ground, 2 taking off, 1 in the air (`isAirborne`: 1 or 2), 4 down or landing, 5 on a building |
+| 8 | | the queued mirror state flips (+0xAA1, taken at the next clip's start); the climbs flip at each hand, so one clip climbs with both |
+| 9 | {f32} | a camera shake of that strength in a random direction (0x2F5AC0 → 0x1E7ED0, the camera-shake effect's own start); 3 or 4 on the heavy punches and the butt slam |
+| 12 | {u16 slot, u16 effect, u32 on} | an effect of MONSTER_DATA's list (+0xA90) starts (1) or stops (0) in that slot: `Monster_Belch.edf` on the burp, `Charged_Punch.edf` on the charge punch, `Collapse_Floor_concrete_comp.edf` on the butt slam |
 | 23 | {column} | the slot column (+0xBAB4), see "Slots" |
-| 20, 22 | {value} | +0xBAAC, +0xBAB0 (not traced) |
-| 0, 8, 9, 12, 15, 16 | | not decoded (hits, effects) |
+| 15, 16 | {..., f32 +0x10} | the record is kept at +0xBA9C / +0xBAA0 (on a building, −5.5; leaving it, −5 … −6.25); not traced |
+| 1, 3, 4, 5, 10, 11, 13, 14, 17, 19, 20, 22 | | handled (a list of four at +0xBA8C, disarming shapes, a throw, +0xAA2, +0xAA8, +0xBD00, ...) but used by no monster |
+
+Of the 38,002 events of all 30 monsters: 16,879 script calls, 7,612 sounds, 4,607 modes, 3,751 columns, 2,431 of
+type 15, 1,370 attacks, 862 effects, 310 flips, 90 shakes, 90 of type 16.
 
 `tools/monster.py` prints them under each state (`0.136 Monsters::addVelocity(1, 0, 0, 16); 0.136 mode 1`).
 

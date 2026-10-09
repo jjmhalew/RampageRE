@@ -48,7 +48,8 @@ VARIABLES = {0: 'LX', 1: 'LY', 2: 'RX', 3: 'RY', 4: 'Up', 5: 'Down', 6: 'Left', 
 OPERATORS = ['>', '>=', '<', '<=', '==']
 # clip events with a value (0x2E7840): 7 the movement mode (+0xAD8), 23 the slots' column (+0xBAB4), 20 / 22 (+0xBAAC
 # / +0xBAB0, not traced)
-EVENT_VALUES = {7: 'mode', 23: 'column', 20: 'set BAAC', 22: 'set BAB0'}          # variable OP value (0x3F5950 floats, 0x3F5970 booleans)
+EVENT_VALUES = {7: 'mode', 23: 'column', 20: 'set BAAC', 22: 'set BAB0'}   # clip events with one value (0x2E7840)
+# variable OP value (0x3F5950 floats, 0x3F5970 booleans)
 
 
 def is_bool(var):
@@ -180,6 +181,25 @@ class MonsterData:
                 text = f'{self.name(self.i(o + 8))}({", ".join(f"{x:g}" for x in struct.unpack_from("<4f", self.d, o + 12))})'
             elif t == 6:
                 text = f'sound {self.name(self.i(o + 12))}'
+            elif t == 0:                                 # body parts' collision shapes armed with this attack
+                parts = [p for p in struct.unpack_from('<4h', self.d, o + 8)[:self.u(o + 0x10)] if p >= 0]
+                names = '+'.join(self.bodyparts[p] if p < len(self.bodyparts) else str(p) for p in parts)
+                if self.u(o + 0x14) & 6:
+                    a, b, c = struct.unpack_from('<3I', self.d, o + 0x20)
+                    x = struct.unpack_from('<4f', self.d, o + 0x2C)
+                    text = f'attack {names} on ({a} {b} {c}; {" ".join(f"{v:g}" for v in x)})'
+                else:
+                    text = f'attack {names} off'
+            elif t == 8:
+                text = 'flip'                            # the queued mirror state toggles (+0xAA1)
+            elif t == 9:
+                text = f'camera shake {self.f(o + 8):g}'
+            elif t == 12:
+                slot, fx, on = struct.unpack_from('<HHI', self.d, o + 8)
+                name = self.effects[fx] if fx < len(self.effects) else str(fx)
+                text = f'effect {slot} {name} {"on" if on else "off"}'
+            elif t in (15, 16):
+                text = f'type {t} {self.f(o + 0x10):g}'
             elif t in EVENT_VALUES:
                 text = f'{EVENT_VALUES[t]} {self.i(o + 8)}'
             else:
