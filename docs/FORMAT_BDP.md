@@ -394,6 +394,41 @@ The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then it
 `CellDetachDamage` and `VertDetachDamage` belong to a building's attachments (AC units, fire escapes; 0x2C617C), not
 to the grid.
 
+### Facade geometry
+The grid G builds the walls itself: the grid builder 0x2D1A30 sets up a mesh writer per pass and face (G+0x1FC + pass
+× 0x174 + face × 0x7C, 0x2D32D0). The builders sit in two 9-entry tables of member-function pointers, [pass][face]
+with left, right, front: 0x3F5818 and 0x3F58A8. Its sheet properties (0x2D1580, names at 0x3F5A2C) are
+`ShellTexture` (+0xB0, the 4 × 4 facade sheet), `CrackTexture` (+0xB4), 1 / `CrackScale` (+0xC0), `CrackTint`
+(+0xC4 …), `InnerWallColumn` (+0xD4), `RefTexWidth` / 4 and `RefTexHeight` / 4 (+0xDC, +0xE0: a tile's pixels), and
+the `ColumnDef|` entries (G+0xEC + column × 0x38, 0x2D0FB0).
+
+- **No back.** The cells and the grid vertices run left (back to front), right (front to back), then front. Nothing
+  builds a back wall, a roof or floor slabs. The roof is the `TopFloorShapes` model and the inside is the floors'
+  `Skeleton` models. The game's camera stays in front.
+- **Pass 1, the facade** (front 0x2C81A0, right 0x2C8760, left 0x2C8D30): one quad per cell in every damage state, a
+  sheet of no thickness.
+  - u is the cell's column / 4 (mirrored by cell flag bit 0); v runs from state / 4 at the top to (state + 1) / 4 at
+    the bottom.
+  - The corners take the dent offsets of their grid vertices: +0x14 along the face, +0x18 up, and on the sides +0x1C
+    along the normal.
+  - The colour is the vertex's times the cell's tint (u16, 256 = 1).
+  - A vertex is emitted at z + 6 + 3 × row (0x2C6790), and each quad is a strip TL, BL, TR, BR.
+- **Inner corner walls** (0x2C63A0, before the front): while the first or the last front cell is damaged, a piece 5 deep
+  just inside the side wall (0.3 in), textured from column `InnerWallColumn` at the side cell's state, grey.
+- **Pass 0, window glass** (front 0x2C92F0): only for cells in state 0 whose column has an `Outline`; it goes once the
+  cell is damaged.
+  - The quad is the outline grown by 0.3 on each side, 0.03 inside the face, tinted `CubeTint`.
+  - It shows one of 16 tiles of `InnerWindow` (the cell's byte +6), or, with no inner window texture, a reflection
+    (the 0x3F5818 variant, from the vertex normals).
+  - An `Outline` (x0, z0, x1, z1 in tile pixels) becomes cell units: x = (o & (Wt − 1)) × 5 / Wt and z = (Ht − o) × 3 / Ht.
+- **Pass 2, cracks** (front 0x2C6A30, right 0x2C7340, left 0x2C7A90; emit 0x2C7020): `CrackTexture` just inside the
+  face, faded in by the dent level.
+  - The fade is the grid vertex's alpha, level × 85; a cell with no level at its corners is skipped.
+  - Below state 2 a column with an `Outline` gets 4 bands around the window, otherwise one quad.
+  - The texture runs on across the unwrapped faces at 1 / `CrackScale` per unit.
+- **Which passes**: all three; a low-detail grid (G+0x1C) only the facade, or the facade and glass when it has an
+  inner window texture.
+
 ### Spawns
 A block definition also says who is in the street (names found through the property name table at 0x3F5990;
 the block loader is 0x302AF0):
