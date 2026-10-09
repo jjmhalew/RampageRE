@@ -56,6 +56,13 @@ void cam_init(GameCamera *c, const CamSettings *s)
     c->first = 1;
 }
 
+void cam_activate(GameCamera *c)                     /* [R 0x313A50: +0x5C = 1, +0x7C = 2, +0x80 = 0x60AD78EC] */
+{
+    c->first = 1;
+    c->state = 2;
+    c->timer = 1e20f;
+}
+
 static float dot3(const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
 /* 0x313C10: how far back the camera must be for every point to fit (the up extent through the vertical half angle,

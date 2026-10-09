@@ -29,6 +29,9 @@ typedef struct {
 
 void cam_settings(CamSettings *s, Group g);
 void cam_init(GameCamera *c, const CamSettings *s);
+/* 0x313A50, the mode (re)entered (gCameraMgr.setCamMode, director.c): the next frame is taken as it is (no
+ * smoothing, the tilt at once), state 2 (neither near nor above) and its timer 1e20, so the first state counts at once */
+void cam_activate(GameCamera *c);
 /* follow the monsters (root positions); aspect_hw = the view's height / width */
 void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw);
 

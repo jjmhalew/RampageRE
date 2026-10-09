@@ -28,6 +28,7 @@
 #include "game.h"
 #include "look.h"
 #include "shadow.h"
+#include "director.h"
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
@@ -84,6 +85,14 @@ typedef struct {
     FxLib *fxlib; FxWorld *fxw;
     ShadowList shl; ShadowGround sg; ShadowMonster smon; ShadowLighting slight;   /* the shadows (shadow.c) */
     int boss_block;                                  /* the block has a boss (the HUD's boss bar) */
+    DirGraph ag; int have_ag;                        /* the move graph as the AI reads it (director.c) */
+    DirAI ai; int is_ai;                             /* the monster's goals while the game drives it (setIsAI) */
+    CamDirector cd; CamView view;                    /* the camera modes and their blend; the camera shown */
+    /* the game's next block, activated at the results: the scene keeps the block left (the next one stands 41 behind
+     * it, slot 1) until the walk is over and the next block begins; meanwhile the game's places, which are the next
+     * block's, are block_shift (41) further on in y here */
+    int next_block; float block_shift;
+    int rubble_fx[3];                                /* ResultsNI's three effects in the rubble (fx ids, -1) */
     int unattended;                                  /* --shot: the results screens are answered for the player */
     SceneMesh fx_shapes[32][8]; int fx_nshapes[32]; /* the effects' debris models (fx.bdp's .pwk), by shape */
     Bundle gui_world, gui_common; int have_gui;      /* WorldGui.bdp, CommonGUI.bdp: the HUD (hud.c) */
@@ -238,6 +247,11 @@ static void start_moves(Viewer *v)
     if (v->scene.monster < 0 || !v->scene.monster_bundle || moves_read(v->scene.monster_bundle, &v->graph) != 0)
         return;
     v->have_graph = 1;
+    if (v->have_ag)
+        dir_graph_free(&v->ag);
+    v->have_ag = dir_graph_read(v->scene.monster_bundle, &v->ag) == 0;
+    dir_ai_init(&v->ai);
+    v->is_ai = 0;
     moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
     v->face = NULL;
     face_init(&v->faces);
@@ -254,6 +268,12 @@ static void start_moves(Viewer *v)
     v->held_unit = -1;
     v->held_vehicle = -1;
     v->game_block = -1;
+    if (!v->game_built) {
+        v->next_block = -1;
+        v->block_shift = 0;
+        for (int k = 0; k < 3; k++)
+            v->rubble_fx[k] = -1;
+    }
     v->pending_slot = -1;
     v->defeated = 0;
     v->scale = v->scale_to = 1;
@@ -268,7 +288,7 @@ static void start_moves(Viewer *v)
     v->mount.at.building = v->mount.cand.building = -1;
     memset(v->air, 0, sizeof v->air);
     memset(v->stick, 0, sizeof v->stick);
-    memcpy(v->frame, v->cam.rot, sizeof v->frame);
+    memcpy(v->frame, v->view.rows, sizeof v->frame);
     v->mz = 0;
     v->mode = MODE_GROUND;
     v->no_gravity = 0;
@@ -306,13 +326,13 @@ static int monster_female(const Viewer *v)
 static int people_visible(void *ctx, const float p[3], float radius)
 {
     const Viewer *v = ctx;
-    const float (*r)[3] = (const float (*)[3])v->cam.rot;
-    float d[3] = { p[0] - v->cam.pos[0], p[1] - v->cam.pos[1], p[2] - v->cam.pos[2] };
+    const float (*r)[3] = (const float (*)[3])v->view.rows;
+    float d[3] = { p[0] - v->view.pos[0], p[1] - v->view.pos[1], p[2] - v->view.pos[2] };
     float x = d[0] * r[0][0] + d[1] * r[0][1] + d[2] * r[0][2], y = d[0] * r[2][0] + d[1] * r[2][1] + d[2] * r[2][2];
     float z = d[0] * r[1][0] + d[1] * r[1][1] + d[2] * r[1][2];
     if (z < -radius)
         return 0;
-    float t = tanf((v->cam.s.fov > 0 ? v->cam.s.fov : 1) / 2), zz = z > 0.1f ? z : 0.1f;
+    float t = tanf((v->view.fov > 0 ? v->view.fov : 1) / 2), zz = z > 0.1f ? z : 0.1f;
     return fabsf(x) - radius <= zz * t * 4 / 3 && fabsf(y) - radius <= zz * t;
 }
 
@@ -379,7 +399,15 @@ static void build(Viewer *v)
     if (v->have_scene && v->monster >= 0 &&
         city_monster(v->city, &v->scene, v->monsters[v->monster], v->clip, v->mx, v->my, v->heading) == 0)
         printf("%s: %s\n", v->monsters[v->monster], v->scene.monster_clip ? v->scene.monster_clip : "-");
-    start_moves(v);
+    {                                                /* the game's next block: its goals and AI go on */
+        DirAI ai = v->ai;
+        int is_ai = v->is_ai;
+        start_moves(v);
+        if (v->game_built) {
+            v->ai = ai;
+            v->is_ai = is_ai;
+        }
+    }
     if (getenv("RAMPAGE_TRACE") && v->have_graph)
         printf("properties %s%s\n", v->graph.props ? v->graph.props : "-", monster_female(v) ? ", female" : "");
     if (v->have_scene && v->scene.music)            /* the block's music, looping (sound.c; silent unless started) */
@@ -532,7 +560,11 @@ static void build(Viewer *v)
     Group tt;
     if (city_camera(v->city, &tt) == 0)
         cam_settings(&v->cam_settings, tt);
-    cam_init(&v->cam, &v->cam_settings);
+    if (!v->game_built) {                            /* the game's next block: the cameras go on */
+        cam_init(&v->cam, &v->cam_settings);
+        dircam_init(&v->cd, &v->cam);
+        v->view = v->cd.out;
+    }
     if (v->have_scene)
         rnd_scene(v->rnd, &v->scene);
     printf("%s %s%s: %u models drawn, %d people, %d rockets, %d not found\n", CITIES[v->city_index],
@@ -804,9 +836,9 @@ static void clip_event(Viewer *v, const MoveEvent *e)
                 memcpy(in.streaker_pos, p->pos, sizeof in.streaker_pos);
                 in.streaker_facing = p->heading / 57.2957795f;
             }
-            memcpy(in.cam_pos, v->cam.pos, sizeof in.cam_pos);
-            memcpy(in.cam_dir, v->cam.rot[1], sizeof in.cam_dir);
-            in.cam_half_fov = v->cam.s.fov / 2;
+            memcpy(in.cam_pos, v->view.pos, sizeof in.cam_pos);
+            memcpy(in.cam_dir, v->view.rows[1], sizeof in.cam_dir);
+            in.cam_half_fov = v->view.fov / 2;
             game_start_respawn(v->game, 0, &in, &out);
             v->mx = out.pos[0]; v->my = out.pos[1]; v->mz = out.pos[2];
             v->heading = out.facing * 57.2957795f;
@@ -838,7 +870,7 @@ static void clip_event(Viewer *v, const MoveEvent *e)
             return;
         Group t = city_template(v->city, monster_female(v) ? "NakedFemale" : "NakedMale");
         float at[3] = { v->mx, v->my, v->mz };
-        if (t.at && (v->streaker = people_add_streaker(v->scene.folk, t, at, v->cam.pos[0])) >= 0)
+        if (t.at && (v->streaker = people_add_streaker(v->scene.folk, t, at, v->view.pos[0])) >= 0)
             v->scene.instances[v->scene.monster].hidden = 1;
         return;
     }
@@ -938,6 +970,12 @@ static void clip_events(Viewer *v, const MoveState *st, float from, float to)
 /* the stick (x right, y down) as a direction on the ground, in the camera's frame the monster keeps (0x2E8410) */
 static void stick_world(const Viewer *v, float lx, float ly, float w[3])
 {
+    if (v->is_ai) {                                  /* the AI's stick is in world x, y (0x2C0AD0, 0x2E8410) */
+        w[0] = v->ai.stick[0];
+        w[1] = v->ai.stick[1];
+        w[2] = 0;
+        return;
+    }
     for (int k = 0; k < 3; k++)
         w[k] = lx * v->frame[0][k] - ly * v->frame[1][k];
     w[2] = 0;
@@ -1269,7 +1307,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am)
         o->hp_frac = b->hp_max > 0 ? (float)b->hp / (float)b->hp_max : 0;
         o->inst = sb->inst;
     }
-    boss_set_view(v->boss, v->cam.pos[0] - 45, v->cam.pos[0] + 45);   /* the view's x range [G], as the army's */
+    boss_set_view(v->boss, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the view's x range [G], as the army's */
     boss_update(v->boss, dt, &m, 1, bl, nb);
     BossEvent ev[64];
     int ne;
@@ -1380,23 +1418,67 @@ static void game_step(Viewer *v, float dt)
         for (int i = 0; i < ne; i++) {
             const GameEvent *e = &ev[i];
             switch (e->type) {
-            case GE_BLOCK:                           /* the next block: built once this frame is over */
+            case GE_BLOCK:                           /* the next block: built when it begins (GS_BEGIN_BLOCK) */
                 for (uint32_t k = 0; e->name && k < v->nblocks; k++)
-                    if (!_stricmp(v->blocks[k], e->name) && k != v->block)
-                        v->game_block = (int)k;
+                    if (!_stricmp(v->blocks[k], e->name) && k != v->block) {
+                        v->next_block = (int)k;
+                        v->block_shift = 41;         /* slot 1 (city.c), the block left 41 towards -y [G] */
+                    }
                 break;
+            case GE_STATE:
+                if (e->a == GS_BEGIN_BLOCK && v->next_block >= 0) {
+                    v->game_block = v->next_block;   /* built once this frame is over */
+                    v->next_block = -1;
+                }
+                break;
+            case GE_RUBBLE_FX:                       /* findPointInRubble is not ported: at pos, 1.5 up [G] */
+                if (v->fxw && e->a >= 0 && e->a < 3 && e->name) {
+                    float at[3] = { e->pos[0], e->pos[1] + v->block_shift, 1.5f };
+                    if (v->rubble_fx[e->a] >= 0)
+                        fx_stop(v->fxw, v->rubble_fx[e->a]);
+                    v->rubble_fx[e->a] = fx_spawn(v->fxw, e->name, at, NULL, 1);
+                }
+                break;
+            case GE_RUBBLE_FX_STOP:
+                for (int k = 0; k < 3; k++) {
+                    if (v->fxw && v->rubble_fx[k] >= 0)
+                        fx_stop(v->fxw, v->rubble_fx[k]);
+                    v->rubble_fx[k] = -1;
+                }
+                break;
+            case GE_AI: v->is_ai = e->a; break;
+            case GE_WALK:                            /* walkTo(pos, radius) and its way point */
+                if (v->have_ag) {
+                    float to[3] = { e->pos[0], e->pos[1] + v->block_shift, e->pos[2] };
+                    float wp[3] = { e->v[0], e->v[1] + v->block_shift, e->v[2] };
+                    int w = dir_ai_walk_to(&v->ai, to, e->f, 0);
+                    if (w >= 0)
+                        dir_ai_add_waypoint(&v->ai, w, wp, e->f);
+                }
+                break;
+            case GE_CAMERA: {
+                float at[3] = { e->pos[0], e->pos[1] + v->block_shift, e->pos[2] };
+                float to[3] = { e->v[0], e->v[1] + v->block_shift, e->v[2] };
+                dircam_game_event(&v->cd, e->name, e->f, at, to, e->a);
+                break;
+            }
             case GE_RESET:
+                if (e->type == GE_RESET)
+                    dir_ai_clear(&v->ai);            /* clearAllGoals */
+                /* fall through */
             case GE_PLACE:
-                if (e->a == 1 && e->type == GE_PLACE) {
-                    v->mx += e->pos[0]; v->my += e->pos[1]; v->mz += e->pos[2];
+                if (e->a == 1 && e->type == GE_PLACE) {  /* SkipResultsNI's -41: the block left; here it stays */
+                    v->mx += e->pos[0]; v->my += e->pos[1] + v->block_shift; v->mz += e->pos[2];
                 } else if (e->a == 1 || e->type == GE_PLACE) {
-                    v->mx = e->pos[0]; v->my = e->pos[1]; v->mz = e->pos[2];
+                    v->mx = e->pos[0]; v->my = e->pos[1] + v->block_shift; v->mz = e->pos[2];
                     if (e->type == GE_RESET)
                         v->heading = e->f * 57.2957795f;
                 }
                 break;
-            case GE_MOVE:
-                if (e->a == 1)
+            case GE_MOVE:                            /* playMove: a goal of the AI; without one, done at once */
+                if (v->is_ai && v->have_ag && v->have_graph)
+                    dir_ai_play_move(&v->ai, e->name ? moves_find(&v->graph, e->name) : -1, e->a);
+                else if (e->a == 1)
                     game_move_done(v->game, e->slot);
                 break;
             case GE_AI_ACTIVATE: if (v->army) army_activate(v->army, 1); break;
@@ -1471,6 +1553,7 @@ static void rage_started(Viewer *v)
 {
     if (v->hud)
         hud_banner_rage(v->hud);
+    dircam_rage(&v->cd, 0);                          /* the script camera on the monster for 1.5 s */
 }
 
 /* gCommon.addStats on the monster (0x2C51A0): HP and energy by the rules edible.c keeps (none at 0 HP; while raging
@@ -1738,7 +1821,7 @@ static void army_step(Viewer *v, float dt)
         boxes[nb].storeys = b->n;
         boxes[nb].gone = b->state == BUILDING_GONE;
     }
-    army_set_view(v->army, v->cam.pos[0] - 45, v->cam.pos[0] + 45);   /* the view's x range [G] */
+    army_set_view(v->army, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the view's x range [G] */
     v->scene.monster_move = m.move;
     army_update(v->army, dt, &m, 1, boxes, nb);
     vehicle_step(v, dt, &m, boxes, nb);
@@ -1910,6 +1993,12 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         hud_frame(v, 1);
         return;
     }
+    static const uint8_t none[MV_COUNT];
+    if (v->is_ai) {                                  /* the game drives the monster: no pad */
+        lx = v->ai.stick[0];
+        ly = v->ai.stick[1];
+        pressed = held = none;
+    }
     if (v->have_graph) {
         MoveInput *in = &v->input;
         face_step(v, dt);
@@ -1931,7 +2020,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         /* the camera frame the stick is read in: every frame (0x2E0738), or, in a NODE_HOLD_FRAME state, only when the
          * stick moves (0x2E8190), so a climb keeps its direction while the camera swings */
         if (!(st->flags & NODE_HOLD_FRAME) || lx != v->stick[0] || ly != v->stick[1])
-            memcpy(v->frame, v->cam.rot, sizeof v->frame);
+            memcpy(v->frame, v->view.rows, sizeof v->frame);
         v->stick[0] = lx;
         v->stick[1] = ly;
         float t0 = v->run.time, length = st->length;
@@ -2020,7 +2109,13 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             }
         }
         float before[3] = { v->mx, v->my, v->mz };
-        int switched = ev == 0 || moves_step(&v->run, in, cdt, answer, v);
+        float root[3] = { v->mx, v->my, v->mz };
+        int switched = ev == 0 || (v->is_ai && v->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */
+                                   dir_ai_step(&v->ai, &v->ag, &v->run, root, cdt, answer, v) :
+                                   moves_step(&v->run, in, cdt, answer, v));
+        for (; v->is_ai && v->ai.done > 0; v->ai.done--)   /* Levels::moveComplete */
+            if (v->game)
+                game_move_done(v->game, 0);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : v->run.time;
         float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
         if (root_at(v, clip_at(v, st, t0), a, q) == 0 && root_at(v, clip_at(v, st, t1), b, q) == 0) {
@@ -2205,6 +2300,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     }
     float at[1][3] = { { v->mx, v->my, v->mz } };
     cam_update(&v->cam, (const float (*)[3])at, 1, dt, aspect);
+    DirObject me = { { v->mx, v->my, v->mz }, v->heading / 57.2957795f };   /* the script camera's objects */
+    dircam_update(&v->cd, dt, &me, 1, &v->view);   /* the modes (the script camera) and their blend */
 }
 
 /* the hands each frame (0x323130, 0x3230F0): let go off a building (unmountBuilding's 0x322EC0, 0.1 s), the timers and
@@ -2265,6 +2362,25 @@ static void hands_step(Viewer *v, float dt)
             for (int k = 0; k < 3; k++)
                 v->scene.ik_rot[h][3 * col + k] = rz[k] * r[3 * col] + rz[3 + k] * r[3 * col + 1] + rz[6 + k] * r[3 * col + 2];
     }
+}
+
+/* the game's next block begins: the scene is rebuilt around it, the monster and the cameras carried along (the block
+ * left was 41 towards -y of it) */
+static void game_next_block(Viewer *v)
+{
+    if (v->game_block < 0)
+        return;
+    v->my -= v->block_shift;
+    v->cam.pos[1] -= v->block_shift;
+    v->cd.out.pos[1] -= v->block_shift;
+    v->cd.snap.pos[1] -= v->block_shift;
+    v->view.pos[1] -= v->block_shift;
+    v->block_shift = 0;
+    v->block = (uint32_t)v->game_block;
+    v->game_block = -1;
+    v->game_built = 1;
+    build(v);
+    v->game_built = 0;
 }
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
@@ -2358,6 +2474,7 @@ static void play_script(Viewer *v, const char *script, float aspect)
                 if (WORDS[i].button >= 0)
                     held[WORDS[i].button] = 1;
                 memset(pressed, 0, sizeof pressed);
+                game_next_block(v);                  /* the game moved on, as the main loop does */
             }
         }
     }
@@ -2493,13 +2610,7 @@ int main(int argc, char **argv)
                 if (w.pressed[KEYS[k].key])
                     hud_input(v.hud, KEYS[k].ev, KEYS[k].button);
         }
-        if (v.game_block >= 0) {                     /* the game moved on to the next block */
-            v.block = (uint32_t)v.game_block;
-            v.game_block = -1;
-            v.game_built = 1;
-            build(&v);
-            v.game_built = 0;
-        }
+        game_next_block(&v);                         /* the game moved on to the next block */
         if (w.pressed[VK_NEXT] && v.nblocks) { v.block = (v.block + 1) % v.nblocks; build(&v); }
         if (w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }
         if (w.pressed['N']) { v.night = !v.night; build(&v); }
@@ -2509,6 +2620,8 @@ int main(int argc, char **argv)
         if (w.pressed['G'] && v.monster >= 0) {
             v.play = !v.play;
             cam_init(&v.cam, &v.cam_settings);
+            dircam_init(&v.cd, &v.cam);
+            v.view = v.cd.out;
             if (v.play && v.have_graph)
                 play_state(&v);
         }
@@ -2548,10 +2661,10 @@ int main(int argc, char **argv)
             play_step(&v, lx, ly, pressed, held, shot ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
             v.scene.instances[v.scene.monster].offset =      /* the clip at the state's time (clip_at) */
                 (float)((v.have_graph ? clip_at(&v, &v.graph.states[v.run.state], v.run.time) : v.run.time) - (shot ? shot_time : now - start));
-            memcpy(cam.pos, v.cam.pos, sizeof cam.pos);
-            cam_shaken(v.cam.pos, (const float (*)[3])v.cam.rot, v.shakes, 8, cam.rows);   /* after the smoothing */
+            memcpy(cam.pos, v.view.pos, sizeof cam.pos);
+            cam_shaken(v.view.pos, (const float (*)[3])v.view.rows, v.shakes, 8, cam.rows);   /* after the smoothing */
             cam.use_rows = 1;
-            cam.fov_deg = v.cam.s.fov * 57.2957795f;
+            cam.fov_deg = v.view.fov * 57.2957795f;
         } else {
             if (v.have_scene) {
                 scene_buildings_update(&v.scene, dt > 0.1f ? 0.1f : dt);

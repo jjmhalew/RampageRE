@@ -114,7 +114,7 @@ enum {
     GE_AI,             /* monster slot: setIsAI(a) */
     GE_MOVE,           /* monster slot plays the move `name` (playMove); a = 1: tell game_move_done(slot) when it ends
                         * (Levels::moveComplete), the NI waits for it */
-    GE_WALK,           /* monster slot: walkTo(pos, speed f), then addWayPoint(v, f); its next GE_MOVEs follow the walk */
+    GE_WALK,           /* monster slot: walkTo(pos, radius f), then addWayPoint(v, f) (f the arrival radius, 0x2F20E0); its next GE_MOVEs follow the walk */
     GE_CAMERA,         /* gCameraMgr.setCamMode(name, blend f); name "Script": the script camera at pos looking at v,
                         * a = 1 cut */
     GE_HUD,            /* the players' HUDs (and ChallengeStatus) fade to a (1 shown, 0 hidden) */
