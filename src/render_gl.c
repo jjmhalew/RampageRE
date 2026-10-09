@@ -438,6 +438,62 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect)
     glColor4f(1, 1, 1, 1);
 }
 
+/* the shadows of one pass (shadow.h): the ground grid with no depth test right after the street; the decals and the
+ * wall blob over the world, depth tested and pulled in front of what they lie on (the wall blob has no depth test in
+ * the game, drawn before the monster; here the monster is already drawn) */
+static void draw_shadows(Renderer *r, int pass)
+{
+    const Scene *s = r->scene;
+    const ShadowList *l = s->shadows;
+    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_POLYGON_BIT | GL_CURRENT_BIT |
+                 GL_TEXTURE_BIT | GL_LIGHTING_BIT);
+    glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glShadeModel(GL_SMOOTH);
+    for (int i = 0; i < l->nb; i++) {
+        const ShadowBatch *b = &l->b[i];
+        if (b->pass != pass)
+            continue;
+        int name = b->texture && s->shadow_bundle ? bdp_find_name(s->shadow_bundle, b->texture) : -1;
+        GLuint id = name >= 0 ? texture(r, s->shadow_bundle, (uint32_t)name) : 0;
+        if (b->texture && !id)
+            continue;
+        if (id) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, id);
+        } else
+            glDisable(GL_TEXTURE_2D);
+        glAlphaFunc(GL_GREATER, b->alpha_test ? 1.0f / 255 : 0.0f);
+        if (pass == SHADOW_PASS_GROUND) {
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        } else {
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(-1, -1);
+        }
+        glBegin(GL_TRIANGLES);
+        for (int k = b->first; k < b->first + b->count; k++) {
+            const ShadowVert *v = &l->v[k];
+            glColor4fv(v->rgba);
+            glTexCoord2fv(v->uv);
+            glVertex3fv(v->pos);
+        }
+        glEnd();
+    }
+    glPopClientAttrib();
+    glPopAttrib();
+}
+
 static void draw_fx(Renderer *r, const Camera *cam)
 {
     const Scene *s = r->scene;
@@ -597,14 +653,18 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         if (fog && s->fog_end > 0)
             glEnable(GL_FOG);
     }
-    for (uint32_t i = 0; i < s->nitems; i++) {
-        const DrawItem *it = &s->items[i];
-        if (s->instances[it->instance].hidden || it->instance == s->sky)
-            continue;
-        glPushMatrix();
-        glMultMatrixf(it->world.m);
-        draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
-        glPopMatrix();
+    for (int pass = 0; pass < 2; pass++) {               /* the street, its building shadows, then the rest */
+        for (uint32_t i = 0; i < s->nitems; i++) {
+            const DrawItem *it = &s->items[i];
+            if (s->instances[it->instance].hidden || it->instance == s->sky || (it->instance == s->ground_inst) != !pass)
+                continue;
+            glPushMatrix();
+            glMultMatrixf(it->world.m);
+            draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
+            glPopMatrix();
+        }
+        if (!pass && s->shadows)
+            draw_shadows(r, SHADOW_PASS_GROUND);
     }
     for (int i = 0; i < s->nfxm; i++) {                    /* the effects' mesh debris, drawn as props (0x21DC20) */
         const FxMesh *m = &s->fxm[i];
@@ -616,6 +676,10 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     }
     if (s->nwater)
         draw_water(r, s, cam);
+    if (s->shadows) {
+        draw_shadows(r, SHADOW_PASS_DECAL);
+        draw_shadows(r, SHADOW_PASS_WALL);
+    }
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);

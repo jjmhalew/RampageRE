@@ -14,6 +14,7 @@
 #include "water.h"
 #include "edible.h"
 #include "boss.h"
+#include "shadow.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -46,6 +47,7 @@ typedef struct {
     int hidden;                                       /* not drawn (a building's interior until it is damaged) */
     int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
     int mirrored;                                     /* skinned mirror-wise: left and right swapped, x reflected */
+    Group shadow;                                     /* its template's ShadowData (shadow.c), at NULL: casts none */
 } Instance;
 
 typedef struct {
@@ -111,6 +113,8 @@ typedef struct {
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
+    int ground_inst;                                  /* the block's GroundShape, -1 none: the shadow grid goes on it */
+    const ShadowList *shadows; const Bundle *shadow_bundle;   /* this frame's shadows (shadow.c), their textures */
     float cloth_dt;                                   /* play time not yet simulated by the cloths */
     float cloth_time;                                 /* the flags' wind clock */
     const char *music;                                /* the block's Music (a .mic stream, sound.c) */

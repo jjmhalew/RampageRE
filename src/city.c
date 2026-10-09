@@ -473,6 +473,8 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         return;
     }
     int id = place_model(c, s, shape, at, -1);
+    if (id >= 0 && t.at)
+        s->instances[id].shadow = group_sub(t, "ShadowData");
     if (scripted >= 0)
         s->scripted[scripted].instance = id;
     if (id >= 0)
@@ -631,6 +633,7 @@ static int person_look(City *c, Scene *s, int who, const Person *p)
     if (id >= 0) {
         Instance *in = &s->instances[id];
         in->dynamic = 1;
+        in->shadow = group_sub(p->tmpl, "ShadowData");   /* DefActorProps': shadow_blob */
         Clip clip;
         if (ce && clip_read(ce, &clip) == 0) {
             if (clip.bones == in->tree.n) {
@@ -665,6 +668,8 @@ static int unit_look(City *c, Scene *s, int who, const ArmyUnit *u)
     if (id >= 0) {
         Instance *in = &s->instances[id];
         in->dynamic = 1;
+        if (u->tmpl.at)
+            in->shadow = group_sub(u->tmpl, "ShadowData");
         const BdpEntry *ce = u->clip ? find_anim(&c->bundle, 2, u->clip) : NULL;
         Clip clip;
         if (ce && clip_read(ce, &clip) == 0) {
@@ -790,6 +795,8 @@ static void vehicle_sync(Scene *s)
         if (show >= 0) {
             s->instances[show].hidden = 0;
             memcpy(s->instances[show].base.m, o->world, sizeof o->world);
+            if (o->tmpl.at && !s->instances[show].shadow.at)
+                s->instances[show].shadow = group_sub(o->tmpl, "ShadowData");
         }
     }
 }
@@ -1876,6 +1883,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     s->city = &c->bundle;
     s->monster = -1;
     s->sky = -1;
+    s->ground_inst = -1;
     s->placing_building = -1;
     s->mesh_of_entry = malloc(sizeof *s->mesh_of_entry * (c->bundle.nentries ? c->bundle.nentries : 1));
     for (uint32_t i = 0; i < c->bundle.nentries; i++)
@@ -1893,8 +1901,11 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         lighting(c, s, ld);
     }
     const char *ground = group_str(block, "Shape|GroundShape");
-    if (ground)
-        place_model(c, s, ground, root, -1);
+    if (ground) {
+        int gi = place_model(c, s, ground, root, -1);
+        if (s->ground_inst < 0)                      /* the play block's, the first built */
+            s->ground_inst = gi;
+    }
     float row_offset = group_num(block, "BackRowOffset", 10);
     static Record r[MAX_REC];
     uint32_t n = group_values(block, "BuildingInstance|", &where, r, MAX_REC);

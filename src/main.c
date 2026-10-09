@@ -27,6 +27,7 @@
 #include "edible.h"
 #include "game.h"
 #include "look.h"
+#include "shadow.h"
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
@@ -81,6 +82,7 @@ typedef struct {
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
+    ShadowList shl; ShadowGround sg; ShadowMonster smon; ShadowLighting slight;   /* the shadows (shadow.c) */
     SceneMesh fx_shapes[32][8]; int fx_nshapes[32]; /* the effects' debris models (fx.bdp's .pwk), by shape */
     Bundle gui_world, gui_common; int have_gui;      /* WorldGui.bdp, CommonGUI.bdp: the HUD (hud.c) */
     Hud *hud; int no_hud;                            /* --nohud: none */
@@ -441,6 +443,17 @@ static void build(Viewer *v)
         }
     }
     v->scene.edibles = v->edibles;
+    {                                                /* the buildings' shadows on the lot, cast at the block's start */
+        static float boxes[SHADOW_MAX_BUILDINGS][6];
+        int nb = 0;
+        for (uint32_t i = 0; i < v->scene.nbuildings && nb < SHADOW_MAX_BUILDINGS; i++, nb++) {
+            memcpy(boxes[nb], v->scene.buildings[i].b.min, 3 * sizeof(float));
+            memcpy(boxes[nb] + 3, v->scene.buildings[i].b.max, 3 * sizeof(float));
+        }
+        shadow_ground_init(&v->sg, v->have_scene && group_num(v->scene.block, "EnableGroundShadow", 1) != 0, nb,
+                           (const float (*)[6])boxes, NULL, NULL);
+        shadow_monster_init(&v->smon);
+    }
     boss_free(v->boss);                              /* the block's boss, and the ambient ones of the blocks behind */
     v->boss = NULL;
     v->nbfx = 0;
@@ -1083,6 +1096,73 @@ static void hit_spheres(Viewer *v)
 }
 
 static void hands_step(Viewer *v, float dt);
+
+/* the frame's shadows (shadow.c): the buildings' on the lot (redone where a top came down), every object whose
+ * template has ShadowData, the monster's blobs on the ground or roof and on the wall it climbs */
+static void shadow_frame(Viewer *v, float dt)
+{
+    if (!v->slight.monster_blob)
+        shadow_lighting_default(&v->slight);
+    shadow_list_clear(&v->shl);
+    v->scene.shadows = &v->shl;
+    v->scene.shadow_bundle = v->have_fx_bundle ? &v->fx_bundle : NULL;
+    if (!v->have_scene)
+        return;
+    for (uint32_t i = 0; i < v->scene.nbuildings && i < SHADOW_MAX_BUILDINGS; i++) {
+        const Building *b = &v->scene.buildings[i].b;
+        if (b->max[2] != v->sg.top[i]) {
+            float box[6] = { b->min[0], b->min[1], b->min[2], b->max[0], b->max[1], b->max[2] };
+            shadow_ground_top(&v->sg, (int)i, box);
+        }
+    }
+    shadow_ground_draw(&v->shl, &v->sg, &v->slight);
+    for (uint32_t i = 0; i < v->scene.ninstances; i++) {
+        const Instance *in = &v->scene.instances[i];
+        if (!in->shadow.at || in->hidden)
+            continue;
+        ShadowData d;
+        shadow_data_default(&d);
+        Group g = in->shadow;
+        const char *tex = group_str(g, "Texture|TextureName");
+        if (tex) d.texture = tex;
+        d.intensity = group_num(g, "Intensity", d.intensity);
+        d.max_height = group_num(g, "MaxHeight", d.max_height);
+        d.full_height = group_num(g, "FullHeight", d.full_height);
+        d.ex_proj_height = group_num(g, "ExProjHeight", d.ex_proj_height);
+        Group rc = group_sub(g, "ShadowRect");
+        Record r[4];
+        if (rc.at && group_items(rc, r, 4) == 4)
+            for (int k = 0; k < 4; k++)
+                d.rect[k] = record_num(r[k]);
+        const float *m = in->base.m;                 /* rows: its x, y, z axes, then its place */
+        float m12[12] = { m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10], m[12], m[13], m[14] };
+        shadow_object(&v->shl, &v->slight, &d, m12);
+    }
+    if (v->scene.monster >= 0 && !v->scene.instances[v->scene.monster].hidden && v->play) {
+        float s = v->scale > 0 ? v->scale : 1, h = v->heading / 57.2957795f, c = cosf(h), sn = sinf(h);
+        float centre[3] = { v->mx, v->my, v->mz }, body[3] = { v->mx, v->my, v->mz + 4 * s };   /* [G] the pelvis */
+        float mbox[6], rbox[6], *roof = NULL;
+        int mounted = v->mode == MODE_BUILDING && v->mount.at.building >= 0 &&
+                      (uint32_t)v->mount.at.building < v->scene.nbuildings;
+        if (mounted) {
+            const Building *b = &v->scene.buildings[v->mount.at.building].b;
+            memcpy(mbox, b->min, 3 * sizeof(float));
+            memcpy(mbox + 3, b->max, 3 * sizeof(float));
+        }
+        for (uint32_t i = 0; i < v->scene.nbuildings && !roof; i++) {   /* the building it is over (0x2D6150) */
+            const Building *b = &v->scene.buildings[i].b;
+            if (v->mx >= b->min[0] && v->mx <= b->max[0] && v->my >= b->min[1] && v->my <= b->max[1] &&
+                v->mz >= b->max[2] - 1) {
+                memcpy(rbox, b->min, 3 * sizeof(float));
+                memcpy(rbox + 3, b->max, 3 * sizeof(float));
+                roof = rbox;
+            }
+        }
+        shadow_monster_update(&v->smon, dt, centre, body, MONSTER_HALF_WIDTH * s, mounted, mbox, roof, 0);
+        float rot[9] = { c, sn, 0, -sn, c, 0, 0, 0, 1 };
+        shadow_monster_draw(&v->shl, &v->slight, &v->smon, rot, MONSTER_HALF_WIDTH * s);
+    }
+}
 
 /* an emitter's sounds (fx.c): add3DSfx at the effect's place as it starts, moved with it, killed as it ends */
 static int fx_sound(void *ctx, int event, const char *name, const float pos[3], int handle)
@@ -2400,6 +2480,14 @@ int main(int argc, char **argv)
             static FxQuad quads[8192];
             v.scene.fx = quads;
             v.scene.nfx = v.fxw ? fx_quads(v.fxw, quads, 8192) : 0;
+            shadow_frame(&v, shot ? 1.0f : (dt > 0.1f ? 0.1f : dt));
+            if (shot && getenv("RAMPAGE_TRACE")) {
+                int np[3] = { 0, 0, 0 };
+                for (int k = 0; k < v.shl.nb; k++)
+                    np[v.shl.b[k].pass] += v.shl.b[k].count / 3;
+                printf("shadows: %d ground, %d decal, %d wall triangles; grid %s, blob fade %.2f\n", np[0], np[1], np[2],
+                       v.sg.enabled ? "on" : "off", v.smon.ground_fade);
+            }
             static FxMesh fxm[1024];
             v.scene.fxm = fxm;
             v.scene.nfxm = v.fxw ? fx_meshes(v.fxw, fxm, 1024) : 0;
