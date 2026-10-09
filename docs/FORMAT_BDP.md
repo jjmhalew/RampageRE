@@ -69,9 +69,9 @@ asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other 
 | 22 | 28 | property book (`.prb`), see below | |
 | 23 | 13 | string table (`.loc`): block names, menus, challenge texts in 9 languages, see [FORMAT_EDF.md](FORMAT_EDF.md) | |
 | 24 | 43 | GUI layout (`.ifc`, XML), see [FORMAT_EDF.md](FORMAT_EDF.md) | |
-| 25 | 44 | cloth simulation settings (hair, whiskers, ...) | |
+| 25 | 44 | cloth: particles, springs and triangles of a monster's hair or a flag, see below | |
 
-Type 25 is named from its entry names; its contents are not decoded yet. Most `.ifc` tags are not decoded either.
+Most `.ifc` tags are not decoded yet.
 
 ## Textures (type 9) and palettes (type 13)
 Texture data, 0x104 bytes:
@@ -223,8 +223,34 @@ names (not checked in the code): `FACE_*` are climbing on the front of a buildin
 `GROUND_*`, `IDLE` and `WALK2` on the street.
 
 `tools/anim.py VOLDIR --all OUTDIR` writes every monster as one glTF with its skinned mesh, the skeleton as
-joints and all its animations. The cloth meshes (hair, whiskers: type 0 meshes in the monster bundle, simulated by
-the game from the type 25 settings) are bound vertex by vertex to the nearest bone instead.
+joints and all its animations. The cloth meshes (hair, whiskers: type 0 meshes in the monster bundle) are
+skinned to the bones and weights of their cloth particles (below); the game simulates them on top of that.
+
+## Cloth (type 25)
+`MODEL|cloth` entries: the hair, fur or whiskers of 12 monsters and 32 flags in the cities. Used in place
+(vtable 0x446500, offsets fixed up by 0x1DB840); `tools/anim.py --verify` parses all 44 to the last byte.
+
+| Offset | Type | |
+|---|---|---|
+| 0x1C | f32[3], f32, f32 | bounding sphere: centre, radius squared, radius |
+| 0x30 | u32 | entry size |
+| 0x34 | u32, u32 | part count, offset of the parts (0x8C bytes each) |
+| 0x3C | u32, u32 | bone count, offset of the bone list (u32 skeleton node indices; George: Spine2, Head, both upper arms and forearms) |
+| 0x44 | u32, u32 | 0, an offset |
+
+A part: f32[19] simulation settings (gravity 9.8 on the flags, 0 on George; timesteps 1/60 and 1/30), u32 2 or 3,
+u8[4] flags, u8[4], f32 100, u32 0, then count and offset of five arrays, which follow each other:
+
+| Array | Item | |
+|---|---|---|
+| pins | u32 | particles held in place |
+| springs | 24 bytes | u32 a, u32 b, f32 rest length, its square, f32 (5 or 4), f32 (200 or 100) |
+| bends | 32 bytes | u32[4] particles, f32[3] 0, f32 20 (flags only) |
+| triangles | 12 bytes | u32[3] particles |
+| particles | 64 bytes (count stored twice) | f32[3] position (bind pose, model space), f32[3] normal, f32 ?, f32[4] bone weights, u16[4] skeleton nodes (0xFFFF = none), u8 bone count, u8 0xEA, u8 1 = held by its bones, u8 0, 8 × 0xFF |
+
+Every vertex of the cloth mesh sits exactly on a particle (checked on five monsters), so the particles' bones and
+weights skin the mesh at rest. A flag's particles have no bones.
 
 ## Materials (type 6)
 0x90 bytes: u16 own name index, u16 layer count?, u16 flags, ..., f32 colours from 0x08 (diffuse, ambient,

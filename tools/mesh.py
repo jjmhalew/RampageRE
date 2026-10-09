@@ -189,9 +189,14 @@ class Gltf:
             if s.colours:
                 attrs['COLOR_0'] = self.accessor(s.colours, 'VEC4')
             if skinned and s.bones:
-                attrs['JOINTS_0'] = self.accessor([(b0, b1, 0, 0) for b0, b1 in s.bones], 'VEC4', 5121)
-                attrs['WEIGHTS_0'] = self.accessor([(min(w, 1.0), 1.0 - min(w, 1.0), 0.0, 0.0) for w in s.weights],
-                                                   'VEC4')
+                if isinstance(s.weights[0], tuple):  # up to 4 bones per vertex, weights given per bone
+                    joints = [tuple(b) + (0,) * (4 - len(b)) for b in s.bones]
+                    weights = [tuple(w) + (0.0,) * (4 - len(w)) for w in s.weights]
+                else:  # skinned mesh: 2 bones, the weight of the first
+                    joints = [(b0, b1, 0, 0) for b0, b1 in s.bones]
+                    weights = [(min(w, 1.0), 1.0 - min(w, 1.0), 0.0, 0.0) for w in s.weights]
+                attrs['JOINTS_0'] = self.accessor(joints, 'VEC4', 5121)
+                attrs['WEIGHTS_0'] = self.accessor(weights, 'VEC4')
             idx = self.accessor([i for t in tris for i in t], 'SCALAR', 5125, 34963)
             out.append({'attributes': attrs, 'indices': idx, 'material': mat})
         if not out:

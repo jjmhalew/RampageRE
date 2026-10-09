@@ -45,6 +45,19 @@ Animation (type 4; 0x196730 makes a KeyInterpAnim, vtable 0x444C30, when the kin
   Rotation segment (0x19D0A0, 0x167DE0): f32[4] q0, f32[4] q1, f32 angle a; value = normalise(q0 cos(a f) +
     q1 sin(a f)), or normalise(q0 + q1 f) when a is 0 (a slerp worked out in advance). Segments join up.
 
+Cloth (type 25, hair, whiskers, ...; used in place, vtable 0x446500, fixed up by 0x1DB840):
+  0x1C  f32[3] bounding sphere centre, f32 radius squared, f32 radius
+  0x30  u32 size  0x34  u32 part count  0x38  u32 offset of the parts (0x8C bytes each)
+  0x3C  u32 bone count  0x40  u32 offset of the bone list (u32 skeleton node indices)  0x44  u32 0  0x48  u32 offset
+  Part: f32[19] simulation settings (gravity 9.8 on flags, timesteps 1/60 and 1/30 among them), u32 2 or 3,
+    u8[4] flags, u8[4], f32 100, u32 0, then count/offset pairs: pinned particles (u32 index), springs (24 bytes: u32 a,
+    u32 b, f32 rest length, its square, f32 stiffness?, f32 ?), bend links (flags only; 32 bytes: u32[4]
+    particles, f32[3] 0, f32 20), triangles (3 x u32), and
+    particles (count twice, then the offset; 64 bytes: f32[3] position in the bind pose's model space, f32[3]
+    normal, f32 ?, f32[4] bone weights, u16[4] skeleton node indices (0xFFFF = none; flags have none), u8 bone
+    count, u8 0xEA,
+    u8 1 = held by its bones, u8 0, 8 x 0xFF). Every vertex of the cloth mesh sits on one particle.
+
 Usage: python tools/anim.py --verify VOLDIR                check every skeleton and animation
        python tools/anim.py VOLDIR MONSTER OUTDIR            write OUTDIR/MONSTER.gltf: mesh, skeleton, animations
        python tools/anim.py VOLDIR --all OUTDIR              every monster (each NAME with NAME.cmp + NAME_anims.cmp)
@@ -62,6 +75,8 @@ import mesh
 
 Node = collections.namedtuple('Node', 'index parent name children')
 Pose = collections.namedtuple('Pose', 'inverse_bind translation rotation')
+Particle = collections.namedtuple('Particle', 'position normal value weights bones held')
+ClothPart = collections.namedtuple('ClothPart', 'settings pins springs bends triangles particles')
 Track = collections.namedtuple('Track', 'bone times values')  # times 0..1 of the duration
 RawTrack = collections.namedtuple('RawTrack', 'value translations rotations')  # value: the f32 at +4, not decoded
 
@@ -281,6 +296,53 @@ def raw_rotation(key, f):
     return tuple(c / norm for c in q)
 
 
+class Cloth:
+    """Cloth settings (type 25): parts of particles held by skeleton bones, springs and triangles."""
+
+    def __init__(self, data):
+        (*self.sphere, self.size, count, parts, nbones, bones, self.zero, self.offset) = struct.unpack_from(
+            '<5f7I', data, 0x1C)
+        self.bones = list(struct.unpack_from(f'<{nbones}I', data, bones))
+        self.parts = []
+        at = bones + 4 * nbones
+        if parts != at:
+            raise ValueError(f'parts at {parts:#x}, expected {at:#x}')
+        at = parts + 0x8C * count
+        for k in range(count):
+            r = parts + 0x8C * k
+            settings = struct.unpack_from('<19fI4B4BfI', data, r)
+            if settings[-1]:
+                raise ValueError(f'part {k}: word at +0x5C is {settings[-1]:#x}')
+            (n_pins, pins_at, n_springs, springs_at, n_bends, bends_at, n_tris, tris_at, n_particles, n2,
+             particles_at) = struct.unpack_from('<11I', data, r + 0x60)
+            if n2 != n_particles:
+                raise ValueError(f'part {k}: particle counts {n_particles} / {n2}')
+            for name, offset, size in (('pins', pins_at, 4 * n_pins), ('springs', springs_at, 24 * n_springs),
+                                       ('bends', bends_at, 32 * n_bends), ('triangles', tris_at, 12 * n_tris),
+                                       ('particles', particles_at, 64 * n_particles)):
+                if offset != at:
+                    raise ValueError(f'part {k}: {name} at {offset:#x}, expected {at:#x}')
+                at += size
+            particles = []
+            for i in range(n_particles):
+                q = particles_at + 64 * i
+                v = struct.unpack_from('<11f4HBBBB2I', data, q)
+                bones_ = [b for b in v[11:15] if b != 0xFFFF]
+                if len(bones_) != v[15] or v[16] != 0xEA or v[18] or v[19:21] != (0xFFFFFFFF, 0xFFFFFFFF):
+                    raise ValueError(f'part {k} particle {i}: unexpected fields {v[11:]}')
+                particles.append(Particle(v[0:3], v[3:6], v[6], v[7:7 + len(bones_)], bones_, bool(v[17])))
+            self.parts.append(ClothPart(
+                settings, list(struct.unpack_from(f'<{n_pins}I', data, pins_at)),
+                [struct.unpack_from('<IIffff', data, springs_at + 24 * i) for i in range(n_springs)],
+                [struct.unpack_from('<4I4f', data, bends_at + 32 * i) for i in range(n_bends)],
+                [struct.unpack_from('<3I', data, tris_at + 12 * i) for i in range(n_tris)], particles))
+        self.end = at
+
+    def skinning(self):
+        """{position: (bones, weights)} of every particle (a cloth mesh vertex is found by its position)."""
+        return {p.position: (p.bones, p.weights) for part in self.parts for p in part.particles}
+
+
 def bundle_items(path):
     with open(path, 'rb') as f:
         b = bdp.Bundle(f.read())
@@ -315,6 +377,21 @@ def verify(voldir):
                         worst_bind = max(worst_bind, max(abs(p[r][c] - (r == c)) for r in range(4) for c in range(4)))
                 skeletons[e.name] = s
                 counts['skeletons' if s.poses else 'node trees'] += 1
+            except (ValueError, struct.error) as err:
+                problems.append(f'{f} {b.name(e.name)!r}: {err}')
+        for e, a, _ in items:
+            if e.type != 25:
+                continue
+            try:
+                c = Cloth(a)
+                if c.end != len(a) or c.size != len(a):
+                    raise ValueError(f'parts end at {c.end:#x}, entry is {len(a):#x}')
+                for part in c.parts:
+                    for p in part.particles:
+                        if p.bones and abs(sum(p.weights) - 1) > 1e-3 or not set(p.bones) <= set(c.bones):
+                            raise ValueError(f'particle weights {p.weights} / bones {p.bones} against {c.bones}')
+                counts['cloths'] += 1
+                counts['cloth particles'] += sum(len(part.particles) for part in c.parts)
             except (ValueError, struct.error) as err:
                 problems.append(f'{f} {b.name(e.name)!r}: {err}')
         for e, a, _ in items:
@@ -550,6 +627,10 @@ def export_monster(voldir, monster, out):
     ibm = g.accessor([column_major(skel.inverse_bind(i)) for i in range(len(joints))], 'MAT4', target=None)
     g.doc['skins'] = [{'joints': joints, 'inverseBindMatrices': ibm, 'skeleton': joints[0], 'name': 'skeleton'}]
     world = skel.world()
+    cloth_skin = {}
+    for e, a, _ in items:
+        if e.type == 25:
+            cloth_skin.update(Cloth(a).skinning())
     for entry in items:
         e = entry[0]
         if e.type == 17:
@@ -558,14 +639,21 @@ def export_monster(voldir, monster, out):
                 n = g.node(assets.clean(e.name), m)
                 g.doc['nodes'][n]['skin'] = 0
         elif e.type == 0:
-            # cloth (hair, whiskers, ...): the game simulates it (type 25); here each vertex rides on the bone
-            # nearest to it in the bind pose
+            # cloth (hair, whiskers, ...): the game simulates it (type 25) from particles held by bones; here each
+            # vertex is skinned to its particle's bones and weights (the bone nearest to it if it has none)
             prims = []
             for part in mesh.read_mesh(0, entry[1], entry[2]):
                 for s in part.sections:
-                    bones = [nearest_bone(skel, world, p) for p in s.positions]
-                    prims.append((assets.material(part.material),
-                                  s._replace(bones=[(j, j) for j in bones], weights=[1.0] * len(bones))))
+                    bones, weights = [], []
+                    for p in s.positions:
+                        bw = cloth_skin.get(p)
+                        if bw:
+                            bones.append(tuple(bw[0]))
+                            weights.append(tuple(bw[1]))
+                        else:
+                            bones.append((nearest_bone(skel, world, p),))
+                            weights.append((1.0,))
+                    prims.append((assets.material(part.material), s._replace(bones=bones, weights=weights)))
             m = g.mesh(assets.clean(e.name), prims, skinned=True)
             if m is not None:
                 n = g.node(assets.clean(e.name), m)
