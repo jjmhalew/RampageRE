@@ -11,7 +11,8 @@ build_viewer.bat
 rampage.exe                                   :: build\disc\RAMPAGE.VOL, Chicago, block 1
 rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit (offscreen: no window)
+rampage.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -9, up 1" --cam 10 -15 8 30 5 --shot s.png
 ```
 `build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
 from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256. The disc
@@ -24,7 +25,8 @@ the keys are a pad: W A S D or the arrows the left stick, Space Cross (jump), J 
 L Circle (grab), R R2 (roar); the monster runs its own move graph and the game's camera follows it
 ([CAMERA.md](CAMERA.md)). `--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a
 `--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
-directions held and buttons pressed, each followed by that many seconds; `--walk S` is `right S`). The console prints
+directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
+buildings; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading).
 
