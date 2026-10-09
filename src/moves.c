@@ -97,6 +97,18 @@ int moves_read(const Bundle *b, MoveGraph *g)
                         state = j;
             g->slot[c][k] = c > 0 && list < 0 ? g->slot[0][k] : state;
         }
+    uint32_t nattach = rd32(d + 0xA84), attach = rd32(d + 0xA88);
+    if (nattach < 256 && attach + 0x38 * (uint64_t)nattach <= size) {
+        g->attach = calloc(nattach ? nattach : 1, sizeof *g->attach);
+        g->nattach = (int)nattach;
+        for (uint32_t k = 0; k < nattach; k++) {
+            const uint8_t *a = d + attach + 0x38 * k;
+            for (int j = 0; j < 12; j++)
+                g->attach[k].m[j] = rdf(a + 4 * j);
+            g->attach[k].name = name_at(b, (int32_t)rd32(a + 0x30));
+            g->attach[k].bone = (int)(rd32(a + 0x34) & 0xFFFF);
+        }
+    }
     uint32_t nnodes = rd32(d + 0xA4C), nodes = rd32(d + 0xA50);
     if (nodes + 0x84 * (uint64_t)nnodes <= size) {
         g->nodes = calloc(nnodes ? nnodes : 1, sizeof *g->nodes);
@@ -207,6 +219,7 @@ void moves_free(MoveGraph *g)
     free(g->slot);
     free(g->shapes);
     free(g->nodes);
+    free(g->attach);
     memset(g, 0, sizeof *g);
 }
 

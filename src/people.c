@@ -1,0 +1,1261 @@
+/* people.c - the people of a block and the monster's hold on them (people.h; docs/PEOPLE_NOTES.md).
+ * [R] marks what is read from the game's code or scripts, [G] what is a guess or a stand-in. */
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "people.h"
+
+#define PI 3.14159265f
+#define DEG (180.0f / PI)
+#define TIMESTEP (1.0f / 60.0f)                      /* [G] gWorld.getTimeStep(): one frame */
+#define DELETE_ME (4 | 8 | 16)                       /* [R] what a script handler returns to have its actor deleted */
+#define MAX_EVENTS 256
+#define MAX_TIMERS 32
+
+/* object flags (+0x4C), names from the table at 0x3F5F70 [R] */
+enum { OF_DYING = 0x800, OF_PUSH_OUT = 0x4000, OF_EFF_NODES = 0x8000, OF_PICKUP = 0x10000, OF_HELD = 0x20000,
+       OF_ACTOR = 0x80000, OF_COUNTED = 0x40000000 };
+
+struct People {
+    Person *v;
+    int n, cap;
+    PeopleClipSeconds clip_seconds;
+    void *ctx;
+    uint32_t rng;
+    float droppable_rate;
+    const PeopleMonster *m;                          /* this frame's monsters */
+    int nm;
+    PeopleEvent ev[MAX_EVENTS];
+    int nev;
+    struct { float left; PeopleEvent ev; } timer[MAX_TIMERS];
+    int ntimers;
+};
+
+/* ---------------------------------------------------------------- small things */
+
+static float frand(People *p)                        /* [G] gWorld.frand(): [0, 1), not the game's sequence */
+{
+    p->rng = p->rng * 1664525u + 1013904223u;
+    return (float)(p->rng >> 8) / 16777216.0f;
+}
+
+static const char *tstr(const Person *q, const char *key) { return q->tmpl.at ? group_str(q->tmpl, key) : NULL; }
+static float tnum(const Person *q, const char *key, float def) { return q->tmpl.at ? group_num(q->tmpl, key, def) : def; }
+
+static void emit(People *p, int type, int who, const char *name, const char *node, const float v[3], float amount, int on)
+{
+    if (p->nev >= MAX_EVENTS)
+        return;
+    PeopleEvent *e = &p->ev[p->nev++];
+    memset(e, 0, sizeof *e);
+    e->type = type;
+    e->who = who;
+    e->name = name;
+    e->node = node;
+    e->on = on;
+    e->amount = amount;
+    if (v)
+        memcpy(e->v, v, sizeof e->v);
+}
+
+static void later(People *p, float delay, int type, const float v[3], float amount)   /* installObjectTimer */
+{
+    if (p->ntimers >= MAX_TIMERS)
+        return;
+    p->timer[p->ntimers].left = delay;
+    memset(&p->timer[p->ntimers].ev, 0, sizeof(PeopleEvent));
+    p->timer[p->ntimers].ev.type = type;
+    p->timer[p->ntimers].ev.who = -1;
+    p->timer[p->ntimers].ev.amount = amount;
+    if (v)
+        memcpy(p->timer[p->ntimers].ev.v, v, 3 * sizeof(float));
+    p->ntimers++;
+}
+
+static int who_of(const People *p, const Person *q) { return (int)(q - p->v); }
+
+static int same_text(const char *a, const char *b)   /* any case, as the game compares names (0x32C9C8) */
+{
+    for (; *a && *b; a++, b++) {
+        int x = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a, y = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
+        if (x != y)
+            return 0;
+    }
+    return *a == *b;
+}
+
+static void sound(People *p, Person *q, const char *key)   /* add3DSfx(getStringProp(key)) */
+{
+    const char *s = tstr(q, key);
+    if (s)
+        emit(p, PE_SOUND, who_of(p, q), s, NULL, q->pos, 0, 1);
+}
+
+static void effect(People *p, Person *q, const char *key, const float at[3], const char *node)
+{
+    const char *s = tstr(q, key);
+    if (s)
+        emit(p, PE_EFFECT, who_of(p, q), s, node, at, 0, 1);
+}
+
+static const PeopleMonster *nearest_monster(const People *p, const float pos[3])   /* getNearestMonster */
+{
+    const PeopleMonster *best = NULL;
+    float bd = 1e30f;
+    for (int i = 0; i < p->nm; i++) {
+        float dx = p->m[i].pos[0] - pos[0], dy = p->m[i].pos[1] - pos[1], dz = p->m[i].pos[2] - pos[2];
+        float d = dx * dx + dy * dy + dz * dz;
+        if (d < bd) {
+            bd = d;
+            best = &p->m[i];
+        }
+    }
+    return best;
+}
+
+/* the world matrix (column-major) of a place and a heading (0 faces +y), turned on by Euler angles (x, y, z) */
+static void place_matrix(float w[16], const float pos[3], float heading, const float rot[3])
+{
+    float h = heading / DEG + (rot ? rot[2] : 0), ax = rot ? rot[0] : 0, ay = rot ? rot[1] : 0;
+    float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
+    /* R = Rz(h) Ry(ay) Rx(ax) */
+    float r[9] = { ch * cy, sh * cy, -sy,
+                   ch * sy * sx - sh * cx, sh * sy * sx + ch * cx, cy * sx,
+                   ch * sy * cx + sh * sx, sh * sy * cx - ch * sx, cy * cx };
+    for (int c = 0; c < 3; c++) {
+        for (int k = 0; k < 3; k++)
+            w[4 * c + k] = r[3 * c + k];
+        w[4 * c + 3] = 0;
+    }
+    w[12] = pos[0];
+    w[13] = pos[1];
+    w[14] = pos[2];
+    w[15] = 1;
+}
+
+/* rotation matrix (columns of a column-major 4x4) <-> quaternion (x, y, z, w) */
+static void mat_quat(const float m[16], float q[4])
+{
+    float t = m[0] + m[5] + m[10];
+    if (t > 0) {
+        float s = sqrtf(t + 1) * 2;
+        q[3] = s / 4;
+        q[0] = (m[6] - m[9]) / s;
+        q[1] = (m[8] - m[2]) / s;
+        q[2] = (m[1] - m[4]) / s;
+    } else if (m[0] > m[5] && m[0] > m[10]) {
+        float s = sqrtf(1 + m[0] - m[5] - m[10]) * 2;
+        q[3] = (m[6] - m[9]) / s;
+        q[0] = s / 4;
+        q[1] = (m[4] + m[1]) / s;
+        q[2] = (m[8] + m[2]) / s;
+    } else if (m[5] > m[10]) {
+        float s = sqrtf(1 + m[5] - m[0] - m[10]) * 2;
+        q[3] = (m[8] - m[2]) / s;
+        q[0] = (m[4] + m[1]) / s;
+        q[1] = s / 4;
+        q[2] = (m[9] + m[6]) / s;
+    } else {
+        float s = sqrtf(1 + m[10] - m[0] - m[5]) * 2;
+        q[3] = (m[1] - m[4]) / s;
+        q[0] = (m[8] + m[2]) / s;
+        q[1] = (m[9] + m[6]) / s;
+        q[2] = s / 4;
+    }
+}
+
+static void quat_mat(const float q[4], float m[16])
+{
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y + z * w);     m[2] = 2 * (x * z - y * w);
+    m[4] = 2 * (x * y - z * w);     m[5] = 1 - 2 * (x * x + z * z); m[6] = 2 * (y * z + x * w);
+    m[8] = 2 * (x * z + y * w);     m[9] = 2 * (y * z - x * w);     m[10] = 1 - 2 * (x * x + y * y);
+    m[3] = m[7] = m[11] = 0;
+    m[15] = 1;
+}
+
+static void slerp(const float a[4], const float b0[4], float f, float out[4])
+{
+    float b[4] = { b0[0], b0[1], b0[2], b0[3] };
+    float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    if (d < 0) {
+        d = -d;
+        for (int k = 0; k < 4; k++)
+            b[k] = -b[k];
+    }
+    float wa = 1 - f, wb = f;
+    if (d < 0.9995f) {
+        float th = acosf(d), s = sinf(th);
+        wa = sinf((1 - f) * th) / s;
+        wb = sinf(f * th) / s;
+    }
+    float len = 0;
+    for (int k = 0; k < 4; k++) {
+        out[k] = wa * a[k] + wb * b[k];
+        len += out[k] * out[k];
+    }
+    len = len > 0 ? 1 / sqrtf(len) : 1;
+    for (int k = 0; k < 4; k++)
+        out[k] *= len;
+}
+
+/* ---------------------------------------------------------------- the actor's anim (0x30AAD0) */
+
+/* [R] startAnim: the look ActorAnimShape|<name>; one play lasts its Duration (+0xC) if it has one, else the clip's
+ * (the AnimName's, or the shape's own); AnimRepeat sets flag 2, a play that repeats. [G] The script's second argument
+ * to startAnim is not what loops (Traffic starts its crowds' looping Running with 0): taken as unused. */
+static void start_anim(People *p, Person *q, const char *name, int random_offset)   /* 1: startAnimAtRandomOffset */
+{
+    snprintf(q->anim, sizeof q->anim, "%s", name);
+    char key[64];
+    snprintf(key, sizeof key, "ActorAnimShape|%s", name);
+    Group look = q->tmpl.at ? group_sub(q->tmpl, key) : q->tmpl;
+    float len = 0;
+    q->anim_loop = 0;
+    if (look.at) {
+        q->anim_loop = group_num(look, "AnimRepeat", 0) != 0;
+        len = fabsf(group_num(look, "Duration", 0));
+        if (len <= 0 && p->clip_seconds) {
+            const char *shape = group_str(look, "Shape|ShapeName");
+            if (!shape)
+                shape = tstr(q, "Shape|ShapeName");
+            len = p->clip_seconds(p->ctx, group_str(look, "Anim|AnimName"), shape);
+        }
+    }
+    q->anim_len = len;
+    q->anim_time = random_offset ? frand(p) * len : 0;
+    q->anim_done = 0;
+}
+
+/* ---------------------------------------------------------------- the LineMover (0x315E10) */
+
+static void mover_init(Person *q, const float a[3], const float b[3], float speed)   /* LineMover.init */
+{
+    memcpy(q->mv.pts[0], a, sizeof q->mv.pts[0]);
+    memcpy(q->mv.pts[1], b, sizeof q->mv.pts[1]);
+    q->mv.n = 2;
+    q->mv.seg = 0;
+    q->mv.t = 0;
+    q->mv.speed = speed;
+    q->mv.active = 1;
+    memcpy(q->pos, a, sizeof q->pos);
+}
+
+static void mover_add(Person *q, const float pt[3])
+{
+    if (q->mv.n < 4)
+        memcpy(q->mv.pts[q->mv.n++], pt, sizeof q->mv.pts[0]);
+}
+
+static float heading_of(float dx, float dy) { return atan2f(-dx, dy) * DEG; }   /* the facing that looks along (dx, dy) */
+
+/* [R] one frame: the share along the segment grows by speed x dt / its length (+0x58); past 1 the next segment
+ * starts from its beginning (3, a point reached) or, after the last, it stays at the end (2) unless it loops (flag
+ * 2); flag 1 faces the way it goes (0x316E60), flag 8 the nearest monster (the target, +0x84); while it simply moves
+ * (1) a monster nearer than MonsterResponseDist (+0x5C holds its square) answers 4. 0: no mover. */
+static int mover_step(People *p, Person *q, float dt)
+{
+    if (!q->mv.active || q->mv.n < 2)
+        return 0;
+    int r = 1, s = q->mv.seg;
+    float *a = q->mv.pts[s], *b = q->mv.pts[s + 1];
+    float d[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+    float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (len != 0)
+        q->mv.t += dt * q->mv.speed / len;
+    if (q->mv.t > 1) {
+        if (q->mv.seg < q->mv.n - 2) {
+            q->mv.seg++;
+            q->mv.t = 0;
+            r = 3;
+        } else if (q->mv.flags & 2) {
+            q->mv.seg = 0;
+            q->mv.t = 0;
+            r = 2;
+        } else {
+            q->mv.t = 1;
+            r = 2;
+        }
+    }
+    s = q->mv.seg;
+    a = q->mv.pts[s];
+    b = q->mv.pts[s + 1];
+    for (int k = 0; k < 3; k++)
+        q->pos[k] = a[k] + (b[k] - a[k]) * q->mv.t;
+    if ((q->mv.flags & 1) && (b[0] != a[0] || b[1] != a[1]))
+        q->heading = heading_of(b[0] - a[0], b[1] - a[1]);
+    const PeopleMonster *m = nearest_monster(p, q->pos);
+    if ((q->mv.flags & 8) && m)
+        q->heading = heading_of(m->pos[0] - q->pos[0], m->pos[1] - q->pos[1]);
+    if (r == 1 && q->mv.resp2 > 0)
+        for (int i = 0; i < p->nm; i++) {
+            float dx = q->pos[0] - p->m[i].pos[0], dy = q->pos[1] - p->m[i].pos[1], dz = q->pos[2] - p->m[i].pos[2];
+            if (dx * dx + dy * dy + dz * dz < q->mv.resp2)
+                r = 4;
+        }
+    return r;
+}
+
+/* ---------------------------------------------------------------- the natives the scripts call */
+
+/* [R] smashObject (0x2B2F50): an actor (or a street object, class 0x4D0720) flies off on a SpherePhysicsMover:
+ * a yaw picked by 0x2B4390 from a cone of 120 degrees around -y (towards the camera), narrowed to 20 .. 120 degrees
+ * on the side the monster faces (narrow when it faces away, +y, wide when it faces the camera), at 15 along it and
+ * 15 x (0.8 .. 1.3) up, spinning +-(2 pi + pi/6 x r) about x and +-(pi/16 + pi/16 x r) about y and z. */
+static void smash_object(People *p, Person *q, float monster_heading)
+{
+    const float c = 3 * PI / 2, lo = 20 / DEG, w = 120 / DEG;
+    float h = monster_heading / DEG;
+    float A = sinf(c), B = cosf(c), A2 = sinf(h + PI / 2), B2 = cosf(h + PI / 2);
+    float d = -(B2 * B + A2 * A), cross = B2 * A - A2 * B;
+    float width = lo + (w - lo) * (1 - d) / 2, a0 = c - w / 2, a1 = c + w / 2;
+    if (cross < 0)
+        a0 = a1 - width;
+    else
+        a1 = a0 + width;
+    float yaw = a0 + (a1 - a0) * frand(p);
+    q->vel[0] = 15 * cosf(yaw);
+    q->vel[1] = 15 * sinf(yaw);
+    q->vel[2] = 15 * (0.8f + 0.5f * frand(p));
+    q->spin[0] = (frand(p) < 0.5f ? 1 : -1) * (2 * PI + PI / 6 * frand(p));
+    q->spin[1] = (frand(p) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(p));
+    q->spin[2] = (frand(p) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(p));
+    q->rot[0] = q->rot[1] = q->rot[2] = 0;
+    q->pos[0] = q->world[12];                        /* from where it is (in the hand, in a window) */
+    q->pos[1] = q->world[13];
+    q->pos[2] = q->world[14];
+    q->mv.active = 0;
+    q->flags &= ~(uint32_t)OF_HELD;
+    q->phase = PP_FLYING;
+}
+
+static void leave_window(Person *q) { q->building = -1; }   /* leaveBuilding / closeWindow / 0x318140 */
+
+static void fart_maybe(People *p)                    /* the scripts' onThrow when eaten: 1 in 5 */
+{
+    if (frand(p) <= 0.2f)
+        later(p, 2.0f, PE_MONSTER_FART, NULL, 0);    /* installObjectTimer("Monsters::timedDoFart", 2.0) */
+}
+
+/* ---------------------------------------------------------------- the scripts */
+
+/* -- Person_Window.bsf: 1 emerging, 2 looking, 3 going back in, 5 falling, 6 landing, 7 running, 20 held, 22 flying */
+static int window_anim_done(People *p, Person *q)
+{
+    if (q->state >= 20)
+        return 1;
+    if (q->state == 1) {
+        start_anim(p, q, "WindowLook", 0);
+        q->state = 2;
+        q->state_time = q->delay_time = 0;
+        q->pulse_time = -frand(p);
+    } else if (q->state == 2) {
+        float r = frand(p);
+        if (q->state_time >= 7.5f) {
+            start_anim(p, q, "WindowReEnter", 0);
+            q->state = 3;
+        } else if (q->delay_time > 0) {
+            start_anim(p, q, "WindowIdle", 0);
+        } else if (r < 0.2f) {
+            start_anim(p, q, "WindowScared", 0);
+        } else if (r < 0.4f) {
+            start_anim(p, q, "WindowLook", 0);
+        } else {
+            q->delay_time = 0.5f + 0.5f * frand(p);
+            start_anim(p, q, "WindowIdle", 0);
+        }
+    } else if (q->state == 3) {
+        q->state = 0;
+        leave_window(q);                             /* closeWindow */
+        int drop = 0;                                /* a droppable falls on a monster well below, from storey 4 up */
+        for (int i = 0; i < p->nm; i++)
+            if (fabsf(q->pos[0] - p->m[i].pos[0]) < 5.0f * 2.0f && q->pos[2] > p->m[i].pos[2] + 15)
+                drop = 1;
+        if (q->pos[2] < 3.0f * 4.0f + 6.0f)
+            drop = 0;
+        if (drop && p->droppable_rate >= frand(p))
+            emit(p, PE_DROP, who_of(p, q), NULL, NULL, q->pos, 0, 1);
+        return DELETE_ME;
+    } else if (q->state == 6) {
+        start_anim(p, q, "Running", 0);
+        q->mv.speed = 10;
+        q->heading = 180;                            /* FACE_BACK: towards the street */
+        q->state = 7;
+        q->sub = 0;
+    }
+    return 1;
+}
+
+static int window_pulse(Person *q)
+{
+    q->state_time += 0.25f;
+    q->delay_time -= 0.25f;
+    if (q->state == 22) {
+        q->fly_duration -= 0.25f;
+        if (q->fly_duration < 0)
+            return DELETE_ME;
+    }
+    return 1;
+}
+
+static int window_mover(People *p, Person *q, int st)
+{
+    if (q->state >= 20)
+        return 1;
+    if (st == 2) {
+        if (q->state == 7)
+            return DELETE_ME;
+    } else if (st == 3) {
+        if (q->state == 5) {
+            q->state = 6;
+            start_anim(p, q, "Landing", 0);
+            q->mv.speed = 0;
+        } else if (q->state == 7 && q->sub == 0) {
+            q->heading = q->run_heading;
+        }
+    }
+    return 1;
+}
+
+/* onFallFromWindow (sent by 0x317DC0): down to the street at 20, a step out, then running off along it */
+static void window_fall(People *p, Person *q)
+{
+    q->state = 5;
+    start_anim(p, q, "Falling", 0);
+    leave_window(q);
+    q->flags |= OF_PICKUP;                           /* setFlags(65536) [G] taken as or-ing, as clearFlags exists */
+    float dir = -1.0f + 2.0f * (float)(frand(p) > 0.5f);
+    float start[3] = { q->pos[0], q->pos[1], q->pos[2] }, end[3] = { q->pos[0], q->pos[1] - 1, 0 };
+    float next[3] = { end[0], dir * 1.0f - 3.0f, 0 }, run[3] = { -dir * 100.0f, next[1], 0 };
+    mover_init(q, start, end, 20);
+    q->mv.flags = 0;
+    mover_add(q, next);
+    mover_add(q, run);
+    sound(p, q, "Sound|FallingSound");
+    q->run_heading = dir == -1 ? -90.0f : 90.0f;     /* FACE_RIGHT runs to +x, FACE_LEFT to -x */
+}
+
+/* -- the per-kind handlers, as each script has them */
+
+static void on_pickup(People *p, Person *q);
+static void smash(People *p, Person *q, float monster_heading);
+static void walk(People *p, Person *q);
+static void decide(People *p, Person *q);
+
+static int on_anim_done(People *p, Person *q)
+{
+    const PeopleMonster *m = nearest_monster(p, q->pos);
+    switch (q->kind) {
+    case PK_WINDOW:
+        return window_anim_done(p, q);
+    case PK_WALKER:
+        if (q->state == 4) {
+            if (m) {
+                emit(p, PE_WEAPON, who_of(p, q), group_str(group_sub(q->tmpl, "Weapon|RifleWeapon"), "WeaponName"),
+                     NULL, m->pos, 0, 1);
+                q->weapon_off = 0.25f;
+                q->state = 5;
+                start_anim(p, q, "ThrowRecover", 0);
+            }
+        } else if (q->state == 5) {
+            if (m) {
+                emit(p, PE_WEAPON, who_of(p, q), NULL, NULL, m->pos, 0, 0);
+                q->state = 3;
+                start_anim(p, q, "Idle", 0);
+            }
+        } else if (q->is_grenadier && q->state == 3 && m) {
+            float dy = m->pos[1] - q->pos[1], dx = m->pos[0] - q->pos[0];
+            float add = m->pos[1] > q->pos[1] ? 0 : PI;
+            q->heading = (-atanf(dx / dy) + add) * DEG;
+            /* abs(diffX < 12.0 && monsterPos.z < 10.0): a signed x, so anywhere to the left counts */
+            if (dx < 12.0f && m->pos[2] < 10.0f && q->reload <= 0) {
+                q->reload = tnum(q, "ReloadDelay", 5.0f);
+                start_anim(p, q, "Throw", 0);
+                q->state = 4;
+            } else {
+                q->state = 1;
+                start_anim(p, q, "Walk", 1);
+                walk(p, q);
+            }
+        }
+        return 1;
+    case PK_TOURIST:
+        if (q->state == 1)
+            decide(p, q);
+        if (q->state == 3) {
+            start_anim(p, q, "PickedUp2", 0);
+            q->pulse_delay = 10 * TIMESTEP;
+            q->pulse_time = 0;
+        }
+        return 1;
+    default:
+        return 1;
+    }
+}
+
+/* WalkingAroundPerson::walk: a stretch of up to WalkRange either way, kept within WalkRange of where it started,
+ * at WalkSpeed, facing the way it goes */
+static void walk(People *p, Person *q)
+{
+    float start[3] = { q->pos[0], q->pos[1], q->pos[2] }, end[3];
+    float r = frand(p) + 0.01f, way = r > 0.5f ? -1.0f : 1.0f;
+    if (fabsf(q->pos[0]) > 49.0f)
+        way = start[0] > 0 ? 1.0f : -1.0f;
+    memcpy(end, start, sizeof end);
+    end[0] = start[0] + way * q->walk_range * r;
+    if (end[0] - q->start[0] > q->walk_range) {
+        end[0] = q->start[0] + 3.0f;
+        if (end[0] == start[0])
+            end[0] -= 0.01f;
+    } else if (q->start[0] - end[0] > q->walk_range) {
+        end[0] = q->start[0] - 3.0f;
+        if (end[0] == start[0])
+            end[0] += 0.01f;
+    }
+    q->heading = end[0] > start[0] ? -90.0f : 90.0f;
+    mover_init(q, start, end, q->walk_speed);
+    q->mv.flags = 0;
+}
+
+/* Tourist::decideFacingAndPhotoState: a monster within 15 along x has its photo taken after a moment */
+static void decide(People *p, Person *q)
+{
+    if (q->is_child || q->state == 4)
+        return;
+    const PeopleMonster *m = nearest_monster(p, q->pos);   /* the mover's target (flag 8) */
+    if (!m)
+        return;
+    if (fabsf(m->pos[0] - q->pos[0]) <= 15.0f) {
+        q->pulse_delay = frand(p);
+        q->state = 5;
+    } else {
+        q->pulse_delay = 0.25f;
+        q->state = 2;
+    }
+}
+
+static int fly_countdown(Person *q)
+{
+    q->fly_duration -= q->pulse_delay;
+    return q->fly_duration < 0 ? DELETE_ME : 1;
+}
+
+static int on_pulse(People *p, Person *q)
+{
+    switch (q->kind) {
+    case PK_WINDOW:
+        return window_pulse(q);
+    case PK_RUNNER:                                  /* (the naked streakers' visibility check is left out) */
+        return q->state == 16 ? fly_countdown(q) : 1;
+    case PK_WALKER:
+        if (q->state == 0) {
+            q->pulse_delay = q->is_grenadier ? 3 * TIMESTEP : 0;
+            walk(p, q);
+            q->state = 1;
+            return 1;
+        }
+        if (q->state == 6)
+            return fly_countdown(q);
+        if (q->is_grenadier) {
+            q->weapon_off -= q->pulse_delay;
+            if (q->weapon_off <= 0 && q->weapon_off > -1000) {
+                q->weapon_off = -1000;
+                emit(p, PE_WEAPON, who_of(p, q), NULL, NULL, q->pos, 0, 0);
+            }
+            q->reload -= q->pulse_delay;
+        }
+        return 1;
+    case PK_STATIONARY:
+        if (q->state == 1)
+            sound(p, q, "Sound|AmbientSound");
+        else if (q->state == 2)
+            return fly_countdown(q);
+        return 1;
+    case PK_TOURIST:
+        if (q->state == 5) {
+            start_anim(p, q, "Idle", 0);
+            q->state = 1;
+            q->pulse_delay = 26 * TIMESTEP;
+            q->pulse_time = 0;
+        } else if (q->state == 1 || q->state == 3) {
+            effect(p, q, "Effect|FlashEffect", q->pos, "Camera");
+            q->pulse_delay = 100;
+        } else if (q->state == 2) {
+            q->pulse_time = 0;
+            decide(p, q);
+        } else if (q->state == 4) {
+            return DELETE_ME;
+        }
+        return 1;
+    default:
+        return q->state == 99 ? fly_countdown(q) : 1;
+    }
+}
+
+static int on_mover(People *p, Person *q, int st)
+{
+    switch (q->kind) {
+    case PK_WINDOW:
+        return window_mover(p, q, st);
+    case PK_RUNNER:
+        if (st == 2)                                 /* it sets up another run across, then asks to be deleted */
+            return DELETE_ME;
+        if (st == 3 && strcmp(q->anim, "RunOut") == 0)
+            q->heading = q->pos[1] < -3.0f ? -90.0f : 90.0f;
+        return 1;
+    case PK_CHILD:
+        return st == 2 ? DELETE_ME : 1;
+    case PK_WALKER:
+        if (st == 2 && q->state == 1) {
+            if (q->has_idle == 1) {
+                start_anim(p, q, "Idle", 0);
+                q->mv.active = 0;                    /* setMover(an empty RWorldMover) */
+                q->state = 3;
+                const PeopleMonster *m = nearest_monster(p, q->pos);   /* lookAtMonster */
+                if (m) {
+                    float dx = m->pos[0] - q->pos[0];
+                    if (dx < 5.0f && dx > -5.0f)
+                        q->heading = m->pos[1] > q->pos[1] ? 0.0f : 180.0f;
+                    else
+                        q->heading = m->pos[0] > q->pos[0] ? -90.0f : 90.0f;
+                }
+            } else {
+                walk(p, q);
+            }
+        }
+        return 1;
+    case PK_TOURIST:
+        if (st == 2) {
+            if (q->state == 6)
+                return DELETE_ME;
+            mover_init(q, q->pos, q->pos, 0);        /* stand, facing the monster */
+            q->mv.flags = (q->mv.flags | 8 | 4) & ~1u;
+            q->pulse_delay = 0.25f;
+            q->state = 2;
+        } else if (st == 4 && q->is_child && q->state != 6) {
+            const PeopleMonster *m = nearest_monster(p, q->pos);
+            float d[3] = { 0, 0, 0 };
+            q->flags &= ~(uint32_t)OF_PUSH_OUT;
+            if (m) {
+                d[0] = q->pos[0] - m->pos[0];
+                d[1] = q->pos[1] - m->pos[1];
+                float l = sqrtf(d[0] * d[0] + d[1] * d[1]);
+                if (l > 0) {
+                    d[0] /= l;
+                    d[1] /= l;
+                }
+            }
+            float e[2] = { d[0] < 0 ? -d[1] : d[1], -fabsf(d[0]) };   /* away, across and towards the street */
+            float end[3] = { q->pos[0] + 160 * e[0], q->pos[1] + 160 * e[1], q->pos[2] };
+            mover_init(q, q->pos, end, 7);
+            q->mv.flags = (q->mv.flags & ~8u) | 1;
+            effect(p, q, "Effect|KidBalloonDetachFX", q->pos, NULL);
+            start_anim(p, q, "Running", 0);
+            q->pulse_delay = 0;
+            q->state = 6;
+        }
+        return 0;
+    default:
+        return 1;
+    }
+}
+
+static void on_pickup(People *p, Person *q)          /* the script's onPickup (script event 8) */
+{
+    float up[3] = { q->pos[0], q->pos[1], q->pos[2] + 5 };
+    switch (q->kind) {
+    case PK_WINDOW:
+        if (q->state != 20) {
+            start_anim(p, q, "PickedUp", 0);
+            sound(p, q, "Sound|PickupSound");
+            q->state = 20;
+        }
+        break;
+    case PK_RUNNER:
+        start_anim(p, q, "PickedUp", 0);
+        sound(p, q, "Sound|PickupSound");
+        q->heading = 0;
+        break;
+    case PK_WALKER:
+        start_anim(p, q, "PickedUp", 0);
+        q->state = 2;
+        sound(p, q, "Sound|Voice");
+        q->sub |= 1;
+        break;
+    case PK_STATIONARY:                              /* playEffect: the idle effect stops, PickedUpEffect, PickupSound */
+        effect(p, q, "Effect|PickedUpEffect", up, NULL);
+        sound(p, q, "Sound|PickupSound");
+        start_anim(p, q, "PickedUp", 0);
+        break;
+    case PK_TOURIST:
+        if (q->state != 3) {
+            sound(p, q, "Sound|PickupSound");
+            start_anim(p, q, "PickedUp2", 0);
+            q->state = 3;
+            q->pulse_delay = 10 * TIMESTEP;
+            q->pulse_time = 0;
+        }
+        break;
+    case PK_CHILD:
+        break;
+    default:                                         /* [G] */
+        start_anim(p, q, "PickedUp", 0);
+        break;
+    }
+}
+
+/* the script's smash(): monster.smashObject(actor), the FlyingSound, the state that counts the flight down */
+static void smash(People *p, Person *q, float monster_heading)
+{
+    smash_object(p, q, monster_heading);
+    sound(p, q, "Sound|FlyingSound");
+    switch (q->kind) {
+    case PK_WINDOW: q->state = 22; break;             /* pulses every 0.25 s */
+    case PK_RUNNER: q->state = 16; q->pulse_delay = 0.5f; break;
+    case PK_WALKER: q->state = 6; q->pulse_delay = 1.0f; break;
+    case PK_STATIONARY: q->state = 2; q->pulse_delay = 1.0f; break;
+    case PK_TOURIST: q->state = 4; q->pulse_delay = 3.0f; break;
+    default: q->state = 99; q->fly_duration = 3; q->pulse_delay = 1.0f; break;   /* [G] */
+    }
+    q->pulse_time = 0;
+}
+
+/* TakeDamage from a monster: who flies off, and when */
+static int take_damage(People *p, Person *q, float monster_heading, const char *move, int who)
+{
+    switch (q->kind) {
+    case PK_WINDOW:
+        if (q->state != 7)
+            return 0;
+        smash(p, q, monster_heading);
+        on_pickup(p, q);                             /* this.actor.onPickup(): after the smash, so state 20 */
+        start_anim(p, q, "PickedUp", 0);
+        return 1;
+    case PK_RUNNER:
+        if (q->state == 16)
+            return 0;
+        smash(p, q, monster_heading);
+        on_pickup(p, q);
+        start_anim(p, q, "PickedUp", 0);
+        return 1;
+    case PK_WALKER:
+        if (q->state == 6)
+            return 0;
+        smash(p, q, monster_heading);
+        start_anim(p, q, "PickedUp", 0);
+        on_pickup(p, q);                             /* state 2 again, as in the script */
+        return 1;
+    case PK_STATIONARY:
+        if (q->state == 2)
+            return 0;
+        on_pickup(p, q);
+        on_pickup(p, q);                             /* playEffect + PickedUp, then this.actor.onPickup() */
+        smash(p, q, monster_heading);
+        return 1;
+    case PK_TOURIST:
+        if (q->state == 4 || q->is_child)
+            return 0;
+        start_anim(p, q, "PickedUp", 0);
+        on_pickup(p, q);
+        smash(p, q, monster_heading);
+        return 1;
+    case PK_CHILD:                                   /* a monster on the ground is thrown back by it */
+        if (move && strncmp(move, "Ground", 6) == 0) {
+            float v[3] = { 0, -20, 30 };
+            emit(p, PE_MONSTER_KNOCK, who, NULL, NULL, v, 0, 1);
+        }
+        return 0;
+    default:                                         /* [G] */
+        if (q->state == 99)
+            return 0;
+        smash(p, q, monster_heading);
+        return 1;
+    }
+}
+
+/* ---------------------------------------------------------------- construction */
+
+static int script_kind(const char *script)
+{
+    static const struct { const char *name; int kind; } k[] = {
+        { "Person_Window", PK_WINDOW }, { "Person_Runner", PK_RUNNER }, { "WalkingAroundPerson", PK_WALKER },
+        { "StationaryPerson", PK_STATIONARY }, { "Tourist", PK_TOURIST }, { "Person_Child", PK_CHILD },
+    };
+    for (size_t i = 0; script && i < sizeof k / sizeof k[0]; i++)
+        if (strncmp(script, k[i].name, strlen(k[i].name)) == 0)
+            return k[i].kind;
+    return PK_OTHER;
+}
+
+static Person *new_person(People *p, Group tmpl, const float pos[3], float heading)
+{
+    if (p->n == p->cap) {
+        int cap = p->cap ? 2 * p->cap : 64;
+        Person *v = realloc(p->v, sizeof *v * (size_t)cap);
+        if (!v)
+            return NULL;
+        p->v = v;
+        p->cap = cap;
+    }
+    Person *q = &p->v[p->n++];
+    memset(q, 0, sizeof *q);
+    q->tmpl = tmpl;
+    q->name = tmpl.at ? group_name(tmpl) : "";
+    q->kind = script_kind(tmpl.at ? group_str(tmpl, "Script|ScriptName") : NULL);
+    memcpy(q->pos, pos, sizeof q->pos);
+    q->heading = heading;
+    q->building = q->storey = q->column = -1;
+    q->pulse_delay = -1;                             /* [R] the Actor's +0xF8: -1, no pulses */
+    q->flags = OF_ACTOR;                             /* [R] 0x30E3E0 */
+    const char *flags = tstr(q, "Flags");            /* [R] the template's Flags (0x30DA24, names at 0x3F5F70) */
+    if (flags && strstr(flags, "Pickupable"))
+        q->flags |= OF_PICKUP;
+    if (flags && strstr(flags, "PushOutMonsters"))
+        q->flags |= OF_PUSH_OUT;
+    const char *def = tstr(q, "DefaultAnim");        /* the native actor starts in its DefaultAnim */
+    start_anim(p, q, def ? def : "Idle", 0);
+    return q;
+}
+
+static void construct(People *p, Person *q)
+{
+    float up[3] = { q->pos[0], q->pos[1], q->pos[2] + 5 };
+    q->fly_duration = 3;
+    switch (q->kind) {
+    case PK_WINDOW:
+        q->state = 1;
+        start_anim(p, q, "WindowEmerge", 0);
+        q->pulse_delay = 0.25f;
+        q->flags |= OF_EFF_NODES;
+        break;
+    case PK_RUNNER:
+        q->flags |= OF_PICKUP | OF_EFF_NODES;
+        break;
+    case PK_WALKER:
+        q->flags |= OF_EFF_NODES;
+        start_anim(p, q, "Walk", 1);
+        memcpy(q->start, q->pos, sizeof q->start);
+        q->walk_range = tnum(q, "WalkRange", 5);
+        q->has_idle = (int)tnum(q, "HasIdle", 0);
+        q->is_grenadier = (int)tnum(q, "IsGrenadier", 0);
+        q->walk_speed = tnum(q, "WalkSpeed", 4);
+        q->weapon_off = -1000;
+        q->pulse_delay = TIMESTEP;
+        sound(p, q, "Sound|AmbientLoopingSound");
+        q->state = 0;
+        break;
+    case PK_STATIONARY:
+        q->flags |= OF_EFF_NODES | OF_PICKUP;
+        start_anim(p, q, "Idle", 1);
+        effect(p, q, "Effect|IdleEffect", up, NULL);
+        sound(p, q, "Sound|Sound");
+        if (tstr(q, "Sound|AmbientSound"))
+            q->pulse_delay = 7;
+        q->state = 1;
+        break;
+    case PK_TOURIST:
+        q->state = 2;
+        q->pulse_delay = 2;
+        mover_init(q, q->pos, q->pos, 0);
+        q->mv.flags = 8 | 4;
+        q->is_child = (int)tnum(q, "IsChild", 0);
+        if (q->is_child) {
+            float d = tnum(q, "MonsterResponseDist", 0);
+            effect(p, q, "Effect|KidBalloonHoldingFX", q->pos, NULL);
+            q->mv.resp2 = d > 0 ? d * d : 0;
+        } else {
+            q->flags |= OF_EFF_NODES | OF_PICKUP;
+            q->mv.resp2 = 0;                         /* setMonsterResponseDist(-1) */
+        }
+        break;
+    default:
+        break;
+    }
+    place_matrix(q->world, q->pos, q->heading, NULL);
+}
+
+/* ---------------------------------------------------------------- the API */
+
+People *people_new(PeopleClipSeconds clip_seconds, void *ctx)
+{
+    People *p = calloc(1, sizeof *p);
+    if (!p)
+        return NULL;
+    p->clip_seconds = clip_seconds;
+    p->ctx = ctx;
+    p->rng = 12345;
+    p->droppable_rate = 0.5f;                        /* the blocks' DroppableDef rate */
+    return p;
+}
+
+void people_free(People *p)
+{
+    if (p) {
+        free(p->v);
+        free(p);
+    }
+}
+
+void people_seed(People *p, uint32_t seed) { p->rng = seed; }
+void people_set_droppable_rate(People *p, float rate) { p->droppable_rate = rate; }
+
+int people_add(People *p, Group tmpl, const float pos[3], float heading_deg)
+{
+    Person *q = new_person(p, tmpl, pos, heading_deg);
+    if (!q)
+        return -1;
+    construct(p, q);
+    return who_of(p, q);
+}
+
+int people_add_window(People *p, Group tmpl, const float at[3], int building, int storey, int column)
+{
+    int who = people_add(p, tmpl, at, 0);            /* [G] facing as placed (0): the window clips face out */
+    if (who >= 0) {
+        p->v[who].building = building;
+        p->v[who].storey = storey;
+        p->v[who].column = column;
+    }
+    return who;
+}
+
+int people_crowd(People *p, const Group *tmpls, int ntmpls, const float centre[3])
+{
+    if (ntmpls <= 0)
+        return 0;
+    int n = 4 + (int)(frand(p) * 5.0f), made = 0;
+    for (int i = 0; i < n; i++) {
+        float s[3] = { centre[0] - 10 + frand(p) * 20, centre[1] - 5 + frand(p) * 10, centre[2] };
+        float d[3] = { centre[0] - 75 + frand(p) * 150, centre[1] - 50, centre[2] };
+        int pick = (int)(frand(p) * (float)ntmpls);
+        int who = people_add(p, tmpls[pick < ntmpls ? pick : ntmpls - 1], s, heading_of(d[0] - s[0], d[1] - s[1]));
+        if (who < 0)
+            continue;
+        Person *q = &p->v[who];
+        start_anim(p, q, "Running", 1);
+        mover_init(q, s, d, 10);
+        made++;
+    }
+    return made;
+}
+
+void people_set_path(People *p, int who, const float (*pts)[3], int n, float speed, uint32_t flags)
+{
+    if (who < 0 || who >= p->n || n < 1)
+        return;
+    Person *q = &p->v[who];
+    mover_init(q, pts[0], n > 1 ? pts[1] : pts[0], speed);
+    for (int i = 2; i < n; i++)
+        mover_add(q, pts[i]);
+    q->mv.flags = flags;
+}
+
+int people_count(const People *p) { return p->n; }
+const Person *people_get(const People *p, int who) { return who >= 0 && who < p->n ? &p->v[who] : NULL; }
+
+int people_events(People *p, PeopleEvent *out, int max)
+{
+    int n = p->nev < max ? p->nev : max;
+    memcpy(out, p->ev, sizeof *out * (size_t)n);
+    memmove(p->ev, p->ev + n, sizeof *p->ev * (size_t)(p->nev - n));
+    p->nev -= n;
+    return n;
+}
+
+static void gone(Person *q)
+{
+    q->phase = PP_GONE;
+    q->flags |= OF_DYING;                            /* requestDelete (vtable +0x58, 0x285DD0) */
+    q->mv.active = 0;
+    q->building = -1;
+}
+
+void people_update(People *p, float dt, const PeopleMonster *m, int nm)
+{
+    p->m = m;
+    p->nm = nm;
+    for (int i = 0; i < p->ntimers; i++)
+        if ((p->timer[i].left -= dt) <= 0) {
+            if (p->nev < MAX_EVENTS)
+                p->ev[p->nev++] = p->timer[i].ev;
+            p->timer[i--] = p->timer[--p->ntimers];
+        }
+    for (int i = 0; i < p->n; i++) {
+        Person *q = &p->v[i];
+        if (q->phase == PP_GONE)
+            continue;
+        int r = 1;
+        /* the anim: a play that does not repeat ends in onAnimComplete */
+        if (q->anim_loop) {
+            if (q->anim_len > 0)
+                q->anim_time = fmodf(q->anim_time + dt, q->anim_len);
+        } else if (!q->anim_done) {
+            q->anim_time += dt;
+            if (q->anim_time >= q->anim_len) {
+                q->anim_time = q->anim_len;
+                q->anim_done = 1;                    /* a handler's startAnim clears it */
+                r = on_anim_done(p, q);
+            }
+        }
+        if (r != DELETE_ME && q->pulse_delay >= 0 && q->phase != PP_GONE) {
+            q->pulse_time += dt;
+            if (q->pulse_time >= q->pulse_delay) {
+                q->pulse_time = q->pulse_delay > 0 ? q->pulse_time - q->pulse_delay : 0;
+                r = on_pulse(p, q);
+            }
+        }
+        if (r != DELETE_ME && q->phase == PP_SCRIPT) {
+            int st = mover_step(p, q, dt);
+            if (st >= 2)
+                r = on_mover(p, q, st);
+            place_matrix(q->world, q->pos, q->heading, NULL);
+        } else if (r != DELETE_ME && q->phase == PP_FLYING) {   /* SpherePhysicsMover [R] Gravity 9.81, Restitution 0.8 */
+            float g = tnum(q, "Gravity", 9.81f), e = tnum(q, "Restitution", 0.8f);
+            q->vel[2] -= g * dt;
+            for (int k = 0; k < 3; k++) {
+                q->pos[k] += q->vel[k] * dt;
+                q->rot[k] += q->spin[k] * dt;
+            }
+            if (q->pos[2] < 0 && q->vel[2] < 0) {    /* [G] the bounce on the street; the collision response is not read */
+                q->pos[2] = 0;
+                q->vel[2] = -q->vel[2] * e;
+            }
+            place_matrix(q->world, q->pos, q->heading, q->rot);
+        }
+        if (r == DELETE_ME)
+            gone(q);
+    }
+}
+
+void people_cell_broken(People *p, int building, int storey)
+{
+    for (int i = 0; i < p->n; i++) {
+        Person *q = &p->v[i];
+        if (q->phase == PP_SCRIPT && q->kind == PK_WINDOW && q->building == building && q->building >= 0 &&
+            q->storey >= storey - 1 && q->storey <= storey + 1)
+            window_fall(p, q);
+    }
+}
+
+/* ---------------------------------------------------------------- the monster's grab */
+
+int people_probe(const PeopleBox *b, int nb, const float monster_pos[3], const float xyz[3], int mirrored,
+                 int *building, int *storey, int *column)
+{
+    float pt[3] = { monster_pos[0] + (mirrored ? -xyz[0] : xyz[0]), monster_pos[1] + xyz[1] - 1.0f,
+                    monster_pos[2] + xyz[2] };
+    int best = -1;
+    float bd = 0;
+    for (int i = 0; i < nb; i++) {                   /* 0x2A3D20 looking along (0, 1, 0): the first front ahead */
+        if (b[i].gone || !(b[i].min[0] <= pt[0]) || b[i].max[0] < pt[0])
+            continue;
+        float d = b[i].min[1] - pt[1];
+        if (d < 0)
+            continue;
+        if (best < 0 || d < bd) {
+            best = i;
+            bd = d;
+        }
+    }
+    if (best < 0)
+        return 0;
+    int col = (int)((pt[0] - b[best].min[0]) / 5.0f);   /* 0x2B3900: truncated, as cvt.w.s does */
+    int sto = (int)((pt[2] - b[best].min[2] - 6.0f) / 3.0f);
+    if (col < 0 || col >= b[best].width || sto < 0)
+        return 0;
+    *building = best;
+    *storey = sto;
+    *column = col;
+    return 1;
+}
+
+int people_window_at(const People *p, int building, int storey, int column)
+{
+    for (int i = 0; i < p->n; i++) {
+        const Person *q = &p->v[i];
+        if (q->phase == PP_SCRIPT && q->building >= 0 && q->building == building && q->storey == storey &&
+            q->column == column)
+            return i;
+    }
+    return -1;
+}
+
+int people_can_grab(const People *p, const PeopleBox *b, int nb, const float monster_pos[3], const float xyz[3],
+                    int mirrored)
+{
+    int bi, st, col;
+    return people_probe(b, nb, monster_pos, xyz, mirrored, &bi, &st, &col) ? people_window_at(p, bi, st, col) : -1;
+}
+
+int people_nearest(const People *p, const float hand[3], const float root[3], const float forward[3], float radius)
+{
+    int best = -1;
+    float bd = 3.4e38f;
+    for (int i = 0; i < p->n; i++) {
+        const Person *q = &p->v[i];
+        if (q->phase == PP_GONE || !(q->flags & OF_PICKUP) || (q->flags & (OF_HELD | OF_DYING | 0x40)))
+            continue;
+        const float *at = &q->world[12];
+        float dx = at[0] - hand[0], dy = at[1] - hand[1], dz = at[2] - hand[2];
+        float d = dx * dx + dy * dy + dz * dz;
+        if (d > radius * radius || d >= bd)
+            continue;
+        float v[3] = { at[0] - root[0], at[1] - root[1], 0 };   /* in front of the root: (x, y) and its z dropped */
+        if (v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2] <= 0)
+            continue;
+        best = i;
+        bd = d;
+    }
+    return best;
+}
+
+void people_grab(People *p, int who, float blend)
+{
+    if (who < 0 || who >= p->n || p->v[who].phase == PP_GONE)
+        return;
+    Person *q = &p->v[who];
+    q->flags = (q->flags | OF_HELD) & ~(uint32_t)(OF_PICKUP | OF_PUSH_OUT);   /* 0x2DA310 */
+    q->phase = PP_HELD;
+    q->mv.active = 0;                                /* its mover becomes the HeldObjectMover */
+    q->blend = blend > 0.001f ? blend : 0;
+    q->blend_left = q->blend;
+    mat_quat(q->world, q->from_q);
+    memcpy(q->from_p, &q->world[12], sizeof q->from_p);
+    on_pickup(p, q);                                 /* script event 8 */
+    leave_window(q);                                 /* 0x318140: the occupant record lets it go */
+}
+
+/* [R] HeldObjectMover (init 0x310ED0, held 0x3109E0): the object's MajorAxis (default 2, z) along the hand's z, the
+ * next one ((MajorAxis + 1) % 3) along the hand's y, the last their cross product; at the hand's place plus
+ * HoldOffset (MirroredHoldOffset when the monster plays mirrored) in the hand's frame. While the blend lasts (+0x84)
+ * it comes in from where it was (0x310B50; [G] linearly). */
+void people_hold(People *p, int who, const float hand[16], int mirrored, float dt)
+{
+    if (who < 0 || who >= p->n || p->v[who].phase != PP_HELD)
+        return;
+    Person *q = &p->v[who];
+    int major = (int)tnum(q, "MajorAxis", 2);
+    if (major < 0 || major > 2)
+        major = 2;
+    int i1 = (major + 1) % 3, i2 = (major + 2) % 3;
+    const float *hz = hand + 8, *hy = hand + 4;
+    float axis[3][3];
+    memcpy(axis[major], hz, sizeof axis[0]);
+    memcpy(axis[i1], hy, sizeof axis[0]);
+    axis[i2][0] = axis[major][1] * axis[i1][2] - axis[major][2] * axis[i1][1];
+    axis[i2][1] = axis[major][2] * axis[i1][0] - axis[major][0] * axis[i1][2];
+    axis[i2][2] = axis[major][0] * axis[i1][1] - axis[major][1] * axis[i1][0];
+    float off[3] = { 0, 0, 0 };
+    Group og = q->tmpl.at ? group_sub(q->tmpl, mirrored ? "MirroredHoldOffset" : "HoldOffset") : q->tmpl;
+    if (og.at) {
+        Record r[3];
+        if (group_items(og, r, 3) == 3)
+            for (int k = 0; k < 3; k++)
+                off[k] = record_num(r[k]);
+    }
+    float t[16];
+    for (int c = 0; c < 3; c++) {
+        for (int k = 0; k < 3; k++)
+            t[4 * c + k] = axis[c][k];
+        t[4 * c + 3] = 0;
+    }
+    for (int k = 0; k < 3; k++)
+        t[12 + k] = hand[12 + k] + off[0] * hand[k] + off[1] * hand[4 + k] + off[2] * hand[8 + k];
+    t[15] = 1;
+    if (q->blend_left > 0) {
+        q->blend_left -= dt;
+        float f = q->blend_left > 0 ? 1 - q->blend_left / q->blend : 1;
+        float tq[4], oq[4];
+        mat_quat(t, tq);
+        slerp(q->from_q, tq, f, oq);
+        quat_mat(oq, q->world);
+        for (int k = 0; k < 3; k++)
+            q->world[12 + k] = q->from_p[k] + (t[12 + k] - q->from_p[k]) * f;
+    } else {
+        memcpy(q->world, t, sizeof t);
+    }
+    memcpy(q->pos, &q->world[12], sizeof q->pos);
+}
+
+PeopleEaten people_eat(People *p, int who)
+{
+    PeopleEaten e = { 0, 0, 0, 0 };
+    if (who < 0 || who >= p->n || p->v[who].phase != PP_HELD)
+        return e;
+    Person *q = &p->v[who];
+    if (!(q->kind == PK_WALKER && q->thrown)) {      /* the scripts' onThrow(monster, 1) */
+        q->thrown = 1;
+        if (!(q->flags & OF_COUNTED)) {              /* gCommon.addStats(actor, slot, 1), once per object */
+            e.health = tnum(q, "Health", 0);
+            e.energy = tnum(q, "Energy", 0);
+            e.points = tnum(q, "Points", 0);
+            q->flags |= OF_COUNTED;
+        }
+        if (q->kind == PK_STATIONARY) {
+            const char *fx = tstr(q, "Effect|EatEffect"), *node = tstr(q, "EatEffectNode");
+            static char nodes[8][48];                /* the node's name + "1" */
+            static int next;
+            if (fx && node) {
+                char *n = nodes[next++ & 7];
+                snprintf(n, sizeof nodes[0], "%s1", node);
+                emit(p, PE_EFFECT, -1, fx, n, q->pos, 0, 1);
+            }
+            const char *reaction = tstr(q, "ReactionType");
+            if (reaction && same_text(reaction, "Priest")) {
+                /* Monsters::doPriestReaction after EatReactionDelay: thrown up and back, 30 HP */
+                float v[3] = { frand(p) < 0.5f ? -10.0f : 10.0f, -5, 20 };
+                float delay = tnum(q, "EatReactionDelay", 0);
+                later(p, delay, PE_MONSTER_KNOCK, v, 0);
+                later(p, delay, PE_MONSTER_HP, NULL, -30);
+                e.priest = 1;
+            }
+        }
+        fart_maybe(p);
+    }
+    gone(q);                                         /* 0x2D9DC0: an eaten actor is deleted */
+    return e;
+}
+
+void people_apply_eaten(const PeopleEaten *e, float *hp, float hp_max, float *energy)
+{
+    if (hp && *hp > 0) {                             /* 0x2C51A0 */
+        float v = *hp + e->health;
+        v = v > 1 ? v : 1;
+        *hp = v < hp_max ? v : hp_max;
+    }
+    if (energy) {
+        float v = *energy + e->energy;
+        *energy = v < 0 ? 0 : v > 100 ? 100 : v;
+    }
+}
+
+void people_throw(People *p, int who, float monster_heading)
+{
+    if (who < 0 || who >= p->n || p->v[who].phase != PP_HELD)
+        return;
+    Person *q = &p->v[who];
+    if (q->kind == PK_WALKER && q->thrown) {         /* bThrownProcessed: it only lets go */
+        q->flags &= ~(uint32_t)OF_HELD;
+        q->phase = PP_SCRIPT;
+        return;
+    }
+    q->thrown = 1;
+    smash(p, q, monster_heading);                    /* onThrow(monster, 0) */
+}
+
+int people_hit(People *p, const float c[3], float radius, float monster_heading, const char *move)
+{
+    int n = 0;
+    for (int i = 0; i < p->n; i++) {
+        Person *q = &p->v[i];
+        if (q->phase != PP_SCRIPT)
+            continue;
+        /* [G] the person's sphere: CollisionRadius (DefActorProps: 2) about its place, 1 up; 0x2D4390 not read */
+        float rr = tnum(q, "CollisionRadius", 2) + radius;
+        float dx = q->pos[0] - c[0], dy = q->pos[1] - c[1], dz = q->pos[2] + 1 - c[2];
+        if (dx * dx + dy * dy + dz * dz <= rr * rr)
+            n += take_damage(p, q, monster_heading, move, -1);
+    }
+    return n;
+}

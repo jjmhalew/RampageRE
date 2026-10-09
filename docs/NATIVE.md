@@ -78,7 +78,10 @@ and in a jump it drives the monster at up to 16 units/s (the stick's own velocit
 slot column and `Monsters.bsf`'s velocity calls (`addVelocity`, `jumpNorm`, ...); in the air the monster moves by
 its velocity and falls by 60 units/s² (unless `disableGravity`), and meeting the street fires the landing slot (56)
 in its column, so a held Cross jumps higher, a double jump flips, a butt slam lands in its impact
-([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). Script checks the graph asks (`Monsters::canMount`,
+([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). The people are their templates' scripts ported (src/people.c, [PEOPLE_NOTES.md](PEOPLE_NOTES.md)):
+window occupants lean out and fall when their window breaks, crowds run, punks throw, tourists take photos; the
+monster grabs one from a window (`canGrabPerson`) or the street (`doGrabObject` at its `Helper R Hand`), holds,
+eats (health, energy) or throws them, and its attacks send them flying. Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
 hides them): the punch's fist, the kick's foot. The face plays its own clip over the body's (the game's face layer:
@@ -119,5 +122,6 @@ x ±75 and y −30.
 - friction on the velocity, the head turning with the right stick;
 - debris and dust effects, scoring;
 - effects (`tools/edf.py`; the camera shakes are in), the GUI, sound;
-- grabbing, the game's rules;
+- the game's rules (scoring, the AI's army), the people's bottles and droppables (their events are raised, not
+  acted on), window occupants' real spawn rates;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

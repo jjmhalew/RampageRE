@@ -372,47 +372,152 @@ static void obstacle_boxes(Scene *s)
     }
 }
 
-/* a person in its template's default state (ActorAnimShape|<DefaultAnim>: model and clip), the clip on a loop */
-static void place_actor(City *c, Scene *s, Group inst)
+/* the people: one look (instance) per person and ActorAnimShape|<anim> it has shown */
+struct PersonLook { int who; char anim[32]; int inst; };
+
+static float people_clip_seconds(void *ctx, const char *anim, const char *shape)
 {
-    Group t = template_of(c, group_str(inst, "Name"));
-    if (!t.at) {
-        s->missing++;
-        return;
-    }
-    const char *state = group_str(t, "DefaultAnim");
+    City *c = ctx;
+    const BdpEntry *ce = anim ? find_anim(&c->bundle, 2, anim) : NULL;
+    if (!ce && shape)
+        ce = find_anim(&c->bundle, 1, shape);        /* the shape's own RawAnim */
+    Clip clip;
+    if (!ce || clip_read(ce, &clip) != 0)
+        return 0;
+    float d = clip.duration;
+    clip_free(&clip);
+    return d;
+}
+
+/* a person's look for its anim now: the model (Shape|ShapeName, else the template's, else the clip's own tree) and
+ * its clip, as place_actor did; -1 none */
+static int person_look(City *c, Scene *s, int who, const Person *p)
+{
+    for (int i = 0; i < s->nlooks; i++)
+        if (s->looks[i].who == who && strcmp(s->looks[i].anim, p->anim) == 0)
+            return s->looks[i].inst;
     char key[96];
-    snprintf(key, sizeof key, "ActorAnimShape|%s", state ? state : "Idle");
-    Group look = group_sub(t, key);
-    if (!look.at)
-        look = group_sub(t, "ActorAnimShape|Idle");
+    snprintf(key, sizeof key, "ActorAnimShape|%s", p->anim);
+    Group look = group_sub(p->tmpl, key);
     const char *clip_name = look.at ? group_str(look, "Anim|AnimName") : NULL;
     const BdpEntry *ce = clip_name ? find_anim(&c->bundle, 2, clip_name) : NULL;
     const char *shape = look.at ? group_str(look, "Shape|ShapeName") : NULL;
-    if (!shape) shape = group_str(t, "Shape|ShapeName");
-    if (!shape) shape = group_str(t, "Shape|Shape");
-    if (!shape && ce)                             /* the clip's own node tree */
+    if (!shape) shape = group_str(p->tmpl, "Shape|ShapeName");
+    if (!shape) shape = group_str(p->tmpl, "Shape|Shape");
+    if (!shape && ce)
         shape = bdp_name(&c->bundle, rd16(ce->data + 0x28));
-    float xyz[3];
-    location(inst, xyz);
-    int id = shape ? place_model(c, s, shape, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)), -1) : -1;
-    if (id < 0)
-        return;
-    s->people++;
-    Instance *in = &s->instances[id];
-    Clip clip;
-    if (ce && clip_read(ce, &clip) == 0) {
-        if (clip.bones == in->tree.n) {
-            if (in->has_clip)
-                clip_free(&in->clip);
-            in->clip = clip;
-            in->has_clip = 1;
-            in->offset = (float)(s->people % 7) * 0.37f;   /* not everyone in step */
-        } else {
-            clip_free(&clip);
+    int missing = s->missing;
+    int id = shape ? place_model(c, s, shape, mat_identity(), -1) : -1;
+    s->missing = missing;
+    if (id >= 0) {
+        Instance *in = &s->instances[id];
+        in->dynamic = 1;
+        Clip clip;
+        if (ce && clip_read(ce, &clip) == 0) {
+            if (clip.bones == in->tree.n) {
+                if (in->has_clip)
+                    clip_free(&in->clip);
+                in->clip = clip;
+                in->has_clip = 1;
+            } else {
+                clip_free(&clip);
+            }
         }
     }
+    s->looks = realloc(s->looks, sizeof *s->looks * (size_t)(s->nlooks + 1));
+    struct PersonLook *l = &s->looks[s->nlooks++];
+    l->who = who;
+    snprintf(l->anim, sizeof l->anim, "%s", p->anim);
+    l->inst = id;
+    return id;
 }
+
+/* each frame: every person's look where people.c has it (its world matrix, the template's RenderScale), its clip at
+ * anim_time / anim_len of the clip; the other looks hidden */
+static void people_sync(Scene *s, double t)
+{
+    if (!s->folk || !s->owner)
+        return;
+    int n = people_count(s->folk);
+    for (int who = 0; who < n; who++) {
+        const Person *p = people_get(s->folk, who);
+        int show = p->phase != PP_GONE ? person_look(s->owner, s, who, p) : -1;
+        for (int i = 0; i < s->nlooks; i++)
+            if (s->looks[i].who == who && s->looks[i].inst >= 0 && s->looks[i].inst != show)
+                s->instances[s->looks[i].inst].hidden = 1;
+        if (show < 0)
+            continue;
+        Instance *in = &s->instances[show];
+        in->hidden = 0;
+        float rs = group_num(p->tmpl, "RenderScale", 1);
+        Mat4 m;
+        memcpy(m.m, p->world, sizeof m.m);
+        for (int k = 0; k < 12; k++)
+            if ((k & 3) != 3)
+                m.m[k] *= rs;
+        in->base = m;
+        if (in->has_clip && p->anim_len > 0)
+            in->offset = (float)(p->anim_time / p->anim_len * in->clip.duration - t);
+    }
+}
+
+void scene_people_spawn(Scene *s, float dt)
+{
+    if (!s->folk || !s->noccupants)
+        return;
+    s->spawn_timer -= dt;
+    if (s->spawn_timer > 0)
+        return;
+    s->spawn_timer = 2;
+    int windows = 0;
+    for (int i = 0; i < people_count(s->folk); i++) {
+        const Person *p = people_get(s->folk, i);
+        windows += p->kind == PK_WINDOW && p->phase != PP_GONE && p->building >= 0;
+    }
+    static uint32_t seed = 12345;
+    seed = seed * 1664525u + 1013904223u;
+    if (windows >= 6 || (float)(seed >> 8) / 16777216.0f >= s->fill_rate || !s->nbuildings)
+        return;
+    float total = 0;                                 /* an occupant by its Frequency */
+    for (int k = 0; k < s->noccupants; k++)
+        total += s->occupant_freq[k];
+    seed = seed * 1664525u + 1013904223u;
+    float pick = (float)(seed >> 8) / 16777216.0f * total;
+    int k = 0;
+    while (k + 1 < s->noccupants && pick >= s->occupant_freq[k]) { pick -= s->occupant_freq[k]; k++; }
+    for (int tries = 0; tries < 8; tries++) {        /* an intact front window with an outline */
+        seed = seed * 1664525u + 1013904223u;
+        uint32_t bi = (seed >> 8) % s->nbuildings;
+        SceneBuilding *sb = &s->buildings[bi];
+        const Building *b = &sb->b;
+        if (b->state != BUILDING_STANDING || b->n < 1)
+            continue;
+        int ls = (int)((seed >> 4) % (uint32_t)b->n), col = (int)((seed >> 12) % (uint32_t)b->width);
+        int ci = building_cell_index(b, FACE_FRONT, col), o = b->live[ls];
+        if (ci < 0 || b->cell[o][ci].state != 0 || sb->outline[b->cell[o][ci].tile & 3][0] < 0 ||
+            people_window_at(s->folk, (int)bi, ls, col) >= 0)
+            continue;
+        const float *ol = sb->outline[b->cell[o][ci].tile & 3];
+        float at[3] = { b->min[0] + CELL * (float)col + (ol[0] + ol[2]) / 2, b->min[1],
+                        b->min[2] + GROUND_FLOOR + STOREY * (float)ls + ol[1] };
+        people_add_window(s->folk, s->occupant[k], at, (int)bi, ls, col);
+        return;
+    }
+}
+
+int scene_people_boxes(const Scene *s, PeopleBox *out, int max)
+{
+    int n = 0;
+    for (uint32_t i = 0; i < s->nbuildings && n < max; i++, n++) {
+        const Building *b = &s->buildings[i].b;
+        memcpy(out[n].min, b->min, sizeof out[n].min);
+        memcpy(out[n].max, b->max, sizeof out[n].max);
+        out[n].width = b->width;
+        out[n].gone = b->state == BUILDING_GONE || b->state >= BUILDING_CRACKING;
+    }
+    return n;
+}
+
 
 static uint32_t rng_next(uint32_t *state) { *state = *state * 1664525u + 1013904223u; return *state >> 8; }
 
@@ -923,6 +1028,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->moving = 0;
         sb->adorn = NULL;
         sb->nadorn = 0;
+        memset(sb->broke, 0, sizeof sb->broke);
         sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
@@ -1205,6 +1311,22 @@ static void monster_ik(Scene *s, Instance *in)
     }
 }
 
+int scene_monster_node(const Scene *s, const char *name, Mat4 *world)
+{
+    if (s->monster < 0)
+        return -1;
+    const Instance *in = &s->instances[s->monster];
+    for (uint32_t i = 0; i < in->tree.n; i++)
+        if (ends_with(in->tree.nodes[i].name, name)) {
+            int m = in->mirrored ? in->tree.nodes[i].mirror : (int)i;
+            if (m < 0 || (uint32_t)m >= in->tree.n)
+                m = (int)i;
+            *world = mat_mul(in->base, in->mirrored ? reflect_x(in->node[m]) : in->node[m]);
+            return 0;
+        }
+    return -1;
+}
+
 int scene_monster_hand(const Scene *s, int hand, Mat4 *world)
 {
     if (s->monster < 0 || hand < 0 || hand > 1 || !s->ik_ready || s->ik_chain[hand][2] < 0)
@@ -1226,6 +1348,7 @@ int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach)
 
 static void update(Scene *s, double t, int all)
 {
+    people_sync(s, t);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
         if (in->vehicle >= 0) {
@@ -1289,11 +1412,46 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         for (uint32_t i = 0; i < n; i++)
             place_object(c, s, record_group(where, r[i]), root);
     }
-    n = group_all(block, "ActorInstance|", r, MAX_REC);   /* SpawnedItem = 1: comes after an earlier one is gone */
+    /* the people (people.c): the block's ActorInstance| entries (SpawnedItem = 1: comes after an earlier one is
+     * gone), Traffic's two crowds of the block's occupants' runners, the window occupants later */
+    s->owner = c;
+    s->folk = people_new(people_clip_seconds, c);
+    n = group_all(block, "ActorInstance|", r, MAX_REC);
     for (uint32_t i = 0; i < n; i++) {
-        Group a = record_group(block, r[i]);
-        if (a.at && group_num(a, "SpawnedItem", 0) == 0)
-            place_actor(c, s, a);
+        Group a = record_group(block, r[i]), t = template_of(c, group_str(a, "Name"));
+        if (!a.at || group_num(a, "SpawnedItem", 0) != 0)
+            continue;
+        if (!t.at) {
+            s->missing++;
+            continue;
+        }
+        float xyz[3];
+        location(a, xyz);
+        people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0));
+        s->people++;
+    }
+    Group occ = group_sub(block, "Occupants"), runners[16];
+    s->fill_rate = group_num(occ, "FillRate", 0);
+    int nrun = 0;
+    n = occ.at ? group_values(occ, "OccupantInstance|", &where, r, MAX_REC) : 0;
+    for (uint32_t i = 0; i < n && s->noccupants < 16; i++) {
+        Group oi = record_group(where, r[i]);
+        const char *name = group_str(oi, "OTRef|Name");
+        Group t = template_of(c, name);
+        if (!t.at)
+            continue;
+        s->occupant[s->noccupants] = t;
+        s->occupant_freq[s->noccupants++] = group_num(oi, "Frequency", 1);
+        char rn[96];
+        snprintf(rn, sizeof rn, "%sRunner", name);
+        Group rt = template_of(c, rn);
+        if (rt.at && nrun < 16)
+            runners[nrun++] = rt;
+    }
+    if (nrun) {
+        static const float CROWD[2][3] = { { -14, 0.5f, 0 }, { 8, -3, 0 } };
+        for (int k = 0; k < 2; k++)
+            s->people += people_crowd(s->folk, runners, nrun, CROWD[k]);
     }
     traffic(c, s, block, block_name, 0);
     /* the next two blocks behind it (0x302AF0): slot 1 at y + 41, slot 2 at y + 82 (hard-coded), their ground, every
@@ -1702,6 +1860,14 @@ void scene_buildings_update(Scene *s, float dt)
         }
         sb->b.dirty = 0;
         facade_passes(s, sb);
+        for (int ls = 0; s->folk && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at state 2 or more */
+            for (int col = 0; col < sb->b.width; col++) {
+                int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];
+                if (ci < 0 || sb->b.cell[o][ci].state < 2 || sb->broke[o][ci])
+                    continue;
+                sb->broke[o][ci] = 1;
+                people_cell_broken(s->folk, (int)i, ls);
+            }
         MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
         for (int st = 0; st < sb->b.storeys; st++)
             for (int c = 0; c < BUILDING_CELLS; c++) {
@@ -1824,6 +1990,9 @@ void scene_free(Scene *s)
     free(s->vehicles);
     free(s->obstacle_of);
     free(s->obstacles);
+    if (s->folk)
+        people_free(s->folk);
+    free(s->looks);
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         free(s->buildings[i].rest);
         free(s->buildings[i].adorn);

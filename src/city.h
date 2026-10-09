@@ -5,6 +5,7 @@
 #define RAMPAGE_CITY_H
 #include "data.h"
 #include "building.h"
+#include "people.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -70,6 +71,7 @@ typedef struct {                                      /* a building's cells and 
      * none), the sheet's InnerWallColumn, 1 / CrackScale and CrackTint */
     float outline[4][4]; int inner_wall; float crack_k, crack_tint[3];
     Adornment *adorn; int nadorn;
+    uint8_t broke[BUILDING_STOREYS][BUILDING_CELLS];  /* a front cell at state 2 or more, its window people told */
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
@@ -84,6 +86,11 @@ typedef struct {
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
+    /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
+     * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
+    People *folk; struct City *owner;
+    struct PersonLook *looks; int nlooks;
+    Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer;
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
@@ -132,6 +139,13 @@ int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
 /* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
  * ones, flag 4, nor obstacles, flag 2); how many */
 int scene_adornments_hit(Scene *s, const float centre[3], float radius);
+/* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
+int scene_monster_node(const Scene *s, const char *name, Mat4 *world);
+/* the window occupants (0x318650's stand-in: the rates were not found): every 2 s, with the block's FillRate, one
+ * of its Occupants comes to an intact window with an outline of a standing building, up to 6 at a time */
+void scene_people_spawn(Scene *s, float dt);
+/* the playable buildings as people.c sees them */
+int scene_people_boxes(const Scene *s, PeopleBox *out, int max);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
  * storeys and rubble drawn as they now are */
 void scene_buildings_update(Scene *s, float dt);

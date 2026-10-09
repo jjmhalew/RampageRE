@@ -48,6 +48,8 @@ typedef struct {
     CamShake shakes[8];                              /* 0: the monster's own (monster +0x7DFC +0x160), then effects' */
     uint32_t shake_seed;
     int last_collapse[64];                           /* per building: its collapse when last looked at */
+    int held;                                        /* the person in its hand (people.c), -1 none */
+    float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
     const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
 } Viewer;
 
@@ -185,6 +187,9 @@ static void start_moves(Viewer *v)
     v->mirror = v->mirror_queued = 0;
     memset(&v->mount, 0, sizeof v->mount);
     memset(v->hand, 0, sizeof v->hand);
+    v->held = -1;
+    v->hp = 200;
+    v->energy = 0;
     memset(v->shakes, 0, sizeof v->shakes);
     for (int i = 0; i < 64; i++) v->last_collapse[i] = -1;
     v->mount.at.building = v->mount.cand.building = -1;
@@ -250,6 +255,9 @@ static int open_city(Viewer *v, int index, uint32_t block)
 
 /* the viewer's answers to the graph's script checks (Monsters.bsf: there are no buildings, people or power-ups to
  * test against here, so only the monster's own abilities say yes) */
+static int attach_world(const Viewer *v, const char *name, Mat4 *out);
+static int window_person(const Viewer *v, const float *xyz);
+
 static Climber climber(const Viewer *v)
 {
     Climber c = { { v->mx, v->my, v->mz }, v->heading, v->graph.box[0], v->mx, { v->graph.probe[0], v->graph.probe[1] } };
@@ -264,7 +272,7 @@ static int along(const Viewer *v, float p0)
 
 static int answer(void *ctx, const char *call, const float *a)
 {
-    static const char *const YES[] = { "Monsters::hasRoarEnergy", "Monsters::canDoPunch", "Monsters::canSpin",
+    static const char *const YES[] = { "Monsters::hasRoarEnergy", "Monsters::canSpin",
                                        "Monsters::hasDoubleJump", "Monsters::hasJumpSmash", "Monsters::hasChargePunch" };
     Viewer *v = ctx;
     for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
@@ -287,6 +295,10 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canHop")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 3;
     if (!strcmp(call, "Monsters::canSwing")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 4;
     if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0, 0) == 5;
+    if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(v, a + 1) >= 0;
+    if (!strcmp(call, "Monsters::canDoPunch")) return window_person(v, a + 1) < 0;   /* not at an occupied window */
+    if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
+        return v->held >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&v->mount, sc, &c, v->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
@@ -440,6 +452,41 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::transferMount")) { climb_transfer(&v->mount); return; }
+    else if (!strcmp(n, "Monsters::doGrabPerson")) { /* grabBuildingOccupant(loc, 1) (0x2B3350): 0.25 s blend */
+        int who = v->held < 0 ? window_person(v, e->p + 1) : -1;
+        if (who >= 0) {
+            people_grab(v->scene.folk, who, 0.25f);
+            v->held = who;
+        }
+        return;
+    }
+    else if (!strcmp(n, "Monsters::doGrabObject")) { /* (0x2D99C0): the nearest within 15 of the hand, in front */
+        Mat4 h;
+        if (v->held >= 0 || !v->scene.folk || attach_world(v, "Helper R Hand", &h) != 0)
+            return;
+        float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { v->mx, v->my, v->mz };
+        float fwd[3] = { -sinf(v->heading / 57.2957795f), cosf(v->heading / 57.2957795f), 0 };
+        int who = people_nearest(v->scene.folk, hand, root, fwd, 15);
+        if (who >= 0) {
+            people_grab(v->scene.folk, who, 0.1f);
+            v->held = who;
+        }
+        return;
+    }
+    else if (!strcmp(n, "Monsters::throwObject")) {  /* (eat, x, y, z) (0x2D9DC0): eaten, or smashed away */
+        if (v->held < 0 || !v->scene.folk)
+            return;
+        if (e->p[0] != 0) {
+            PeopleEaten got = people_eat(v->scene.folk, v->held);
+            people_apply_eaten(&got, &v->hp, 200, &v->energy);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  ate: health %+.0f -> %.0f, energy %+.0f -> %.0f\n", got.health, v->hp, got.energy, v->energy);
+        } else {
+            people_throw(v->scene.folk, v->held, v->heading);
+        }
+        v->held = -1;
+        return;
+    }
     else if (!strcmp(n, "Monsters::changeMountRail")) {
         float d = v->mirror ? -e->p[0] : e->p[0];
         climb_change_rail(&v->mount, d < 0 ? -1 : 1);
@@ -612,12 +659,64 @@ static void hit_spheres(Viewer *v)
             c[r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
         c[3] = sh->radius;
         scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
+        if (v->scene.folk)                           /* and people (TakeDamage) */
+            people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
     }
     if (!v->show_hits)
         v->scene.nspheres = 0;
 }
 
 static void hands_step(Viewer *v, float dt);
+
+static int ends_with_i(const char *s, const char *tail)
+{
+    size_t a = strlen(s), b = strlen(tail);
+    return a >= b && _stricmp(s + a - b, tail) == 0;
+}
+
+/* an attachment node of MONSTER_DATA (+0xA84) in the world as drawn: its bone's place x its matrix (rows, then the
+ * place); mirrored, the other side's node on the other side's bone, reflected; 0 = ok */
+static int attach_world(const Viewer *v, const char *name, Mat4 *out)
+{
+    if (!v->have_graph || v->scene.monster < 0)
+        return -1;
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    const struct MoveAttach *a = NULL;
+    for (int i = 0; i < v->graph.nattach && !a; i++)
+        if (v->graph.attach[i].name && ends_with_i(v->graph.attach[i].name, name))
+            a = &v->graph.attach[i];
+    if (!a || a->bone < 0 || (uint32_t)a->bone >= in->tree.n)
+        return -1;
+    if (v->mirror) {                                 /* the partner bone's own attachment */
+        int mb = in->tree.nodes[a->bone].mirror;
+        for (int i = 0; i < v->graph.nattach; i++)
+            if (v->graph.attach[i].bone == mb && mb != a->bone)
+                a = &v->graph.attach[i];
+    }
+    Mat4 t = mat_identity();
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            t.m[4 * i + j] = a->m[3 * i + j];
+    for (int j = 0; j < 3; j++)
+        t.m[12 + j] = a->m[9 + j];
+    Mat4 m = mat_mul(in->node[a->bone], t);
+    if (v->mirror)
+        for (int c = 0; c < 4; c++) {                /* S m S */
+            m.m[4 * c] = -m.m[4 * c];
+            m.m[c] = -m.m[c];
+        }
+    *out = mat_mul(in->base, m);
+    return 0;
+}
+
+/* canGrabPerson's / doGrabPerson's window person (getBuildingOccupant 0x2B37C0), -1 none */
+static int window_person(const Viewer *v, const float *xyz)
+{
+    PeopleBox boxes[64];
+    int nb = scene_people_boxes(&v->scene, boxes, 64);
+    float at[3] = { v->mx, v->my, v->mz };
+    return v->scene.folk ? people_can_grab(v->scene.folk, boxes, nb, at, xyz, v->mirror) : -1;
+}
 
 static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
 {
@@ -783,6 +882,28 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     }
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
     hands_step(v, dt);
+    if (v->scene.folk) {                             /* the people, the one in its hand, what they make happen */
+        PeopleMonster pm = { { v->mx, v->my, v->mz }, v->have_graph ? v->graph.states[v->run.state].name : NULL };
+        scene_people_spawn(&v->scene, dt);
+        people_update(v->scene.folk, dt, &pm, 1);
+        Mat4 h;
+        if (v->held >= 0 && people_get(v->scene.folk, v->held)->phase != PP_HELD)
+            v->held = -1;
+        if (v->held >= 0 && attach_world(v, "Helper R Hand", &h) == 0)
+            people_hold(v->scene.folk, v->held, h.m, v->mirror, dt);
+        PeopleEvent ev[32];
+        int ne = people_events(v->scene.folk, ev, 32);
+        for (int i = 0; i < ne; i++) {
+            if (ev[i].type == PE_MONSTER_HP)
+                v->hp = fmaxf(0, fminf(200, v->hp + ev[i].amount));
+            else if (ev[i].type == PE_MONSTER_KNOCK) {   /* setVel(v, world), setReaction(2) */
+                memcpy(v->vel, ev[i].v, sizeof v->vel);
+                v->mode = MODE_AIRBORNE;
+            }
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  people event %d (%s) from %d\n", ev[i].type, ev[i].name ? ev[i].name : "-", ev[i].who);
+        }
+    }
     scene_buildings_update(&v->scene, dt);
     /* a floor that starts to fall plays its Floor_Large / Floor_Small effect (Collapse_Floor_*_comp), which holds
      * camshake.edf at strength 1 where it falls */

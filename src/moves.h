@@ -71,6 +71,9 @@ typedef struct {
     /* every state node (+0xA4C / +0xA50), by name: setFacialAnim plays a node's clip on the face (George's
      * Expression_Idle .. Expression_Zap play George_Head_*), its rate 1 / the clip's duration */
     struct MoveNode { const char *name, *clip; float rate, blend; } *nodes; int nnodes;
+    /* the attachment nodes (+0xA84 / +0xA88, 0x38 bytes): a matrix (rows, then the place) on a bone: Helper R Hand
+     * (what the monster holds things by), fxNode_*, Tracking_Node ... */
+    struct MoveAttach { const char *name; int bone; float m[12]; } *attach; int nattach;
 } MoveGraph;
 typedef struct MoveNode MoveNode;
 
