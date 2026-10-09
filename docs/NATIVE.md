@@ -41,6 +41,7 @@ what each block holds (models, people, vehicles, anything not found) and, in pla
 | `src/anim.c` | clips: KeyInterpAnim tracks with the game's rotation decode (0x192010), RawAnim segments (`tools/anim.py`) |
 | `src/city.c` | a block: ground, buildings with generated facades, objects, people, traffic, lighting (`tools/city.py`); a monster; posing and CPU skinning every frame |
 | `src/camera.c` | the game's play camera, TwoTilts, transcribed from 0x312B50 (docs/CAMERA.md) |
+| `src/building.c` | a building's cells and the game's hit on them: 0x2BC150, 0x2BB7B0, 0x2BB950 (docs/FORMAT_BDP.md "Damage") |
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
@@ -76,12 +77,19 @@ in its column, so a held Cross jumps higher, a double jump flips, a butt slam la
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
-hides them): the punch's fist, the kick's foot. One stand-in remains for game code not read: a start through a slot (a landing) blends in (it takes no
-transition, so which way it comes in is not traced). The monster stays within the street (x ±75, y −30 … −3).
+hides them): the punch's fist, the kick's foot. The clips' `hitBuildingFront` calls damage the buildings by the
+game's rules: the front cell takes 2 HP, the hit spreads up or down and sideways as the cell weakens, floors and
+buildings keep their HP pools, and each facade tile shows its cell's state (the sheet's row), so five punches crack,
+break and wreck a cell and its neighbours ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage"). Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
+transition, so which way it comes in is not traced). The monster stays within the street (x ±75, y −30 … −8: 3 units off the front row, a stand-in for the game's
+collision with buildings), and the building a hit goes to is the one whose face lies within 5 units along the
+side's direction (the game's search, 0x2A3D20, is not read).
 
 ## Not there yet
 - the monster's face clips (`<MONSTER>_HEAD_*`) layered over its body, cloth simulation;
 - friction on the velocity, the head turning with the right stick;
+- the buildings' dents (vertex levels), floors collapsing and buildings falling (the HP and states are kept, the
+  facade does not fall), debris effects, the interiors shown behind damaged floors;
 - effects (`tools/edf.py`), the GUI, sound;
 - the ground is the street at height 0 (no roofs, no collision with buildings), climbing buildings, grabbing, the
   game's rules;

@@ -163,6 +163,50 @@ static int answer(void *ctx, const char *call)
 
 /* the clip events the viewer acts on: the movement mode, and Monsters.bsf's velocity functions (jumpNorm and its kin
  * set the velocity, addVelocity adds to it, in the world or turned with the monster) */
+/* Monsters.bsf's hitBuildingFront(kind, x, y, z): which face (by kind, the mirror state, or for kinds 6 and 7 the way
+ * the monster faces), the point in the monster's frame, then hitBuildingPt(point, side, 1, 2.0): the point in the
+ * world (0x2B3A80), the building whose face that side looks at within 5 units, the point on it (0x2D54F0), and its
+ * hit (0x2BC150). Sides: 0 the building's left face (looking +x), 1 its right (-x), 2 its front (+y), 5 its roof. */
+static void hit_building_front(Viewer *v, const float *p)
+{
+    int mirror = 0, side = 0, kind = (int)p[0];      /* the viewer's monster is never mirrored */
+    if (kind == 0 || kind == 1 || kind == 3 || kind == 4) side = mirror;
+    else if (kind == 2 || kind == 5) side = 2;
+    else if (kind == 6 || kind == 7) {
+        float yaw = (v->heading > 180 ? v->heading - 360 : v->heading) / 57.2957795f;
+        if (yaw >= -0.7853982f && yaw <= 0.7853982f) side = 2;
+        else if (yaw >= 0.7853982f && yaw <= 2.3561945f) side = 1;
+        else if (yaw <= -0.7853982f && yaw >= -2.3561945f) side = 0;
+        /* facing the street the script leaves side as it was declared: 0 */
+    }
+    float l[3] = { (mirror && side == 2) || side == 1 ? -p[1] : p[1], p[2], p[3] };
+    float c = cosf(v->heading / 57.2957795f), sn = sinf(v->heading / 57.2957795f);
+    float w[3] = { v->mx + c * l[0] - sn * l[1], v->my + sn * l[0] + c * l[1], v->mz + l[2] };
+    SceneBuilding *best = NULL;
+    float bq[3], bd = 25;                            /* within 5 units of the face */
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+        Building *b = &v->scene.buildings[i].b;
+        float q[3] = { w[0], w[1], w[2] };
+        int in_x = w[0] >= b->min[0] && w[0] <= b->max[0], in_y = w[1] >= b->min[1] && w[1] <= b->max[1];
+        if (side == 2 && in_x) q[1] = b->min[1];
+        else if (side == 0 && in_y) q[0] = b->min[0];
+        else if (side == 1 && in_y) q[0] = b->max[0];
+        else continue;
+        if (w[2] > b->max[2])
+            continue;
+        float d = (q[0] - w[0]) * (q[0] - w[0]) + (q[1] - w[1]) * (q[1] - w[1]);
+        if (d <= bd) {
+            bd = d;
+            best = &v->scene.buildings[i];
+            memcpy(bq, q, sizeof bq);
+        }
+    }
+    int hit = best && building_hit(&best->b, bq, 2.0f);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  hitBuildingFront side %d at %.1f %.1f %.1f: %s\n", side, w[0], w[1], w[2],
+               !best ? "no building" : hit ? "hit" : "no damage");
+}
+
 static void clip_event(Viewer *v, const MoveEvent *e)
 {
     float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
@@ -199,6 +243,7 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
     else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
+    else if (strstr(n, "::hitBuildingFront")) { hit_building_front(v, e->p); return; }
     else return;
     if (relative) {                                  /* the monster's frame (0x2E7330 / 0x2E74F0: by its matrix) */
         w[0] = c * l[0] - s * l[1];
@@ -412,13 +457,14 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
         if (v->my < -30) v->my = -30;
-        if (v->my > -3) v->my = -3;
+        if (v->my > -8) v->my = -8;                  /* 3 off the front row (y -5): a stand-in for building collision */
         v->heading = fmodf(v->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE"))
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", v->graph.states[v->run.state].name,
                    v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
+    scene_buildings_redraw(&v->scene);
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
         float turn = st->flags & NODE_ROOT_TURN ?

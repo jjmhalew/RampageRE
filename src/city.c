@@ -514,9 +514,38 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     }
     const char *sheet = group_str(t, "TextureSheet");
     int sheet_name = sheet ? bdp_find_name(&c->bundle, sheet) : -1;
-    if (nst && sheet_name >= 0)
-        push_item(s, scene_add_mesh(s, facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst), s->city),
-                  new_instance(s, node, -1), -1, NULL);
+    int mesh = -1;
+    if (nst && sheet_name >= 0) {
+        mesh = (int)scene_add_mesh(s, facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst), s->city);
+        push_item(s, (uint32_t)mesh, new_instance(s, node, -1), -1, NULL);
+    }
+    /* its cells (the game's grid, 0x2D1A30): the box is 6 + 3 x storeys + 1.5 (the roof's band) high */
+    if (nst && width > 0 && depth > 0 && 2 * depth + width <= BUILDING_CELLS) {
+        s->buildings = realloc(s->buildings, sizeof *s->buildings * (s->nbuildings + 1));
+        SceneBuilding *sb = &s->buildings[s->nbuildings++];
+        float cx = node.m[12], cy = node.m[13];
+        float lo[3] = { cx - width * CELL / 2, cy - depth * CELL / 2, 0 };
+        float hi[3] = { cx + width * CELL / 2, cy + depth * CELL / 2, GROUND_FLOOR + STOREY * (float)nst + 1.5f };
+        building_init(&sb->b, lo, hi, width, depth, nst);
+        sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
+        sb->b.seed = s->nbuildings;
+        sb->mesh = mesh;
+        memset(sb->quad, 0xFF, sizeof sb->quad);
+        int32_t v = 0;
+        for (int st = 0; st < nst && st < BUILDING_STOREYS; st++) {
+            sb->b.floor_hp[st] = (int)group_num(floors[st + 1], "FloorHP", (float)sb->b.floor_hp[st]);
+            for (int k = 0; k < 2 * depth + width && (uint32_t)k < ntiles[st]; k++) {
+                int face = k < depth ? FACE_LEFT : k < depth + width ? FACE_FRONT : FACE_RIGHT;
+                int col = k < depth ? k : k < depth + width ? k - depth : k - depth - width;
+                int i = building_cell_index(&sb->b, face, col);
+                if (i >= 0) {
+                    sb->quad[st][i] = v;
+                    sb->b.cell[st][i].tile = (uint8_t)((int)record_num(tiles[st][k]) % 4);
+                }
+                v += 4;
+            }
+        }
+    }
     const char *top = str_item(group_sub(t, "ShapeSet|TopFloorShapes"), 0);
     if (top)
         place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)(nfloors ? nfloors - 1 : 0), 0)), -1);
@@ -938,6 +967,27 @@ int scene_monster_play(Scene *s, const char *clip)
     return -1;
 }
 
+void scene_buildings_redraw(Scene *s)
+{
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        SceneBuilding *sb = &s->buildings[i];
+        if (!sb->b.dirty || sb->mesh < 0)
+            continue;
+        sb->b.dirty = 0;
+        MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
+        for (int st = 0; st < sb->b.nstoreys; st++)
+            for (int c = 0; c < BUILDING_CELLS; c++) {
+                int32_t v = sb->quad[st][c];
+                if (v < 0 || (uint32_t)v + 4 > p->nverts)
+                    continue;
+                /* the sheet's row is the damage state (0 intact .. 3): a quad's corners are bottom, top, bottom, top */
+                float row = (sb->b.state == BUILDING_DESTROYED ? 3 : sb->b.cell[st][c].state) * 0.25f;
+                for (int k = 0; k < 4; k++)
+                    p->uv[2 * (v + k) + 1] = row + (k & 1 ? 0 : 0.25f);
+            }
+    }
+}
+
 void scene_monster_blend(Scene *s, float seconds)
 {
     if (s->monster < 0)
@@ -1032,5 +1082,6 @@ void scene_free(Scene *s)
     free(s->instances);
     free(s->items);
     free(s->vehicles);
+    free(s->buildings);
     memset(s, 0, sizeof *s);
 }

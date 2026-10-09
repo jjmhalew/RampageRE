@@ -325,6 +325,44 @@ cloud band does not move in its RawAnim (29 identical segments); its drift must 
 `tools/anim.py VOLDIR --models CITY OUTDIR` exports every animated tree model of a city (people, vehicles,
 bosses) with all its clips to `OUTDIR/CITY/models`.
 
+### Damage
+A building is a grid of cells (the Building's grid at +0x1B8, built by 0x2D1A30): its box is the template's width × 5
+by depth × 5 (depth is 2 in every city) and 6 + 3 × storeys + 1.5 high (the last 1.5 is the roof's band), and every
+storey above the ground floor has a cell per facade column: the left side (depth columns, back to front), the right
+side (front to back) and the front (width columns), 16 bytes each: damage state 0 … 3 (the `TextureSheet` row), HP
+(10 at the start, 0x2CBEB4), the sheet's column (from the `Floor|` list), a tint and flags (`FloorFlags`; 0x400 hidden
+behind a front-row building, 0x800 hits ignored, 0x100 / 0x200 an open window). Each floor holds `FloorHP` (8 ×
+width unless set), and the building `BuildingHP` (6 × width × storeys unless set). Script bindings read and set them
+(`getCellDamage`, `setCellDamage(face, storey, column, state)`, `getDestructionFrac` = HP left / HP at the start,
+`disableAutoCollapse`, ...; 0x2ADF00 → 0x2AD610).
+
+A monster damages a building through its clips' script calls, not its attack spheres: `Monsters.bsf`'s
+`hitBuildingFront(kind, x, y, z)` (George's street punches `(2, 0.5, 6, 8.5)`: 6 ahead and 8.5 up, the first
+storey) picks the face from `kind` (0, 1, 3, 4 by the mirror state; 2, 5 the front; 6, 7 by the way the monster
+faces) and calls the monster's `hitBuildingPt(point, side, 1, 2.0)`. That turns the point into the world with the
+monster's matrix (0x2B3A80), finds the building whose face the side looks at (0x2A3D20 on the world at 0x4D0900;
+side 0 its left face, 1 its right, 2 its front, 5 its roof), moves the point onto that face and, if it is within 5
+units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.0:
+
+1. Only a standing building (+0x14C = 1) takes hits. The point goes into the box and onto the nearest of roof, front,
+   left or right (0x2BB7B0, never the back), then to a face, storey and column (0x2CCCA0): below z 6.01 the ground
+   floor, in the roof's band the roof; storey = (z − 6) / 3, column = the 5-unit slot along the face.
+2. Every hit on a facade dents its vertices: 3 × round(radius / 2.5) times 0x2CC900 raises a vertex level (0 … 3) at
+   the nearest grid vertex or a neighbour at random (rings of 1, 8 and 12, capped 3, 2, 1), which bends the mesh.
+3. With a radius of 2 or more the front cell takes 2 HP (0x2BB950; a side's front column counts as the front's end
+   cell, the other side cells and the roof take none). The HP comes off the floor's and the building's pools too:
+   when the building's runs out it falls (state 4), when the floor's does every cell of that storey goes to state 3
+   and the floor collapses (0x2BAE70). Otherwise the cell's state follows its HP: any damage → 1 (cracked, glass or
+   wall debris), under 5 → 2, 0 → 3 (heavy debris). Crossing below 7 HP the hit carries 3 HP to the cell above (hit
+   in its upper half) or below; crossing below 3 HP, 3 HP to a living neighbour left or right at random
+   (Park–Miller, 0x106BD0). So five punches on one cell: 10 → 8 (cracked) → 6 (the cell above takes 3) → 4 (broken)
+   → 2 (a neighbour takes 3) → 0 (destroyed).
+4. The facade shows each cell's state as its tile's row; a floor with any damaged cell shows its `Skeleton`, the
+   interior, and its `DamagedSkeleton` once `DamagedSkeletonHP` (half of `FloorHP`) is passed (around 0x2CD898).
+
+`CellDetachDamage` and `VertDetachDamage` belong to a building's attachments (AC units, fire escapes; 0x2C617C), not
+to the grid.
+
 ### Spawns
 A block definition also says who is in the street (names found through the property name table at 0x3F5990;
 the block loader is 0x302AF0):

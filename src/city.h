@@ -4,6 +4,7 @@
 #ifndef RAMPAGE_CITY_H
 #define RAMPAGE_CITY_H
 #include "data.h"
+#include "building.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -35,7 +36,13 @@ typedef struct {
     Skin *skin;                                       /* skinned meshes: draw skin->pos / nrm instead of the mesh's */
 } DrawItem;
 
-typedef struct { float y, direction, phase, turn_deg; } Vehicle;   /* a car on a lane, phase 0..1 along it */
+typedef struct { float y, direction, phase, turn_deg; } Vehicle;
+
+typedef struct {                                      /* a building's cells and its facade quads */
+    Building b;
+    int mesh;                                         /* the facade's scene mesh, -1 none */
+    int32_t quad[BUILDING_STOREYS][BUILDING_CELLS];   /* per cell (building.h order) its quad's first vertex, -1 */
+} SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
     const Bundle *city;
@@ -54,6 +61,7 @@ typedef struct {
     const Bundle *monster_anims;
     const Bundle *monster_bundle;                     /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
     float spheres[64][4]; int nspheres;               /* drawn over the scene as wire spheres: centre, radius */
+    SceneBuilding *buildings; uint32_t nbuildings;
 } Scene;
 
 typedef struct City City;
@@ -72,6 +80,7 @@ void scene_monster_place(Scene *s, float x, float y, float z, float deg);
  * monster itself makes */
 void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn);
 int scene_monster_play(Scene *s, const char *clip);
+void scene_buildings_redraw(Scene *s);              /* the facades of damaged buildings to their cells' states */
 /* the next clip blends in over `seconds` from the pose the monster has now, as the game's animation player does
  * (0x2FFA00): call before scene_monster_play; scene_monster_blend_step counts it down */
 void scene_monster_blend(Scene *s, float seconds);
