@@ -838,10 +838,10 @@ void scene_people_spawn(Scene *s, float dt)
         for (uint32_t bi = 0; bi < s->nbuildings; bi++) {
             const SceneBuilding *sb = &s->buildings[bi];
             int win[512][2], n = 0;
-            for (int o = 0; o < sb->b.storeys; o++)
+            for (int o = 0; o < sb->b.storeys; o++)  /* 0x2D01F0: live storeys 1 .. standing - 1 (not the ground) */
                 for (int col = 0; col < sb->b.width && n < 512; col++) {
-                    int ci = building_cell_index(&sb->b, FACE_FRONT, col);
-                    if (ci >= 0 && sb->outline[sb->b.cell[o][ci].tile & 3][0] >= 0) {
+                    int ci = building_cell_index(&sb->b, FACE_FRONT, col), ls = building_live_of(&sb->b, o);
+                    if (ci >= 0 && ls >= 1 && ls <= sb->b.n - 1 && sb->outline[sb->b.cell[o][ci].tile & 3][0] >= 0) {
                         win[n][0] = o;
                         win[n++][1] = col;
                     }

@@ -97,7 +97,8 @@ a person punched this way is never deleted. The port keeps this behaviour.
   from a random slot on, the first free one (+0x14 empty, +0xD an occupant) whose building's x lies in the view
   (0x318390) and that 0x31AD00 allows. The slots (0x31A540 calls 0x3196F0 per building with the
   Occupants' `FillRate` and `NonMilitaryRate` and the Edibles' `FillRate`): of the building's n windows (its list
-  from 0x2BE750; the viewer takes the front cells with an outline), round(n × FillRate) in a shuffled order, the
+  from 0x2BE750 / 0x2D01F0: the front cells with a window on live storeys 1 and up, never the first storey above
+  the ground floor), round(n × FillRate) in a shuffled order, the
   first total − int(total × NonMilitaryRate) of them military (+0x40), the rest civilian (+0x3C). The building's
   `NumNonMilitaryOccupants` (then all n windows, that many civilians) and `NumMilitaryOccupants` override the
   counts, each capped at n. A slot's kind is a random one of the sort's list (0x318B40 makes it from the
