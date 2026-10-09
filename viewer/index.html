@@ -24,6 +24,8 @@
 <div id="panel">
   <label>Model <select id="file"></select></label>
   <label><input type="checkbox" id="wire"> wireframe</label>
+  <span id="cityrow" hidden><label><input type="checkbox" id="night"> night</label>
+  <label><input type="checkbox" id="fog"> fog</label></span>
   <label id="animrow" hidden>Animation <select id="anim"></select></label>
   <div id="info">Export with <code>tools/mesh.py</code> or <code>tools/city.py</code> into build/gltf, serve the repository root.</div>
 </div>
@@ -41,8 +43,11 @@ scene.background = new THREE.Color(0x1d1f23);
 // the exported files are Y-up (a root node turns the game's Z-up)
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100000);
 const controls = new OrbitControls(camera, renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 2.5));
-let current = null, mixer = null, clips = [];
+// files without lights of their own (monsters, models) get a soft default; city blocks bring the game's lights
+const defaultLight = new THREE.HemisphereLight(0xffffff, 0x404040, 2.5);
+const ambient = new THREE.AmbientLight(0xffffff, 0);
+scene.add(defaultLight, ambient);
+let current = null, mixer = null, clips = [], scrolling = [], fog = null;
 const clock = new THREE.Clock();
 const animSelect = document.getElementById('anim');
 animSelect.onchange = () => play(animSelect.value);
@@ -65,10 +70,31 @@ document.getElementById('wire').onchange = e => current && current.traverse(o =>
   if (o.material) o.material.wireframe = e.target.checked;
 });
 
+const nightBox = document.getElementById('night'), fogBox = document.getElementById('fog');
+const isBlock = name => /^[A-Za-z]+\/[^/]+$/.test(name) && !name.startsWith('monsters/');
+nightBox.onchange = () => load(select.value);
+fogBox.onchange = () => { scene.fog = fogBox.checked ? fog : null; };
+
 function load(name) {
-  new GLTFLoader().load(`../build/gltf/${name}.gltf`, gltf => {
+  document.getElementById('cityrow').hidden = !isBlock(name);
+  const file = isBlock(name) && nightBox.checked ? name + '_night' : name;
+  new GLTFLoader().load(`../build/gltf/${file}.gltf`, gltf => {
     if (current) scene.remove(current);
     current = gltf.scene;
+    const extras = gltf.scene.userData || {};
+    defaultLight.visible = !extras.ambient;
+    ambient.intensity = extras.ambient ? Math.PI : 0;
+    if (extras.ambient) ambient.color.setRGB(...extras.ambient, THREE.LinearSRGBColorSpace);
+    fog = extras.fog ? new THREE.Fog(new THREE.Color().setRGB(...extras.fog.color), extras.fog.start, extras.fog.end) : null;
+    scene.fog = fogBox.checked ? fog : null;
+    scene.background = new THREE.Color(fog ? fog.color : 0x1d1f23);
+    scrolling = [];
+    current.traverse(o => {
+      // the fog is set for the game's close camera; the backdrop and sky stay clear of it
+      for (let p = o; p; p = p.parent) if (o.material && /backdrop|skydome/i.test(p.name)) o.material.fog = false;
+      if (o.material && o.material.userData.uvRate && o.material.map && !scrolling.includes(o.material))
+        scrolling.push(o.material);
+    });
     clips = gltf.animations;
     mixer = clips.length ? new THREE.AnimationMixer(current) : null;
     animSelect.innerHTML = '';
@@ -115,6 +141,10 @@ addEventListener('resize', () => {
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (mixer) mixer.update(dt);
+  for (const m of scrolling) {  // the sky's cloud band drifts (LightingData.AnimatingSkyData)
+    m.map.offset.x = (m.map.offset.x + m.userData.uvRate[0] * dt) % 1;
+    m.map.offset.y = (m.map.offset.y + m.userData.uvRate[1] * dt) % 1;
+  }
   controls.update();
   renderer.render(scene, camera);
 });

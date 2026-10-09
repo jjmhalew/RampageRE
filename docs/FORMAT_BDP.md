@@ -327,6 +327,31 @@ a looping traffic clip: per open lane, round(10 s / 3.5 s) = 3 vehicles (at most
 along the line, their types drawn by `Frequency` with a fixed seed per block. All 7 cities: 379 people, 375
 vehicles, every template resolved. The traffic is a fair sample of what the game spawns, not a recording of it.
 
+### Lighting
+`WorldData.LightingData` (day) and `LightingDataNight` (read at 0x2A5750). The fog, light files and model naming
+below are the same in all seven cities; Las Vegas has no `AnimatingSkyData`:
+
+| Key | Day | Night | |
+|---|---|---|---|
+| `Shape\|Backdrop`, `Shape\|SkyBox` | `Chicago_Backdrop`, `Chicago_Skydome_Main` | `..._Backdrop_Night`, `..._Skydome_Night` | the skyline plane and the sky around the block |
+| `text\|LightFile` | `default_lights.txt` | `default_night_lights.txt` | in `common.bdp` (type 2) |
+| `FogR/G/B`, `FogStart`, `FogEnd` | 120, 152, 226; −2 … 200.5 | 50, 37, 122; 5 … 200.5 | |
+| `AnimatingSkyData` | `MaterialName` (the cloud band), `UAnimRate` 0.009, `VAnimRate` 0 | – | scrolls the material's texture; given to a material animator |
+| `CubeMap\|EnvMap`, `CubeTintR/G/B` | `Chicago_Cubemap`, 192 | 255 | reflections, not used here |
+| `GroundShadowIntensity`, `MonsterShadowIntensity`, `MShadow*`, `TShadow*`, `Ramp*`, `Texture\|MonsterBlob` | | | shadows, not used here |
+
+A light file is text: a `BEGIN_AMBIENT` block (`RED`, `GREEN`, `BLUE`) and `BEGIN_LIGHT` blocks (`LIGHT_TYPE
+DIRECTIONAL`, `DIFFUSE_R/G/B`, `DIRECTION_X/Y/Z`: the way the light travels, in game space), `//` comments.
+Day: ambient 0.1 grey, a white key light (0.85) from above and in front (0, 0.5, −1), a warm orange one (0.65,
+0.35, 0.1) from the right (−1, 0.25, 0) and a blue fill (0.2, 0.2, 0.4) from the left (1, 0, 0). Only 21 sections
+of city meshes carry vertex colours (the damaged interiors), so the city is lit by these at run time.
+
+`tools/city.py` (and `--night`) writes the lights as `KHR_lights_punctual` directional lights (intensity × π, so
+that a surface facing a light gets colour × texture), the ambient colour and the fog as scene extras, and the cloud
+band's rate as material extras (`uvRate`). The rate is taken as texture widths per second (one drift across in
+about 110 s); the animator that applies it is not decoded, so per second is an assumption. The viewer can show
+the fog, but it is set for the game's close camera and greys out a block seen from further away.
+
 Not reproduced yet: the facade layout is inferred (it looks right in all cities, not checked against the game),
-vertex lighting (`LightingData`), the timed and random spawns (attackers, window occupants, crowds), and the
+shadows and reflections, the timed and random spawns (attackers, window occupants, crowds), and the
 people's walking routes (`WalkingAroundPerson.bsf`).

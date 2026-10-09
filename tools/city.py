@@ -18,10 +18,16 @@ People and traffic (the blocks' ActorInstance| and TrafficDef, see "Spawns" in d
   towards +x, rear y = -7.5 towards -x, x from -75 to 75 at 15 units/s; the vehicles are a fixed sample of the
   block's VehicleDef mix (the game picks them at random), so the loop shows the kind of traffic, not a recording.
 
-Usage: python tools/city.py VOLDIR CITY OUTDIR        e.g. tools/city.py build/vol Chicago build/gltf
-       writes OUTDIR/CITY/<block>.gltf for every block, with the textures in OUTDIR/CITY/textures
+Lighting (WorldData.LightingData, or LightingDataNight with --night): the backdrop and sky models, fog and a light
+  file (common.bdp: an ambient colour and directional lights) become glTF lights (KHR_lights_punctual) and scene
+  extras ("ambient", "fog"); the cloud band material scrolls its texture (material extras "uvRate", taken as
+  texture widths per second).
+
+Usage: python tools/city.py VOLDIR CITY OUTDIR [--night]   e.g. tools/city.py build/vol Chicago build/gltf
+       writes OUTDIR/CITY/<block>.gltf (or <block>_night.gltf) for every block, the textures in OUTDIR/CITY/textures
 """
 import collections
+import math
 import os
 import random
 import sys
@@ -121,6 +127,39 @@ class Group:
         return value
 
 
+def read_lights(text):
+    """(ambient (r, g, b), [((r, g, b), direction)]) of a light file: BEGIN_AMBIENT / BEGIN_LIGHT blocks of
+    "KEY value" lines, // comments."""
+    ambient, lights, block, values = (0.0, 0.0, 0.0), [], None, {}
+    for line in text.splitlines():
+        words = line.split('//')[0].split()
+        if not words:
+            continue
+        if words[0] in ('BEGIN_AMBIENT', 'BEGIN_LIGHT'):
+            block, values = words[0], {}
+        elif words[0] == 'END_AMBIENT':
+            ambient = tuple(float(values.get(k, 0)) for k in ('RED', 'GREEN', 'BLUE'))
+        elif words[0] == 'END_LIGHT':
+            if values.get('LIGHT_TYPE', 'DIRECTIONAL') == 'DIRECTIONAL':
+                lights.append((tuple(float(values.get(f'DIFFUSE_{k}', 0)) for k in 'RGB'),
+                               tuple(float(values.get(f'DIRECTION_{k}', 0)) for k in 'XYZ')))
+        elif len(words) > 1:
+            values[words[0]] = words[1]
+    return ambient, lights
+
+
+def rotation_from_minus_z(d):
+    """Quaternion (x, y, z, w) turning (0, 0, -1), the way a glTF directional light shines, onto d."""
+    n = math.sqrt(sum(c * c for c in d))
+    dx, dy, dz = (c / n for c in d)
+    # a = (0, 0, -1): a x d = (dy, -dx, 0), a . d = -dz
+    x, y, z, w = dy, -dx, 0.0, 1.0 - dz
+    if w < 1e-6:  # d = (0, 0, 1): half a turn about x
+        return [1.0, 0.0, 0.0, 0.0]
+    n = math.sqrt(x * x + y * y + z * z + w * w)
+    return [x / n, y / n, z / n, w / n]
+
+
 def facade(width, depth, storeys):
     """Section (positions, normals, uvs, strip flags) of the generated upper storeys of a building.
     storeys: [(z, [tile column per facade cell])]"""
@@ -151,7 +190,9 @@ def facade(width, depth, storeys):
 
 
 class CityExporter:
-    def __init__(self, voldir, city, out):
+    def __init__(self, voldir, city, out, night=False):
+        self.voldir = voldir
+        self.night = night
         self.books = Books(voldir)
         self.city = city
         self.out = os.path.join(out, city)
@@ -160,6 +201,7 @@ class CityExporter:
         self.name_index = {n.lower(): i for i, n in enumerate(self.bundle.names)}
         self.models = anim.Models(self.bundle)
         self.world = self.books.group(city + '_Props', 'WorldData')
+        self.lighting = self.world.get('LightingDataNight' if night else 'LightingData')
         self.template_books = [self.world.get('ObjectTemplateBook'), self.world.get('WeaponsTemplateBook'),
                                city + '_Props', city + '_buildings']
         self.missing = collections.Counter()
@@ -293,10 +335,11 @@ class CityExporter:
         g = mesh.Gltf()
         assets = mesh.BundleAssets(self.bundle, g, self.out, 'textures')
         root = g.node(block_name)
-        # the day backdrop and sky ("Chicago_Backdrop", "SanFran_Skydome_Main", ...)
-        for model in sorted(assets.models):
-            if model.endswith(('_backdrop', '_skydome_main')):
-                self.place_model(assets, g, model, root)
+        sky = [self.lighting.get('Shape|Backdrop'), self.lighting.get('Shape|SkyBox')] if self.lighting else []
+        if not all(sky):  # by name: "Chicago_Backdrop", "SanFran_Skydome_Main", ...
+            sky = [m for m in sorted(assets.models) if m.endswith(('_backdrop', '_skydome_main'))]
+        for model in sky:
+            self.place_model(assets, g, model, root)
         ground = block.get('Shape|GroundShape')
         if ground:
             self.place_model(assets, g, ground, root)
@@ -311,9 +354,47 @@ class CityExporter:
             if not inst.get('SpawnedItem'):
                 self.place_actor(assets, g, inst, root)
         self.traffic(assets, g, block, block_name, root)
+        if self.lighting:
+            self.light(g)
         os.makedirs(self.out, exist_ok=True)
-        g.save(os.path.join(self.out, block_name + '.gltf'))
+        g.save(os.path.join(self.out, block_name + ('_night' if self.night else '') + '.gltf'))
         return len(block.values('BuildingInstance|'))
+
+    def light_file(self, name):
+        with open(os.path.join(self.voldir, self.books.files['common.bdp']), 'rb') as f:
+            common = bdp.Bundle(f.read())
+        for e, a, _ in common.items(0):
+            if e.type == 2 and common.name(e.name).lower() == name.lower():
+                return a.decode('latin1')
+        return None
+
+    def light(self, g):
+        """The block's lights, fog and scrolling clouds from LightingData."""
+        ld = self.lighting
+        extras = g.doc['scenes'][0].setdefault('extras', {})
+        text = self.light_file(ld.get('text|LightFile', 'default_lights.txt'))
+        if text:
+            ambient, lights = read_lights(text)
+            extras['ambient'] = list(ambient)
+            out = []
+            for i, (colour, direction) in enumerate(lights):
+                peak = max(colour) or 1.0
+                # intensity in glTF's units: a surface facing the light gets colour x texture, as in the game
+                out.append({'type': 'directional', 'name': f'light {i}', 'color': [c / peak for c in colour],
+                            'intensity': peak * math.pi})
+                n = g.node(f'light {i}')
+                g.doc['nodes'][n]['rotation'] = rotation_from_minus_z(direction)
+                g.doc['nodes'][n]['extensions'] = {'KHR_lights_punctual': {'light': i}}
+            g.doc.setdefault('extensions', {})['KHR_lights_punctual'] = {'lights': out}
+            g.doc.setdefault('extensionsUsed', []).append('KHR_lights_punctual')
+        if ld.get('FogEnd') is not None:
+            extras['fog'] = {'color': [ld.get(f'Fog{k}', 0) / 255 for k in 'RGB'],
+                             'start': ld.get('FogStart', 0.0), 'end': ld.get('FogEnd')}
+        sky = ld.get('AnimatingSkyData')
+        if sky and sky.get('MaterialName'):
+            for m in g.doc['materials']:
+                if m['name'].lower() == sky.get('MaterialName').lower():
+                    m['extras'] = {'uvRate': [sky.get('UAnimRate', 0.0), sky.get('VAnimRate', 0.0)]}
 
     def blocks(self):
         seen = []
@@ -324,10 +405,11 @@ class CityExporter:
 
 
 def main():
-    if len(sys.argv) != 4:
+    args = [a for a in sys.argv[1:] if a != '--night']
+    if len(args) != 3:
         sys.exit(__doc__)
-    voldir, city, out = sys.argv[1:]
-    x = CityExporter(voldir, city, out)
+    voldir, city, out = args
+    x = CityExporter(voldir, city, out, night='--night' in sys.argv)
     for block in x.blocks():
         actors, vehicles = x.actors, x.vehicles
         n = x.block(block)

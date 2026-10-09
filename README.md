@@ -40,6 +40,7 @@ Las Vegas. The 3D picture still has errors (black ground), it runs slowly and th
 | Skeletons and animations (60 skeletons, 5,379 animations): all 30 monsters animated in glTF | ✅ |
 | City models with node trees (people, vehicles, bosses) with their clips; moving props loop in the blocks | ✅ |
 | People and traffic in the blocks (379 people, 375 vehicles; lanes from the game's traffic code) | ✅ |
+| Lighting: the game's lights, fog, drifting clouds; every block also at night | ✅ |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
