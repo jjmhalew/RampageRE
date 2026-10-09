@@ -120,7 +120,7 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- the face layer's blend into a new face clip (it cuts), `queueFacialAnim`, the head turning towards a target, cloth
+- `queueFacialAnim`, the head turning towards a target, cloth
   simulation;
 - friction on the velocity, the head turning with the right stick;
 - scoring;

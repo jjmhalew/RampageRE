@@ -31,6 +31,7 @@ typedef struct {
     /* the monster's face layer (0x2E9350, 0x2FFF10): a clip on its own 0 .. 1 clock whose bones replace the body
      * clip's in face_mask (the nodes under Bip01 Head, the head itself too for a head layer) */
     Clip face; int has_face; double face_t; uint8_t *face_mask;
+    float (*face_held)[7]; float face_blend_left, face_blend_time;   /* the face bones' own cross-fade (AP +0x7298) */
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
     int hidden;                                       /* not drawn (a building's interior until it is damaged) */
     int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
@@ -141,6 +142,8 @@ void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float tu
 int scene_monster_play(Scene *s, const char *clip);
 /* the face layer plays clip (head: Bip01 Head itself too), at face_t 0 .. 1 (Instance.face_t); 0 = ok */
 int scene_monster_face(Scene *s, const char *clip, int head);
+/* the face bones blend over seconds from where they are now (a face clip starting, 0x2FF910) */
+void scene_monster_face_blend(Scene *s, float seconds);
 /* the monster's hand (0 left, 1 right, as drawn) in the world, as the clips posed it (before the IK); 0 = ok */
 int scene_monster_hand(const Scene *s, int hand, Mat4 *world);
 /* where that arm's shoulder (upper arm) is in the world, as posed, and how far the arm reaches; 0 = ok */

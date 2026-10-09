@@ -1191,8 +1191,13 @@ static void pose_instance(Scene *s, Instance *in, double t)
             clip_pose(&in->clip, t + in->offset, i, tr, q);
         if (in->has_face && in->face_mask && in->face_mask[i])   /* the face clip's, fully (weight 1.0) */
             clip_pose(&in->face, in->face_t * in->face.duration, i, tr, q);
-        if (w > 0) {                                 /* towards the held pose by the share of the blend left */
-            const float *h = in->held[i];
+        float wi = w;                                /* the face bones blend on their own timer (0x2FFF10) */
+        if (in->has_face && in->face_mask && in->face_mask[i])
+            wi = in->face_held && in->face_blend_left > 0 && in->face_blend_time > 0 ?
+                 in->face_blend_left / in->face_blend_time : 0;
+        if (wi > 0) {                                /* towards the held pose by the share of the blend left */
+            const float *h = in->face_mask && in->face_mask[i] && in->has_face ? in->face_held[i] : in->held[i];
+            float w = wi;
             for (int k = 0; k < 3; k++)
                 tr[k] += (h[k] - tr[k]) * w;
             quat_slerp(q, h + 3, w > 1 ? 1 : w, q);
@@ -1953,6 +1958,23 @@ void scene_monster_blend_step(Scene *s, float dt)
 {
     if (s->monster >= 0 && s->instances[s->monster].blend_left > 0)
         s->instances[s->monster].blend_left -= dt;
+    if (s->monster >= 0 && s->instances[s->monster].face_blend_left > 0)
+        s->instances[s->monster].face_blend_left -= dt;
+}
+
+void scene_monster_face_blend(Scene *s, float seconds)
+{
+    if (s->monster < 0)
+        return;
+    Instance *in = &s->instances[s->monster];
+    if (!in->pose || !(seconds > 0)) {
+        in->face_blend_left = 0;
+        return;
+    }
+    if (!in->face_held)
+        in->face_held = calloc(in->tree.n ? in->tree.n : 1, sizeof *in->face_held);
+    memcpy(in->face_held, in->pose, sizeof *in->face_held * in->tree.n);
+    in->face_blend_left = in->face_blend_time = seconds;
 }
 
 int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
@@ -2020,6 +2042,7 @@ void scene_free(Scene *s)
         if (s->instances[i].has_face)
             clip_free(&s->instances[i].face);
         free(s->instances[i].face_mask);
+        free(s->instances[i].face_held);
         free(s->instances[i].node);
         free(s->instances[i].pose);
         free(s->instances[i].held);

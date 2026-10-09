@@ -148,6 +148,7 @@ static void face_play(Viewer *v, const char *name, int head, int loop, int count
     v->face = n;
     v->face_loop = loop;
     v->face_count = count;
+    scene_monster_face_blend(&v->scene, n->blend);   /* 0x2FF910: from the face as it was, over the node's blend */
 }
 
 /* Monsters.bsf's DefaultFacialAnim: Expression_Idle, looping, the head itself left to the body */
@@ -166,9 +167,10 @@ static void face_step(Viewer *v, float dt)
     in->face_t += v->face->rate * dt;
     if (in->face_t < 1)
         return;
-    if (v->face_loop || --v->face_count > 0)
+    if (v->face_loop || --v->face_count > 0) {
         in->face_t = 0;
-    else
+        scene_monster_face_blend(&v->scene, v->face->blend);
+    } else
         face_default(v);
 }
 
