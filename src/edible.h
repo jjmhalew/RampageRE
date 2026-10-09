@@ -128,9 +128,14 @@ int edible_load_block(Edibles *e, Group block);
  * props: its template (either may be absent). Returns the slots it made */
 int edible_add_building(Edibles *e, int building, Group inst, Group props, int width, int storeys);
 /* 0x318FD0 (edible): the edible `name` in the cell (building, storey, column), replacing a kind there; a name not in
- * the block's list becomes a kind of Frequency 0. The monster reveal's Edible_Cryotube goes here too (WorldData's
- * MonsterRevealDef RevealLoc| { Block, Building, cell, floor }). Returns the slot, -1 */
+ * the block's list becomes a kind of Frequency 0 (the monster reveal's tube: edible_add_cryotube). Returns the slot,
+ * -1 */
 int edible_add_fixed(Edibles *e, int building, int storey, int column, const char *name);
+/* [R] 0x3235F0 -> 0x318FD0(mgr, building, "Edible_Cryotube", floor, cell, 1, 1, 0): the monster reveal's tube in the
+ * cell (building, storey = RevealLoc floor, column = RevealLoc cell; reveal.h's reveal_block says where). Its kind,
+ * made here when the block's list lacks it, has +8 = 1 like a hazard's: getBuildingOccupant answers 3 for it, and a
+ * cell that breaks once the building is being destroyed (+0x14C >= 4) does not let it out. Returns the slot, -1 */
+int edible_add_cryotube(Edibles *e, int building, int storey, int column);
 
 int edible_kinds(const Edibles *e);
 const EdibleKind *edible_kind(const Edibles *e, int k);

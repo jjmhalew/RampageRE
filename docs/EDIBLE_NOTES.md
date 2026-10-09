@@ -188,16 +188,142 @@ The substitutes have no look record; they exist only to be eaten.
   - while raging the script hits the building twice.
 
 ## The cryotube (Cryotube.bsf)
-WorldData's `MonsterRevealDef { RevealLoc| { Block, Building, cell, floor } }` puts `Edible_Cryotube` in a cell. The
-native code that reads it (0x304150 → 0x3235F0 → 0x318FD0) was not traced.
-
 When its cell breaks:
-1. 0x317DC0 calls `onPickup(the world's monster +0x40, 1)`.
+1. 0x317DC0 calls `onPickup(gWorld's monster list +0x40 [0], 1)` (0x318020) **[R]**. That is slot 0, whoever broke
+   the cell, so the 500 points go to player 1.
 2. `PickupFx`, then `addStats(type 0)`, which is 500 points.
 3. A `LineMover` carries it 5 towards the street at 20, then 5 more and down to z = 1. It tumbles 2π / 24 every
    1/24 s.
 4. When it lands: `HitGroundFx`, `HitGroundSound`, then `startReveal`, the "MonsterRevealed" banner and
    `V_Monster_Reveal_Seq`. Then it is deleted.
+
+### The reveal object (0x4D6A10) [R]
+Ported in `src/reveal.c` / `reveal.h`. The World bindings are `startReveal` (id 0x31, case 0x2AED78), `stopReveal`
+(0x32, 0x2AEDE8) and `wasMonsterRevealed` (0x47, 0x2AF388). The table at 0x42B040 lists the ids, and the jump table
+0x42DD70 gives the cases.
+
+| Offset | What it holds |
+|---|---|
+| +0x00 | four `RevealLoc`s of 16 bytes: Block, Building, floor, cell |
+| +0x40 | the monster to reveal (a roster index) |
+| +0x44 | how many have been revealed; −1 when there is nothing to reveal |
+| +0x48 | how many there are to reveal (0 or 1) |
+| +0x4C | the number of RevealLocs |
+| +0x50 | the tubes placed in this block |
+| +0x54 / +0x58 | the slot shown and the monster revealed (−1 for none) |
+| +0x5C | `wasMonsterRevealed`'s countdown |
+| +0x60 | whether the monster is shown (one player only) |
+
+**The roster.** GameStatus +0x10 holds 12-byte records with the name at +8. Its count is at +0x18 (`getNumMonsters`).
+0x33DAF0 finds a name, ignoring case. The order is ShellData's `MonsterData.Monster0 .. 29`: George 0, Lizzie 1,
+Ralph 2, … Crock 8, … Venus 13, … Boosy 29, as MonsterSelect's `getMonsterName` reads them **[G: the table's own
+loader was not read]**. A monster's flags are at GameStatus +0x234 + 4 × index. `0x80` means it can be selected
+(MonsterSelect's `isMonsterAvailable` tests `flags & 128`). 1, 2, 4 and 8 are the upgrades.
+
+**The load** (0x3236F0, at the world's start from 0x2B6BE0):
+1. +0x44 = −1, and +0x48, +0x4C, +0x50 and +0x60 = 0.
+2. Only in the campaign (0x4D7E44 = 2). With one player (0x4D7E28 = 1), +0x60 = 1.
+3. Then it reads each record of WorldData's `MonsterRevealDef`, in order:
+   - **`RevealDef| { Monster = name  - name … }`** counts only while no monster has been chosen. Its `Monster` is
+     taken when:
+     - no player plays it (by name, ignoring case);
+     - the roster has it;
+     - it is not yet 0x80;
+     - its list names player 1's monster (GameStatus +0x214) or `"everyone"`, ignoring case.
+
+     Then +0x40 = that monster, +0x48 = 1 and +0x44 = 0. The slot after the players (GameStatus +0x214 + 4 ×
+     players) gets that monster. So at most one monster per city visit, and it is the first that fits.
+   - **`RevealLoc| { Block, Building, cell, floor }`**: ints, −1 when a key is missing. At most 4 are kept.
+4. 0x2B6BE0 and 0x2B72B0 then make players + min(+0x48, 1) monsters when +0x60 is set. The extra one (slot ≥
+   players) gets +0x108 = +0x109 = 1 (0x2E35C0, 0x2E34B0). It is loaded but hidden and out of the play.
+
+The data has three RevealDefs and three RevealLocs per city. The first RevealDef is "Everyone"'s, except in New York.
+
+| City | RevealDefs (Monster: whose players) | RevealLocs (Block, Building, floor, cell) |
+|---|---|---|
+| Las Vegas | Leon: everyone; Kingston: Lizzie Gilman Leon Kyle Icky Wally Natalie Dick; Jack: Venus Harry | (2,2,3,2) (6,2,5,0) (8,7,1,1) |
+| San Francisco | Marco: everyone; Snapper: George Lizzie Cal Crock Harry Kingston Dick; Natalie: Gilman Rhett Crock Marco Snapper Rock Batty | (3,3,1,0) (7,2,1,3) (9,5,2,1) |
+| London | Kyle: everyone; Icky: George Ralph Ramsey Leon Crock Kyle Wally Snapper Rock Jill; Dick: Kyle Wally Amanda | (2,3,3,1) (4,0,2,2) (7,6,1,1) |
+| Los Angeles | Cal: everyone; Amanda: Lizzie Rhett Cal Kyle Rojo Wally Jill; Batty: Snapper Kingston | (2,1,1,2) (5,0,1,0) (7,4,4,1) |
+| Chicago | Rojo: everyone; Harry: Ramsey Gilman Leon Marco Venus Amanda Furby Nick; Nick: Harry Rock | (2,0,3,1) (5,4,3,0) (8,2,6,0) |
+| Hong Kong | Crock: everyone; Venus: Ralph Leon Crock Rojo Harry Kingston Batty Jack; Jill: Snapper Amanda | (3,3,4,2) (5,4,7,0) (6,3,5,2) |
+| New York | Wally: Ramsey Rhett Kyle Marco Icky Natalie Nick; Rock: George Ralph Cal Kyle Rojo Venus Amanda Furby; Furby: Rojo Icky Natalie | (3,0,3,2) (6,3,5,0) (9,2,6,1) |
+
+So George in Hong Kong frees Crock, and on the next visit nothing (no other RevealDef lists him). Ralph frees Crock,
+then Venus.
+
+**The tubes** (0x3235F0, at each block's activation from 0x304150, right after the edibles' 0x31A540):
+1. +0x50 = 0, and +0x5C counts down (if it is not 0).
+2. While +0x44 < +0x48, each RevealLoc whose Block is the current block (0x4D4E88, the BlockList index) and whose
+   Building is below the block's building count (0x4D0958) gets a tube:
+   `0x318FD0(edibles, building[Building], "Edible_Cryotube", floor, cell, 1, 1, 0)`, then +0x50 + 1.
+
+   The 7th argument is the new kind's +8, the flag a `Hazard*` kind has (the EdibleInstance call passes 0 and
+   MilitaryInstance 1). So `getBuildingOccupant` answers 3 for the tube. A cell broken once the building is being
+   destroyed (+0x14C ≥ 4) does not let it out (0x317F9C). `edible_add_cryotube` does this.
+3. A tube left unbroken simply goes with its block. The next RevealLoc block gets another, until one is broken.
+
+**startReveal(pos)** (0x323520, from the binding 0x2AED78):
+1. If no tube was placed in this block (+0x50 ≤ 0), nothing happens.
+2. Otherwise:
+   - if +0x44 > 0, +0x60 = 0;
+   - with +0x60 set, the slot shown is players + +0x44, and 0x2D40B0 shows that monster at pos;
+   - +0x58 = +0x40 [+0x44];
+   - its flags (0x4D7BC4 + 4 × monster) |= 0x80: **the profile unlocks it**;
+   - +0x50 = 0, +0x44 + 1, and +0x5C = 2.
+3. The binding answers +0x58 (the banner's `getMonsterName`). Without +0x60 it then calls `stopReveal` at once.
+
+**stopReveal** (0x3234D0): with +0x60 set, 0x2D3F90 hides the shown slot's monster (+0x109 = 1, taken out of the
+world). Then +0x54 = +0x58 = −1.
+
+**wasMonsterRevealed** answers +0x5C ≠ 0. It is 2 at the reveal. The next block's activation, which happens at the
+block's end before the results, takes it to 1, so Results shows "Monster Revealed" (`!bIsLastBlock`). One more
+activation takes it to 0.
+
+**The Continue** (0x3250B0) calls 0x323450 when `wasMonsterRevealed` is set:
+- +0x44 − 1 (if it is above 0), so the tube comes back;
+- the shown monster is hidden, and +0x54 / +0x58 = −1;
+- +0x5C = 0.
+
+The monster's 0x80 is not cleared there. The world's reset (0x2B8040 → 0x323CB0) clears everything.
+
+### The revealed monster comes out (one player) [R]
+0x2D40B0 looks for `"<Monster>::onRevealNITick"` and falls back to `"Monsters::onRevealNITick"`. Only Monsters.bsf has
+it. Then:
+1. +0x109 = 0, and the monster is added to the world.
+2. It is put at the tube's landing point, facing π.
+3. The function is called with the monster.
+
+`Monsters::onRevealNITick`:
+1. The first call, when there is no timer yet, sets everything up:
+   - `setIsAI(1)` and revealTime 0;
+   - a 0.25 s object timer on itself;
+   - `Ground_Idle`;
+   - `setDynamicScale(0.1, 0)`, then `(1.0, 1.0)`: it grows to full size in 1 s.
+2. On each tick, revealTime is checked, then goes up by 0.25:
+   - at 0.5, `Ground_Taunt`;
+   - at 4.0, `walkTo((100, −10, 0), 1, "", "Monsters::onRevealNIEnd")` and `setSpeedScale(1.5, 100000)`. x becomes
+     −100 when the monster is left of `getCameraPos().x`. A facing (π/2, mirrored) is worked out but never used;
+   - at 5.0, the timer is removed.
+3. `onRevealNIEnd` calls `gWorld.stopReveal()`: the monster is hidden again.
+
+With the first tick 0.25 s after the start **[G]**, the taunt comes at 0.75 s and the run at 4.25 s.
+
+So the monster bursts out of the tube on the street, taunts, and runs off to the side. With two or more players it
+does not appear; only the banner shows and the profile changes. The HUD shows only Cryotube.bsf's banner: `"#" +
+format(localize("MonsterRevealed"), localize(getMonsterName(i)))` ("%s Unlocked"), (220, 0, 0), scale 0.5,
+`V_Monster_Reveal_Seq`. The results' "Monster Revealed" appears at the block's end.
+
+### All Monsters Revealed and Boosy [R]
+At each block's end (0x3255B0) the check below runs when the city is done, or when `isAtCheckpoint` answers, which
+it always does (0x3030B0 answers 1). It runs in every play type:
+1. 0x323240 answers 1 when every RevealDef's `Monster` is 0x80 in the profile. A city without a MonsterRevealDef
+   also answers 1. Then the city's flags (GameStatus +0x2AC) |= 8.
+2. Then all saved city flags (GameStatus +0x100 + 4 i, i < GameStatus +0xC) are ANDed together. The current city
+   counts its saved value | 8, not +0x2AC. When the result has 1, 2, 4 and 8, Boosy's flags |= 0x80.
+
+The flag tracks the profile, not this visit: a city whose three monsters were freed earlier earns its fourth star
+at the first block's end.
 
 ## Driving it from the viewer
 1. **Setup:**
@@ -207,7 +333,9 @@ When its cell breaks:
      - `cell_place` returns where the edible stands (`edible_cell_place(b.min, column, building_live_of(b, o))`);
      - `building_place` is optional (for `ExtraEffectCentered`).
    - Per block: `edible_load_block(BlockDef)`, then `edible_add_building(i, its BuildingInstance| group, its
-     template, width, standing storeys)` for each building, in the block's order.
+     template, width, standing storeys)` for each building, in the block's order. Then the monster reveal's tubes:
+     `reveal_block(&reveal, game_block, nbuildings, locs, 4)` and `edible_add_cryotube(building, floor, cell)` for
+     each loc it returns (reveal.h; `reveal_load` once per city, at the world's start).
 2. **Buildings:**
    - where `scene_buildings_update` calls `people_cell_broken` (a front cell reaching 2 or more), also call
      `edible_cell_broken(i, o, col, state, b.state)`;
@@ -228,7 +356,7 @@ When its cell breaks:
 | `EE_STATS` | `army_add_stats(army, monster, tmpl, level)` for the score; `edible_power_add_stats(&power, &hp, 200, v[0], v[1], 0)` for HP and energy; if that returns 1: `edible_power_start_rage`, slot 54, the camera and the Rage banner |
 | `EE_BANNER` / `EE_MESSAGE` | the HUD |
 | `EE_MONSTER_FUNCTION` | `doFart` / `doCatSound` |
-| `EE_REVEAL` | the monster reveal |
+| `EE_REVEAL` | `reveal_start(&reveal, players, &roster, &slot)`: the banner names `roster.name[i]`; slot ≥ 0: `reveal_walk_start(&walk, slot, pos)` |
 | `EE_REMOVED` | nothing to do |
 
 4. **Monster calls:** for any clip event or transition check named `*::canGrabPowerup`, `*::checkForHazard`,
@@ -250,9 +378,13 @@ When its cell breaks:
   - the RotationMover's units (taken as radians per second);
   - the tube's LineMover end (it stops at its last point);
   - placement stays fixed after the edible appears, as the game sets it once.
-- **The cryotube:**
-  - when the native code places it (which monster is to be revealed);
-  - the monster its `onPickup` names (taken as monster 0).
+- **The cryotube (reveal.c):**
+  - the roster's order (ShellData's MonsterData; the GameStatus table's loader was not read);
+  - which monsters the profile starts with (the memory card's; the host seeds `RevealRoster.flags`);
+  - that RevealLoc's Building indexes the block's building list in BlockDef order (0x4D095C), as `edible_add_building`
+    numbers them;
+  - the object timer's first tick (taken as 0.25 s after it is installed);
+  - what 0x2D40B0 / 0x2D3F90 do besides +0x109 and the world's list (0x2C1A80 / 0x2C1A90 on 0x4D3330 + 0x18).
 - **Building and banner details:**
   - `b.getPosition()` / `getSizeZ()` without the host's `building_place`;
   - the scale of `MessageColor` (taken as 0 … 255);

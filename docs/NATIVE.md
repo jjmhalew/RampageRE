@@ -134,13 +134,13 @@ x ±75 and y −30.
 ## Not there yet
 - the goals of scripts not ported (trains, cable cars, freighters, hot dog
   carts, bikers, parade balloons, chimneys and gongs, street lamps) never count; hideChallengeCompletionUI;
-- which monster a cryotube reveals (the banner names the next one in the viewer's list), findPointInRubble;
+- the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
 - the feet locked to the ground and dragged (0x33BF10 and kin; footstep.c keeps the records for it);
 - vertex-coloured interiors of damaged buildings, the facades darkened by their neighbours' shadows.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
-the bosses (boss.c), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
+the bosses (boss.c), the cryotube's monster reveal and the rubble's points (reveal.c), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
 choreography and camera modes (director.c), the block challenges and their upgrades (challenge.c,
 [CHALLENGE_NOTES.md](CHALLENGE_NOTES.md)), the Pause menu (hud.c, [PAUSE_NOTES.md](PAUSE_NOTES.md)), the face queue, head turn and friction (look.c), shadows (shadow.c),
 effects with their mesh debris and sounds (fx.c), the footfalls and landings' dust and splashes (footstep.c,

@@ -31,6 +31,7 @@
 #include "director.h"
 #include "footstep.h"
 #include "challenge.h"
+#include "reveal.h"
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
@@ -119,6 +120,10 @@ typedef struct {
     int upgrade_fx;                                  /* the MonsterUpgrade object's effect, -1 */
     int exit_game;                                   /* the game went back to the shell (the Pause menu's Quit) */
     float sfx_vol, music_vol, music_now;
+    Reveal reveal; RevealRoster roster;              /* the cryotube's monster and the unlocks (reveal.c): the
+                                                      * roster's flags stand for the profile's, from 0 */
+    RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
+    Rubble rubble;                                   /* findPointInRubble's slots: the block left's buildings */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */             /* the Options page's volumes, 1 = as the game; the music now */              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
@@ -384,6 +389,39 @@ static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from
                              float dt);
 
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
+static Group rubble_tmpl(void *ctx, const char *name)
+{
+    return city_template(((Viewer *)ctx)->city, name);
+}
+static int rubble_box(void *ctx, const char *shape, float min[3], float max[3])
+{
+    return city_shape_box(((Viewer *)ctx)->city, shape, min, max) == 0 ? 0 : -1;
+}
+/* the city's WorldData (<City>_Props): its MonsterRevealDef */
+static Group world_data(Viewer *v)
+{
+    char book[64];
+    snprintf(book, sizeof book, "%s_Props", CITIES[v->city_index]);
+    return city_book_group(v->city, book, "WorldData");
+}
+static int game_all_revealed(void *ctx)
+{
+    Viewer *v = ctx;
+    return reveal_all_revealed(world_data(v), &v->roster);
+}
+/* the cryotubes of the block: the edibles get them in their cells */
+static void add_tubes(Viewer *v)
+{
+    for (int i = 0; v->edibles && i < v->ntubes; i++)
+        if (v->tubes[i].building >= 0 && v->tubes[i].building < (int)v->scene.nbuildings) {
+            edible_add_cryotube(v->edibles, v->tubes[i].building, v->tubes[i].floor, v->tubes[i].cell);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  cryotube: building %d, floor %d, cell %d\n", v->tubes[i].building, v->tubes[i].floor,
+                       v->tubes[i].cell);
+        }
+    v->ntubes = 0;
+}
+
 static Group army_find(void *ctx, const char *book, const char *name)
 {
     return city_book_group(((Viewer *)ctx)->city, book, name);
@@ -510,6 +548,7 @@ static void build(Viewer *v)
                 const SceneBuilding *sb = &v->scene.buildings[i];
                 edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
             }
+            add_tubes(v);                            /* a reveal's tubes, for the block now built */
             if (getenv("RAMPAGE_TRACE"))
                 printf("edibles: %d kinds, %d slots\n", edible_kinds(v->edibles), edible_slots(v->edibles));
         }
@@ -559,7 +598,18 @@ static void build(Viewer *v)
         if (v->have_scene && v->monster >= 0) {
             static GameHost gh;
             gh.find = army_find;
+            gh.all_revealed = game_all_revealed;
             gh.ctx = v;
+            if (v->roster.n == 0) {                  /* ShellData's MonsterData: the 30, the profile's flags */
+                reveal_roster_load(&v->roster, city_book_group(v->city, "ShellData", "MonsterData"));
+                rubble_seed(&v->rubble, 1);
+            }
+            int pm = reveal_roster_find(&v->roster, v->monsters[v->monster]);   /* 0x3236F0: the city's monster */
+            int rm = reveal_load(&v->reveal, world_data(v), (v->play_type ? v->play_type : GP_CAMPAIGN) == GP_CAMPAIGN,
+                                 1, &pm, &v->roster);
+            v->ntubes = 0;
+            if (getenv("RAMPAGE_TRACE"))
+                printf("reveal: %s\n", rm >= 0 ? v->roster.name[rm] : "-");
             GameConfig gc = { v->play_type ? v->play_type : GP_CAMPAIGN, 1, 0, campaign_index(CITIES[v->city_index]), 7,
                               city_block_index(v->city, v->blocks[v->block]), 1 };
             v->game = game_new(&gh, &gc);
@@ -1510,13 +1560,26 @@ static void game_step(Viewer *v, float dt)
         for (int i = 0; i < ne; i++) {
             const GameEvent *e = &ev[i];
             switch (e->type) {
-            case GE_BLOCK:                           /* the next block: built when it begins (GS_BEGIN_BLOCK) */
-                for (uint32_t k = 0; e->name && k < v->nblocks; k++)
-                    if (!_stricmp(v->blocks[k], e->name) && k != v->block) {
-                        v->next_block = (int)k;
-                        v->block_shift = 41;         /* slot 1 (city.c), the block left 41 towards -y [G] */
-                    }
+            case GE_BLOCK: {                         /* the next block: built when it begins (GS_BEGIN_BLOCK) */
+                int k = -1;
+                for (uint32_t i = 0; e->name && i < v->nblocks; i++)
+                    if (!_stricmp(v->blocks[i], e->name))
+                        k = (int)i;
+                if (k >= 0 && k != (int)v->block) {
+                    v->next_block = k;
+                    v->block_shift = 41;             /* slot 1 (city.c), the block left 41 towards -y [G] */
+                }
+                /* the reveal's tubes in this block (0x3235F0), now if it is the one built */
+                v->ntubes = reveal_block(&v->reveal, e->a, 1 << 30, v->tubes, REVEAL_LOCS);
+                if (k == (int)v->block)
+                    add_tubes(v);
+                static RubbleHost rh;                /* the block left's rubble (0x303C90) */
+                rh.tmpl = rubble_tmpl;
+                rh.shape_box = rubble_box;
+                rh.ctx = v;
+                rubble_load(&v->rubble, v->scene.block, k >= 0 && k != (int)v->block, &rh);
                 break;
+            }
             case GE_STATE:
                 if (e->a == GS_BLOCK_WON) {          /* 0x3255B0: the clock's seconds to "Clock", the check */
                     int vis;
@@ -1534,14 +1597,18 @@ static void game_step(Viewer *v, float dt)
                     v->next_block = -1;
                 }
                 break;
-            case GE_RUBBLE_FX:                       /* findPointInRubble is not ported: at pos, 1.5 up [G] */
-                if (v->fxw && e->a >= 0 && e->a < 3 && e->name) {
-                    float at[3] = { e->pos[0], e->pos[1] + v->block_shift, 1.5f };
+            case GE_RUBBLE_FX: {                     /* findPointInRubble(pos, 8): a point in the block left's
+                                                      * rubble, 1.5 up; none, no effect */
+                float loc[3];
+                if (v->fxw && e->a >= 0 && e->a < 3 && e->name && rubble_find_point(&v->rubble, e->pos, e->f, loc)) {
+                    float at[3] = { loc[0], loc[1] + v->block_shift, loc[2] + 1.5f };
+                    const char *name = !strcmp(e->name, "Rubble_Smolder") && loc[1] > -23 ? e->name : "Fire_Loop";
                     if (v->rubble_fx[e->a] >= 0)
                         fx_stop(v->fxw, v->rubble_fx[e->a]);
-                    v->rubble_fx[e->a] = fx_spawn(v->fxw, e->name, at, NULL, 1);
+                    v->rubble_fx[e->a] = fx_spawn(v->fxw, name, at, NULL, 1);
                 }
                 break;
+            }
             case GE_RUBBLE_FX_STOP:
                 for (int k = 0; k < 3; k++) {
                     if (v->fxw && v->rubble_fx[k] >= 0)
@@ -1622,6 +1689,7 @@ static void game_step(Viewer *v, float dt)
                     r.city_score = game_city_total(v->game);
                     r.par_score = game_par_score(v->game);
                     r.city_flags = game_city_flags(v->game) | (v->challenges_lost ? 0 : CITY_FLAG_CHALLENGES);
+                    r.monster_revealed = reveal_was_revealed(&v->reveal);
                     hud_results(v->hud, e->a, &r);
                 }
                 break;
@@ -1653,6 +1721,8 @@ static void hud_frame(Viewer *v, int after)
     if (!after || !v->hud)
         return;
     int r = hud_result(v->hud);
+    if (r == GR_CONTINUE && v->game && game_state(v->game) == GS_GAME_OVER && reveal_was_revealed(&v->reveal))
+        reveal_continue(&v->reveal);                 /* 0x323450: the tube comes back */
     if (r && v->game)
         game_set_result(v->game, r);
     float sv, mv;
@@ -1791,12 +1861,15 @@ static void edible_step(Viewer *v, float dt)
                 if (v->hud)
                     hud_banner_text(v->hud, e->name, e->v, e->amount, e->name2);
                 break;
-            case EE_REVEAL:                          /* the cryotube: "<monster> Unlocked". Which monster
-                                                      * gWorld.startReveal picks is not read: the next one in the
-                                                      * viewer's list [G] */
-                if (v->hud && v->nmonsters)
-                    hud_banner_reveal(v->hud, v->monsters[(v->monster + 1) % (int)v->nmonsters]);
+            case EE_REVEAL: {                        /* the cryotube: gWorld.startReveal, "<monster> Unlocked" */
+                int slot, i = reveal_start(&v->reveal, 1, &v->roster, &slot);
+                if (v->hud && i >= 0)
+                    hud_banner_reveal(v->hud, v->roster.name[i]);
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  revealed: %s\n", i >= 0 ? v->roster.name[i] : "-");
+                reveal_stop(&v->reveal);             /* [G stand-in] no second monster here to walk on */
                 break;
+            }
             default: break;
             }
             if (getenv("RAMPAGE_TRACE") && e->type != EE_EFFECT && e->type != EE_EFFECT_STOP)

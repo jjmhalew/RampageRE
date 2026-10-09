@@ -362,6 +362,16 @@ int edible_add_fixed(Edibles *e, int building, int storey, int column, const cha
     return s;
 }
 
+int edible_add_cryotube(Edibles *e, int building, int storey, int column)
+{
+    static const char NAME[] = "Edible_Cryotube";
+    int had = kind_of(e, NAME) >= 0;
+    int s = edible_add_fixed(e, building, storey, column, NAME);
+    if (s >= 0 && !had)                              /* [R] 0x318FD0's 7th argument (1) is the new kind's +8; an */
+        e->kind[e->slot[s].kind].hazard = 1;         /* existing kind keeps its own (0x319050) */
+    return s;
+}
+
 /* ---------------------------------------------------------------- the edibles */
 
 static Edible *new_edible(Edibles *e)
@@ -576,7 +586,8 @@ void edible_cell_broken(Edibles *e, int building, int storey, int column, int st
     /* [R] no edible yet: it appears, unless the building is being destroyed (+0x14C >= 4) and it is a hazard */
     if (e->slot[s].item < 0 && (building_state < BSTATE_DESTROYED || !k->hazard))
         spawn(e, s);
-    /* [R] the monster reveal's tube: onPickup(gWorld's first monster (+0x40) [G], 1) at once */
+    /* [R] the monster reveal's tube: onPickup(gWorld's monster list +0x40 [0], i.e. slot 0, 1) at once (0x318020),
+     * whoever broke the cell: its 500 points go to player 1 */
     int it = e->slot[s].item;
     if (it >= 0 && same_text(k->name, "Edible_Cryotube") && e->ed[it].phase == EP_WINDOW)
         tube_pickup(e, &e->ed[it], 0);

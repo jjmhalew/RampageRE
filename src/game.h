@@ -85,6 +85,9 @@ typedef struct {
      * "NewYork::BossResultsNI"): NI functions return their next call's delay (0: done), IsBlockFinished non-zero
      * when finished. Return -1 when unknown: the Levels.bsf version is used instead [G] */
     float (*script)(void *ctx, const char *function, float last_freq);
+    /* 0x323240 at the block's end: every monster of the city's MonsterRevealDef unlocked (city flag 8, "All Monsters
+     * Revealed"); NULL: never */
+    int (*all_revealed)(void *ctx);
     void *ctx;
 } GameHost;
 

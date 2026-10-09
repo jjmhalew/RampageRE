@@ -137,8 +137,50 @@ followers keep per-frame steps (× the frame's dt at load) **[G: one frame at lo
 +0x5C at once: no fade over time [R; the dispatcher read as GuiObject's]. `BeginBlockNI` also `setVisible(1)`s each
 `Hud<n>`. The animated fades are the scripts' own (Clock.bsf, the results screens).
 
+## The rubble: findPointInRubble [R]
+
+`ResultsNI` puts three effects in the rubble of the block just won, with
+`gWorld.findPointInRubble((0, −21, 0), 8, &loc)` (World id 0x38, case 0x2AEFE8 → 0x303670). For each point found:
+`Rubble_Smolder` when `(int)(2 × frand) < 1` and loc.y > −23, otherwise `Fire_Loop`; it goes at loc + (0, 0, 1.5).
+Ported in `src/reveal.c` (`rubble_load`, `rubble_find_point`).
+
+**The list** (the block manager's +0x18, 0x4D4E98: a count, then 16-byte slots of a place +4 … +0xC and a shape at
++0x10, room for 16):
+- **When it is built:** activateNextBlock (0x302AF0) calls 0x303C90(list, the BlockList entry left behind,
+  had_previous). The entry left behind is +0xC, which 0x302800 sets from +0x8. had_previous is 0 on the city's first
+  activation, or when the block left is the new one (a replayed King tie). The list is always emptied first, and
+  with had_previous 0 it stays empty.
+- **What goes in:** each `BuildingInstance|` of that BlockDef that passes these checks:
+  - its LeftEdgeXPos is in [−50, 50) (0x303EB4);
+  - its template (`TemplateName`, 0x285710) has a `RubbleShape`. Its `Width` comes from the template, its `Row`
+    from the instance.
+- **Its place:** x = LeftEdgeXPos + 2.5 × Width, y = −36, plus the BlockDef's `BackRowOffset` when Row ≠ 0, and z =
+  0. This is the block left behind as it lies after activateNextBlock: 41 towards −y, with its fronts 5 in.
+- **What is not in it:** nothing is checked about the building's state. Every building of the block left is in the
+  list, standing or not (at the block's end they have all fallen).
+
+**The search** (0x303670):
+1. **The boxes.** Each slot's box is its shape's bounds (+0x20 … +0x34, min and max) moved to the slot's place. A
+   box counts when it meets the sphere (0x100810: the box's nearest point is within the radius). If none does, the
+   search answers 0 and that effect is skipped.
+2. **The random numbers.** They come from 0x106BD0 on gWorld +0x828: seed = 16807 × seed mod (2³¹ − 1), the
+   minimal standard generator. Each number is that value × 2⁻³¹, and three are drawn per call.
+3. **The box.** The pick is `(int)((n − 0.01) × u)` among the boxes that counted.
+4. **The point:**
+   - x = min.x + 0.5 + (max.x − min.x − 1) × u;
+   - y is worked out the same way;
+   - z = min.z, the rubble's base;
+   - a point farther than the radius from the centre (3D) is moved onto the sphere: centre + d × radius / |d|.
+
+In Hong Kong's HK03 the six buildings give boxes about 16.6 × 11 (rubble −0.3 … 1.9 high), at x ±12.5, ±37.5 (back
+row, y −26) and ±45 (front, y −36). The sphere around (0, −21) catches the two middle ones. Most picks land outside
+it and are pulled onto it, so the fires sit about 8 from the centre, at z ≈ −0.2 (+1.5).
+
 ## What the port does not have
 
+- **[G]** findPointInRubble: the shape's +0x20 … +0x34 taken as the model's bounds (`city_shape_box`); a missing
+  BackRowOffset taken as 10 (the game reads address 0); gWorld's generator shared with `frand` is not (reveal.c keeps
+  its own seed).
 - **[G]** The follower constants per second (one frame's dt at load taken as 1/60); the script camera's smoothing per
   frame at 60 Hz (`frame_hz`).
 - **[G]** `Free` and `Follow` hold the camera (the scripts only pass through Free). A local offset turns by the
