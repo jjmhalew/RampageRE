@@ -42,7 +42,7 @@ Las Vegas. The 3D picture still has errors (black ground), it runs slowly and th
 | People and traffic in the blocks (379 people, 375 vehicles; lanes from the game's traffic code) | ✅ |
 | Lighting: the game's lights, fog, drifting clouds; every block also at night | ✅ |
 | Effects (297, rebuilt byte for byte), string tables (13, 9 languages), GUI layouts (XML) | ✅ [docs/FORMAT_EDF.md](docs/FORMAT_EDF.md) |
-| Native viewer in C (`rampage.exe`): every city block from `RAMPAGE.VOL`, lit, day and night, traffic | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
+| Native viewer in C (`rampage.exe`): every city block from `RAMPAGE.VOL`, lit, day and night, traffic, animated people and props, any monster with its clips | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.

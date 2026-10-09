@@ -24,6 +24,13 @@ int tree_read(const Bundle *b, const BdpEntry *te, const BdpEntry *raw, Tree *t)
             const uint8_t *pose = d + rd32(d + 0x3C) + 0x50 * i;
             for (int k = 0; k < 3; k++) t->nodes[i].t[k] = rdf(pose + 0x34 + 4 * k);
             for (int k = 0; k < 4; k++) t->nodes[i].q[k] = rdf(pose + 0x40 + 4 * k);
+            float *ib = t->nodes[i].inverse_bind;            /* x, y, z axis rows and translation: GL's column order */
+            for (int col = 0; col < 4; col++) {
+                for (int row = 0; row < 3; row++)
+                    ib[4 * col + row] = rdf(pose + 4 + 4 * (3 * col + row));
+                ib[4 * col + 3] = col == 3 ? 1.0f : 0.0f;
+            }
+            t->nodes[i].has_bind = 1;
         }
     }
     if (raw && raw->size >= 0x38 && rd32(raw->data + 0x20) == 1) {
@@ -46,4 +53,28 @@ void tree_free(Tree *t)
 {
     free(t->nodes);
     memset(t, 0, sizeof *t);
+}
+
+uint32_t cloth_particles(const BdpEntry *e, ClothParticle **out)
+{
+    const uint8_t *d = e->data;
+    uint32_t parts = rd32(d + 0x34), at = rd32(d + 0x38), total = 0;
+    for (uint32_t k = 0; k < parts; k++)
+        total += rd32(d + at + 0x8C * k + 0x80);
+    ClothParticle *p = calloc(total ? total : 1, sizeof *p);
+    uint32_t n = 0;
+    for (uint32_t k = 0; k < parts; k++) {
+        const uint8_t *rec = d + at + 0x8C * k, *q = d + rd32(rec + 0x88);
+        for (uint32_t i = 0, c = rd32(rec + 0x80); i < c; i++, q += 64) {
+            ClothParticle *cp = &p[n++];
+            for (int j = 0; j < 3; j++) cp->pos[j] = rdf(q + 4 * j);
+            cp->nbones = q[0x34] > 4 ? 4 : q[0x34];
+            for (int j = 0; j < 4; j++) {
+                cp->weights[j] = rdf(q + 0x1C + 4 * j);
+                cp->bones[j] = rd16(q + 0x2C + 2 * j);
+            }
+        }
+    }
+    *out = p;
+    return n;
 }

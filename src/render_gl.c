@@ -110,10 +110,11 @@ double win_time(void)
 
 /* ---------------------------------------------------------------- renderer */
 
+typedef struct { const Bundle *b; GLuint *tex; uint32_t n; } BundleTex;   /* per name index: GL texture, ~0 = none */
+
 struct Renderer {
     const Scene *scene;
-    GLuint *tex;            /* per city bundle name index: GL texture, 0 = not made yet, ~0 = none */
-    uint32_t ntex;
+    BundleTex cache[8]; int ncache;
     uint32_t drawn;
 };
 
@@ -121,20 +122,19 @@ Renderer *rnd_create(void) { return calloc(1, sizeof(Renderer)); }
 
 static void drop_textures(Renderer *r)
 {
-    for (uint32_t i = 0; i < r->ntex; i++)
-        if (r->tex[i] && r->tex[i] != ~0u)
-            glDeleteTextures(1, &r->tex[i]);
-    free(r->tex);
-    r->tex = NULL;
-    r->ntex = 0;
+    for (int k = 0; k < r->ncache; k++) {
+        for (uint32_t i = 0; i < r->cache[k].n; i++)
+            if (r->cache[k].tex[i] && r->cache[k].tex[i] != ~0u)
+                glDeleteTextures(1, &r->cache[k].tex[i]);
+        free(r->cache[k].tex);
+    }
+    r->ncache = 0;
 }
 
 void rnd_scene(Renderer *r, const Scene *s)
 {
     drop_textures(r);
     r->scene = s;
-    r->ntex = s->city->nnames;
-    r->tex = calloc(r->ntex ? r->ntex : 1, sizeof *r->tex);
 }
 
 void rnd_free(Renderer *r)
@@ -147,15 +147,27 @@ void rnd_free(Renderer *r)
 
 uint32_t rnd_triangles(const Renderer *r) { return r->drawn; }
 
-static GLuint texture(Renderer *r, uint32_t name)
+static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
 {
-    if (!name || name >= r->ntex)
+    BundleTex *bt = NULL;
+    for (int k = 0; k < r->ncache && !bt; k++)
+        if (r->cache[k].b == b)
+            bt = &r->cache[k];
+    if (!bt) {
+        if (r->ncache == 8)
+            return 0;
+        bt = &r->cache[r->ncache++];
+        bt->b = b;
+        bt->n = b->nnames;
+        bt->tex = calloc(bt->n ? bt->n : 1, sizeof *bt->tex);
+    }
+    if (!name || name >= bt->n)
         return 0;
-    if (!r->tex[name]) {
+    if (!bt->tex[name]) {
         uint8_t *rgba;
         int w, h;
-        r->tex[name] = ~0u;
-        if (tex_decode(r->scene->city, bdp_entry(r->scene->city, name), &rgba, &w, &h) == 0) {
+        bt->tex[name] = ~0u;
+        if (tex_decode(b, bdp_entry(b, name), &rgba, &w, &h) == 0) {
             GLuint id;
             glGenTextures(1, &id);
             glBindTexture(GL_TEXTURE_2D, id);
@@ -165,10 +177,10 @@ static GLuint texture(Renderer *r, uint32_t name)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
             free(rgba);
-            r->tex[name] = id;
+            bt->tex[name] = id;
         }
     }
-    return r->tex[name] == ~0u ? 0 : r->tex[name];
+    return bt->tex[name] == ~0u ? 0 : bt->tex[name];
 }
 
 static void perspective(float fov_deg, float aspect, float zn, float zf)
@@ -192,29 +204,32 @@ static void look(const Camera *c)
     glTranslatef(-c->pos[0], -c->pos[1], -c->pos[2]);
 }
 
-static void draw_mesh(Renderer *r, const Mesh *m, double t)
+static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double t)
 {
     const Scene *s = r->scene;
-    for (uint32_t i = 0; i < m->nparts; i++) {
+    const Mesh *m = &sm->mesh;
+    uint32_t first = 0;                                    /* the part's first vertex in the skin buffers */
+    for (uint32_t i = 0; i < m->nparts; first += m->parts[i].nverts, i++) {
         const MeshPart *p = &m->parts[i];
         if (!p->ntris)
             continue;
-        GLuint id = texture(r, material_texture(s->city, p->material));
+        GLuint id = texture(r, sm->b, material_texture(sm->b, p->material));
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
         } else {
             glDisable(GL_TEXTURE_2D);
         }
-        int scroll = s->cloud_material && p->material == s->cloud_material;
+        int scroll = s->cloud_material && sm->b == s->city && p->material == s->cloud_material;
         if (scroll) {                                        /* the drifting cloud band (AnimatingSkyData) */
             glMatrixMode(GL_TEXTURE);
             glLoadIdentity();
             glTranslatef((float)fmod(s->cloud_rate[0] * t, 1.0), (float)fmod(s->cloud_rate[1] * t, 1.0), 0);
             glMatrixMode(GL_MODELVIEW);
         }
-        glVertexPointer(3, GL_FLOAT, 0, p->pos);
-        if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, p->nrm); }
+        glVertexPointer(3, GL_FLOAT, 0, skin ? skin->pos + 3 * first : p->pos);
+        if (skin) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, skin->nrm + 3 * first); }
+        else if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, p->nrm); }
         else { glDisableClientState(GL_NORMAL_ARRAY); glNormal3f(0, 0, 1); }
         if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, p->uv); }
         else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -285,14 +300,8 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     for (uint32_t i = 0; i < s->nitems; i++) {
         const DrawItem *it = &s->items[i];
         glPushMatrix();
-        if (it->vehicle >= 0) {
-            const Vehicle *v = &s->vehicles[it->vehicle];
-            Mat4 m = mat_mul(mat_trs_z(vehicle_x(v, t), v->y, 0, v->turn_deg), it->local);
-            glMultMatrixf(m.m);
-        } else {
-            glMultMatrixf(it->world.m);
-        }
-        draw_mesh(r, &s->meshes[it->mesh].mesh, t);
+        glMultMatrixf(it->world.m);
+        draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
         glPopMatrix();
     }
     glDisableClientState(GL_VERTEX_ARRAY);

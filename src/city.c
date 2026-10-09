@@ -5,7 +5,9 @@
  *   Objects1_Props (ObjectTemplateBook): object and actor templates
  *   <City>.bdp: the models (node trees with their meshes) and textures
  * A building's ground floor is 6 high and each storey above it 3; the storeys have no mesh, their facade is made from the
- * template's 4 x 4 texture sheet (column = window style, row = damage). Traffic runs on the two lanes of 0x332D90. */
+ * template's 4 x 4 texture sheet (column = window style, row = damage). Traffic runs on the two lanes of 0x332D90.
+ * What moves: models whose own RawAnim moves (rotors, the fountain), the people's state clips, traffic and a monster
+ * (its skeleton's clips; its skinned mesh and cloth posed on the CPU every frame). */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,8 +192,6 @@ void city_close(City *c)
     free(c);
 }
 
-const Bundle *city_bundle(City *c) { return &c->bundle; }
-
 uint32_t city_blocks(City *c, const char **names, uint32_t max)
 {
     Group list = group_sub(group_sub(c->world, "BlockData"), "BlockList");
@@ -210,30 +210,41 @@ uint32_t city_blocks(City *c, const char **names, uint32_t max)
 
 /* ---------------------------------------------------------------- the scene */
 
-static uint32_t scene_mesh_of(Scene *s, uint32_t entry)
-{
-    if (s->mesh_of_entry[entry] < 0) {
-        if (s->nmeshes == s->meshes_cap) {
-            s->meshes_cap = s->meshes_cap ? 2 * s->meshes_cap : 256;
-            s->meshes = realloc(s->meshes, s->meshes_cap * sizeof *s->meshes);
-        }
-        mesh_read(&s->city->entries[entry], &s->meshes[s->nmeshes].mesh);
-        s->mesh_of_entry[entry] = (int32_t)s->nmeshes++;
-    }
-    return (uint32_t)s->mesh_of_entry[entry];
-}
-
-static uint32_t scene_add_mesh(Scene *s, Mesh m)
+static uint32_t scene_add_mesh(Scene *s, Mesh m, const Bundle *b)
 {
     if (s->nmeshes == s->meshes_cap) {
         s->meshes_cap = s->meshes_cap ? 2 * s->meshes_cap : 256;
         s->meshes = realloc(s->meshes, s->meshes_cap * sizeof *s->meshes);
     }
     s->meshes[s->nmeshes].mesh = m;
+    s->meshes[s->nmeshes].b = b;
     return s->nmeshes++;
 }
 
-static void push_item(Scene *s, uint32_t mesh, Mat4 world, int vehicle)
+static uint32_t scene_mesh_of(Scene *s, uint32_t entry)
+{
+    if (s->mesh_of_entry[entry] < 0) {
+        Mesh m;
+        mesh_read(&s->city->entries[entry], &m);
+        s->mesh_of_entry[entry] = (int32_t)scene_add_mesh(s, m, s->city);
+    }
+    return (uint32_t)s->mesh_of_entry[entry];
+}
+
+static int new_instance(Scene *s, Mat4 base, int vehicle)
+{
+    if (s->ninstances == s->instances_cap) {
+        s->instances_cap = s->instances_cap ? 2 * s->instances_cap : 256;
+        s->instances = realloc(s->instances, s->instances_cap * sizeof *s->instances);
+    }
+    Instance *in = &s->instances[s->ninstances];
+    memset(in, 0, sizeof *in);
+    in->base = base;
+    in->vehicle = vehicle;
+    return (int)s->ninstances++;
+}
+
+static void push_item(Scene *s, uint32_t mesh, int instance, int node, Skin *skin)
 {
     if (s->nitems == s->items_cap) {
         s->items_cap = s->items_cap ? 2 * s->items_cap : 1024;
@@ -241,9 +252,10 @@ static void push_item(Scene *s, uint32_t mesh, Mat4 world, int vehicle)
     }
     DrawItem *it = &s->items[s->nitems++];
     it->mesh = mesh;
-    it->world = world;
-    it->local = world;
-    it->vehicle = vehicle;
+    it->instance = instance;
+    it->node = node;
+    it->world = s->instances[instance].base;
+    it->skin = skin;
 }
 
 static const BdpEntry *find_entry(const Bundle *b, int type, const char *name)
@@ -254,19 +266,22 @@ static const BdpEntry *find_entry(const Bundle *b, int type, const char *name)
     return NULL;
 }
 
-static const BdpEntry *find_rawanim(const Bundle *b, const char *name)
+/* an animation (type 4) of the given kind: by its own name (kind 2) or by the tree it drives (kind 1) */
+static const BdpEntry *find_anim(const Bundle *b, uint32_t kind, const char *name)
 {
     for (uint32_t i = 0; i < b->nentries; i++) {
         const BdpEntry *e = &b->entries[i];
-        if (e->type == ET_ANIM && e->size >= 0x2C && rd32(e->data + 0x20) == 1 &&
-            _stricmp(bdp_name(b, rd16(e->data + 0x28)), name) == 0)
+        if (e->type != ET_ANIM || e->size < 0x44 || rd32(e->data + 0x20) != kind)
+            continue;
+        if (_stricmp(bdp_name(b, kind == 1 ? rd16(e->data + 0x28) : e->name), name) == 0)
             return e;
     }
     return NULL;
 }
 
-/* place model `name` (with or without .pwk): each mesh object on its node of the model's tree, at the tree's rest pose */
-static int place_model(City *c, Scene *s, const char *name, Mat4 parent, int vehicle)
+/* place model `name` (with or without .pwk): each mesh object on its node of the model's tree, at its rest pose; a model
+ * whose own RawAnim moves (rotors, the fountain) plays it on a loop. Returns the instance, -1 if it has no meshes. */
+static int place_model(City *c, Scene *s, const char *name, Mat4 base, int vehicle)
 {
     char key[64];
     size_t n = 0;
@@ -275,37 +290,40 @@ static int place_model(City *c, Scene *s, const char *name, Mat4 parent, int veh
     key[n] = 0;
     if (n > 4 && strcmp(key + n - 4, ".pwk") == 0)
         key[n - 4] = 0;
-    Tree tree = { 0 };
-    Mat4 *node_world = NULL;
+    int found = 0;
+    for (uint32_t i = 0; i < c->bundle.nentries && !found; i++)
+        found = c->model_key[i][0] && strcmp(c->model_key[i], key) == 0;
+    if (!found) {
+        s->missing++;
+        return -1;
+    }
+    int id = new_instance(s, base, vehicle);
+    Instance *in = &s->instances[id];
     const BdpEntry *te = find_entry(&c->bundle, ET_TREE, key);
     if (te) {
-        tree_read(&c->bundle, te, find_rawanim(&c->bundle, key), &tree);
-        node_world = malloc(sizeof *node_world * (tree.n ? tree.n : 1));
-        for (uint32_t i = 0; i < tree.n; i++) {
-            Mat4 local = mat_tq(tree.nodes[i].t, tree.nodes[i].q);
-            int p = tree.nodes[i].parent;
-            node_world[i] = mat_mul(p >= 0 && (uint32_t)p < i ? node_world[p] : parent, local);
+        const BdpEntry *raw = find_anim(&c->bundle, 1, key);
+        tree_read(&c->bundle, te, raw, &in->tree);
+        if (raw && clip_read(raw, &in->clip) == 0) {
+            if (clip_moves(&in->clip))
+                in->has_clip = 1;
+            else
+                clip_free(&in->clip);
         }
+        in->node = calloc(in->tree.n ? in->tree.n : 1, sizeof *in->node);
     }
-    int placed = 0;
     for (uint32_t i = 0; i < c->bundle.nentries; i++) {
         if (!c->model_key[i][0] || strcmp(c->model_key[i], key) != 0)
             continue;
         const char *obj = strchr(bdp_name(&c->bundle, c->bundle.entries[i].name), '|');
-        Mat4 world = parent;
-        for (uint32_t k = 0; obj && k < tree.n; k++)
-            if (_stricmp(tree.nodes[k].name, obj + 1) == 0) {
-                world = node_world[k];
+        int node = -1;
+        for (uint32_t k = 0; obj && k < in->tree.n; k++)
+            if (_stricmp(in->tree.nodes[k].name, obj + 1) == 0) {
+                node = (int)k;
                 break;
             }
-        push_item(s, scene_mesh_of(s, i), world, vehicle);
-        placed++;
+        push_item(s, scene_mesh_of(s, i), id, node, NULL);
     }
-    free(node_world);
-    tree_free(&tree);
-    if (!placed)
-        s->missing++;
-    return placed;
+    return id;
 }
 
 static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
@@ -321,17 +339,7 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     place_model(c, s, shape, mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0))), -1);
 }
 
-static const BdpEntry *find_clip(const Bundle *b, const char *name)
-{
-    for (uint32_t i = 0; i < b->nentries; i++) {
-        const BdpEntry *e = &b->entries[i];
-        if (e->type == ET_ANIM && e->size >= 0x2C && rd32(e->data + 0x20) == 2 &&
-            _stricmp(bdp_name(b, e->name), name) == 0)
-            return e;
-    }
-    return NULL;
-}
-
+/* a person in its template's default state (ActorAnimShape|<DefaultAnim>: model and clip), the clip on a loop */
 static void place_actor(City *c, Scene *s, Group inst)
 {
     Group t = template_of(c, group_str(inst, "Name"));
@@ -345,18 +353,32 @@ static void place_actor(City *c, Scene *s, Group inst)
     Group look = group_sub(t, key);
     if (!look.at)
         look = group_sub(t, "ActorAnimShape|Idle");
+    const char *clip_name = look.at ? group_str(look, "Anim|AnimName") : NULL;
+    const BdpEntry *ce = clip_name ? find_anim(&c->bundle, 2, clip_name) : NULL;
     const char *shape = look.at ? group_str(look, "Shape|ShapeName") : NULL;
     if (!shape) shape = group_str(t, "Shape|ShapeName");
     if (!shape) shape = group_str(t, "Shape|Shape");
-    if (!shape && look.at) {                      /* the clip's own node tree */
-        const char *clip = group_str(look, "Anim|AnimName");
-        const BdpEntry *e = clip ? find_clip(&c->bundle, clip) : NULL;
-        shape = e ? bdp_name(&c->bundle, rd16(e->data + 0x28)) : NULL;
-    }
+    if (!shape && ce)                             /* the clip's own node tree */
+        shape = bdp_name(&c->bundle, rd16(ce->data + 0x28));
     float xyz[3];
     location(inst, xyz);
-    if (shape && place_model(c, s, shape, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)), -1))
-        s->people++;
+    int id = shape ? place_model(c, s, shape, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)), -1) : -1;
+    if (id < 0)
+        return;
+    s->people++;
+    Instance *in = &s->instances[id];
+    Clip clip;
+    if (ce && clip_read(ce, &clip) == 0) {
+        if (clip.bones == in->tree.n) {
+            if (in->has_clip)
+                clip_free(&in->clip);
+            in->clip = clip;
+            in->has_clip = 1;
+            in->offset = (float)(s->people % 7) * 0.37f;   /* not everyone in step */
+        } else {
+            clip_free(&clip);
+        }
+    }
 }
 
 static uint32_t rng_next(uint32_t *state) { *state = *state * 1664525u + 1013904223u; return *state >> 8; }
@@ -404,13 +426,13 @@ static void traffic(City *c, Scene *s, Group block, const char *block_name)
             const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL;
             Vehicle v = { lanes[l].y, lanes[l].dir, (float)k / per_lane, lanes[l].turn };
             s->vehicles[s->nvehicles] = v;
-            if (shape && place_model(c, s, shape, mat_identity(), (int)s->nvehicles))
+            if (shape && place_model(c, s, shape, mat_identity(), (int)s->nvehicles) >= 0)
                 s->nvehicles++;
         }
     }
 }
 
-float vehicle_x(const Vehicle *v, double t)
+static float vehicle_x(const Vehicle *v, double t)
 {
     double f = fmod(t * TRAFFIC_SPEED / (2 * LANE_END) + v->phase, 1.0);
     return v->direction * (float)(-LANE_END + 2 * LANE_END * f);
@@ -418,7 +440,7 @@ float vehicle_x(const Vehicle *v, double t)
 
 /* the generated upper storeys: one quad per facade cell, its tile out of the 4 x 4 sheet */
 static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record (*tiles)[64], const uint32_t *ntiles,
-                   Group *floors, int nstoreys)
+                   int nstoreys)
 {
     Mesh m = { 0 };
     int cells = width + 2 * depth;
@@ -427,10 +449,10 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
     m.nparts = 1;
     MeshPart *p = m.parts;
     p->material = sheet;
-    p->pos = malloc(sizeof(float) * 12 * nq);
-    p->nrm = malloc(sizeof(float) * 12 * nq);
-    p->uv = malloc(sizeof(float) * 8 * nq);
-    p->tris = malloc(sizeof(uint32_t) * 6 * nq);
+    p->pos = malloc(sizeof(float) * 12 * (nq ? nq : 1));
+    p->nrm = malloc(sizeof(float) * 12 * (nq ? nq : 1));
+    p->uv = malloc(sizeof(float) * 8 * (nq ? nq : 1));
+    p->tris = malloc(sizeof(uint32_t) * 6 * (nq ? nq : 1));
     float hw = width * CELL / 2, hd = depth * CELL / 2;
     for (int st = 0; st < nstoreys; st++) {
         for (int cell = 0; cell < cells && (uint32_t)cell < ntiles[st]; cell++) {
@@ -459,7 +481,6 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
             p->ntris += 2;
         }
     }
-    (void)floors;
     return m;
 }
 
@@ -494,7 +515,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     const char *sheet = group_str(t, "TextureSheet");
     int sheet_name = sheet ? bdp_find_name(&c->bundle, sheet) : -1;
     if (nst && sheet_name >= 0)
-        push_item(s, scene_add_mesh(s, facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, floors, nst)), node, -1);
+        push_item(s, scene_add_mesh(s, facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst), s->city),
+                  new_instance(s, node, -1), -1, NULL);
     const char *top = str_item(group_sub(t, "ShapeSet|TopFloorShapes"), 0);
     if (top)
         place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)(nfloors ? nfloors - 1 : 0), 0)), -1);
@@ -507,7 +529,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
 static void read_lights(Scene *s, const char *text, uint32_t len)
 {
     char line[256], key[64];
-    float v[8] = { 0 };
+    float v[8];
     int in_light = 0;
     memset(v, 0, sizeof v);
     for (uint32_t i = 0; i < len;) {
@@ -570,10 +592,87 @@ static void lighting(City *c, Scene *s, Group ld)
     }
 }
 
+/* ---------------------------------------------------------------- posing */
+
+static void pose_instance(Scene *s, Instance *in, double t)
+{
+    for (uint32_t i = 0; i < in->tree.n; i++) {
+        TreeNode *nd = &in->tree.nodes[i];
+        float tr[3] = { nd->t[0], nd->t[1], nd->t[2] }, q[4] = { nd->q[0], nd->q[1], nd->q[2], nd->q[3] };
+        if (in->has_clip)
+            clip_pose(&in->clip, t + in->offset, i, tr, q);
+        Mat4 local = mat_tq(tr, q);
+        int p = nd->parent;
+        in->node[i] = p >= 0 && (uint32_t)p < i ? mat_mul(in->node[p], local) : local;
+    }
+    (void)s;
+}
+
+static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
+{
+    Skin *sk = it->skin;
+    static Mat4 palette[256];
+    uint32_t nb = in->tree.n < 256 ? in->tree.n : 256;
+    for (uint32_t j = 0; j < nb; j++) {
+        Mat4 ib;
+        memcpy(ib.m, in->tree.nodes[j].inverse_bind, sizeof ib.m);
+        palette[j] = mat_mul(in->node[j], ib);
+    }
+    const Mesh *m = &s->meshes[it->mesh].mesh;
+    uint32_t v = 0;
+    for (uint32_t pi = 0; pi < m->nparts; pi++) {
+        const MeshPart *p = &m->parts[pi];
+        for (uint32_t i = 0; i < p->nverts; i++, v++) {
+            float o[3] = { 0, 0, 0 }, on[3] = { 0, 0, 0 };
+            const float *x = p->pos + 3 * i, *n = p->nrm ? p->nrm + 3 * i : NULL;
+            for (int k = 0; k < 4; k++) {
+                float w = sk->weights[v][k];
+                if (w <= 0 || sk->bones[v][k] >= nb)
+                    continue;
+                const float *M = palette[sk->bones[v][k]].m;
+                for (int r = 0; r < 3; r++) {
+                    o[r] += w * (M[r] * x[0] + M[4 + r] * x[1] + M[8 + r] * x[2] + M[12 + r]);
+                    if (n) on[r] += w * (M[r] * n[0] + M[4 + r] * n[1] + M[8 + r] * n[2]);
+                }
+            }
+            memcpy(sk->pos + 3 * v, o, sizeof o);
+            memcpy(sk->nrm + 3 * v, on, sizeof on);
+        }
+    }
+}
+
+static void update(Scene *s, double t, int all)
+{
+    for (uint32_t i = 0; i < s->ninstances; i++) {
+        Instance *in = &s->instances[i];
+        if (in->vehicle >= 0) {
+            const Vehicle *v = &s->vehicles[in->vehicle];
+            in->base = mat_trs_z(vehicle_x(v, t), v->y, 0, v->turn_deg);
+        }
+        if (in->tree.n && (all || in->has_clip))
+            pose_instance(s, in, t);
+    }
+    for (uint32_t i = 0; i < s->nitems; i++) {
+        DrawItem *it = &s->items[i];
+        Instance *in = &s->instances[it->instance];
+        if (!all && !in->has_clip && in->vehicle < 0)
+            continue;
+        if (it->skin) {
+            skin_item(s, in, it);
+            it->world = in->base;
+        } else {
+            it->world = it->node >= 0 ? mat_mul(in->base, in->node[it->node]) : in->base;
+        }
+    }
+}
+
+void scene_update(Scene *s, double t) { update(s, t, 0); }
+
 int city_build(City *c, const char *block_name, int night, Scene *s)
 {
     memset(s, 0, sizeof *s);
     s->city = &c->bundle;
+    s->monster = -1;
     s->mesh_of_entry = malloc(sizeof *s->mesh_of_entry * (c->bundle.nentries ? c->bundle.nentries : 1));
     for (uint32_t i = 0; i < c->bundle.nentries; i++)
         s->mesh_of_entry[i] = -1;
@@ -610,6 +709,145 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
             place_actor(c, s, a);
     }
     traffic(c, s, block, block_name);
+    update(s, 0, 1);
+    return 0;
+}
+
+/* ---------------------------------------------------------------- monsters */
+
+uint32_t monster_names(const Vol *vol, const char **names, uint32_t max)
+{
+    uint32_t k = 0;
+    for (uint32_t i = 0; i < vol->count && k < max; i++) {
+        size_t len = strlen(vol->files[i].name);
+        if (len > 10 && _stricmp(vol->files[i].name + len - 10, "_anims.cmp") == 0) {
+            char *n = malloc(len - 9);
+            memcpy(n, vol->files[i].name, len - 10);
+            n[len - 10] = 0;
+            names[k++] = n;
+        }
+    }
+    for (uint32_t i = 1; i < k; i++)                     /* sorted */
+        for (uint32_t j = i; j > 0 && _stricmp(names[j - 1], names[j]) > 0; j--) {
+            const char *t = names[j]; names[j] = names[j - 1]; names[j - 1] = t;
+        }
+    return k;
+}
+
+static Bundle *own_bundle(const Vol *vol, Scene *s, const char *file)
+{
+    uint32_t size;
+    uint8_t *data = vol_read(vol, file, &size);
+    if (!data || s->nown == 4)
+        return free(data), NULL;
+    Bundle *b = calloc(1, sizeof *b);
+    if (bdp_load(b, data, size) != 0) {
+        free(data);
+        free(b);
+        return NULL;
+    }
+    s->own[s->nown++] = b;
+    return b;
+}
+
+static Skin *new_skin(const Mesh *m)
+{
+    Skin *sk = calloc(1, sizeof *sk);
+    for (uint32_t i = 0; i < m->nparts; i++)
+        sk->nverts += m->parts[i].nverts;
+    sk->bones = calloc(sk->nverts ? sk->nverts : 1, sizeof *sk->bones);
+    sk->weights = calloc(sk->nverts ? sk->nverts : 1, sizeof *sk->weights);
+    sk->pos = calloc(3 * (sk->nverts ? sk->nverts : 1), sizeof(float));
+    sk->nrm = calloc(3 * (sk->nverts ? sk->nverts : 1), sizeof(float));
+    return sk;
+}
+
+int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x, float y, float deg)
+{
+    char file[96];
+    snprintf(file, sizeof file, "%s.cmp", monster);
+    Bundle *mb = own_bundle(c->vol, s, file);
+    snprintf(file, sizeof file, "%s_anims.cmp", monster);
+    Bundle *ab = own_bundle(c->vol, s, file);
+    if (!mb || !ab)
+        return -1;
+    const BdpEntry *te = NULL;
+    for (uint32_t i = 0; i < mb->nentries && !te; i++)
+        if (mb->entries[i].type == ET_TREE && mb->entries[i].extra == 1)
+            te = &mb->entries[i];
+    if (!te)
+        return -1;
+    int id = new_instance(s, mat_trs_z(x, y, 0, deg), -1);
+    Instance *in = &s->instances[id];
+    tree_read(mb, te, NULL, &in->tree);
+    in->node = calloc(in->tree.n ? in->tree.n : 1, sizeof *in->node);
+    /* its clips: the keyframed ones for this skeleton; -1 picks the body idle (SKELETON_n_IDLE, else ..._SHORT) */
+    const BdpEntry *pick = NULL;
+    int k = 0, pick_rank = 0;
+    for (uint32_t i = 0; i < ab->nentries; i++) {
+        const BdpEntry *e = &ab->entries[i];
+        if (e->type != ET_ANIM || e->size < 0x44 || rd32(e->data + 0x20) != 2 || rd32(e->data + 0x2C) != in->tree.n)
+            continue;
+        const char *n = bdp_name(ab, e->name), *rest;
+        if (!strncmp(n, "000", 3))
+            n += 3;
+        int rank = 0;                                /* 2: SKELETON_<n>_IDLE, 1: SKELETON_<n>_IDLE_SHORT */
+        if (!_strnicmp(n, "SKELETON_", 9)) {
+            for (rest = n + 9; *rest >= '0' && *rest <= '9'; rest++)
+                ;
+            rank = !_stricmp(rest, "_IDLE") ? 2 : !_stricmp(rest, "_IDLE_SHORT") ? 1 : 0;
+        }
+        if (clip_index < 0 ? rank > pick_rank : k == clip_index) {
+            pick = e;
+            pick_rank = rank;
+        }
+        k++;
+    }
+    if (pick && clip_read(pick, &in->clip) == 0) {
+        in->has_clip = 1;
+        s->monster_clip = bdp_name(ab, pick->name);
+        if (!strncmp(s->monster_clip, "000", 3))
+            s->monster_clip += 3;
+    }
+    ClothParticle *cloth = NULL;
+    uint32_t ncloth = 0;
+    for (uint32_t i = 0; i < mb->nentries; i++)
+        if (mb->entries[i].type == ET_CLOTH && !cloth)
+            ncloth = cloth_particles(&mb->entries[i], &cloth);
+    for (uint32_t i = 0; i < mb->nentries; i++) {
+        const BdpEntry *e = &mb->entries[i];
+        if (e->type != ET_SKINNED && e->type != ET_MESH)
+            continue;
+        Mesh m;
+        if (mesh_read(e, &m) != 0)
+            continue;
+        Skin *sk = new_skin(&m);
+        uint32_t v = 0;
+        for (uint32_t pi = 0; pi < m.nparts; pi++) {
+            const MeshPart *p = &m.parts[pi];
+            for (uint32_t j = 0; j < p->nverts; j++, v++) {
+                if (p->bones) {                  /* skinned: two bones, the first one's weight */
+                    sk->bones[v][0] = p->bones[j][0];
+                    sk->bones[v][1] = p->bones[j][1];
+                    sk->weights[v][0] = p->weight[j] > 1 ? 1 : p->weight[j];
+                    sk->weights[v][1] = 1 - sk->weights[v][0];
+                    continue;
+                }
+                for (uint32_t q = 0; q < ncloth; q++)   /* cloth: the bones of the particle it sits on */
+                    if (!memcmp(cloth[q].pos, p->pos + 3 * j, 12)) {
+                        for (int b = 0; b < cloth[q].nbones; b++) {
+                            sk->bones[v][b] = (uint8_t)cloth[q].bones[b];
+                            sk->weights[v][b] = cloth[q].weights[b];
+                        }
+                        break;
+                    }
+            }
+        }
+        push_item(s, scene_add_mesh(s, m, mb), id, -1, sk);
+    }
+    free(cloth);
+    s->monster = id;
+    update(s, 0, 1);
     return 0;
 }
 
@@ -617,8 +855,24 @@ void scene_free(Scene *s)
 {
     for (uint32_t i = 0; i < s->nmeshes; i++)
         mesh_free(&s->meshes[i].mesh);
+    for (uint32_t i = 0; i < s->nitems; i++)
+        if (s->items[i].skin) {
+            Skin *sk = s->items[i].skin;
+            free(sk->bones); free(sk->weights); free(sk->pos); free(sk->nrm); free(sk);
+        }
+    for (uint32_t i = 0; i < s->ninstances; i++) {
+        tree_free(&s->instances[i].tree);
+        if (s->instances[i].has_clip)
+            clip_free(&s->instances[i].clip);
+        free(s->instances[i].node);
+    }
+    for (int i = 0; i < s->nown; i++) {
+        bdp_free(s->own[i]);
+        free(s->own[i]);
+    }
     free(s->meshes);
     free(s->mesh_of_entry);
+    free(s->instances);
     free(s->items);
     free(s->vehicles);
     memset(s, 0, sizeof *s);

@@ -75,9 +75,29 @@ float record_num(Record r);
 const char *record_str(Group g, Record r);
 
 /* ---- node trees (type 3) and their rest pose: the RawAnim of the same name at time 0, or the skeleton's bind pose */
-typedef struct { int parent; const char *name; float t[3], q[4]; } TreeNode;   /* q: x, y, z, w, row-vector convention */
+typedef struct {
+    int parent; const char *name;
+    float t[3], q[4];                                    /* rest pose; q: x, y, z, w, row-vector convention */
+    float inverse_bind[16]; int has_bind;                /* skeletons: the stored inverse bind matrix (column-major) */
+} TreeNode;
 typedef struct { TreeNode *nodes; uint32_t n; } Tree;
 int tree_read(const Bundle *b, const BdpEntry *tree, const BdpEntry *rawanim, Tree *t);   /* rawanim may be NULL */
 void tree_free(Tree *t);
+
+/* ---- animation clips (type 4): KeyInterpAnim (kind 2, every monster and person clip) and RawAnim (kind 1) */
+typedef struct {
+    const uint8_t *data;
+    uint32_t kind, bones, skeleton;                      /* skeleton: name index of the node tree it drives */
+    float duration;                                      /* seconds */
+    const uint8_t **trans, **rot;                        /* kind 2: per bone its tracks; kind 1: trans = per bone its record */
+} Clip;
+int clip_read(const BdpEntry *e, Clip *c);               /* 0 = ok */
+void clip_free(Clip *c);
+int clip_moves(const Clip *c);                           /* RawAnims mostly hold one pose; 1 = this one moves */
+int clip_pose(const Clip *c, double seconds, uint32_t bone, float t[3], float q[4]);   /* looping; 0 = bone not in it */
+
+/* ---- cloth (type 25): the particles of a monster's hair, each held by up to four bones (docs/FORMAT_BDP.md "Cloth") */
+typedef struct { float pos[3]; uint16_t bones[4]; float weights[4]; int nbones; } ClothParticle;
+uint32_t cloth_particles(const BdpEntry *e, ClothParticle **out);   /* malloc'd; returns the count */
 
 #endif
