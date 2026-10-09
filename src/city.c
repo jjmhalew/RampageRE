@@ -1445,8 +1445,18 @@ static void pose_instance(Scene *s, Instance *in, double t)
             local = mat_mul(mat_trs_z(0, 0, 0, -in->root_turn), local);
         int p = nd->parent;
         in->node[i] = p >= 0 && (uint32_t)p < i ? mat_mul(in->node[p], local) : local;
+        if ((int)(in - s->instances) == s->monster && (s->look_yaw != 0 || s->look_pitch != 0)) {
+            if ((int)i == s->look_neck) {            /* model x Rz(yaw) (row vectors): about up, at the neck */
+                Mat4 r = mat_trs_z(0, 0, 0, s->look_yaw * 57.2957795f), m = in->node[i];
+                float t[3] = { m.m[12], m.m[13], m.m[14] };
+                m.m[12] = m.m[13] = m.m[14] = 0;
+                m = mat_mul(r, m);
+                m.m[12] = t[0]; m.m[13] = t[1]; m.m[14] = t[2];
+                in->node[i] = m;
+            } else if ((int)i == s->look_head)       /* Rz(-pitch) x model (row vectors): about its own z */
+                in->node[i] = mat_mul(in->node[i], mat_trs_z(0, 0, 0, -s->look_pitch * 57.2957795f));
+        }
     }
-    (void)s;
 }
 
 static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
@@ -1504,11 +1514,14 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
             Mat4 w = mat_mul(in->base, palette[j]);
             memcpy(world[j], w.m, sizeof world[j]);
         }
-        cloth_set_world(sk->cloth, in->base.m);
+        /* the world matrix moves only with a step: a posing between steps draws the particles where the last step
+         * left them, under that step's matrix (else the hair would trail by the monster's move since) */
         if (!sk->cloth_started) {
+            cloth_set_world(sk->cloth, in->base.m);
             cloth_reset(sk->cloth, (const float (*)[16])world);
             sk->cloth_started = 1;
         } else if (s->cloth_dt > 0) {
+            cloth_set_world(sk->cloth, in->base.m);
             float wind[3] = { 0, 0, 0 };
             if (sk->has_wind)                        /* 0x3473B0: the flag's wind at the game clock */
                 cloth_flag_wind(&sk->wind, s->cloth_time, wind);
@@ -1934,10 +1947,17 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
                 sk->particle = malloc(sizeof *sk->particle * (sk->nverts ? sk->nverts : 1));
                 for (uint32_t k = 0; k < sk->nverts; k++)
                     sk->particle[k] = -1;
-                uint32_t base = 0;                   /* a vertex is placed by one of its triangles (cloth_triangle):
-                                                        some bind places hold two or three particles */
+                uint32_t base = 0;                   /* the mesh's own vertex -> particle table (0x1AA960), else a
+                                                        vertex is placed by one of its triangles (cloth_triangle) */
                 for (uint32_t pi = 0; pi < m.nparts; base += m.parts[pi].nverts, pi++) {
                     const MeshPart *p = &m.parts[pi];
+                    ClothMeshPart cp;
+                    if (cloth_mesh_part(sk->cloth, (int)pi, e->data, e->size, e->data2, e->size2, &cp) == 0) {
+                        if ((uint32_t)cp.nverts == p->nverts)
+                            for (uint32_t j = 0; j < p->nverts; j++)
+                                sk->particle[base + j] = cp.particle[j];
+                        cloth_mesh_part_free(&cp);
+                    }
                     for (uint32_t t = 0; t < p->ntris; t++) {
                         const uint32_t *tri = p->tris + 3 * t;
                         int out[3];
@@ -1956,6 +1976,11 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
     }
     free(cloth);
     s->monster = id;
+    s->look_neck = s->look_head = -1;                /* MD +0xA14: two bones, the neck yaws and the head pitches */
+    for (uint32_t i = 0; i < in->tree.n; i++) {
+        if (ends_with(in->tree.nodes[i].name, "Bip01 Neck")) s->look_neck = (int)i;
+        if (ends_with(in->tree.nodes[i].name, "Bip01 Head")) s->look_head = (int)i;
+    }
     s->monster_anims = ab;
     s->monster_bundle = mb;
     update(s, 0, 1);

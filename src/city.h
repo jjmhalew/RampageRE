@@ -102,6 +102,9 @@ typedef struct {
     float cloth_dt;                                   /* play time not yet simulated by the cloths */
     float cloth_time;                                 /* the flags' wind clock */
     const char *music;                                /* the block's Music (a .mic stream, sound.c) */
+    /* the monster's head turn (MonsterHeadAnimator, 0x2FBF90): the neck yaws about the model's up, the head pitches
+     * about its own z; its bones, -1 none */
+    float look_yaw, look_pitch; int look_neck, look_head;
     Group block;                                      /* the block's BlockDef (its AIDef, ...) */
     /* the army (army.c, driven by main): its units' looks are posed with the people's; the buildings' damage scores */
     Army *army; const char *monster_move;

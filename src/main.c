@@ -56,6 +56,8 @@ typedef struct {
     Army *army;
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
     int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
+    float rx, ry;                                    /* the right stick (x right, y down) */
+    float look_yaw, look_pitch;                      /* the head animator's angles now (+0xBC, +0xE8) */
     float scale, scale_from, scale_to, scale_time, scale_left;   /* setDynamicScale */
     struct { int id, fx, unit, shot; float off[3]; } fxa[128]; int nfxa;   /* the army's effects that follow */
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
@@ -1167,6 +1169,20 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                    v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
+    {                                                /* the head (0x2E70C0, 0x2FBE30, 0x2FBC90): in a look state the
+                                                        right stick's deflection is the target, 81 degrees of yaw and
+                                                        45 of pitch (MONSTER_DATA +0xA08 .. +0xA10, the same in all
+                                                        30); eased at pi / 2 a second (MD +0x174, +0x178), half that
+                                                        while the stick is held; back to 0 outside */
+        int look = v->have_graph && (v->graph.states[v->run.state].flags & NODE_LOOK);
+        int held = look && (v->rx != 0 || v->ry != 0);
+        float ty = look ? -v->rx * 1.4137f : 0, tp = look ? -v->ry * 0.7854f : 0;
+        float step = 1.5707963f * dt * (held ? 0.5f : 1);
+        v->look_yaw += fmaxf(-step, fminf(step, ty - v->look_yaw));
+        v->look_pitch += fmaxf(-step, fminf(step, tp - v->look_pitch));
+        v->scene.look_yaw = v->mirror ? -v->look_yaw : v->look_yaw;   /* mirrored: not traced [G] */
+        v->scene.look_pitch = v->look_pitch;
+    }
     if (v->scale_left > 0) {                         /* the dynamic scale, linear over its time [G] */
         v->scale_left -= dt;
         float f = v->scale_left > 0 ? v->scale_left / v->scale_time : 0;
@@ -1314,7 +1330,9 @@ static void play_script(Viewer *v, const char *script, float aspect)
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
         { "left", -1, -1, 0 }, { "right", -1, 1, 0 }, { "up", -1, 0, -1 }, { "down", -1, 0, 1 }, { "wait", -1, 0, 0 },
         { "cross", MV_CROSS, 0, 0 }, { "square", MV_SQUARE, 0, 0 }, { "triangle", MV_TRIANGLE, 0, 0 },
-        { "circle", MV_CIRCLE, 0, 0 }, { "r2", MV_R2, 0, 0 } };
+        { "circle", MV_CIRCLE, 0, 0 }, { "r2", MV_R2, 0, 0 },
+        { "rleft", -2, -1, 0 }, { "rright", -2, 1, 0 }, { "rup", -2, 0, -1 }, { "rdown", -2, 0, 1 },
+        { "rcenter", -2, 0, 0 } };
     char word[32];
     const char *p = script;
     while (*p) {
@@ -1363,7 +1381,12 @@ static void play_script(Viewer *v, const char *script, float aspect)
             int frames = (int)(seconds * 60 + 0.5f);
             if (frames < 1) frames = 1;
             for (int k = 0; k < frames; k++) {
-                play_step(v, WORDS[i].x, WORDS[i].y, pressed, held, 1.0f / 60, aspect);
+                int right = WORDS[i].button == -2;  /* the right stick: held from here until rcenter */
+                if (right) {
+                    v->rx = WORDS[i].x;
+                    v->ry = WORDS[i].y;
+                }
+                play_step(v, right ? 0 : WORDS[i].x, right ? 0 : WORDS[i].y, pressed, held, 1.0f / 60, aspect);
                 if (v->have_graph && v->scene.monster >= 0) {   /* posed each frame, as the main loop does */
                     v->scene.instances[v->scene.monster].offset =
                         (float)clip_at(v, &v->graph.states[v->run.state], v->run.time);
@@ -1518,8 +1541,10 @@ int main(int argc, char **argv)
                     play_script(&v, script, aspect);
             }
             settled = 1;
-            float lx = (float)((w.keys['D'] || w.keys[VK_RIGHT]) - (w.keys['A'] || w.keys[VK_LEFT]));
-            float ly = (float)((w.keys['S'] || w.keys[VK_DOWN]) - (w.keys['W'] || w.keys[VK_UP]));
+            float lx = (float)(w.keys['D'] - w.keys['A']);   /* the left stick: W A S D; the right: the arrows */
+            float ly = (float)(w.keys['S'] - w.keys['W']);
+            v.rx = (float)(w.keys[VK_RIGHT] - w.keys[VK_LEFT]);
+            v.ry = (float)(w.keys[VK_DOWN] - w.keys[VK_UP]);
             static const struct { int key, button; } PAD[] = {
                 { VK_SPACE, MV_CROSS }, { 'J', MV_SQUARE }, { 'K', MV_TRIANGLE }, { 'L', MV_CIRCLE }, { 'R', MV_R2 } };
             uint8_t pressed[MV_COUNT] = { 0 }, held[MV_COUNT] = { 0 };
