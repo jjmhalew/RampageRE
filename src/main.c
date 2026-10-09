@@ -237,10 +237,21 @@ static void start_moves(Viewer *v)
 }
 
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
-static Group army_find(void *ctx, const char *book, const char *name) { return city_book_group(ctx, book, name); }
+static Group army_find(void *ctx, const char *book, const char *name)
+{
+    return city_book_group(((Viewer *)ctx)->city, book, name);
+}
 static int army_shape_box(void *ctx, const char *shape, float min[3], float max[3])
 {
-    return city_shape_box(ctx, shape, min, max) == 0;
+    return city_shape_box(((Viewer *)ctx)->city, shape, min, max) == 0;
+}
+static int army_node_world(void *ctx, const ArmyUnit *u, const char *node, float out[16])
+{
+    Viewer *v = ctx;                                 /* the weapon's node on the unit's look as drawn */
+    int ok = v->army && scene_unit_node(&v->scene, (int)(u - army_unit(v->army, 0)), node, out) == 0;
+    if (getenv("RAMPAGE_NODES"))
+        printf("  %s node %s: %s\n", u->name ? u->name : "?", node, ok ? "found" : "not found");
+    return ok;
 }
 static float army_clip_seconds(void *ctx, const char *anim, const char *shape)
 {
@@ -270,7 +281,8 @@ static void build(Viewer *v)
         host.find = army_find;
         host.clip_seconds = army_clip_seconds;
         host.shape_box = army_shape_box;
-        host.ctx = v->city;
+        host.node_world = army_node_world;
+        host.ctx = v;
         v->army = army_new(&host);
         if (v->army) {
             army_load_block(v->army, v->scene.block);

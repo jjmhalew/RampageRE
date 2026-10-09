@@ -605,6 +605,25 @@ static int unit_look(City *c, Scene *s, int who, const ArmyUnit *u)
     return id;
 }
 
+static int ends_with(const char *s, const char *tail);
+
+int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
+{
+    for (int i = 0; i < s->nlooks; i++) {
+        const struct PersonLook *l = &s->looks[i];
+        if (l->who != (1 << 20) + unit || l->inst < 0 || s->instances[l->inst].hidden)
+            continue;
+        const Instance *in = &s->instances[l->inst];
+        for (uint32_t k = 0; k < in->tree.n && in->node; k++)
+            if (ends_with(in->tree.nodes[k].name, node)) {
+                Mat4 w = mat_mul(in->base, in->node[k]);
+                memcpy(out, w.m, sizeof w.m);
+                return 0;
+            }
+    }
+    return -1;
+}
+
 /* each frame: every army unit at its place, its clip at anim_time / anim_len of the clip (looks keyed from 1 << 20) */
 static void army_sync(Scene *s, double t)
 {
