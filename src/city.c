@@ -506,9 +506,9 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         if (group_count(f))
             floors[nfloors++] = f;
     }
-    int nst = 0;
-    for (uint32_t i = 1; i < nfloors; i++) {
-        z[nst] = GROUND_FLOOR + STOREY * (float)(i - 1);
+    int nst = 0;                                     /* every Floor| with tiles is a storey above the ground floor */
+    for (uint32_t i = 0; i < nfloors; i++) {         /* (the game's grid: storeys = Floor| entries - 1, the last empty) */
+        z[nst] = GROUND_FLOOR + STOREY * (float)i;
         ntiles[nst] = group_items(floors[i], tiles[nst], 64);
         nst++;
     }
@@ -533,7 +533,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         memset(sb->quad, 0xFF, sizeof sb->quad);
         int32_t v = 0;
         for (int st = 0; st < nst && st < BUILDING_STOREYS; st++) {
-            sb->b.floor_hp[st] = (int)group_num(floors[st + 1], "FloorHP", (float)sb->b.floor_hp[st]);
+            sb->b.floor_hp[st] = (int)group_num(floors[st], "FloorHP", (float)sb->b.floor_hp[st]);
             for (int k = 0; k < 2 * depth + width && (uint32_t)k < ntiles[st]; k++) {
                 int face = k < depth ? FACE_LEFT : k < depth + width ? FACE_FRONT : FACE_RIGHT;
                 int col = k < depth ? k : k < depth + width ? k - depth : k - depth - width;
@@ -548,7 +548,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     }
     const char *top = str_item(group_sub(t, "ShapeSet|TopFloorShapes"), 0);
     if (top)
-        place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)(nfloors ? nfloors - 1 : 0), 0)), -1);
+        place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)nfloors, 0)), -1);
     Record obj[MAX_REC];
     uint32_t no = group_values(inst, "ObjectInstance|", &where, obj, MAX_REC);
     for (uint32_t i = 0; i < no; i++)

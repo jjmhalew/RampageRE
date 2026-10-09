@@ -308,8 +308,10 @@ All seven cities export (Chicago, New York, San Francisco, Los Angeles, Las Vega
 block, every building and object model found). Game units, Z up, the street towards −Y; one cell is 5 × 5:
 - the block's ground shape, the city's day backdrop (`*_Backdrop`) and sky (`*_Skydome_Main`) at the origin;
 - a building's centre is at x = `LeftEdgeXPos` + width × 2.5, y = `Row` × `BackRowOffset`;
-- the ground-floor shape (`ShapeSet|GroundFloorShapes`, 6 high) at z 0, then storeys 2..n (`Floor|` entries; the
-  template name is width × storeys, `CG2_2x7`) 3 high each, then the top shape (`ShapeSet|TopFloorShapes`);
+- the ground-floor shape (`ShapeSet|GroundFloorShapes`, 6 high) at z 0, then a storey 3 high per `Floor|` entry
+  with tiles (the template name is width × storeys: `CG2_2x7` has 7 such entries and an empty eighth, and the
+  game's grid counts storeys as entries − 1), then the top shape (`ShapeSet|TopFloorShapes`, 1.5 high: the roof's
+  band of the grid's box) at 6 + 3 × storeys;
 - upper storeys have no mesh: the facade is built from the `TextureSheet`, a 4 × 4 grid of tiles (column =
   window style, row = damage state, 0 intact). Each `Floor|` lists width + 2 × depth tile columns: left side
   (back to front), front (left to right), right side (front to back); the back is never seen. A floor's

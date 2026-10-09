@@ -7,7 +7,7 @@ texture sheet and one `Floor|` per storey with a facade tile per cell. The meshe
 See docs/FORMAT_BDP.md ("City layout").
 
 Building geometry (game units; one cell is 5 x 5, Z up, the street is towards -Y):
-  ground-floor shape at z 0 (6 high), then storeys 2..n are 3 high each, then the top shape.
+  ground-floor shape at z 0 (6 high), then one storey 3 high per Floor| with tiles, then the top shape (1.5 high).
   The upper storeys have no mesh of their own: the game builds the facade from the texture sheet, a 4 x 4
   grid of tiles (column = window style, row = damage state). A storey lists width + 2 * depth tile columns:
   left side (back to front), front (left to right), right side (front to back).
@@ -316,7 +316,7 @@ class CityExporter:
         if ground and ground.items():
             self.place_model(assets, g, ground.items()[0], node)
         floors = [f for f in t.values('Floor|') if f.records]
-        storeys = [(GROUND_FLOOR + STOREY * (i - 1), f.items()) for i, f in enumerate(floors) if i > 0]
+        storeys = [(GROUND_FLOOR + STOREY * i, f.items()) for i, f in enumerate(floors)]   # every tiled Floor|
         sheet = t.get('TextureSheet')
         if storeys and sheet:
             png = assets.texture(self.name_index.get(sheet.lower(), -1))
@@ -326,7 +326,7 @@ class CityExporter:
                 g.node('facade', m, parent=node)
         top = t.get('ShapeSet|TopFloorShapes')
         if top and top.items():
-            self.place_model(assets, g, top.items()[0], node, (0, 0, GROUND_FLOOR + STOREY * (len(floors) - 1)))
+            self.place_model(assets, g, top.items()[0], node, (0, 0, GROUND_FLOOR + STOREY * len(floors)))
         for obj in inst.values('ObjectInstance|'):
             self.place_object(assets, g, obj, node)
 
