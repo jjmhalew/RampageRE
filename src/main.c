@@ -18,6 +18,7 @@
 #include "camera.h"
 #include "moves.h"
 #include "climb.h"
+#include "ik.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -43,6 +44,7 @@ typedef struct {
     uint32_t armed; int show_hits;                   /* body parts an attack event armed (bits); H draws them */
     int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
     Mount mount;                                     /* on a building's face (climb.c) */
+    Hand hand[2];                                    /* its hands on the wall (0 left, 1 right, as seen) */
     const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
 } Viewer;
 
@@ -179,6 +181,7 @@ static void start_moves(Viewer *v)
     memset(v->vel, 0, sizeof v->vel);
     v->mirror = v->mirror_queued = 0;
     memset(&v->mount, 0, sizeof v->mount);
+    memset(v->hand, 0, sizeof v->hand);
     v->mount.at.building = v->mount.cand.building = -1;
     memset(v->air, 0, sizeof v->air);
     memset(v->stick, 0, sizeof v->stick);
@@ -404,6 +407,27 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::unmountBuilding")) { climb_unmount(&v->mount); return; }
+    else if (!strcmp(n, "Monsters::attachHand")) {   /* (hand, time, mirror): only on a building */
+        int h = ((int)e->p[0] & 1) ^ (v->mirror ? 1 : 0);
+        Mat4 w;
+        if (v->mount.at.building < 0 || scene_monster_hand(&v->scene, h, &w) != 0)
+            return;
+        /* the place: the clip's hand now, held to the face; the rotation the clip's (the game's is the clip's hand
+         * at the end of the blend, 0x321E80) */
+        float pos[3] = { w.m[12], w.m[13], w.m[14] }, r[9], q[4];
+        for (int c = 0; c < 3; c++)
+            for (int k = 0; k < 3; k++)
+                r[3 * c + k] = w.m[4 * c + k];
+        ik_quat_of(r, q);
+        climb_hand_snap(&v->mount, &v->scene, h, pos);
+        if (hand_attach(&v->hand[h], e->p[1], pos, q) && e->p[2] != 0)
+            v->mirror_queued = !v->mirror_queued;
+        return;
+    }
+    else if (!strcmp(n, "Monsters::detachHand")) {
+        hand_detach(&v->hand[((int)e->p[0] & 1) ^ (v->mirror ? 1 : 0)], e->p[1]);
+        return;
+    }
     else if (!strcmp(n, "Monsters::transferMount")) { climb_transfer(&v->mount); return; }
     else if (!strcmp(n, "Monsters::changeMountRail")) {
         float d = v->mirror ? -e->p[0] : e->p[0];
@@ -579,6 +603,8 @@ static void hit_spheres(Viewer *v)
     }
 }
 
+static void hands_step(Viewer *v, float dt);
+
 static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
 {
     if (v->have_graph) {
@@ -742,6 +768,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                    v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
+    hands_step(v, dt);
     scene_buildings_update(&v->scene, dt);
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
@@ -752,6 +779,43 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     }
     float at[1][3] = { { v->mx, v->my, v->mz } };
     cam_update(&v->cam, (const float (*)[3])at, 1, dt, aspect);
+}
+
+/* the hands each frame (0x323130, 0x3230F0): let go off a building (unmountBuilding's 0x322EC0, 0.1 s), the timers and
+ * targets, then the IK's targets in the monster's frame */
+static void hands_step(Viewer *v, float dt)
+{
+    float h0 = v->heading / 57.2957795f, c = cosf(h0), sn = sinf(h0);
+    for (int h = 0; h < 2; h++) {
+        Hand *hd = &v->hand[h];
+        if (v->mount.at.building < 0 && hd->target > 0)
+            hand_detach(hd, 0.1f);
+        Mat4 w;
+        float anim[3] = { hd->tp[0], hd->tp[1], hd->tp[2] };
+        if (scene_monster_hand(&v->scene, h, &w) == 0) {
+            anim[0] = w.m[12];
+            anim[1] = w.m[13];
+            anim[2] = w.m[14];
+        }
+        hand_update(hd, h, &v->mount, &v->scene, anim, dt);
+        float wt = hand_weight(hd);
+        if (getenv("RAMPAGE_HANDS") && (wt > 0 || hd->target > 0))
+            printf("  hand %d: w %.2f%s%s, clip's at %.2f %.2f %.2f, held at %.2f %.2f %.2f\n", h, wt,
+                   hd->attaching ? " attaching" : "", hd->planted ? " planted" : "", anim[0], anim[1], anim[2],
+                   hd->sp[0], hd->sp[1], hd->sp[2]);
+        v->scene.ik_w[h] = hd->valid ? wt : 0;
+        if (!hd->valid)
+            continue;
+        /* model space: the world less the monster's place, turned back by its heading */
+        float d[3] = { hd->sp[0] - v->mx, hd->sp[1] - v->my, hd->sp[2] - v->mz }, r[9], rz[9] = { c, -sn, 0, sn, c, 0, 0, 0, 1 };
+        v->scene.ik_pos[h][0] = c * d[0] + sn * d[1];
+        v->scene.ik_pos[h][1] = -sn * d[0] + c * d[1];
+        v->scene.ik_pos[h][2] = d[2];
+        ik_rot_of(hd->sq, r);
+        for (int col = 0; col < 3; col++)            /* Rz(-heading) x r */
+            for (int k = 0; k < 3; k++)
+                v->scene.ik_rot[h][3 * col + k] = rz[k] * r[3 * col] + rz[3 + k] * r[3 * col + 1] + rz[6 + k] * r[3 * col + 2];
+    }
 }
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
@@ -855,7 +919,7 @@ int main(int argc, char **argv)
             city = i;
     uint32_t block = (uint32_t)(atoi(pos[2]) > 0 ? atoi(pos[2]) - 1 : 0);
     Window w;
-    if (win_open(&w, "RampageRE", 1280, 720) != 0) {
+    if (win_open(&w, "RampageRE", 1280, 720, shot != NULL) != 0) {   /* a --shot run never shows a window */
         plat_message("Cannot open an OpenGL window.", 1);
         return 1;
     }

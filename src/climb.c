@@ -2,6 +2,7 @@
 #include <math.h>
 #include <string.h>
 #include "climb.h"
+#include "ik.h"
 #include "moves.h"
 
 #define RAIL 5.0f
@@ -365,4 +366,103 @@ int climb_check(Mount *m, const Scene *s, const Climber *c, int mode)
     if (r == 1 || r == -9)
         return -1;
     return r == -8 ? 73 : 31;                        /* knocked off: the falling building's slot, or the plain one */
+}
+
+/* ---------------------------------------------------------------- the hands */
+
+#define HAND_OFF 0.75f                               /* the hand object's +0x4 */
+
+float hand_weight(const Hand *h)
+{
+    if (h->remaining <= 0)
+        return h->target;
+    if (h->remaining >= h->duration)
+        return h->start;
+    float u = h->remaining / h->duration, s = (3 - 2 * u) * u * u;
+    return h->target * (1 - s) + h->start * s;
+}
+
+int hand_attach(Hand *h, float time, const float pos[3], const float q[4])
+{
+    if (time <= 0) {
+        if (h->attaching || h->planted)
+            return 0;
+        time = 0.2f;
+    }
+    h->attaching = 1;
+    h->start = hand_weight(h);
+    h->target = 1;
+    h->remaining = h->duration = h->start >= 1 ? 0 : time;
+    memcpy(h->tp, pos, sizeof h->tp);
+    memcpy(h->tq, q, sizeof h->tq);
+    return 1;
+}
+
+void hand_detach(Hand *h, float time)
+{
+    h->start = hand_weight(h);
+    h->target = 0;
+    h->attaching = h->planted = 0;
+    h->remaining = h->duration = h->start <= 0 ? 0 : time;
+}
+
+void climb_hand_snap(const Mount *m, const Scene *s, int hand, float pos[3])
+{
+    const Building *b = building_of(s, m->at.building);
+    if (!b)
+        return;
+    const float *M = m->at.pt;
+    if (m->at.rail == 0) {
+        pos[0] = hand == 1 ? M[0] : M[0] - HAND_OFF;
+        pos[1] = hand == 1 ? M[1] : M[1] + 2.5f;
+    } else if (m->at.rail == b->width) {
+        pos[0] = hand == 0 ? M[0] : M[0] + HAND_OFF;
+        pos[1] = hand == 0 ? M[1] : M[1] + 2.5f;
+    } else {
+        pos[1] = M[1] - HAND_OFF;
+        pos[0] = fmaxf(b->min[0] + 2 * HAND_OFF, fminf(pos[0], b->max[0] - 2 * HAND_OFF));
+    }
+    float lo = b->min[2], hi = b->max[2];
+    const Building *o = across(m, s);
+    if (o) {
+        lo = fmaxf(lo, o->min[2]);
+        hi = fminf(hi, o->max[2]);
+    }
+    pos[2] = fmaxf(lo + 1.5f, fminf(pos[2], hi - 1.5f));
+}
+
+void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float anim[3], float dt)
+{
+    int follow = 0;
+    if (h->remaining > 0) {
+        h->remaining -= dt;
+        if (h->remaining <= 0) {
+            h->remaining = 0;
+            if (h->target == 1) {
+                h->planted = 1;
+                h->attaching = 0;
+            }
+        } else
+            follow = h->attaching;
+    } else
+        follow = h->target == 1 && h->attaching;
+    if (follow) {
+        memcpy(h->tp, anim, sizeof h->tp);
+        climb_hand_snap(m, s, hand, h->tp);
+    }
+    if (h->planted)
+        climb_hand_snap(m, s, hand, h->tp);
+    if (h->valid) {                                  /* 0.3 (gp - 0x7130) of the last place stays */
+        for (int k = 0; k < 3; k++)
+            h->sp[k] = h->tp[k] + (h->sp[k] - h->tp[k]) * 0.3f;
+        ik_slerp(h->tq, h->sq, 0.3f, h->sq);
+    }
+    /* 0x322960: what the solver gets */
+    if (hand_weight(h) <= 0)
+        h->valid = 0;
+    else if (!h->valid) {
+        memcpy(h->sq, h->tq, sizeof h->sq);
+        memcpy(h->sp, h->tp, sizeof h->sp);
+        h->valid = 1;
+    }
 }

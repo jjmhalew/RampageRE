@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include "plat.h"
 #include "city.h"
+#include "ik.h"
 
 #define CELL 5.0f
 #define GROUND_FLOOR 6.0f
@@ -747,6 +748,71 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
     }
 }
 
+static int ends_with(const char *s, const char *tail);
+
+/* S k S, S the reflection of x: a node of the other side as the mirrored pose draws it */
+static Mat4 reflect_x(Mat4 k)
+{
+    for (int c = 0; c < 4; c++) {
+        k.m[4 * c] = -k.m[4 * c];
+        k.m[c] = -k.m[c];
+    }
+    return k;
+}
+
+/* the monster's hands, posed: kept as the clips have them, then the arm IK (StdIKPairAnimator at monster +0x2588:
+ * chains for Bip01 L Hand and Bip01 R Hand, 0x2F9720). Mirrored, a hand as drawn is the other side's node reflected,
+ * so the IK works on that one with the target reflected. */
+static void monster_ik(Scene *s, Instance *in)
+{
+    if (!s->ik_ready) {
+        s->ik_ready = 1;
+        static const char *const HAND[2] = { "Bip01 L Hand", "Bip01 R Hand" };
+        for (int h = 0; h < 2; h++) {
+            s->ik_chain[h][0] = s->ik_chain[h][1] = s->ik_chain[h][2] = -1;
+            for (uint32_t i = 0; i < in->tree.n; i++)
+                if (ends_with(in->tree.nodes[i].name, HAND[h])) {
+                    int fa = in->tree.nodes[i].parent, ua = fa >= 0 ? in->tree.nodes[fa].parent : -1;
+                    if (ua >= 0) {
+                        s->ik_chain[h][0] = ua;
+                        s->ik_chain[h][1] = fa;
+                        s->ik_chain[h][2] = (int)i;
+                    }
+                }
+        }
+    }
+    for (int h = 0; h < 2; h++) {
+        int c[3], ok = s->ik_chain[h][2] >= 0;
+        for (int k = 0; k < 3 && ok; k++) {
+            int b = s->ik_chain[h][k], m = in->mirrored ? in->tree.nodes[b].mirror : b;
+            c[k] = m >= 0 && (uint32_t)m < in->tree.n ? m : b;
+        }
+        if (!ok)
+            continue;
+        s->ik_anim[h] = in->mirrored ? reflect_x(in->node[c[2]]) : in->node[c[2]];
+        if (s->ik_w[h] <= 0 || getenv("RAMPAGE_NOIK"))
+            continue;
+        float p[3] = { s->ik_pos[h][0], s->ik_pos[h][1], s->ik_pos[h][2] }, r[9];
+        memcpy(r, s->ik_rot[h], sizeof r);
+        if (in->mirrored) {
+            p[0] = -p[0];
+            for (int col = 0; col < 3; col++)
+                for (int k = 0; k < 3; k++)
+                    if ((k == 0) != (col == 0))
+                        r[3 * col + k] = -r[3 * col + k];
+        }
+        ik_arm(in->node, &in->tree, c, p, r, s->ik_w[h]);
+    }
+}
+
+int scene_monster_hand(const Scene *s, int hand, Mat4 *world)
+{
+    if (s->monster < 0 || hand < 0 || hand > 1 || !s->ik_ready || s->ik_chain[hand][2] < 0)
+        return -1;
+    *world = mat_mul(s->instances[s->monster].base, s->ik_anim[hand]);
+    return 0;
+}
+
 static void update(Scene *s, double t, int all)
 {
     for (uint32_t i = 0; i < s->ninstances; i++) {
@@ -755,8 +821,11 @@ static void update(Scene *s, double t, int all)
             const Vehicle *v = &s->vehicles[in->vehicle];
             in->base = mat_trs_z(vehicle_x(v, t), v->y, 0, v->turn_deg);
         }
-        if (in->tree.n && (all || in->has_clip))
+        if (in->tree.n && (all || in->has_clip)) {
             pose_instance(s, in, t);
+            if ((int)i == s->monster)
+                monster_ik(s, in);
+        }
     }
     for (uint32_t i = 0; i < s->nitems; i++) {
         DrawItem *it = &s->items[i];

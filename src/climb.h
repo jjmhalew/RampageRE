@@ -53,4 +53,24 @@ void climb_place(Mount *m, const Scene *s, uint32_t flags, const float delta[3],
  * building falls), else -1. Mode: its movement mode (off a building it lets go). */
 int climb_check(Mount *m, const Scene *s, const Climber *c, int mode);
 
+/* the hands on the wall (monster +0xC77C, 0x323180): attachHand (0x3228B0, 0x3219D0), detachHand (0x3218C0), the
+ * release on unmounting (0x322EC0, 0.1 s) and each frame's update (0x322C50, 0x322960); the arm IK they drive is
+ * ik.c's. Hand 0 is the left one, 1 the right (as seen: the script's hand swapped when the clip plays mirrored). */
+typedef struct {
+    float target, start, remaining, duration;        /* +0x0 .. +0xC: the share it blends to, from, time left, of */
+    int attaching, planted, valid;                   /* +0x10, +0x11, +0x12 */
+    float sq[4], sp[3];                              /* +0x14, +0x24: where it is held, smoothed (world) */
+    float tq[4], tp[3];                              /* +0x30, +0x40: where it is to be */
+} Hand;
+float hand_weight(const Hand *h);                    /* now: a smoothstep from start to target */
+/* time <= 0: 0.2, or nothing while it already grips; pos (snapped) and q where the clip puts the hand; 1 if taken */
+int hand_attach(Hand *h, float time, const float pos[3], const float q[4]);
+void hand_detach(Hand *h, float time);
+/* 0x322680: the hand's place held to the mount's face (0.75 off it; on a side one hand at the corner, the other 2.5
+ * along), between the building's foot and top less 1.5 */
+void climb_hand_snap(const Mount *m, const Scene *s, int hand, float pos[3]);
+/* each frame: the timer, the target following the clip's hand while it attaches (anim) and held to the face, then
+ * the smoothing (0.7 of the target, 0.3 of the last place) */
+void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float anim[3], float dt);
+
 #endif

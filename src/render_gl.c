@@ -40,7 +40,39 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
-int win_open(Window *w, const char *title, int width, int height)
+/* hidden: never shown nor focused (--shot); the frame goes to an offscreen framebuffer (EXT_framebuffer_object)
+ * of width x height, or, without one, to the window shown without taking the focus, off the screen */
+static int offscreen(int width, int height)
+{
+    typedef void (APIENTRY *Gen)(GLsizei, GLuint *);
+    typedef void (APIENTRY *Bind)(GLenum, GLuint);
+    typedef void (APIENTRY *Storage)(GLenum, GLenum, GLsizei, GLsizei);
+    typedef void (APIENTRY *Attach)(GLenum, GLenum, GLenum, GLuint);
+    typedef GLenum (APIENTRY *Status)(GLenum);
+    Gen gen_fb = (Gen)(void *)wglGetProcAddress("glGenFramebuffersEXT");
+    Gen gen_rb = (Gen)(void *)wglGetProcAddress("glGenRenderbuffersEXT");
+    Bind bind_fb = (Bind)(void *)wglGetProcAddress("glBindFramebufferEXT");
+    Bind bind_rb = (Bind)(void *)wglGetProcAddress("glBindRenderbufferEXT");
+    Storage storage = (Storage)(void *)wglGetProcAddress("glRenderbufferStorageEXT");
+    Attach attach = (Attach)(void *)wglGetProcAddress("glFramebufferRenderbufferEXT");
+    Status status = (Status)(void *)wglGetProcAddress("glCheckFramebufferStatusEXT");
+    if (!gen_fb || !gen_rb || !bind_fb || !bind_rb || !storage || !attach || !status)
+        return -1;
+    GLuint fb, rb[2];
+    gen_fb(1, &fb);
+    gen_rb(2, rb);
+    bind_fb(0x8D40, fb);                                   /* GL_FRAMEBUFFER_EXT */
+    bind_rb(0x8D41, rb[0]);                                /* GL_RENDERBUFFER_EXT */
+    storage(0x8D41, 0x8058, width, height);                /* GL_RGBA8 */
+    attach(0x8D40, 0x8CE0, 0x8D41, rb[0]);                 /* GL_COLOR_ATTACHMENT0_EXT */
+    bind_rb(0x8D41, rb[1]);
+    storage(0x8D41, 0x88F0, width, height);                /* GL_DEPTH24_STENCIL8_EXT */
+    attach(0x8D40, 0x8D00, 0x8D41, rb[1]);                 /* GL_DEPTH_ATTACHMENT_EXT */
+    attach(0x8D40, 0x8D20, 0x8D41, rb[1]);                 /* GL_STENCIL_ATTACHMENT_EXT */
+    return status(0x8D40) == 0x8CD5 ? 0 : -1;              /* GL_FRAMEBUFFER_COMPLETE_EXT */
+}
+
+int win_open(Window *w, const char *title, int width, int height, int hidden)
 {
     memset(w, 0, sizeof *w);
     g_win = w;
@@ -54,8 +86,10 @@ int win_open(Window *w, const char *title, int width, int height)
     RegisterClassA(&wc);
     RECT rc = { 0, 0, width, height };
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND hwnd = CreateWindowA("RampageRE", title, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
-                              rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, inst, NULL);
+    HWND hwnd = CreateWindowExA(hidden ? WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW : 0, "RampageRE", title,
+                                WS_OVERLAPPEDWINDOW | (hidden ? 0 : WS_VISIBLE), hidden ? -32000 : CW_USEDEFAULT,
+                                hidden ? -32000 : CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, NULL, NULL,
+                                inst, NULL);
     if (!hwnd)
         return -1;
     HDC hdc = GetDC(hwnd);
@@ -73,6 +107,10 @@ int win_open(Window *w, const char *title, int width, int height)
         swap(1);
     w->hwnd = hwnd; w->hdc = hdc; w->hglrc = rc_gl;
     w->width = width; w->height = height;
+    if (hidden && offscreen(width, height) != 0) {
+        SetWindowPos(hwnd, HWND_BOTTOM, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
     return 0;
 }
 

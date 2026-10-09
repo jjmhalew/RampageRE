@@ -15,7 +15,7 @@ typedef struct {
     void *hwnd, *hdc, *hglrc;
 } Window;
 
-int  win_open(Window *w, const char *title, int width, int height);   /* 0 = ok */
+int  win_open(Window *w, const char *title, int width, int height, int hidden);   /* 0 = ok; hidden: offscreen */
 void win_poll(Window *w);
 void win_swap(Window *w);
 void win_close(Window *w);

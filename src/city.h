@@ -75,6 +75,12 @@ typedef struct {
     const Bundle *monster_bundle;                     /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
     float spheres[64][4]; int nspheres;               /* drawn over the scene as wire spheres: centre, radius */
     SceneBuilding *buildings; uint32_t nbuildings;
+    /* the monster's arm IK (ik.c), per hand (0 left, 1 right, as drawn): its share, where the hand goes (model space,
+     * as drawn: rotation 3 x 3 column-major), the chain (upper arm, forearm, hand; -1 none), and the hand as the
+     * clips posed it before the IK (model space, as drawn) */
+    float ik_w[2], ik_pos[2][3], ik_rot[2][9];
+    int ik_chain[2][3], ik_ready;
+    Mat4 ik_anim[2];
 } Scene;
 
 typedef struct City City;
@@ -95,6 +101,8 @@ void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float tu
 int scene_monster_play(Scene *s, const char *clip);
 /* the face layer plays clip (head: Bip01 Head itself too), at face_t 0 .. 1 (Instance.face_t); 0 = ok */
 int scene_monster_face(Scene *s, const char *clip, int head);
+/* the monster's hand (0 left, 1 right, as drawn) in the world, as the clips posed it (before the IK); 0 = ok */
+int scene_monster_hand(const Scene *s, int hand, Mat4 *world);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
  * storeys and rubble drawn as they now are */
 void scene_buildings_update(Scene *s, float dt);
