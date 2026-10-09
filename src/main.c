@@ -106,7 +106,7 @@ static void play_state(Viewer *v)
     }
     v->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed, on the ground */
     v->mode = MODE_GROUND;                           /* (its events set the mode it is in) */
-    climb_clip_started(&v->mount);
+    climb_clip_started(&v->mount, st->name);
     v->mirror = v->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
     v->input.mirrored = v->mirror;
     if (v->scene.monster >= 0)
@@ -196,7 +196,7 @@ static int open_city(Viewer *v, int index, uint32_t block)
  * test against here, so only the monster's own abilities say yes) */
 static Climber climber(const Viewer *v)
 {
-    Climber c = { { v->mx, v->my, v->mz }, v->heading, v->graph.box[0], { v->graph.probe[0], v->graph.probe[1] } };
+    Climber c = { { v->mx, v->my, v->mz }, v->heading, v->graph.box[0], v->mx, { v->graph.probe[0], v->graph.probe[1] } };
     return c;
 }
 
@@ -228,21 +228,25 @@ static int answer(void *ctx, const char *call, const float *a)
         int r = climb_can_mount(&v->mount, sc, &c, (int)a[0], 0);
         return r == -1 || r == -2 || r == -3 || r == -5 || r == -6;
     }
-    if (!strcmp(call, "Monsters::canHop")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0])) == 3;
-    if (!strcmp(call, "Monsters::canSwing")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0])) == 4;
-    if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0) == 5;
+    if (!strcmp(call, "Monsters::canHop")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 3;
+    if (!strcmp(call, "Monsters::canSwing")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 4;
+    if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0, 0) == 5;
+    if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
+        return climb_can_transfer(&v->mount, sc, &c, v->mirror ? a[0] == 0 : a[0] == 1) == 1;
+    if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
+        return climb_can_transfer(&v->mount, sc, &c, v->mirror || a[0] != 0) == 1;
     if (!strcmp(call, "Monsters::stopClimbUp") || !strcmp(call, "Monsters::stopSpiderClimbUp")) {
-        int r = climb_can_climb(&v->mount, sc, &c, 1, 0);
+        int r = climb_can_climb(&v->mount, sc, &c, 1, 0, !strcmp(call, "Monsters::stopSpiderClimbUp"));
         if (getenv("RAMPAGE_TRACE"))
             printf("  canClimb up %d (mount z %.1f, top %.1f)\n", r, v->mount.at.pt[2],
                    v->mount.at.building >= 0 ? sc->buildings[v->mount.at.building].b.max[2] : 0);
         return r != 2;
     }
-    if (!strcmp(call, "Monsters::stopClimbDown")) return climb_can_climb(&v->mount, sc, &c, -1, 0) != 2;
-    if (!strcmp(call, "Monsters::shouldUnmountDown")) return climb_can_climb(&v->mount, sc, &c, -1, 0) == -1;
+    if (!strcmp(call, "Monsters::stopClimbDown")) return climb_can_climb(&v->mount, sc, &c, -1, 0, 0) != 2;
+    if (!strcmp(call, "Monsters::shouldUnmountDown")) return climb_can_climb(&v->mount, sc, &c, -1, 0, 0) == -1;
     if (!strcmp(call, "Monsters::hitElectricSign"))
-        return climb_can_climb(&v->mount, sc, &c, a[0] == 0 ? 1 : -1, 0) == -2;
-    return 0;                                        /* canTransfer, canGrabPerson, ...: not here */
+        return climb_can_climb(&v->mount, sc, &c, a[0] == 0 ? 1 : -1, 0, 0) == -2;
+    return 0;                                        /* canGrabPerson, ...: not here */
 }
 
 /* the clip events the viewer acts on: the movement mode, and Monsters.bsf's velocity functions (jumpNorm and its kin
@@ -341,6 +345,7 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::unmountBuilding")) { climb_unmount(&v->mount); return; }
+    else if (!strcmp(n, "Monsters::transferMount")) { climb_transfer(&v->mount); return; }
     else if (!strcmp(n, "Monsters::changeMountRail")) {
         float d = v->mirror ? -e->p[0] : e->p[0];
         climb_change_rail(&v->mount, d < 0 ? -1 : 1);
@@ -691,7 +696,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
- * "mirror" flips the mirror state for the next clip */
+ * "mirror" flips the mirror state for the next clip; "at x y" puts the monster there, facing the buildings */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -707,13 +712,22 @@ static void play_script(Viewer *v, const char *script, float aspect)
         word[n] = 0;
         float seconds = 0;
         while (*p == ' ') p++;
-        if ((*p >= '0' && *p <= '9') || *p == '.') {
+        if ((*p >= '0' && *p <= '9') || *p == '.' || *p == '-') {
             char *end;
             seconds = (float)strtod(p, &end);
             p = end;
         }
         if (_stricmp(word, "mirror") == 0) {         /* the next clip mirrored, as an event of type 8 would */
             v->mirror_queued = !v->mirror_queued;
+            continue;
+        }
+        if (_stricmp(word, "at") == 0) {             /* at x y: the monster stands there, facing the buildings */
+            char *end;
+            v->mx = seconds;
+            v->my = (float)strtod(p, &end);
+            p = end;
+            v->mz = 0;
+            v->heading = 0;
             continue;
         }
         if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
@@ -793,6 +807,11 @@ int main(int argc, char **argv)
     if (open_city(&v, city, block) != 0) {
         plat_message("The city's bundles are not in RAMPAGE.VOL.", 1);
         return 1;
+    }
+    for (uint32_t i = 0; getenv("RAMPAGE_TRACE") && i < v.scene.nbuildings; i++) {
+        const Building *b = &v.scene.buildings[i].b;
+        printf("building %u: x %.0f .. %.0f, y %.0f .. %.0f, top %.1f, row %d, %d wide\n", i, b->min[0], b->max[0],
+               b->min[1], b->max[1], b->max[2], b->row, b->width);
     }
     Camera cam = { { 0, -110, 45 }, 3.14159265f / 2, -0.3f, 60 };
     if (v.monster >= 0) {                                  /* closer, the monster in front */

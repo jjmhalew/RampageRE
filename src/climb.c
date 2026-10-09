@@ -18,9 +18,10 @@ static int standing(const Building *b)               /* states 1 .. 3 */
 }
 
 /* 0x2DDC40: can the monster be at pt on building bi? The box pt +- (4.1, 4.1, 4.5) must not reach into another
- * building (-5), the building must not be falling (-8). The game also asks the cells' flag 0x1000 (-6), the
- * building's attachments and other objects (-2), other monsters (-3) and the camera's reach (-9): none here. */
-static int place_ok(const Scene *s, int bi, const float pt[3])
+ * building (-5), the building must not be falling (-8), and a player's place must be in the camera's reach (-9:
+ * 0x336230, at most 70 high and 30 along x from the middle of the players). The game also asks the cells' flag
+ * 0x1000 (-6), the building's attachments and other objects (-2) and other monsters (-3): none here. */
+static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
 {
     float lo[3] = { pt[0] - 4.1f, pt[1] - 4.1f, pt[2] - 4.5f }, hi[3] = { pt[0] + 4.1f, pt[1] + 4.1f, pt[2] + 4.5f };
     for (uint32_t i = 0; i < s->nbuildings; i++) {
@@ -36,7 +37,32 @@ static int place_ok(const Scene *s, int bi, const float pt[3])
     const Building *b = building_of(s, bi);
     if (!b || b->state == BUILDING_FALLING || b->state == BUILDING_GONE)
         return -8;
+    if (pt[2] > 70 || fabsf(pt[0] - focus_x) > 30)
+        return -9;
     return 1;
+}
+
+/* 0x2DD710: on a side in a spider state, the building of its row across the 10-unit alley that side looks onto */
+static const Building *across(const Mount *m, const Scene *s)
+{
+    const Building *b = building_of(s, m->at.building);
+    if (!b || !m->mounted || !m->spider || (m->at.rail != 0 && m->at.rail != b->width))
+        return NULL;
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        const Building *o = &s->buildings[i].b;
+        if (o == b || o->row != b->row)
+            continue;
+        float gap = m->at.rail == 0 ? b->min[0] - o->max[0] : o->min[0] - b->max[0];
+        if (fabsf(gap - 10) < 0.001f)
+            return o;
+    }
+    return NULL;
+}
+
+static float top_of(const Mount *m, const Scene *s, const Building *b)   /* maxZ', with the spider's neighbour */
+{
+    const Building *o = across(m, s);
+    return o ? fminf(b->max[2], o->max[2]) : b->max[2];
 }
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -91,7 +117,7 @@ int climb_can_mount(Mount *m, const Scene *s, const Climber *c, int side, float 
     MountSpot spot;
     if (!find_spot(m, s, c, side, zoff, &spot))
         return -7;
-    int r = place_ok(s, spot.building, spot.pt);
+    int r = place_ok(s, spot.building, spot.pt, c->focus_x);
     if (r == 1) {
         m->cand = spot;
         m->have_cand = 1;
@@ -106,9 +132,8 @@ static int rail_kind(const Building *b, int rail)
     return rail >= 1 && rail <= b->width - 1 ? 1 : rail == 0 ? 2 : rail == b->width ? 4 : 0;
 }
 
-int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, int dh)
+int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, int dh, int spider)
 {
-    (void)c;
     const Building *b = building_of(s, m->at.building);
     if (!m->mounted || !b)
         return -4;
@@ -129,29 +154,86 @@ int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, in
         pt[0] += RAIL * (float)dh;
         if (m->from_top)
             pt[2] -= REACH;
-        int r = place_ok(s, m->at.building, pt);
+        int r = place_ok(s, m->at.building, pt, c->focus_x);
         if (r != 1)
             return r;
         return to == (dh < 0 ? 0 : b->width) || m->at.rail == (dh < 0 ? b->width : 0) ? 4 : 3;
     }
     if (dv > 0) {                                    /* up: on climbing, or over the top onto the roof */
-        if (pt[2] + 4 <= b->max[2]) {
+        float roof = spider ? top_of(m, s, b) : b->max[2];
+        if (pt[2] + 4 <= roof) {
             pt[2] += 0.75f;
-            int r = place_ok(s, m->at.building, pt);
+            int r = place_ok(s, m->at.building, pt, c->focus_x);
             return r == 1 || r == -9 ? 2 : r;
         }
-        float top[3] = { pt[0], pt[1] + 2.5f, b->max[2] + 7.5f };
-        int r = place_ok(s, m->at.building, top);
+        float top[3] = { pt[0], pt[1] + 2.5f, roof + 7.5f };
+        int r = place_ok(s, m->at.building, top, c->focus_x);
         return r == 1 ? 5 : r;
     }
     if (dv < 0) {                                    /* down: on climbing, or its feet are at the bottom: -1 */
         if (pt[2] - 7.5f <= b->min[2])
             return -1;
         pt[2] -= 0.75f;
-        int r = place_ok(s, m->at.building, pt);
+        int r = place_ok(s, m->at.building, pt, c->focus_x);
         return r == 1 || r == -9 || r == -5 ? 2 : r;
     }
     return 0;
+}
+
+/* 0x2A41F0: the spot on the next building of its row that way (right: +x), 10 (9.75 .. 10.25) from its place along
+ * the ground: from the front's end rail onto the front of a building it touches, or from a side across the alley onto
+ * the other's side. The building must stand at least 4 above the place; the storey is kept. */
+static int transfer_spot(const Mount *m, const Scene *s, int right, MountSpot *out)
+{
+    const Building *b = building_of(s, m->at.building);
+    if (!b)
+        return 0;
+    float best = 1e30f;
+    int found = 0;
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        const Building *o = &s->buildings[i].b;
+        if ((int)i == m->at.building || !standing(o) || o->row != b->row || m->at.pt[2] + 4 - o->max[2] > 0)
+            continue;
+        int rail;
+        if (o->min[0] - m->at.pt[0] > 0) {           /* to the right: from the left side never */
+            if (!right || m->at.rail == 0)
+                continue;
+            rail = m->at.rail == b->width ? 0 : 1;
+        } else if (o->max[0] - m->at.pt[0] < 0) {    /* to the left: from the right side never */
+            if (right || m->at.rail == b->width)
+                continue;
+            rail = m->at.rail == 0 ? o->width : o->width - 1;
+        } else
+            continue;
+        float pt[3] = { o->min[0] + RAIL * (float)rail, o->min[1], m->at.pt[2] };
+        float d = (pt[0] - m->at.pt[0]) * (pt[0] - m->at.pt[0]) + (pt[1] - m->at.pt[1]) * (pt[1] - m->at.pt[1]);
+        if (d > 10.25f * 10.25f || d < 9.75f * 9.75f || d >= best)
+            continue;
+        best = d;
+        MountSpot spot = { (int)i, { pt[0], pt[1], pt[2] }, rail, m->at.storey };
+        *out = spot;
+        found = 1;
+    }
+    return found;
+}
+
+int climb_can_transfer(Mount *m, const Scene *s, const Climber *c, int right)
+{
+    MountSpot spot;
+    if (!m->mounted || !transfer_spot(m, s, right, &spot))
+        return -7;
+    int r = place_ok(s, spot.building, spot.pt, c->focus_x);
+    if (r == 1) {
+        m->xfer = spot;
+        m->have_xfer = 1;
+    }
+    return r;
+}
+
+void climb_transfer(Mount *m)
+{
+    if (m->have_xfer)
+        m->at = m->xfer;
 }
 
 void climb_prepare(Mount *m)
@@ -207,10 +289,12 @@ void climb_change_rail(Mount *m, int dir)
     m->rail_changed = 1;
 }
 
-void climb_clip_started(Mount *m)
+void climb_clip_started(Mount *m, const char *state)
 {
     m->rail_changed = 0;
     m->from_top = 0;
+    m->spider = state && (!strcmp(state, "Spider_Climb_Down") || !strcmp(state, "Spider_Climb_Up") ||
+                          !strcmp(state, "Spider_Idle"));      /* the names at 0x3F5938 */
 }
 
 void climb_place(Mount *m, const Scene *s, uint32_t flags, const float delta[3], float dt, float pos[3], float *heading)
@@ -218,7 +302,10 @@ void climb_place(Mount *m, const Scene *s, uint32_t flags, const float delta[3],
     const Building *b = building_of(s, m->at.building);
     if (!b)
         return;
-    float wall = climb_wall_heading(m, s);
+    float wall = climb_wall_heading(m, s), top = top_of(m, s, b), bottom = b->min[2];
+    const Building *o = across(m, s);
+    if (o)
+        bottom = fmaxf(bottom, o->min[2]);
     if (m->move_left > 0) {                          /* transitionToMount: from where it was to its place */
         for (int k = 0; k < 3; k++)
             m->move_from[k] += delta[k];             /* the clip's root still moves the start */
@@ -246,7 +333,7 @@ void climb_place(Mount *m, const Scene *s, uint32_t flags, const float delta[3],
         if ((flags & 0x120000) && !m->rail_changed) {
             pos[0] = m->at.pt[0];
             pos[1] = m->at.pt[1];
-            pos[2] = (flags & 0x100000) ? b->max[2] - REACH : fminf(pos[2], b->max[2] - REACH);
+            pos[2] = (flags & 0x100000) ? top - REACH : fminf(pos[2], top - REACH);
         }
         return;
     }
@@ -256,7 +343,7 @@ void climb_place(Mount *m, const Scene *s, uint32_t flags, const float delta[3],
     if (m->mounted) {                                /* on the face: at its place, up and down by the clip */
         pos[0] = m->at.pt[0];
         pos[1] = m->at.pt[1];
-        pos[2] = fmaxf(b->min[2], fminf(pos[2], b->max[2] - REACH));
+        pos[2] = fmaxf(bottom, fminf(pos[2], top - REACH));
     } else if (m->at.rail >= 1 && m->at.rail < b->width) {
         pos[0] = m->at.pt[0];                        /* getting on: lined up with the rail */
     } else {
@@ -274,7 +361,7 @@ int climb_check(Mount *m, const Scene *s, const Climber *c, int mode)
     if (!m->mounted || !b)
         return -1;
     m->at.storey = clampi((int)((c->pos[2] + 3) / 3), 0, b->n - 1 > 0 ? b->n - 1 : 0);
-    int r = place_ok(s, m->at.building, m->at.pt);
+    int r = place_ok(s, m->at.building, m->at.pt, c->focus_x);
     if (r == 1 || r == -9)
         return -1;
     return r == -8 ? 73 : 31;                        /* knocked off: the falling building's slot, or the plain one */

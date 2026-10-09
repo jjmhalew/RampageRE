@@ -530,6 +530,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         float lo[3] = { cx - width * CELL / 2, cy - depth * CELL / 2, 0 };
         float hi[3] = { cx + width * CELL / 2, cy + depth * CELL / 2, GROUND_FLOOR + STOREY * (float)nst + 1.5f };
         building_init(&sb->b, lo, hi, width, depth, nst);
+        sb->b.row = (int)group_num(inst, "Row", 0);
         sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
         sb->b.seed = s->nbuildings;
         sb->mesh = mesh;

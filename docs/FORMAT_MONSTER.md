@@ -243,8 +243,22 @@ in this clip, whether it is coming down from the top.
 - **canClimb(dv, dh)**: −4 not mounted. Sideways: −7 off the building, −5 a building close by, else the place 5 along
   is checked; 4 when it turns a corner (to or from a side), 3 a hop along the front. Up: 2 while the mount's height
   + 4 is not above the top, else 5 (mantle) if there is room on the roof. Down: −1 when the feet reach the foot, else 2.
-- **Transfers**: to a building in the same row, its rail 9.75 … 10.25 away (front rails that touch, or sides across a
-  10-unit alley), keeping the storey.
+- **Transfers**: `canTransfer(right)` (0x2DD8B0; mirrored the other way) takes the building of the same row (+0x10C,
+  the block's `Row`) next along that way (0x2A41F0), standing at least 4 above the mount: from the front onto its
+  front's first rail (1 going right, width − 1 going left), from a side onto its facing side (rail 0 going right from
+  the right side, width going left from the left side; never back across the building). The new point must be 9.75 …
+  10.25 from the mount along the ground, so only fronts that touch, or sides across a 10-unit alley; it keeps the
+  height and the storey, and is checked as canMount's is. `transferMount` (0x2DD680), an event of the transfer clips
+  (Front_Transition_Hop_Right, flags 0x440: its root carries the monster the 10 units; Spider_Transition_Side_R),
+  moves the mount onto it.
+- **Spider climbing**: on a side across a 10-unit alley, `canSpiderTransfer` (canTransfer towards the alley, always
+  right when mirrored) lets the monster brace itself between the two buildings (Side_L_Transition_To_Spider, then
+  Spider_Idle; still mounted on the first). In Spider_Climb_Down, Spider_Climb_Up and Spider_Idle (the names at
+  0x3F5938) 0x2DD710 finds the building across the alley, and both the height kept (0x2D5870) and canSpiderClimb's top
+  are the lower of the two; Spider_Transition_Side_R transfers to the other side (and flips, so the side idle plays
+  mirrored, facing the other way). canSpider asks for 6, which canClimb never answers.
+- **The camera's reach** (−9, 0x336230): for a player, the place may be at most 70 high and 30 along x from the middle
+  of the players' x (0x336360, kept at gp − 0x6C70; one player: its own x).
 
 ## Slots
 The game's own events (hits, landing, rampage) start states through the 74 slots: slot k is a start list index at

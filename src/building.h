@@ -26,6 +26,7 @@ typedef struct {
 typedef struct {
     float min[3], max[3];                            /* in the world (the grid's +0x24 .. +0x38); max z drops as it falls */
     int width, depth, storeys;                       /* storeys: as built */
+    int row;                                         /* +0x10C: the block's row it stands in (0 the front row) */
     int n, live[BUILDING_STOREYS];                   /* the standing storeys, bottom up (G+0x18, G+0x48) */
     int state;                                       /* BUILDING_* */
     int hp, hp_max;                                  /* BuildingHP (+0x390, +0x394; default 6 x width x storeys) */
