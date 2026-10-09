@@ -370,14 +370,10 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             play_state(v);
             v->column = -1;                         /* 0x2E7F70: a new state starts without the old one's effects */
             v->no_gravity = 0;
-            /* and the new one's first: those at its start (its set-up: mode, column) and, entered part-way (phase
-             * kept), those where it starts; the game's own event playback (under 0x2FFA00) is not read yet */
-            const MoveEvent *e0;
-            int n0 = moves_events_between(to, -1, 0, &e0);
-            for (int i = 0; i < n0; i++)
-                clip_event(v, &e0[i]);
-            if (v->run.time > 0)
-                clip_events(v, to, v->run.via >= 0 ? v->run.time - 1e-5f : 0, v->run.time);
+            /* and the new one's up to where it starts: the game's event player (0x2F45D0) begins at the clip's first
+             * event and fires, in order, every one at or before the start, so a state entered part-way (phase
+             * kept) still gets its set-up (mode, column) */
+            clip_events(v, to, -1, v->run.time);
         }
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;

@@ -75,9 +75,8 @@ its velocity and falls by 60 units/s² (unless `disableGravity`), and meeting th
 in its column, so a held Cross jumps higher, a double jump flips, a butt slam lands in its impact
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
-punch). Two stand-ins remain for game code not read: a state's events at its start fire even when it is entered
-part-way (the game's event playback, under 0x2FFA00, is not read), and a start through a slot (landing) blends. The monster stays within the street (x ±75,
-y −30 … −3).
+punch). One stand-in remains for game code not read: a start through a slot (a landing) blends in (it takes no
+transition, so which way it comes in is not traced). The monster stays within the street (x ±75, y −30 … −3).
 
 ## Not there yet
 - the monster's face clips (`<MONSTER>_HEAD_*`) layered over its body, cloth simulation;

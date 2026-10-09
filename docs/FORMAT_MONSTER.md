@@ -139,6 +139,12 @@ type, table 0x4312F0):
 
 `tools/monster.py` prints them under each state (`0.136 Monsters::addVelocity(1, 0, 0, 16); 0.136 mode 1`).
 
+The monster's event player (+0 the monster, +0x4 the node, +0x8 the time, +0xC the next event, +0x10 the count)
+starts with the clip (0x2F45D0, from the monster's command): at the clip's first event, the time where the clip
+starts, and it fires at once, in order, every event at or before that time, so a state entered part-way (its phase
+kept) still gets its set-up (mode, column). Each frame (0x2F4500, from the update) the time grows by the node's rate
+× dt × the monster's speed and the events it reaches fire.
+
 ## Movement
 A jump is the clip's events: `Jump_Start_1` (George) sets mode 2 at 0.102, then at 0.136 adds 16 up
 (`addVelocity(relative, x, y, z)`) and mode 1, and from 0.203 to 0.542 adds 3 or 4 up eight times, while the graph
