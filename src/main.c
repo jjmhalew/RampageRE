@@ -30,6 +30,7 @@
 #include "shadow.h"
 #include "director.h"
 #include "footstep.h"
+#include "challenge.h"
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
@@ -102,12 +103,21 @@ typedef struct {
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
     const MoveNode *face;                            /* the face layer's node playing now */
     FootProps feet_fx; FootState feet;              /* the footfalls' names and the foot records (footstep.c) */
+    Challenge challenge;                             /* the block's challenge, its goals counted (challenge.c) */
+    uint32_t upgrades[64];                           /* the moves each monster took from upgrades (the profile's
+                                                      * getMonsterFlags; a new profile: none [G]) */
+    int challenges_lost;                             /* a block of this city was won with its challenge not met */
+    int upgrade_fx;                                  /* the MonsterUpgrade object's effect, -1 */
+    int exit_game;                                   /* the game went back to the shell (the Pause menu's Quit) */
+    float sfx_vol, music_vol, music_now;             /* the Options page's volumes, 1 = as the game; the music now */              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
     float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
 } Viewer;
 
 static int water_at(const Viewer *v, float x, float y);
+static void challenge_stats(Viewer *v, const char *name, int points);
+static void upgrade_touch(Viewer *v, const float centre[3], float radius);
 static float water_surface(const Water *w);
 static float ground_at(const Viewer *v, float x, float y, float z);
 
@@ -286,6 +296,7 @@ static void start_moves(Viewer *v)
     v->held_unit = -1;
     v->held_vehicle = -1;
     v->game_block = -1;
+    v->upgrade_fx = -1;
     if (!v->game_built) {
         v->next_block = -1;
         v->block_shift = 0;
@@ -541,6 +552,7 @@ static void build(Viewer *v)
             gh.ctx = v;
             GameConfig gc = { GP_CAMPAIGN, 1, 0, 0, 7, city_block_index(v->city, v->blocks[v->block]), 1 };
             v->game = game_new(&gh, &gc);
+            v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
             } else {
@@ -565,12 +577,16 @@ static void build(Viewer *v)
             }
         }
     }
-    if (v->hud) {                                    /* Levels::onActivateBlock: the boss bar on the boss block; the
-                                                      * challenges are not ported (no item count) */
+    challenge_init(&v->challenge);                   /* the block's challenge (0x3468F0, at its activation) */
+    challenge_upgrade_props(&v->challenge, city_template(v->city, "MonsterUpgrade"));
+    if (v->have_scene && v->monster >= 0)
+        challenge_load(&v->challenge, v->scene.block, v->game ? game_play_type(v->game) : GP_CAMPAIGN, v->boss_block,
+                       v->monsters[v->monster], v->upgrades[v->monster & 63]);
+    if (v->hud) {                                    /* Levels::onActivateBlock: ChallengeStatus (the count, or the
+                                                      * boss bar on the boss block) and ChallengeText's card */
         HudChallenge ch;
-        memset(&ch, 0, sizeof ch);
-        ch.last_block = v->boss_block;
-        ch.required = -1;
+        challenge_hud(&v->challenge, v->boss_block, &ch);
+        ch.pause_scale = challenge_icon_scale(&v->challenge, 1);
         hud_challenge(v->hud, &ch);
     }
     if (v->game && !v->hud && !v->game_built)        /* no screens to answer the results: after 3 s */
@@ -981,8 +997,16 @@ static void clip_event(Viewer *v, const MoveEvent *e)
         if (v->held < 0 || !v->scene.folk)
             return;
         if (e->p[0] != 0) {
+            const Person *pp = people_get(v->scene.folk, v->held);
+            int first = pp && !(pp->flags & 0x40000000u);    /* addStats once per object */
+            const char *name = pp ? pp->name : NULL;
             PeopleEaten got = people_eat(v->scene.folk, v->held);
             monster_stats(v, got.health, got.energy);
+            if (first) {                                 /* gCommon.addStats(actor, slot, 1): civilian points */
+                if (v->game && got.points != 0)
+                    game_add_points(v->game, 0, GPT_CIVILIAN, (int)got.points);
+                challenge_stats(v, name, (int)got.points);
+            }
             if (getenv("RAMPAGE_TRACE"))
                 printf("  ate: health %+.0f -> %.0f, energy %+.0f -> %.0f\n", got.health, v->hp, got.energy, v->energy);
         } else {
@@ -1198,6 +1222,7 @@ static void hit_spheres(Viewer *v)
             vehicle_hit(v->veh, 0, c, c[3], 20);
         if (v->boss)                                 /* and the bosses */
             boss_hit(v->boss, 0, c, c[3], 20);
+        upgrade_touch(v, c, c[3]);                   /* and the MonsterUpgrade object */
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, c, c[3], v->heading, v->graph.states[v->run.state].name);
             float from[3] = { v->mx, v->my, v->mz };
@@ -1482,6 +1507,17 @@ static void game_step(Viewer *v, float dt)
                     }
                 break;
             case GE_STATE:
+                if (e->a == GS_BLOCK_WON) {          /* 0x3255B0: the clock's seconds to "Clock", the check */
+                    int vis;
+                    float left = game_clock(v->game, &vis);
+                    if (!challenge_block_won(&v->challenge, game_play_type(v->game), left))
+                        v->challenges_lost = 1;
+                    if (getenv("RAMPAGE_TRACE"))
+                        printf("  challenge %s: %d/%d\n", challenge_was_met(&v->challenge) ? "met" : "not met",
+                               challenge_collected(&v->challenge), challenge_required(&v->challenge));
+                }
+                if (e->a == GS_EXIT)
+                    v->exit_game = 1;
                 if (e->a == GS_BEGIN_BLOCK && v->next_block >= 0) {
                     v->game_block = v->next_block;   /* built once this frame is over */
                     v->next_block = -1;
@@ -1560,7 +1596,7 @@ static void game_step(Viewer *v, float dt)
                     r.city = CITIES[v->city_index];
                     r.city_score = game_city_total(v->game);
                     r.par_score = game_par_score(v->game);
-                    r.city_flags = game_city_flags(v->game);
+                    r.city_flags = game_city_flags(v->game) | (v->challenges_lost ? 0 : CITY_FLAG_CHALLENGES);
                     hud_results(v->hud, e->a, &r);
                 }
                 break;
@@ -1594,6 +1630,41 @@ static void hud_frame(Viewer *v, int after)
     int r = hud_result(v->hud);
     if (r && v->game)
         game_set_result(v->game, r);
+    float sv, mv;
+    int rumble;
+    switch (hud_pause_result(v->hud)) {
+    case HUD_PAUSE_QUIT:                             /* ConfirmQuit's Yes: gWorld.restartShell */
+        if (v->game)
+            game_restart_shell(v->game);
+        else
+            v->exit_game = 1;
+        break;
+    case HUD_PAUSE_SETTINGS:                         /* the profile's volumes (0 .. 0.75: the game's full one) */
+        hud_settings(v->hud, &sv, &mv, &rumble);
+        v->sfx_vol = sv / 0.75f;
+        v->music_vol = v->music_now = mv / 0.75f;
+        sound_volume(v->sfx_vol, v->music_now);
+        break;
+    default: break;
+    }
+    HudCall calls[16];
+    int nc = hud_calls(v->hud, calls, 16);
+    for (int i = 0; i < nc; i++)                     /* gSndDev's volumes (no fades here) */
+        switch (calls[i].call) {
+        case HUD_CALL_MUSIC_VOLUME: v->music_now = calls[i].value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+        case HUD_CALL_SFX_VOLUME: v->sfx_vol = calls[i].value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+        case HUD_CALL_SAVE_SETTINGS:
+            hud_settings(v->hud, &sv, &mv, &rumble);
+            v->sfx_vol = sv / 0.75f;
+            v->music_vol = v->music_now = mv / 0.75f;
+            sound_volume(v->sfx_vol, v->music_now);
+            break;
+        case HUD_CALL_PLAY_MUSIC:
+            if (!music_playing() && v->scene.music)
+                music_play(v->scene.music);
+            break;
+        default: break;                              /* the vibration, the cheats: no pad here */
+        }
     HudSound hs[16];
     int n = hud_sounds(v->hud, hs, 16);
     for (int i = 0; i < n; i++) {
@@ -1803,6 +1874,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, const ArmyBo
             case VE_STATS:                           /* id 1: the army applied it (its events follow) */
                 if (e->id == 0) {
                     monster_stats(v, e->v[0], e->v[1]);
+                    challenge_stats(v, e->name, (int)e->amount);
                 }
                 break;
             case VE_REMOVED:
@@ -1934,8 +2006,10 @@ static void army_step(Viewer *v, float dt)
             case AE_SCORE:
                 if (v->game)
                     game_add_points(v->game, 0, e->level, (int)e->amount);
+                if (e->name)                         /* the object's template counts for the challenge (0x346780) */
+                    challenge_stats(v, e->name, (int)e->amount);
                 if (getenv("RAMPAGE_TRACE"))
-                    printf("  score %+.0f (category %d), total %.0f\n", e->amount, e->level,
+                    printf("  score %+.0f (category %d, %s), total %.0f\n", e->amount, e->level, e->name ? e->name : "-",
                            army_stats(v->army, 0)->points[6]);
                 break;
             default: break;
@@ -2356,8 +2430,32 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         hud_set(v->hud, v->hp, 200, v->energy, 100, v->game ? game_points(v->game, 0, GPT_TOTAL) :
                 v->army ? (int)army_stats(v->army, 0)->points[6] : 0, v->game ? game_lives(v->game, 0) : -1, -1);
         hud_set_clock(v->hud, vis, clock);
+        if (hud_challenge_items(v->hud, challenge_collected(&v->challenge), challenge_required(&v->challenge)) &&
+            v->game)                                 /* CHALLENGE MET!: ChallengeDef.Points / players */
+            game_add_points(v->game, 0, GPT_CHALLENGE, challenge_points(&v->challenge));
         hud_update(v->hud, dt);
         hud_frame(v, 1);
+    }
+    if (v->challenge.up_state == CU_WAITING) {       /* the monster's body against it (TakeDamage, Collision): its
+                                                      * box, 3 each way across and 8.5 tall, as a sphere [G] */
+        float body[3] = { v->mx, v->my, fminf(fmaxf(v->challenge.up.pos[2], v->mz), v->mz + MONSTER_HEIGHT) };
+        upgrade_touch(v, body, MONSTER_HALF_WIDTH);
+    }
+    switch (challenge_upgrade_tick(&v->challenge, dt)) {   /* gAIMgr: the MonsterUpgrade object, its last banner */
+    case CUE_SPAWN:
+        if (v->fxw && v->challenge.up.effect)
+            v->upgrade_fx = fx_spawn(v->fxw, v->challenge.up.effect, v->challenge.up.pos, NULL, 1);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  upgrade on offer: %s\n", challenge_upgrade_move(v->challenge.upgrade));
+        break;
+    case CUE_BANNER:
+        if (v->hud) {
+            static const float green[4] = { 0, 1, 0, 1 };
+            hud_banner_text2(v->hud, challenge_upgrade_key(v->challenge.up_taken),
+                             challenge_upgrade_inst(v->challenge.up_taken), green, 1, 3, "");
+        }
+        break;
+    default: break;
     }
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
@@ -2430,6 +2528,40 @@ static void hands_step(Viewer *v, float dt)
             for (int k = 0; k < 3; k++)
                 v->scene.ik_rot[h][3 * col + k] = rz[k] * r[3 * col] + rz[3 + k] * r[3 * col + 1] + rz[6 + k] * r[3 * col + 2];
     }
+}
+
+/* gCommon.addStats's award to the block's challenge (0x346780): the object's template counts */
+static void challenge_stats(Viewer *v, const char *name, int points)
+{
+    if (challenge_add_stats(&v->challenge, name, points) > 0 && getenv("RAMPAGE_TRACE"))
+        printf("  challenge: %s counted, %d/%d%c", name, challenge_collected(&v->challenge),
+               challenge_required(&v->challenge), 10);
+}
+
+/* a monster's damage on the MonsterUpgrade object (StreetObject.bsf TakeDamage: any type, so a blow or its body's
+ * touch): once its delay is over, the move is the monster's (aquireUpgrade), the "Monster Upgrade" banner */
+static void upgrade_touch(Viewer *v, const float centre[3], float radius)
+{
+    if (v->challenge.up_state != CU_WAITING || v->monster < 0)
+        return;
+    uint32_t mv = challenge_upgrade_hit(&v->challenge, centre, radius, &v->upgrades[v->monster & 63]);
+    if (!mv)
+        return;
+    if (v->fxw && v->upgrade_fx >= 0)
+        fx_stop(v->fxw, v->upgrade_fx);
+    v->upgrade_fx = -1;
+    if (v->hud)                                      /* hideChallengeCompletionUI is not ported */
+        hud_banner_text(v->hud, v->challenge.up.text, v->challenge.up.colour, 1, "v_upgrade");
+    v->power.abilities |= mv;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  upgrade taken: %s\n", challenge_upgrade_move(mv));
+}
+
+/* Start: the Pause menu (WorldGuiDriver::process, event 128) */
+static int pause_open(Viewer *v)
+{
+    HudPause p = { CITIES[v->city_index], v->game ? game_block_name(v->game, 1) : NULL };
+    return v->hud && hud_pause_open(v->hud, 0, &p);
 }
 
 /* the game's next block begins: the scene is rebuilt around it, the monster and the cameras carried along (the block
@@ -2506,6 +2638,33 @@ static void play_script(Viewer *v, const char *script, float aspect)
                 printf("no effect %s\n", name);
             continue;
         }
+        if (_stricmp(word, "award") == 0) {          /* award name: gCommon.addStats of an object of that template */
+            char name[64];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
+            name[k] = 0;
+            challenge_stats(v, name, 0);
+            continue;
+        }
+        if (_stricmp(word, "pause") == 0) {          /* Start: the Pause menu */
+            pause_open(v);
+            continue;
+        }
+        if (_stricmp(word, "menu") == 0) {           /* menu up / down / left / right / accept / back / start */
+            static const struct { const char *name; int ev; } EV[] = {
+                { "up", HUD_EV_UP }, { "down", HUD_EV_DOWN }, { "left", HUD_EV_LEFT }, { "right", HUD_EV_RIGHT },
+                { "accept", HUD_EV_ACCEPT }, { "back", HUD_EV_BACK }, { "start", HUD_EV_START } };
+            char name[16];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 15) name[k++] = *p++;
+            name[k] = 0;
+            for (size_t i = 0; i < sizeof EV / sizeof *EV; i++)
+                if (v->hud && _stricmp(name, EV[i].name) == 0)
+                    hud_input(v->hud, EV[i].ev, 0);
+            continue;
+        }
         if (_stricmp(word, "collapseall") == 0) {    /* every building of the block falls (the end of a block) */
             for (uint32_t i = 0; i < v->scene.nbuildings; i++)
                 building_destroy(&v->scene.buildings[i].b);
@@ -2554,6 +2713,7 @@ int main(int argc, char **argv)
     const char *shot = NULL, *monster = NULL, *pos[3] = { "build\\disc\\RAMPAGE.VOL", "Chicago", "1" };
     int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0;
     float view[5] = { 0 };
+    v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
     double shot_time = 0;
     const char *script = NULL;
     char walk_script[48];
@@ -2677,7 +2837,20 @@ int main(int argc, char **argv)
             for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
                 if (w.pressed[KEYS[k].key])
                     hud_input(v.hud, KEYS[k].ev, KEYS[k].button);
-        }
+        } else if (v.hud && hud_pause_showing(v.hud)) {   /* the Pause menu has the pad: the arrows choose, Enter /
+                                                      * Space take, Backspace back, P (Start) takes too */
+            static const struct { int key, ev; } KEYS[] = {
+                { VK_RETURN, HUD_EV_ACCEPT }, { VK_SPACE, HUD_EV_ACCEPT }, { VK_BACK, HUD_EV_BACK },
+                { VK_UP, HUD_EV_UP }, { VK_DOWN, HUD_EV_DOWN }, { VK_LEFT, HUD_EV_LEFT }, { VK_RIGHT, HUD_EV_RIGHT },
+                { 'P', HUD_EV_START } };
+            for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
+                if (w.pressed[KEYS[k].key])
+                    hud_input(v.hud, KEYS[k].ev, 0);
+            hud_pad_held(v.hud, 0, w.keys[VK_LEFT] != 0, w.keys[VK_RIGHT] != 0);
+        } else if (v.hud && v.play && (w.pressed['P'] || w.pressed[VK_RETURN]))   /* Start: the Pause menu */
+            pause_open(&v);
+        if (v.exit_game)                             /* back to the shell: there is none here */
+            w.quit = 1;
         game_next_block(&v);                         /* the game moved on to the next block */
         if (w.pressed[VK_NEXT] && v.nblocks) { v.block = (v.block + 1) % v.nblocks; build(&v); }
         if (w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }

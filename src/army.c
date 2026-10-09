@@ -911,7 +911,7 @@ static void weapons_reload(ArmyUnit *u)              /* reloadWeapon [G: ammo ba
 
 /* [R] Player.addPoints (0x33F530): points and kills of category t (0 destruction, 1 civilian, 2 vehicle, 3 bonus,
  * 4 time bonus, 5 challenge), and of 6, the total */
-static void add_points(Army *a, int slot, int t, float pts)
+static void add_points(Army *a, int slot, int t, float pts, const char *name)
 {
     if (slot < 0 || slot >= ARMY_MONSTERS || t < 0 || t >= 7)
         return;
@@ -922,7 +922,7 @@ static void add_points(Army *a, int slot, int t, float pts)
         st->points[6] += pts;
         st->kills[6]++;
     }
-    ArmyEvent *e = emit(a, AE_SCORE, -1, NULL, NULL);
+    ArmyEvent *e = emit(a, AE_SCORE, -1, name, NULL);
     e->monster = slot;
     e->amount = pts;
     e->level = t;
@@ -951,7 +951,7 @@ static void add_stats(Army *a, ArmyUnit *u, int slot, int type)
             e->amount = energy;
         }
     }
-    add_points(a, slot, type, (float)points);
+    add_points(a, slot, type, (float)points, u->name);
 }
 
 const ArmyStats *army_stats(const Army *a, int monster)
@@ -980,7 +980,7 @@ void army_add_stats(Army *a, int monster, Group tmpl, int type)
             e->amount = energy;
         }
     }
-    add_points(a, monster, type, (float)(int)gnum(tmpl, "Points", 0));
+    add_points(a, monster, type, (float)(int)gnum(tmpl, "Points", 0), tmp.name);
 }
 
 /* the buildings' Scoring (DefBuildingProps, 0x2BA4B0) [R]: see army.h */
@@ -1061,7 +1061,7 @@ float army_score_building(Army *a, int monster, int building, Group building_pro
         c->skip = 1;
     }
     if (pts != 0) {
-        add_points(a, monster, 0, pts);
+        add_points(a, monster, 0, pts, NULL);
         float fl = group_num(scoring, "Floating", 0);
         if (fl > 0 && pts >= fl && at) {             /* a floating number (0x331D50, scale 0.8) at y - 5 */
             ArmyEvent *e = emit(a, AE_FLOAT, -1, NULL, at);

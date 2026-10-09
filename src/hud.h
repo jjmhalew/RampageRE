@@ -1,10 +1,10 @@
 /* hud.h - the game's 2D interface over the world: the in-play HUD of one player (HudN.ifc and Clock.ifc of
  * WorldGui.bdp, run by the logic of Hud.bsf / Clock.bsf), the floating score numbers (PointsBanner, 0x331D50), the
  * text banners (PointsBanner.createAndStartText: Rage.ifc + Rage.bsf), the challenge / boss status (ChallengeStatus),
- * the challenge card (ChallengeText) and the results screens (WorldGuiDriver::startResults: Results, GameOver),
- * drawn with the game's bitmap fonts (.fdf + texture) and texts (.loc). docs/FORMAT_GUI.md has the formats,
- * docs/SCREENS_NOTES.md the banners and screens; hud.c cites the game code ([R] read in the code or the files, [G] a
- * guess where it matters).
+ * the challenge card (ChallengeText), the results screens (WorldGuiDriver::startResults: Results, GameOver) and the
+ * Pause menu (Pause.ifc + Pause.bsf), drawn with the game's bitmap fonts (.fdf + texture) and texts (.loc).
+ * docs/FORMAT_GUI.md has the formats, docs/SCREENS_NOTES.md the banners and screens, docs/PAUSE_NOTES.md the Pause
+ * menu; hud.c cites the game code ([R] read in the code or the files, [G] a guess where it matters).
  *
  * Use: load WorldGui.bdp and CommonGUI.bdp (vol_read + bdp_load), hud_open() once per player, hud_set() whenever the
  * monster's numbers change (or every frame), hud_float() for a score award the game shows (army AE_FLOAT),
@@ -105,6 +105,8 @@ typedef struct {
     float icon_shift;        /* getChallengeIconShift() */
     int upgrade;             /* getChallengeUpgrade(): 0, or the upgrade (1 2 4 8: "Upgrade<n>") */
     int required;            /* getChallengeItemRequired(): -1 no challenge */
+    float pause_scale;       /* getChallengeIconScale(1): the ChallengeDef's PauseScale, else its Scale [R 0x2AF488]
+                              * (the Pause menu's icon); 0 = icon_scale */
 } HudChallenge;
 /* a block was activated (Levels::onActivateBlock -> ChallengeStatus::updateBossStatus, setupUI) [R]: the boss bar
  * shows on the last block in the campaign and the Timed Run, the item count on the others */
@@ -157,18 +159,72 @@ void hud_results(Hud *h, int screen, const HudResults *r);
 /* the result the screen gave since the last call (HUD_RESULT_*, the numbers of game.h GR_*), HUD_RESULT_NONE none */
 int hud_result(Hud *h);
 int hud_results_showing(const Hud *h);   /* a results screen is up (it has the pad: route hud_input to it) */
-int hud_paused(const Hud *h);            /* gApp.pauseGame(1): the GameOver screen pauses the game until a choice */
+int hud_paused(const Hud *h);            /* gApp.pauseGame(1): the GameOver screen or the Pause menu pauses the game
+                                          * until a choice */
 /* stand-in for a player: press ACCEPT for them this many seconds after a screen takes buttons (Results' Continue,
  * GameOver's Retry); 0 = never (default) */
 void hud_results_auto(Hud *h, float seconds);
 
-/* the pad, as GuiEvent ids [R the screens' scripts; G which button is which]: HUD_EV_BUTTON with button 0 is the
- * Results' "Change Monster" (Controller_B0), 1 its "Autosave" (Controller_B1) */
+/* the pad, as GuiEvent ids [R the screens' scripts]. Which direction is which [R by the scripts' use]: the Pause
+ * menu's options page picks its rows (stacked down the page) with 8 / 16 while the held left / right move the
+ * sliders and 4 / 2 turn the vibration's ON / OFF (side by side); ConfirmQuit's No / Yes (side by side) take 4 / 2;
+ * the main menu's cheat code moves along its six digits with 4 / 2 and changes one with 8 (+1) / 16 (-1). So 2 is
+ * right, 4 left, 8 up, 16 down. HUD_EV_BUTTON with button 0 is the Results' "Change Monster" (Controller_B0), 1 its
+ * "Autosave" (Controller_B1) */
 enum {
-    HUD_EV_DOWN = 2, HUD_EV_UP = 4, HUD_EV_LEFT = 8, HUD_EV_RIGHT = 16, HUD_EV_BACK = 32, HUD_EV_ACCEPT = 64,
+    HUD_EV_RIGHT = 2, HUD_EV_LEFT = 4, HUD_EV_UP = 8, HUD_EV_DOWN = 16, HUD_EV_BACK = 32, HUD_EV_ACCEPT = 64,
     HUD_EV_START = 128, HUD_EV_BUTTON = 256
 };
+/* to the interface that has the pad: the Pause menu when it shows, else a results screen */
 void hud_input(Hud *h, int ev, int button);
+/* the same from pad `pad` (GuiEvent.getController(): 0 = player 1); hud_input is pad 0. The Pause menu's Options
+ * page answers pad 0 only [R Pause.scr] */
+void hud_input_pad(Hud *h, int ev, int button, int pad);
+/* pad 0 held, every frame (gGuiMgr.getController(0): getX(0), getButtons() & 4 / 8): the stick across (-1 .. 1) and
+ * the d-pad's left and right; the Options page's sliders move while they are held */
+void hud_pad_held(Hud *h, float stick_x, int left, int right);
+
+/* ---- the Pause menu (docs/PAUSE_NOTES.md): Start reaches WorldGuiDriver::process (event 128) when no other
+ * interface has the pad, and outside the attract mode it loads the interface Pause (Pause.ifc + Pause.bsf) [R]. It
+ * takes the pad, pauses the game (gApp.pauseGame(1): hud_paused()), turns the music down to 0 in 1 s and the
+ * vibration off. "Game Paused", "<city> : <block>", the block's challenge (or the boss's card), the list Continue /
+ * Options / Quit and the controller's picture (not on the boss block). Continue resumes; Options (pad 0 only) shows
+ * the sound and music sliders and the vibration's ON / OFF; Quit asks ConfirmQuit, Yes leaves for the shell
+ * (gWorld.restartShell). */
+typedef struct {
+    const char *city;        /* gCommon.getGameStatus().getCityName(): a .loc key ("LasVegas") */
+    const char *block;       /* gWorld.getBlockName(1) (game_block_name(g, 1)): the current block's .loc key; the
+                              * title reads "<city> : <block>" localised */
+} HudPause;
+/* Start pressed by pad `pad` (0 = player 1): shows the menu and returns 1; 0 when it cannot (attract mode, a results
+ * screen has the pad, already showing). The challenge box shows the last hud_challenge() / hud_challenge_items(). */
+int hud_pause_open(Hud *h, int pad, const HudPause *p);
+int hud_pause_showing(const Hud *h);     /* it has the pad: route hud_input to it */
+enum {
+    HUD_PAUSE_NONE = 0,
+    HUD_PAUSE_RESUME = 1,    /* Continue: the menu is gone, the game runs on (gApp.pauseGame(0)) */
+    HUD_PAUSE_QUIT = 2,      /* ConfirmQuit's Yes: Pause::onQuit -> gWorld.restartShell (game_restart_shell) */
+    HUD_PAUSE_SETTINGS = 3   /* the Options page's Accept: new settings (hud_settings) for the profile; the menu
+                              * stays */
+};
+int hud_pause_result(Hud *h);            /* since the last call, HUD_PAUSE_NONE none */
+/* the settings the game keeps (gCommon.getSoundVolume / getMusicVolume, 0 .. 0.75 = the sliders' 0 .. 100, and
+ * getEnableRumble; the profile's 0x4D7ACC / 0x4D7AD0 / 0x4D7AD4 [R 0x2C2F68..0x2C3480]): set them from the profile
+ * (default 0.75, 0.75, 1 [G]); the Options page's Accept changes them */
+void hud_set_settings(Hud *h, float sound, float music, int rumble);
+void hud_settings(const Hud *h, float *sound, float *music, int *rumble);
+/* what the Pause menu asks of gSndDev / gCommon since the last call (the same call twice in a row: the last kept) */
+enum {
+    HUD_CALL_MUSIC_VOLUME,   /* gSndDev.setMusicVolume(value, arg ms) */
+    HUD_CALL_SFX_VOLUME,     /* gSndDev.setSfxVolume(value, arg ms) */
+    HUD_CALL_RUMBLE,         /* gCommon.setEnableRumble(value != 0, arg: 1 = into the profile) */
+    HUD_CALL_RUMBLE_PULSE,   /* gCommon.rumble(arg ms): a test buzz when the vibration is turned ON */
+    HUD_CALL_PLAY_MUSIC,     /* the music slider went up: if no music plays, start the block's "Music" */
+    HUD_CALL_SAVE_SETTINGS,  /* gCommon.setSoundVolume / setMusicVolume / setEnableRumble(.., 1): hud_settings */
+    HUD_CALL_CLEAR_CHEATS    /* gCommon.clearCheatFlags(arg): 65536 when quitting (the cheat 082864's flag) */
+};
+typedef struct { int call; float value; int arg; } HudCall;
+int hud_calls(Hud *h, HudCall *out, int max);
 
 /* the sounds the interfaces start (gSndDev.playSound) and stop (killSound) since the last call */
 typedef struct { char name[32]; int kill; } HudSound;
@@ -184,7 +240,8 @@ typedef struct {
     uint32_t tex;            /* name index of the texture in b */
 } HudQuad;
 /* the quads back to front: the floating numbers (they are in the 3D world, under the GUI), then the interfaces in the
- * order they were loaded (the HUD, the clock, ChallengeStatus, ChallengeText, the banners, the results screen);
+ * order they were loaded (the HUD, the clock, ChallengeStatus, ChallengeText, the banners, the results screen, the
+ * Pause menu);
  * returns the count (at most max) */
 int hud_quads(const Hud *h, HudQuad *out, int max);
 #endif

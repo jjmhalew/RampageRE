@@ -22,11 +22,13 @@ Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look ar
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
 the monster's clips, G play or the free camera, F12 a screenshot, Esc quit. In play (the default with `--monster`)
 the keys are a pad: W A S D or the arrows the left stick, Space Cross (jump), J Square (punch), K Triangle (kick),
-L Circle (grab), R R2 (roar); the monster runs its own move graph and the game's camera follows it
+L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter or Space take, Backspace
+back); the monster runs its own move graph and the game's camera follows it
 ([CAMERA.md](CAMERA.md)). `--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a
 `--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
 directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
-buildings; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. The console prints
+buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... drive it; `award Name` counts an object of
+that template for the block's challenge; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
@@ -129,7 +131,8 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- the challenges (the item counts, ChallengeText's cards), the King and Timed Run results screens, the Pause menu;
+- the King and Timed Run results screens; the goals of scripts not ported (trains, cable cars, freighters, hot dog
+  carts, bikers, parade balloons, chimneys and gongs, street lamps) never count; hideChallengeCompletionUI;
 - which monster a cryotube reveals (the banner names the next one in the viewer's list), findPointInRubble;
 - the feet locked to the ground and dragged (0x33BF10 and kin; footstep.c keeps the records for it);
 - vertex-coloured interiors of damaged buildings, the facades darkened by their neighbours' shadows.
@@ -137,6 +140,7 @@ x ±75 and y −30.
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
 the bosses (boss.c), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
-choreography and camera modes (director.c), the face queue, head turn and friction (look.c), shadows (shadow.c),
+choreography and camera modes (director.c), the block challenges and their upgrades (challenge.c,
+[CHALLENGE_NOTES.md](CHALLENGE_NOTES.md)), the Pause menu (hud.c, [PAUSE_NOTES.md](PAUSE_NOTES.md)), the face queue, head turn and friction (look.c), shadows (shadow.c),
 effects with their mesh debris and sounds (fx.c), the footfalls and landings' dust and splashes (footstep.c,
 [FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md)) and sound (sound.c).

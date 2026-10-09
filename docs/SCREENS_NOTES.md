@@ -105,5 +105,5 @@ A frame 480 wide holding `ConfirmQuit` ("Unsaved progress ... quit?") or `Confir
 
 ### Not ported
 WorldResults, KingBlockResults, KingCityResults, KingWorldResults, TimedRunResults: `hud_results` shows nothing and
-answers DONE after 3 s or on X **[G stand-in]**. The save button and profile saving, `hideChallengeCompletionUI`, the
-Pause menu.
+answers DONE after 3 s or on X **[G stand-in]**. The save button and profile saving, `hideChallengeCompletionUI`. (The
+Pause menu is ported: [PAUSE_NOTES.md](PAUSE_NOTES.md).)

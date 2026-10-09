@@ -1,8 +1,8 @@
 /* hud.c - the game's 2D interface (hud.h; docs/FORMAT_GUI.md, docs/SCREENS_NOTES.md), transcribed from the PS2 game:
  * the GUI layout files (.ifc, bundle type 24: Hud0..3.ifc, Clock.ifc, Rage.ifc, ChallengeStatus.ifc,
- * ChallengeText.ifc, Results.ifc, LevelResults.ifc, GameOver.ifc of WorldGui.bdp), the logic of their scripts
- * (build/scripts/Hud.scr, Clock.scr, Rage.scr, ChallengeStatus.scr, ChallengeText.scr, Results.scr, LevelResults.scr,
- * GameOver.scr, WorldGuiDriver.scr and the
+ * ChallengeText.ifc, Results.ifc, LevelResults.ifc, GameOver.ifc, Pause.ifc of WorldGui.bdp), the logic of their
+ * scripts (build/scripts/Hud.scr, Clock.scr, Rage.scr, ChallengeStatus.scr, ChallengeText.scr, Results.scr,
+ * LevelResults.scr, GameOver.scr, Pause.scr, WorldGuiDriver.scr and the
  * include files ObjectFader.h, ConfirmQuit.h, ButtonSetup.h), the GUI objects that draw them (GuiQuad 0x2439E0,
  * GuiSlider layout 0x24A310, GuiText 0x234D30), the bitmap fonts (OFontData loader 0x1B7CD0, OFont defaults 0x1B7200,
  * the line measure 0x1B5AA0 / 0x1B6270, the string draw 0x1B6A80 and its glyph quads 0x1B64B0), the string tables
@@ -35,6 +35,7 @@
 #define MAX_RAGE 8
 #define MAX_SOUNDS 32
 #define MAX_FADERS 6
+#define MAX_CALLS 48
 #define RAGE_COPIES 15
 
 /* ---------------------------------------------------------------- colours */
@@ -446,11 +447,12 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
 }
 
 /* ---------------------------------------------------------------- the layout tree (.ifc) */
-enum { N_GROUP, N_QUAD, N_TEXT, N_SLIDER, N_RECT, N_LIST };
+enum { N_GROUP, N_QUAD, N_TEXT, N_SLIDER, N_RECT, N_LIST, N_LINE };
 typedef struct Node {
     int kind;
     char name[32];
     float p[3], m, z;           /* <p> x y z, <m> scale, <z> */
+    int flip_y;                 /* <x> with a mirrored frame (Pause's arrows under MIN / MAX) */
     float d[2]; int has_d;      /* <d> size */
     float col[4];               /* <c> (white when absent) */
     unsigned F, Q, M;           /* <F> flags (0x1: hidden [G]), <Q> sprite flags, <M> (0x310: a mask [G]) */
@@ -476,6 +478,7 @@ typedef struct Node {
     float hl_d[2];
     int sel, pulse;
     int clip; float clip_x0, clip_x1;
+    float ep[4]; int has_ep;    /* line (<l>): <ep> its first and last point (x y) */
     int visible;
     float fade;
     struct Node *parent, *child, *next;
@@ -574,8 +577,22 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
     } else if (strcmp(tag, "v") == 0) {
         char *o = nd->text;                              /* the layouts' texts keep their line breaks, not \r */
         int n = 0;
-        for (const char *s = text; *s && n < MAX_TEXT - 1; s++)
-            if (*s != '\r') o[n++] = *s;
+        static const struct { const char *e; char c; } ENT[] = {
+            { "&apos;", '\'' }, { "&quot;", '"' }, { "&amp;", '&' }, { "&lt;", '<' }, { "&gt;", '>' } };
+        for (const char *s = text; *s && n < MAX_TEXT - 1; s++) {
+            if (*s == '\r')
+                continue;
+            size_t k = 0;
+            if (*s == '&')                               /* "Crazy Man&apos;s Village" (Pause.ifc) */
+                for (; k < sizeof ENT / sizeof *ENT; k++)
+                    if (strncmp(s, ENT[k].e, strlen(ENT[k].e)) == 0)
+                        break;
+            if (*s == '&' && k < sizeof ENT / sizeof *ENT) {
+                o[n++] = ENT[k].c;
+                s += strlen(ENT[k].e) - 1;
+            } else
+                o[n++] = *s;
+        }
         o[n] = 0;
     } else if (strcmp(tag, "L") == 0)
         node_localize(g, nd, text);
@@ -594,7 +611,27 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
     else if (strcmp(tag, "bc") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->border);
     else if (strcmp(tag, "B") == 0) nd->B = strtof(text, NULL);
     else if (strcmp(tag, "bbias") == 0) nd->bbias = strtof(text, NULL);
-    /* sc (script), f (entry function), R, a, sp, growth, X / xf (child interfaces): not needed for drawing */
+    else if (strcmp(tag, "x") == 0) {
+        /* the object's whole frame: the 3x3 by rows, then the position (Pause's "completed" stamps, turned 28 degrees
+         * at scale 0.8, and its arrows, mirrored up-down). A quad here cannot turn: the position and the scale are
+         * kept, a mirror flips the picture, a turn is dropped [G] */
+        float x[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+        parse_floats(text, x, 12);
+        memcpy(nd->p, x + 9, sizeof nd->p);
+        nd->m = sqrtf(x[0] * x[0] + x[1] * x[1]);
+        nd->flip_y = x[0] * x[4] - x[1] * x[3] < 0;
+    } else if (strcmp(tag, "ep") == 0) {
+        float e[16] = { 0 };                             /* the count, then x y z each [G] */
+        parse_floats(text, e, 16);
+        int n = (int)e[0];
+        if (n >= 2 && n <= 5) {
+            nd->ep[0] = e[1]; nd->ep[1] = e[2];
+            nd->ep[2] = e[1 + 3 * (n - 1)]; nd->ep[3] = e[2 + 3 * (n - 1)];
+            nd->has_ep = 1;
+        }
+    }
+    /* sc (script), f (entry function), R, a, sp, growth, si / sflags / stretch (sizers), X / xf (child interfaces):
+     * not needed for drawing */
 }
 
 static int node_kind(const char *tag)
@@ -604,7 +641,10 @@ static int node_kind(const char *tag)
     if (strcmp(tag, "sl") == 0) return N_SLIDER;
     if (strcmp(tag, "r") == 0) return N_RECT;
     if (strcmp(tag, "lb") == 0) return N_LIST;
-    if (strcmp(tag, "o") == 0 || strcmp(tag, "DD") == 0 || strcmp(tag, "i") == 0) return N_GROUP;
+    if (strcmp(tag, "l") == 0) return N_LINE;
+    /* sz: a sizer (GuiSizer: Pause's Cancel / Accept buttons); its items are taken where the layout puts them [G] */
+    if (strcmp(tag, "o") == 0 || strcmp(tag, "DD") == 0 || strcmp(tag, "i") == 0 || strcmp(tag, "sz") == 0)
+        return N_GROUP;
     return -1;
 }
 
@@ -847,6 +887,22 @@ static void list_increment(Node *l, int delta)
         }
     }
 }
+/* incrementSelection(delta, 1): the same, going round at the ends [G: the second argument] (Pause's vibration
+ * ON / OFF) */
+static void list_increment_wrap(Node *l, int delta)
+{
+    int n = list_count(l);
+    if (!l || n <= 0)
+        return;
+    for (int k = 1, j = l->sel; k <= n; k++) {
+        j = ((j + delta) % n + n) % n;
+        Node *c = list_item(l, j);
+        if (c && c->visible) {
+            list_select(l, j);
+            return;
+        }
+    }
+}
 
 /* ---------------------------------------------------------------- drawing a layout */
 /* GuiRect [G: its draw is not traced]: the background (bkgdColor) over d from the origin, then a frame in bc: the
@@ -950,9 +1006,12 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             /* M 0x200 (Results' 0x310 boxes at the title's ends): a mask, not drawn [G]; F 0x20 (the challenge
              * icons): drawn only with a picture [G] */
             int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
+            float vs = nd->has_tex ? nd->tex.vs : 1, v0 = nd->flip_y ? vs : 0, v1 = nd->flip_y ? 0 : vs;
+            if (nd->flip_y)                              /* mirrored about the origin */
+                y0 = -(y0 + h);
             if (drawn && w > 0 && h > 0)
-                emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, 0,
-                          nd->has_tex ? nd->tex.us : 1, nd->has_tex ? nd->tex.vs : 1, c,
+                emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, v0,
+                          nd->has_tex ? nd->tex.us : 1, v1, c,
                           nd->has_tex ? nd->tex.b : NULL, nd->has_tex ? nd->tex.name : 0, nz);
         } else if (nd->kind == N_SLIDER) {
             float w = nd->has_d ? nd->d[0] : 100, h = nd->has_d ? nd->d[1] : 20;
@@ -983,6 +1042,13 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             text_style(nd, &ts);
             /* the text's own scale s goes into its matrix (GuiText 0x234D88 scales the matrix by it) */
             text_emit(e, g, &ts, nd->text, nox, noy, nsc * nd->tscale, c, s, f->shadow_dx, f->shadow_dy, nz);
+        } else if (nd->kind == N_LINE && nd->has_ep) {
+            /* a GuiLine (Pause's options rule) [G: its draw is not traced]: one pixel wide between its points */
+            float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
+            float x0 = fminf(nd->ep[0], nd->ep[2]), x1 = fmaxf(nd->ep[0], nd->ep[2]);
+            float y0 = fminf(nd->ep[1], nd->ep[3]), y1 = fmaxf(nd->ep[1], nd->ep[3]);
+            if (x1 - x0 >= y1 - y0) { y0 -= 0.5f; y1 += 0.5f; } else { x0 -= 0.5f; x1 += 0.5f; }
+            emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * x1, noy + nsc * y1, 0, 0, 1, 1, c, NULL, 0, nz);
         } else if (nd->kind == N_RECT)
             rect_emit(e, nd, nox, noy, nsc, nz, nf);
         else if (nd->kind == N_LIST)
@@ -1080,7 +1146,7 @@ typedef struct {
 
 typedef struct { Node *obj; float t0, t1, p0[3], p1[3], s0, s1, f0, f1; int done; } Intro;
 
-enum { SCR_STANDIN, SCR_RESULTS, SCR_GAME_OVER, SCR_LEVEL };
+enum { SCR_STANDIN, SCR_RESULTS, SCR_GAME_OVER, SCR_LEVEL, SCR_PAUSE };
 typedef struct {
     Layout *L;
     int kind, screen;
@@ -1099,8 +1165,14 @@ typedef struct {
     Node *list, *total, *live, *title1, *title2, *base, *save, *cu_item;
     Intro intro[16], walk[8];
     int nintro, nwalk;
-    /* GameOver.scr */
+    /* GameOver.scr (and Pause.scr: listbox) */
     Node *choices;
+    /* Pause.scr */
+    int pause_state;                                     /* nPauseState: 0 the menu, 1 the Options page */
+    int pad;                                             /* the controller that opened it */
+    int prev_rumble, b_rumble, mode, tweak_sound;        /* nMode: the Options row (0 sound, 1 music, 2 rumble) */
+    float prev_music, f_music, f_sound, opt_pulse, tick;
+    Node *pause_group, *options_group, *s_sound, *s_music, *l_rumble, *titles[3];
 } Screen;
 
 typedef struct {
@@ -1159,6 +1231,15 @@ struct Hud {
     float auto_press;
     HudSound sounds[MAX_SOUNDS];
     int nsounds;
+    /* the Pause menu and what it changes */
+    Screen *pause;
+    int pause_result;
+    float set_sound, set_music;                          /* gCommon.getSoundVolume / getMusicVolume, 0 .. 0.75 */
+    int set_rumble;                                      /* gCommon.getEnableRumble */
+    float held_x;                                        /* pad 0 held (hud_pad_held) */
+    int held_l, held_r;
+    HudCall calls[MAX_CALLS];
+    int ncalls;
 };
 
 static void sound(Hud *h, const char *name, int kill)
@@ -1237,6 +1318,8 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
                                                           * numbers, here hud_set comes after hud_open] */
     h->lives = -1;
     h->blocks_won = -1;
+    h->set_sound = h->set_music = 0.75f;                 /* the sliders full [G: the profile's defaults not traced] */
+    h->set_rumble = 1;
     /* Clock::doInterface */
     if (h->clock) {
         h->clock_group = layout_find(h->clock->root, "clock");
@@ -1283,6 +1366,7 @@ void hud_close(Hud *h)
     for (int i = 0; i < h->nrages; i++)
         rage_free(h->rages[i]);
     screen_free(h->scr);
+    screen_free(h->pause);
     free(h);
 }
 
@@ -1956,6 +2040,7 @@ static void cq_show(Hud *h, Screen *s, int shorter)
 
 static void results_quit(Hud *h, Screen *s);
 static void gameover_quit(Hud *h, Screen *s);
+static void pause_quit(Hud *h, Screen *s);
 
 static int cq_process(Hud *h, Screen *s, int ev)
 {
@@ -1969,6 +2054,8 @@ static int cq_process(Hud *h, Screen *s, int ev)
             results_quit(h, s);
         else if (s->kind == SCR_LEVEL)
             set_result(h, HUD_RESULT_QUIT);              /* LevelResults::onQuit */
+        else if (s->kind == SCR_PAUSE)
+            pause_quit(h, s);
         else
             gameover_quit(h, s);
         q->state = 0;
@@ -1976,10 +2063,10 @@ static int cq_process(Hud *h, Screen *s, int ev)
         fader_go(&s->fd, q->box, -1);
         q->state = 0;
     } else if (ev == HUD_EV_UP || ev == HUD_EV_DOWN || ev == HUD_EV_LEFT || ev == HUD_EV_RIGHT) {
-        if (ev == HUD_EV_LEFT) ev = HUD_EV_UP;
-        if (ev == HUD_EV_RIGHT) ev = HUD_EV_DOWN;
+        if (ev == HUD_EV_UP) ev = HUD_EV_LEFT;           /* No / Yes side by side: up and down as left and right */
+        if (ev == HUD_EV_DOWN) ev = HUD_EV_RIGHT;
         int sel = q->list ? q->list->sel : 0;
-        list_increment(q->list, -1 + 2 * (ev == HUD_EV_DOWN));
+        list_increment(q->list, -1 + 2 * (ev == HUD_EV_RIGHT));
         if (q->list && q->list->sel != sel)
             sound(h, "Rollover", 0);
     }
@@ -2563,6 +2650,444 @@ static void gameover_input(Hud *h, Screen *s, int ev)
     }
 }
 
+/* ---------------------------------------------------------------- the Pause menu [R Pause.scr] */
+/* what the menu asks of gSndDev / gCommon (hud_calls); the same call twice in a row keeps the last, PLAY_MUSIC once */
+static void hud_call(Hud *h, int what, float value, int arg)
+{
+    HudCall *c = NULL;
+    if (h->ncalls > 0 && h->calls[h->ncalls - 1].call == what)
+        c = &h->calls[h->ncalls - 1];
+    else if (what == HUD_CALL_PLAY_MUSIC)
+        for (int i = 0; i < h->ncalls; i++)
+            if (h->calls[i].call == what)
+                return;
+    if (!c) {
+        if (h->ncalls >= MAX_CALLS)
+            return;
+        c = &h->calls[h->ncalls++];
+    }
+    c->call = what;
+    c->value = value;
+    c->arg = arg;
+}
+
+static void pause_unload(Hud *h)
+{
+    screen_free(h->pause);
+    h->pause = NULL;
+}
+
+/* setupNonCampaign: no challenge box; the list higher, its top rule hidden, the lower one moved; the pad's picture */
+static void pause_noncampaign(Screen *s)
+{
+    Node *r = s->L->root;
+    show(layout_find(r, "challenge_group"), 0);
+    show(layout_find(r, "boss_group"), 0);
+    Node *go = layout_find(r, "selection_group");
+    if (go) {
+        go->p[0] = 0; go->p[1] = -20; go->p[2] = 0;
+        show(list_item(go, 0), 0);
+        Node *bar = list_item(go, 2);
+        if (bar) { bar->p[0] = 4; bar->p[1] = 255; bar->p[2] = 0; }
+    }
+    show(layout_find(r, "controller_group"), 1);
+}
+
+/* the icon of the box: resetTexture(getChallengeIcon()), setScale(getChallengeIconScale(1)), showObject */
+static void pause_icon(Hud *h, Node *icon)
+{
+    if (!icon)
+        return;
+    const HudChallenge *ch = &h->ch;
+    icon->has_tex = tex_find(&h->gui, ch->icon, &icon->tex);
+    icon->m = ch->pause_scale > 0 ? ch->pause_scale : ch->icon_scale > 0 ? ch->icon_scale : 1.0f;
+    icon->visible = 1;
+}
+
+/* setupChallenge: the block's challenge ("Bonus Challenge" / "Upgrade Challenge", its text, its icon, COMPLETED once
+ * the items are in) */
+static void pause_challenge(Hud *h, Screen *s)
+{
+    Node *r = s->L->root;
+    const HudChallenge *ch = &h->ch;
+    /* ChallengeStatus::isChallengeUpgrade: getChallengeUpgrade() != 0 on a block that is not the boss's */
+    node_localize(&h->gui, layout_find(r, "challenge"), ch->upgrade ? "CT_Challenge_Upgrade" : "CT_Challenge");
+    node_localize(&h->gui, layout_find(r, "goal"), ch->identifier ? ch->identifier : "");
+    Node *icon = layout_find(r, "icon");
+    pause_icon(h, icon);
+    if (icon)
+        icon->p[0] += ch->icon_shift;
+    int goal = h->ch_required, count = h->ch_collected < goal ? h->ch_collected : goal;
+    show(layout_find(r, "completed"), goal == count);    /* and setFlags(1024) [G: not traced] */
+    Node *go = layout_find(r, "selection_group");
+    if (go) { go->p[0] = 0; go->p[1] = 20; go->p[2] = 0; }
+    show(layout_find(r, "controller_group"), 1);
+}
+
+/* setupBoss: the boss's card (its title, text, objectives and hint stacked by their heights), no pad picture */
+static void pause_boss(Hud *h, Screen *s)
+{
+    Node *r = s->L->root;
+    /* gApp.getLanguage() > 2 (French and on) and gApp.getPlatform() == 2 (taken as the PS2's [G]): the wider card */
+    int foreign = h->gui.lang > 2;
+    float padding = foreign ? 0.0f : 8.0f;
+    Node *head = layout_find(r, foreign ? "boss_group_foreign" : "boss_group");
+    if (!head)
+        head = layout_find(r, "boss_group");
+    if (!head)
+        return;
+    Node *title = layout_find(head->child, "boss_title"), *msg = layout_find(head->child, "boss_challenge");
+    Node *obj = layout_find(head->child, "boss_objectives"), *hint = layout_find(head->child, "boss_hint");
+    node_localize(&h->gui, title, "ChallengeBossTitle");
+    node_localize(&h->gui, msg, "ChallengeBoss");
+    node_localize(&h->gui, obj, "ChallengeBossObjectives");
+    node_localize(&h->gui, hint, "ChallengeBossHint");
+    if (msg && obj && hint) {
+        float x = msg->p[0], y = msg->p[1] + text_h(&h->gui, msg) + padding;
+        obj->p[0] = x; obj->p[1] = y;
+        y += text_h(&h->gui, obj) + padding;
+        hint->p[0] = x; hint->p[1] = y;
+    }
+    pause_icon(h, layout_find(head->child, "boss_icon"));
+    int goal = h->ch_required, count = h->ch_collected < goal ? h->ch_collected : goal;
+    show(layout_find(head->child, "boss_completed"), goal == count);
+    show(head, 1);
+    if (foreign) {
+        show(layout_find(r, "boss_group"), 0);
+        Node *rect = layout_find(r, "boss_rect");
+        if (rect) {
+            rect->p[0] = 80; rect->p[1] = 40; rect->p[2] = 0;
+            rect->d[0] = 480;
+            Node *c = layout_find(rect->child, "center");
+            if (c) { c->p[0] = 50; c->p[1] = 0; c->p[2] = 0; }
+        }
+    } else
+        show(layout_find(r, "boss_group_foreign"), 0);
+    Node *go = layout_find(r, "selection_group");
+    if (go) { go->p[0] = 0; go->p[1] = 160; go->p[2] = 0; }
+    show(layout_find(r, "controller_group"), 0);
+}
+
+/* Pause::process 8192: the interface starts */
+static void pause_start(Hud *h, Screen *s, int pad, const HudPause *p)
+{
+    Node *r = s->L->root;
+    s->pad = pad;
+    s->pause_state = 0;
+    s->prev_music = h->set_music;                        /* gCommon.getMusicVolume() */
+    hud_call(h, HUD_CALL_MUSIC_VOLUME, 0.0f, 1000);      /* gSndDev.setMusicVolume(0.0, 1000) */
+    s->prev_rumble = h->set_rumble;
+    hud_call(h, HUD_CALL_RUMBLE, 0.0f, 0);               /* gCommon.setEnableRumble(0, 0) */
+    int boss = h->ch.last_block;                         /* getCurrentBlockNum() == getNumBlocks() */
+    s->choices = layout_find(r, "choices");
+    if (s->choices) s->choices->pulse = 1;
+    list_select(s->choices, 0);
+    show(layout_find(r, "challenge_group"), !boss);
+    show(layout_find(r, "boss_group"), boss);
+    if (h->cfg.play_type != HUD_PLAY_CAMPAIGN)
+        pause_noncampaign(s);
+    else if (boss)
+        pause_boss(h, s);
+    else
+        pause_challenge(h, s);
+    /* cityTitle: localizeString(city) + " : " + localizeString(getBlockName(1)) (a missing key shows itself [G]) */
+    const char *ck = p && p->city ? p->city : "", *bk = p && p->block ? p->block : "";
+    const char *cs = loc_find(&h->gui, ck), *bs = loc_find(&h->gui, bk);
+    char title[MAX_TEXT];
+    snprintf(title, sizeof title, "%s : %s", cs ? cs : ck, bs ? bs : bk);
+    node_text(layout_find(r, "city_location"), title);
+    cq_init(s);
+    s->pause_group = layout_find(r, "pause_group");
+    s->options_group = layout_find(r, "options_group");  /* the outer one (there is a second inside it) */
+    fader_init(&s->fd, s->pause_group, 1);
+    fader_init(&s->fd, s->options_group, 0);
+}
+
+/* Continue: unloadInterface(this), the focus back, pauseGame(0), the music back in 1 s, the vibration back */
+static void pause_resume(Hud *h)
+{
+    Screen *s = h->pause;
+    hud_call(h, HUD_CALL_MUSIC_VOLUME, s->prev_music, 1000);
+    hud_call(h, HUD_CALL_RUMBLE, (float)s->prev_rumble, 0);
+    h->pause_result = HUD_PAUSE_RESUME;
+    pause_unload(h);
+}
+
+/* Pause::onQuit (ConfirmQuit's Yes): pauseGame(0), clearCheatFlags(65536), the music and vibration back,
+ * gWorld.restartShell. The script leaves the interface up for the world's end; here it goes on the next frame [G] */
+static void pause_quit(Hud *h, Screen *s)
+{
+    hud_call(h, HUD_CALL_CLEAR_CHEATS, 0.0f, 65536);
+    hud_call(h, HUD_CALL_MUSIC_VOLUME, s->prev_music, 1000);
+    hud_call(h, HUD_CALL_RUMBLE, (float)s->prev_rumble, 0);
+    h->pause_result = HUD_PAUSE_QUIT;
+    s->ended = 1;
+}
+
+/* setupOptions: the sliders from the settings (100 x volume / 0.75), the vibration's ON / OFF, the row titles at 1 */
+static void pause_options_setup(Hud *h, Screen *s)
+{
+    Node *go = s->options_group;
+    s->opt_pulse = 0;
+    s->mode = 0;
+    s->s_sound = go ? layout_find(go->child, "sound") : NULL;
+    s->s_music = go ? layout_find(go->child, "music") : NULL;
+    s->l_rumble = go ? layout_find(go->child, "rumble") : NULL;
+    s->titles[0] = go ? layout_find(go->child, "sound_title") : NULL;
+    s->titles[1] = go ? layout_find(go->child, "music_title") : NULL;
+    s->titles[2] = go ? layout_find(go->child, "rumble_title") : NULL;
+    s->f_music = s->prev_music;
+    s->b_rumble = s->prev_rumble;
+    s->f_sound = h->set_sound;                           /* gCommon.getSoundVolume() */
+    /* GuiSlider.setValue clamps to its range [R 0x24ABA0] */
+    if (s->s_sound) s->s_sound->val = fminf(100.0f, fmaxf(0.0f, 100.0f * s->f_sound / 0.75f));
+    if (s->s_music) s->s_music->val = fminf(100.0f, fmaxf(0.0f, 100.0f * s->f_music / 0.75f));
+    list_select(s->l_rumble, !s->b_rumble);              /* item 0 ON, 1 OFF */
+    for (int i = 0; i < 3; i++)
+        if (s->titles[i]) s->titles[i]->tscale = 1.0f;
+    if (h->gui.lang == 7 && s->l_rumble) {               /* Dutch: the list moved, its words smaller (and
+                                                          * setExtraSpacing(30) [G: not done]) */
+        s->l_rumble->p[0] = 185; s->l_rumble->p[1] = 180; s->l_rumble->p[2] = 0;
+        Node *on = layout_find(s->l_rumble->child, "ON"), *off = layout_find(s->l_rumble->child, "OFF");
+        if (on) on->tscale = 0.6f;
+        if (off) off->tscale = 0.6f;
+    }
+}
+
+static void pause_options_open(Hud *h, Screen *s)       /* activateOptions */
+{
+    s->pause_state = 1;
+    fader_go(&s->fd, s->pause_group, -1);
+    fader_go(&s->fd, s->options_group, 1);
+    pause_options_setup(h, s);
+    hud_call(h, HUD_CALL_MUSIC_VOLUME, s->f_music, 1000);   /* the music comes back to be heard */
+}
+
+static void pause_options_close(Hud *h, Screen *s)      /* deactivateOptions */
+{
+    s->pause_state = 0;
+    fader_go(&s->fd, s->options_group, -1);
+    fader_go(&s->fd, s->pause_group, 1);
+    hud_call(h, HUD_CALL_MUSIC_VOLUME, 0.0f, 1000);
+}
+
+/* saveSettings: the sliders' values back to volumes; gCommon.setSoundVolume / setMusicVolume (they set the sound
+ * device's volumes at once [R 0x2C2F68, 0x2C3048]) and setEnableRumble(b, 1) (into the profile) */
+static void pause_options_save(Hud *h, Screen *s)
+{
+    float fs = (s->s_sound ? s->s_sound->val : 100.0f) / 100.0f * 0.75f;
+    float fm = (s->s_music ? s->s_music->val : 100.0f) / 100.0f * 0.75f;
+    int br = !(s->l_rumble ? s->l_rumble->sel : 0);
+    s->prev_music = fm;
+    s->prev_rumble = br;
+    h->set_sound = fs;
+    h->set_music = fm;
+    h->set_rumble = br;
+    hud_call(h, HUD_CALL_SAVE_SETTINGS, 0.0f, 0);
+    h->pause_result = HUD_PAUSE_SETTINGS;
+}
+
+static void pause_options_row(Screen *s, int dir)       /* updateSelection */
+{
+    int pm = s->mode;
+    s->mode += dir;
+    if (s->mode < 0) s->mode = 2;
+    if (s->mode > 2) s->mode = 0;
+    if (s->titles[pm]) s->titles[pm]->tscale = 1.0f;
+    s->opt_pulse = 0;
+}
+
+static void pause_options_list(Hud *h, Screen *s, int dir)   /* updateLists: OFF -> ON buzzes the pad */
+{
+    if (!s->l_rumble)
+        return;
+    int sel = s->l_rumble->sel;
+    list_increment_wrap(s->l_rumble, dir);
+    if (sel && sel != s->l_rumble->sel) {
+        hud_call(h, HUD_CALL_RUMBLE, 1.0f, 0);
+        hud_call(h, HUD_CALL_RUMBLE_PULSE, 0.0f, 250);
+    }
+}
+
+/* one game frame of the Options page's sliders (processOptions 2048): pad 0 held right / left (or its stick past
+ * 0.05) moves the row's slider one step (GuiSlider.increment / decrement: value +- 1 [R 0x250EE0, 0x250F00]); the
+ * sound's new volume is set (with a Click) once it stops moving, the music's at every step (the block's music
+ * started if none plays) */
+static void pause_options_tick(Hud *h, Screen *s)
+{
+    float sv = s->s_sound ? s->s_sound->val : 0, mv = s->s_music ? s->s_music->val : 0;
+    if (s->mode < 2) {
+        Node *sl = s->mode == 1 ? s->s_music : s->s_sound;
+        if (sl) {
+            if (h->held_x >= 0.05f || h->held_r)
+                sl->val = fminf(sl->vmax, sl->val + 1.0f);
+            else if (h->held_x <= -0.05f || h->held_l)
+                sl->val = fmaxf(sl->vmin, sl->val - 1.0f);
+        }
+    }
+    float sn = s->s_sound ? s->s_sound->val : 0, mn = s->s_music ? s->s_music->val : 0;
+    if (s->tweak_sound) {
+        if (sv == sn) {
+            hud_call(h, HUD_CALL_SFX_VOLUME, sn / 100.0f * 0.75f, 0);
+            s->tweak_sound = 0;
+            sound(h, "Click", 0);
+        }
+    } else if (sv != sn)
+        s->tweak_sound = 1;
+    if (mv != mn) {
+        if (mn > 0.0f)
+            hud_call(h, HUD_CALL_PLAY_MUSIC, 0.0f, 0);   /* if !gSndDev.isMusicPlaying(): playMusic(block's Music) */
+        hud_call(h, HUD_CALL_MUSIC_VOLUME, mn / 100.0f * 0.75f, 0);
+    }
+}
+
+#define PAUSE_TICK (1.0f / 60.0f)                        /* the script's frame [G: 60 a second] */
+
+static void pause_frame(Hud *h, Screen *s, float dt)
+{
+    fader_update(&s->fd, dt);                            /* UpdateObjectFader */
+    if (s->pause_state != 1)
+        return;
+    s->opt_pulse += dt;                                  /* pulseSelection: the row's title 1 + 0.1 sin(4t) */
+    if (s->titles[s->mode])
+        s->titles[s->mode]->tscale = 1.0f + sinf(4.0f * s->opt_pulse) * 0.1f;
+    s->tick += dt;
+    int n = 0;
+    while (s->tick >= PAUSE_TICK && n < 8) {
+        s->tick -= PAUSE_TICK;
+        pause_options_tick(h, s);
+        n++;
+    }
+    if (n == 8)
+        s->tick = 0;
+}
+
+static void pause_options_input(Hud *h, Screen *s, int ev, int pad)   /* processOptions, the pad's events */
+{
+    if (pad != 0)                                        /* event.getController() != 0: not taken */
+        return;
+    if (ev == HUD_EV_ACCEPT) {
+        sound(h, "Click", 0);
+        pause_options_save(h, s);
+        pause_options_close(h, s);
+    } else if (ev == HUD_EV_BACK) {
+        sound(h, "Cancel", 0);
+        hud_call(h, HUD_CALL_SFX_VOLUME, s->f_sound, 0);         /* the sound as it was */
+        hud_call(h, HUD_CALL_RUMBLE, (float)s->b_rumble, 0);
+        pause_options_close(h, s);
+    } else if (ev == HUD_EV_UP || ev == HUD_EV_DOWN) {
+        pause_options_row(s, ev == HUD_EV_UP ? -1 : 1);
+        sound(h, "Rollover", 0);
+    } else if ((ev == HUD_EV_LEFT || ev == HUD_EV_RIGHT) && s->mode >= 2) {
+        pause_options_list(h, s, ev == HUD_EV_LEFT ? -1 : 1);
+        sound(h, "Rollover", 0);
+    }
+}
+
+static void pause_input(Hud *h, Screen *s, int ev, int pad)   /* Pause::process, the pad's events */
+{
+    if (s->pause_state == 1) {
+        pause_options_input(h, s, ev, pad);
+        return;
+    }
+    if (cq_process(h, s, ev)) {
+        if (!s->cq.state && s->choices && !s->ended)
+            s->choices->pulse = 1;
+        return;
+    }
+    Node *l = s->choices;
+    int sel = l ? l->sel : 0;
+    if (ev == HUD_EV_UP || ev == HUD_EV_LEFT || ev == HUD_EV_DOWN || ev == HUD_EV_RIGHT) {
+        list_increment(l, ev == HUD_EV_UP || ev == HUD_EV_LEFT ? -1 : 1);
+        if (l && l->sel != sel)
+            sound(h, "Rollover", 0);
+    } else if (ev == HUD_EV_START || ev == HUD_EV_ACCEPT) {
+        sound(h, "Click", 0);
+        if (sel == 0)
+            pause_resume(h);
+        else if (sel == 1) {
+            if (pad != 0)
+                sound(h, "Cheat_back", 0);               /* the Options page is player 1's */
+            else
+                pause_options_open(h, s);
+        } else if (sel == 2) {
+            if (l) l->pulse = 0;
+            cq_show(h, s, 0);
+        }
+    }
+    /* Back: nothing (the script has no case for it) */
+}
+
+int hud_pause_open(Hud *h, int pad, const HudPause *p)
+{
+    /* WorldGuiDriver::process 128: only while it has the focus (no results screen), not in the attract mode */
+    if (!h || h->pause || h->scr || h->cfg.play_type == HUD_PLAY_ATTRACT)
+        return 0;
+    Screen *s = calloc(1, sizeof *s);
+    if (!s)
+        return 0;
+    s->kind = SCR_PAUSE;
+    s->screen = -1;
+    s->L = layout_load(&h->gui, h->gui.bundles[0], "Pause.ifc");
+    if (!s->L) {
+        free(s);
+        return 0;
+    }
+    h->pause = s;
+    h->pause_result = HUD_PAUSE_NONE;
+    pause_start(h, s, pad, p);
+    return 1;
+}
+
+int hud_pause_showing(const Hud *h) { return h && h->pause && !h->pause->ended; }
+
+int hud_pause_result(Hud *h)
+{
+    if (!h)
+        return HUD_PAUSE_NONE;
+    int r = h->pause_result;
+    h->pause_result = HUD_PAUSE_NONE;
+    return r;
+}
+
+void hud_set_settings(Hud *h, float sound_vol, float music_vol, int rumble)
+{
+    if (!h)
+        return;
+    h->set_sound = sound_vol;
+    h->set_music = music_vol;
+    h->set_rumble = rumble != 0;
+}
+
+void hud_settings(const Hud *h, float *sound_vol, float *music_vol, int *rumble)
+{
+    if (!h)
+        return;
+    if (sound_vol) *sound_vol = h->set_sound;
+    if (music_vol) *music_vol = h->set_music;
+    if (rumble) *rumble = h->set_rumble;
+}
+
+void hud_pad_held(Hud *h, float stick_x, int left, int right)
+{
+    if (!h)
+        return;
+    h->held_x = stick_x;
+    h->held_l = left != 0;
+    h->held_r = right != 0;
+}
+
+int hud_calls(Hud *h, HudCall *out, int max)
+{
+    if (!h || !out)
+        return 0;
+    int n = h->ncalls < max ? h->ncalls : max;
+    memcpy(out, h->calls, sizeof *out * (size_t)n);
+    memmove(h->calls, h->calls + n, sizeof *out * (size_t)(h->ncalls - n));
+    h->ncalls -= n;
+    return n;
+}
+
 static void results_unload(Hud *h)
 {
     if (h->scr && h->scr->sound_on)
@@ -2624,14 +3149,13 @@ int hud_result(Hud *h)
 }
 
 int hud_results_showing(const Hud *h) { return h && h->scr; }
-int hud_paused(const Hud *h) { return h && h->paused; }
+int hud_paused(const Hud *h) { return h && (h->paused || hud_pause_showing(h)); }
 void hud_results_auto(Hud *h, float seconds) { if (h) h->auto_press = seconds; }
 
-void hud_input(Hud *h, int ev, int button)
+static void screen_input(Hud *h, Screen *s, int ev, int button)
 {
-    if (!h || !h->scr || h->scr->ended)
+    if (s->ended)
         return;
-    Screen *s = h->scr;
     if (s->kind == SCR_RESULTS)
         results_input(h, s, ev, button);
     else if (s->kind == SCR_LEVEL)
@@ -2643,6 +3167,22 @@ void hud_input(Hud *h, int ev, int button)
         s->ended = 1;
     }
 }
+
+/* the event goes to the interface with the focus: the Pause menu over a results screen [R: both take it] */
+void hud_input_pad(Hud *h, int ev, int button, int pad)
+{
+    if (!h)
+        return;
+    if (h->pause) {
+        if (!h->pause->ended)
+            pause_input(h, h->pause, ev, pad);
+        return;
+    }
+    if (h->scr)
+        screen_input(h, h->scr, ev, button);
+}
+
+void hud_input(Hud *h, int ev, int button) { hud_input_pad(h, ev, button, 0); }
 
 static void screen_update(Hud *h, float dt)
 {
@@ -2670,7 +3210,7 @@ static void screen_update(Hud *h, float dt)
     s->ready = ready ? s->ready + dt : 0;
     if (h->auto_press > 0 && ready && s->ready >= h->auto_press) {
         s->ready = 0;
-        hud_input(h, HUD_EV_ACCEPT, 0);
+        screen_input(h, s, HUD_EV_ACCEPT, 0);
     }
 }
 
@@ -2692,6 +3232,12 @@ void hud_update(Hud *h, float dt)
     }
     h->nrages = n;
     screen_update(h, dt);
+    if (h->pause) {                                      /* Pause::process 2048 */
+        if (h->pause->ended)
+            pause_unload(h);
+        else
+            pause_frame(h, h->pause, dt);
+    }
 }
 
 int hud_sounds(Hud *h, HudSound *out, int max)
@@ -2720,5 +3266,7 @@ int hud_quads(const Hud *h, HudQuad *out, int max)
             n += emit_layout(out + n, max - n, &h->gui, h->rages[i]->L);
     if (h->scr && h->scr->L)
         n += emit_layout(out + n, max - n, &h->gui, h->scr->L);
+    if (h->pause && h->pause->L)                         /* loaded last: over everything */
+        n += emit_layout(out + n, max - n, &h->gui, h->pause->L);
     return n;
 }
