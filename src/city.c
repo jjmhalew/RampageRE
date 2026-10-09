@@ -191,6 +191,22 @@ void city_close(City *c)
     free(c);
 }
 
+int city_block_index(City *c, const char *name)
+{
+    Group list = group_sub(group_sub(c->world, "BlockData"), "BlockList");
+    Record r[MAX_REC];
+    uint32_t n = group_items(list, r, MAX_REC);
+    int start = (int)group_num(c->world, "BlockStart", 0), first = -1;
+    for (uint32_t i = 0; i < n && name; i++)
+        if (_stricmp(record_str(list, r[i]), name) == 0) {
+            if ((int)i >= start)
+                return (int)i;
+            if (first < 0)
+                first = (int)i;
+        }
+    return first;
+}
+
 uint32_t city_blocks(City *c, const char **names, uint32_t max)
 {
     Group list = group_sub(group_sub(c->world, "BlockData"), "BlockList");

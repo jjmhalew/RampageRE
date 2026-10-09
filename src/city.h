@@ -210,6 +210,8 @@ int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4]);
 int city_camera(City *c, Group *two_tilts);
 /* a group of a property book by the book's name ("Objects1_Props", "Weapons": <name>.bdp in the Vol) */
 Group city_book_group(City *c, const char *book, const char *name);
+/* a block's index in the city's BlockList as the game counts it (the first at or after WorldData BlockStart), -1 */
+int city_block_index(City *c, const char *name);
 /* a model's bounds in its own frame (its meshes' vertices); 0 = ok */
 int city_shape_box(City *c, const char *shape, float min[3], float max[3]);
 /* an army unit's node (a weapon's WeaponNode) in the world as its look is drawn now; 0 = ok */

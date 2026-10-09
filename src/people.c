@@ -1383,6 +1383,12 @@ static void gone(Person *q)
     q->building = -1;
 }
 
+void people_remove(People *p, int who)
+{
+    if (who >= 0 && who < p->n && p->v[who].phase != PP_GONE)
+        gone(&p->v[who]);
+}
+
 void people_update(People *p, float dt, const PeopleMonster *m, int nm)
 {
     p->m = m;

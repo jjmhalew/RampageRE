@@ -132,6 +132,7 @@ int people_hut_state(const People *p, int hut);     /* 0 standing, 1 hit (flying
  * camera_x the camera's x. Out at 2.241 to y = -3 -+ 1, then scurrying off along it (Person_Runner.bsf), deleted
  * once out of view. The monster's becomeHuman (0x2D3ED0) keeps the actor (+0xAAC) and stops drawing itself. */
 int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float camera_x);
+void people_remove(People *p, int who);              /* requestDelete: gone at once (the respawn's streaker) */
 
 void people_update(People *p, float dt, const PeopleMonster *m, int nm);
 int people_count(const People *p);

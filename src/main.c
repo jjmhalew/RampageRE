@@ -25,6 +25,7 @@
 #include "hud.h"
 #include "vehicle.h"
 #include "edible.h"
+#include "game.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -59,6 +60,10 @@ typedef struct {
     int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
     Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
     Edibles *edibles;                                /* the power-ups and hazards behind the windows (edible.c) */
+    Game *game;                                      /* the world's states, the lives, the clock (game.c) */
+    int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
+    int game_built;                                  /* this build is the game's: keep the game going */
+    int streaker;                                    /* the defeated monster's streaker (people.c), -1 none */
     EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
     struct { int fx, edible; float off[3]; } efx[32]; int nefx;   /* the edibles' effects that follow them */
     struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
@@ -218,6 +223,7 @@ static void start_moves(Viewer *v)
     v->held = -1;
     v->held_unit = -1;
     v->held_vehicle = -1;
+    v->game_block = -1;
     v->pending_slot = -1;
     v->defeated = 0;
     v->scale = v->scale_to = 1;
@@ -409,6 +415,25 @@ static void build(Viewer *v)
         }
     }
     v->scene.edibles = v->edibles;
+    v->streaker = -1;
+    if (!v->game_built) {                            /* the flow of the city from this block on: campaign, one player */
+        game_free(v->game);
+        v->game = NULL;
+        if (v->have_scene && v->monster >= 0) {
+            static GameHost gh;
+            gh.find = army_find;
+            gh.ctx = v;
+            GameConfig gc = { GP_CAMPAIGN, 1, 0, 0, 7, city_block_index(v->city, v->blocks[v->block]), 1 };
+            v->game = game_new(&gh, &gc);
+            if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
+                game_auto_results(v->game, 3.0f);   /* no results screens here: answered after 3 s */
+                game_start(v->game);
+            } else {
+                game_free(v->game);
+                v->game = NULL;
+            }
+        }
+    }
     if (v->have_scene && v->scene.folk)
         people_set_visible(v->scene.folk, people_visible, v);
     hud_close(v->hud);                               /* player 1's HUD for this monster (Hud0.ifc) */
@@ -494,7 +519,9 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canHop")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 3;
     if (!strcmp(call, "Monsters::canSwing")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0]), 0) == 4;
     if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0, 0) == 5;
-    if (!strcmp(call, "Monsters::canRespawn")) return v->defeated;   /* [G]: the native's lives / credits not read */
+    if (!strcmp(call, "Monsters::canRespawn"))       /* 0x2D3D80: lives left, become human, its streaker not held */
+        return v->game ? game_can_respawn(v->game, 0, v->streaker >= 0 && v->scene.folk &&
+                                          people_get(v->scene.folk, v->streaker)->phase == PP_HELD) : v->defeated;
     if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(v, a + 1) >= 0;
     if (!strcmp(call, "Monsters::canDoPunch")) {     /* not at a person's or a power-up's window */
         int e = edible_call(v, call, a + 1);
@@ -680,20 +707,58 @@ static void clip_event(Viewer *v, const MoveEvent *e)
             v->scale = v->scale_to;
         return;
     }
-    else if (!strcmp(n, "Monsters::startRespawn")) { /* back to full health (MONSTER_DATA +0x138) */
+    else if (!strcmp(n, "Monsters::startRespawn")) { /* 0x2D3930: a life, back to full health where the streaker is
+                                                        or dropping in from the view */
         v->hp = 200;
         v->defeated = 0;
         if (v->scene.monster >= 0)
             v->scene.instances[v->scene.monster].hidden = 0;
+        if (v->game) {
+            GameRespawnIn in;
+            GameRespawn out;
+            memset(&in, 0, sizeof in);
+            const Person *p = v->streaker >= 0 && v->scene.folk ? people_get(v->scene.folk, v->streaker) : NULL;
+            if (p && p->phase != PP_GONE) {
+                in.streaker = 1;
+                in.on_line = p->mv.active && p->phase != PP_HELD;
+                memcpy(in.streaker_pos, p->pos, sizeof in.streaker_pos);
+                in.streaker_facing = p->heading / 57.2957795f;
+            }
+            memcpy(in.cam_pos, v->cam.pos, sizeof in.cam_pos);
+            memcpy(in.cam_dir, v->cam.rot[1], sizeof in.cam_dir);
+            in.cam_half_fov = v->cam.s.fov / 2;
+            game_start_respawn(v->game, 0, &in, &out);
+            v->mx = out.pos[0]; v->my = out.pos[1]; v->mz = out.pos[2];
+            v->heading = out.facing * 57.2957795f;
+            if (out.fall) {                          /* in the air, Jump_Butt_Slam_fall */
+                v->mode = MODE_AIRBORNE;
+                for (int k = 0; v->have_graph && k < v->graph.n; k++)
+                    if (!_stricmp(v->graph.states[k].name, "Jump_Butt_Slam_fall")) {
+                        moves_force(&v->run, k);
+                        break;
+                    }
+            }
+            if (out.delete_streaker && v->scene.folk && v->streaker >= 0)
+                people_remove(v->scene.folk, v->streaker);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  respawn at %.1f %.1f %.1f%s, %d lives\n", out.pos[0], out.pos[1], out.pos[2],
+                       out.fall ? ", falling" : "", game_lives(v->game, 0));
+        }
+        v->streaker = -1;
         return;
     }
     else if (!strcmp(n, "Monsters::becomeHuman")) {  /* while a block plays (state 6): createStreaker, and the monster
                                                         stops drawing itself (0x2D3ED0) */
         if (!v->scene.folk || v->scene.monster < 0)
             return;
+        int human = v->game ? game_become_human(v->game, 0) : 1;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  becomeHuman: %s (state %d)\n", human == 1 ? "a streaker" : "not in play", v->game ? game_state(v->game) : -1);
+        if (human != 1)
+            return;
         Group t = city_template(v->city, monster_female(v) ? "NakedFemale" : "NakedMale");
         float at[3] = { v->mx, v->my, v->mz };
-        if (t.at && people_add_streaker(v->scene.folk, t, at, v->cam.pos[0]) >= 0)
+        if (t.at && (v->streaker = people_add_streaker(v->scene.folk, t, at, v->cam.pos[0])) >= 0)
             v->scene.instances[v->scene.monster].hidden = 1;
         return;
     }
@@ -968,6 +1033,68 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
 }
 
 /* the army each frame (army.c): the monster as it sees it, the buildings, then what it makes happen */
+/* the game's frame (game.c): what it sees (the monster's HP, the buildings standing), then what it says. The viewer
+ * has no intro or walk-out choreography: a move the flow waits for is done at once, the walks and the script cameras
+ * are left out [G], and a new block is built after the frame */
+static void game_step(Viewer *v, float dt)
+{
+    if (!v->game || game_left(v->game))
+        return;
+    GameInput in;
+    memset(&in, 0, sizeof in);
+    in.hp[0] = v->hp;
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++)
+        in.buildings += v->scene.buildings[i].b.state == BUILDING_STANDING ||
+                        v->scene.buildings[i].b.state == BUILDING_FLOOR_FALLING;
+    game_update(v->game, dt, &in);
+    GameEvent ev[32];
+    int ne;
+    while ((ne = game_events(v->game, ev, 32)) > 0)
+        for (int i = 0; i < ne; i++) {
+            const GameEvent *e = &ev[i];
+            switch (e->type) {
+            case GE_BLOCK:                           /* the next block: built once this frame is over */
+                for (uint32_t k = 0; e->name && k < v->nblocks; k++)
+                    if (!_stricmp(v->blocks[k], e->name) && k != v->block)
+                        v->game_block = (int)k;
+                break;
+            case GE_RESET:
+            case GE_PLACE:
+                if (e->a == 1 && e->type == GE_PLACE) {
+                    v->mx += e->pos[0]; v->my += e->pos[1]; v->mz += e->pos[2];
+                } else if (e->a == 1 || e->type == GE_PLACE) {
+                    v->mx = e->pos[0]; v->my = e->pos[1]; v->mz = e->pos[2];
+                    if (e->type == GE_RESET)
+                        v->heading = e->f * 57.2957795f;
+                }
+                break;
+            case GE_MOVE:
+                if (e->a == 1)
+                    game_move_done(v->game, e->slot);
+                break;
+            case GE_AI_ACTIVATE: if (v->army) army_activate(v->army, 1); break;
+            case GE_REVIVE:                          /* cancelRespawn: full HP where it is */
+                v->hp = 200;
+                v->defeated = 0;
+                v->scale = v->scale_to = 1;
+                if (v->scene.monster >= 0)
+                    v->scene.instances[v->scene.monster].hidden = 0;
+                if (v->streaker >= 0 && v->scene.folk)
+                    people_remove(v->scene.folk, v->streaker);
+                v->streaker = -1;
+                if (e->a == 1) {
+                    edible_power_init(&v->power);
+                    v->energy = 0;
+                }
+                break;
+            default: break;
+            }
+            if (getenv("RAMPAGE_TRACE") && e->type != GE_MOVE)
+                printf("  game event %d (%s) a %d, state %d\n", e->type, e->name ? e->name : "-", e->a,
+                       game_state(v->game));
+        }
+}
+
 /* gCommon.addStats on the monster (0x2C51A0): HP and energy by the rules edible.c keeps (none at 0 HP; while raging
  * only a full Energy restarts it); a full one starts the rage: Monsters::startRage, slot 54 [G: its slot] */
 static void monster_stats(Viewer *v, float health, float energy)
@@ -1227,6 +1354,7 @@ static void army_step(Viewer *v, float dt)
     army_update(v->army, dt, &m, 1, boxes, nb);
     vehicle_step(v, dt, &m, boxes, nb);
     edible_step(v, dt);
+    game_step(v, dt);
     ArmyEvent ev[64];
     int ne;
     while ((ne = army_events(v->army, ev, 64)) > 0)
@@ -1275,6 +1403,8 @@ static void army_step(Viewer *v, float dt)
                     hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);
                 break;
             case AE_SCORE:
+                if (v->game)
+                    game_add_points(v->game, 0, e->level, (int)e->amount);
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  score %+.0f (category %d), total %.0f\n", e->amount, e->level,
                            army_stats(v->army, 0)->points[6]);
@@ -1641,7 +1771,11 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     fx_step(v, dt);
     shake_step(v->shakes, 8, dt);
     if (v->hud) {                                    /* Hud.bsf: health, rage, the score (ArmyStats points[6]) */
-        hud_set(v->hud, v->hp, 200, v->energy, 100, v->army ? (int)army_stats(v->army, 0)->points[6] : 0, -1, -1);
+        int vis = 0;
+        float clock = v->game ? game_clock(v->game, &vis) : 0;
+        hud_set(v->hud, v->hp, 200, v->energy, 100, v->game ? game_points(v->game, 0, GPT_TOTAL) :
+                v->army ? (int)army_stats(v->army, 0)->points[6] : 0, v->game ? game_lives(v->game, 0) : -1, -1);
+        hud_set_clock(v->hud, vis, clock);
         hud_update(v->hud, dt);
     }
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
@@ -1904,6 +2038,13 @@ int main(int argc, char **argv)
         float dt = (float)(now - last);
         last = now;
         if (w.pressed[VK_ESCAPE]) w.quit = 1;
+        if (v.game_block >= 0) {                     /* the game moved on to the next block */
+            v.block = (uint32_t)v.game_block;
+            v.game_block = -1;
+            v.game_built = 1;
+            build(&v);
+            v.game_built = 0;
+        }
         if (w.pressed[VK_NEXT] && v.nblocks) { v.block = (v.block + 1) % v.nblocks; build(&v); }
         if (w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }
         if (w.pressed['N']) { v.night = !v.night; build(&v); }
