@@ -55,6 +55,10 @@ typedef struct {                                      /* a building's cells and 
     int first, last; Mat4 *rest;                      /* all its instances, first .. last - 1, where they were built */
     Mat4 node;                                        /* its place */
     int moving;                                       /* it moved last frame */
+    /* the facade's other passes (FORMAT_BDP.md "Facade geometry"), parts 1 .. 3 of its mesh: the window glass, the
+     * cracks, the inner corner walls. Per sheet column its window outline in cell units (x0, z0, x1, z1; x0 < 0
+     * none), the sheet's InnerWallColumn, 1 / CrackScale and CrackTint */
+    float outline[4][4]; int inner_wall; float crack_k, crack_tint[3];
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
@@ -67,6 +71,7 @@ typedef struct {
     Vehicle *vehicles; uint32_t nvehicles;
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;
     float fog_colour[3], fog_start, fog_end;
+    float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
     int monster;                                      /* instance of the monster, -1 = none */

@@ -47,6 +47,7 @@ typedef struct {
     float *pos, *nrm, *uv, *col;                         /* 3, 3, 2, 4 floats per vertex (nrm / uv / col may be NULL) */
     uint8_t (*bones)[2]; float *weight;                  /* skinned: skeleton node indices and the first one's weight */
     uint32_t *tris;                                      /* 3 indices per triangle */
+    int blend;                                           /* drawn over what is behind it by its alpha (cracks) */
 } MeshPart;
 typedef struct { MeshPart *parts; uint32_t nparts; } Mesh;
 int mesh_read(const BdpEntry *e, Mesh *m);               /* 0 = ok */

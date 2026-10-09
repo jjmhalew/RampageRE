@@ -87,7 +87,11 @@ the game's pose mirroring, 0x194BA0), and root motion, steering, the conditions 
 game's rules: the front cell takes 2 HP, the hit spreads up or down and sideways as the cell weakens, floors and
 buildings keep their HP pools, and each facade tile shows its cell's state (the sheet's row), so five punches crack,
 break and wreck a cell and its neighbours, and a damaged storey shows its interior (the floor's `Skeleton`, then its
-`DamagedSkeleton` once half its `FloorHP` is gone) through the holes ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage"). A floor whose HP runs out falls: the storeys above
+`DamagedSkeleton` once half its `FloorHP` is gone) through the holes ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage").
+The facade's other passes are the game's too ("Facade geometry"): intact windows show `InnerWindow` interiors behind
+the sheet's clear panes, tinted `CubeTint`; a cracking front fades in `CrackTexture` by its vertex rows' levels,
+around the windows of lightly damaged cells; a broken corner cell shows the inner wall behind it (the sheet's
+`InnerWallColumn`). A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
 and sinks, leaving its rubble ("Collapse"; `--do "collapse"` destroys the building in front of the monster).
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster

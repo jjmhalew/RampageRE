@@ -485,6 +485,200 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
     return m;
 }
 
+/* the sheet's ColumnDef| outlines (0x2D0FB0): pixels of a tile RefTexWidth / 4 x RefTexHeight / 4 to cell units,
+ * x = (o & (Wt - 1)) x 5 / Wt, z = (Ht - o) x 3 / Ht, the first x and the last z a pixel in */
+static void sheet_columns(City *c, SceneBuilding *sb, const char *sheet)
+{
+    for (int k = 0; k < 4; k++)
+        sb->outline[k][0] = -1;
+    sb->inner_wall = 0;
+    sb->crack_k = 1.0f / 8;
+    sb->crack_tint[0] = sb->crack_tint[1] = sb->crack_tint[2] = 1;
+    Group g = template_of(c, sheet), where;
+    if (!g.at)
+        return;
+    sb->inner_wall = (int)group_num(g, "InnerWallColumn", 0) & 3;
+    float scale = group_num(g, "CrackScale", 8);
+    sb->crack_k = scale > 0 ? 1 / scale : 1.0f / 8;
+    sb->crack_tint[0] = group_num(g, "CrackTintR", 1);
+    sb->crack_tint[1] = group_num(g, "CrackTintG", 1);
+    sb->crack_tint[2] = group_num(g, "CrackTintB", 1);
+    int wt = (int)group_num(g, "RefTexWidth", 512) / 4, ht = (int)group_num(g, "RefTexHeight", 512) / 4;
+    if (wt < 1 || ht < 1 || (wt & (wt - 1)) || (ht & (ht - 1)))
+        return;
+    Record r[8], o[8];
+    uint32_t n = group_values(g, "ColumnDef|", &where, r, 8);
+    for (uint32_t i = 0; i < n; i++) {
+        Group cd = record_group(where, r[i]);
+        int col = (int)group_num(cd, "Column", -1);
+        Group ol = group_sub(cd, "Outline|");
+        if (col < 0 || col > 3 || !ol.at || group_items(ol, o, 8) < 4)
+            continue;
+        int p[4];
+        for (int k = 0; k < 4; k++)
+            p[k] = (int)record_num(o[k]);
+        sb->outline[col][0] = (float)((p[0] & (wt - 1)) + 1) * CELL / wt;
+        sb->outline[col][1] = (float)(ht - (p[1] & (ht - 1))) * STOREY / ht;
+        sb->outline[col][2] = (float)(p[2] & (wt - 1)) * CELL / wt;
+        sb->outline[col][3] = (float)(ht - 1 - (p[3] & (ht - 1))) * STOREY / ht;
+    }
+}
+
+static void part_reset(MeshPart *p, uint32_t quads)
+{
+    free(p->pos); free(p->nrm); free(p->uv); free(p->col); free(p->tris);
+    p->pos = malloc(sizeof(float) * 12 * (quads ? quads : 1));
+    p->nrm = malloc(sizeof(float) * 12 * (quads ? quads : 1));
+    p->uv = malloc(sizeof(float) * 8 * (quads ? quads : 1));
+    p->col = malloc(sizeof(float) * 16 * (quads ? quads : 1));
+    p->tris = malloc(sizeof(uint32_t) * 6 * (quads ? quads : 1));
+    p->nverts = p->ntris = 0;
+}
+
+/* one quad, corners in order around it, wound to face n */
+static void part_quad(MeshPart *p, const float pos[4][3], const float uv[4][2], const float col[4][4], const float n[3])
+{
+    uint32_t v0 = p->nverts;
+    for (int k = 0; k < 4; k++) {
+        memcpy(p->pos + 3 * p->nverts, pos[k], 12);
+        memcpy(p->nrm + 3 * p->nverts, n, 12);
+        memcpy(p->uv + 2 * p->nverts, uv[k], 8);
+        memcpy(p->col + 4 * p->nverts, col[k], 16);
+        p->nverts++;
+    }
+    float a[3], b[3];
+    for (int k = 0; k < 3; k++) {
+        a[k] = pos[1][k] - pos[0][k];
+        b[k] = pos[2][k] - pos[0][k];
+    }
+    float d = (a[1] * b[2] - a[2] * b[1]) * n[0] + (a[2] * b[0] - a[0] * b[2]) * n[1] + (a[0] * b[1] - a[1] * b[0]) * n[2];
+    uint32_t q[6] = { v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3 };
+    if (d < 0) { q[1] = v0 + 2; q[2] = v0 + 1; q[4] = v0 + 3; q[5] = v0 + 2; }
+    memcpy(p->tris + 3 * p->ntris, q, sizeof q);
+    p->ntris += 2;
+}
+
+/* a point of a cell of face (FACE_*) column col: a along the face (0 .. 5, left to right seen from outside), z up
+ * the storey (0 .. 3, squashed to its height now), d into the building */
+static void face_point(const SceneBuilding *sb, int face, int col, float a, float z, float d, float bottom, float height,
+                       float out[3])
+{
+    float hw = sb->b.width * CELL / 2, hd = sb->b.depth * CELL / 2;
+    if (face == FACE_FRONT) { out[0] = -hw + CELL * (float)col + a; out[1] = -hd + d; }
+    else if (face == FACE_LEFT) { out[0] = -hw + d; out[1] = hd - CELL * (float)col - a; }
+    else { out[0] = hw - d; out[1] = -hd + CELL * (float)col + a; }
+    out[2] = bottom + z * height / STOREY;
+}
+
+static void face_normal(int face, float n[3])
+{
+    n[0] = face == FACE_LEFT ? -1.0f : face == FACE_RIGHT ? 1.0f : 0;
+    n[1] = face == FACE_FRONT ? -1.0f : 0;
+    n[2] = 0;
+}
+
+/* the facade's other passes (0x2C92F0 .., 0x2C6A30 .., 0x2C63A0), made again whenever the building changes:
+ * - the window glass, for every cell in state 0 whose column has an outline: the outline grown by 0.3, 0.03 behind
+ *   the face (seen through the sheet's clear windows), one of 16 InnerWindow tiles, tinted CubeTint (/ 256: the
+ *   game halves its vertex colours, 0x80 = 1);
+ * - the cracks on the front, faded in by the vertex rows' levels (level x 85, halved: level / 3), around the window
+ *   below state 2, CrackTexture running on across the faces at 1 / CrackScale (here just in front of the face: the
+ *   game puts it 0.015 behind and must draw it over the facade some other way);
+ * - while a corner front cell is damaged, a wall 5 deep just inside the side wall (0.3 in at its back), the sheet's
+ *   InnerWallColumn at the side cell's state, grey (0x80 halved). */
+static void facade_passes(Scene *s, SceneBuilding *sb)
+{
+    if (sb->mesh < 0 || s->meshes[sb->mesh].mesh.nparts < 4)
+        return;
+    MeshPart *glass = &s->meshes[sb->mesh].mesh.parts[1], *crack = &s->meshes[sb->mesh].mesh.parts[2];
+    MeshPart *inner = &s->meshes[sb->mesh].mesh.parts[3];
+    const Building *b = &sb->b;
+    int cells = 2 * b->depth + b->width;
+    part_reset(glass, (uint32_t)(b->storeys * cells));
+    part_reset(crack, (uint32_t)(b->storeys * b->width * 4));
+    part_reset(inner, (uint32_t)(b->storeys * 2));
+    float tint[4] = { s->cube_tint[0] / 256, s->cube_tint[1] / 256, s->cube_tint[2] / 256, 1 };
+    for (int o = 0; o < b->storeys; o++) {
+        int ls = building_live_of(b, o);
+        if (ls < 0 || b->state == BUILDING_GONE)
+            continue;
+        float bottom = 0, height = 0;
+        building_storey(b, ls, &bottom, &height);
+        if (height <= 0.01f)
+            continue;
+        for (int face = 0; face < 3; face++) {
+            int ncol = face == FACE_FRONT ? b->width : b->depth;
+            float n[3];
+            face_normal(face, n);
+            for (int col = 0; col < ncol; col++) {
+                int ci = building_cell_index(b, face, col);
+                if (ci < 0 || sb->quad[o][ci] < 0)
+                    continue;
+                const BuildingCell *cell = &b->cell[o][ci];
+                const float *ol = sb->outline[cell->tile & 3];
+                if (cell->state == 0 && ol[0] >= 0) {
+                    unsigned t = ((unsigned)o * 7u + (unsigned)ci * 13u + b->seed * 5u) & 15u;   /* cell +6 */
+                    float a0 = ol[0] - 0.3f, a1 = ol[2] + 0.3f, z0 = ol[1] - 0.3f, z1 = ol[3] + 0.3f;
+                    float az[4][2] = { { a0, z0 }, { a1, z0 }, { a1, z1 }, { a0, z1 } }, pos[4][3], uv[4][2], col4[4][4];
+                    for (int k = 0; k < 4; k++) {
+                        face_point(sb, face, col, az[k][0], az[k][1], 0.03f, bottom, height, pos[k]);
+                        uv[k][0] = 0.25f * (float)(t & 3) + 0.05f * az[k][0];
+                        uv[k][1] = 1 - (0.25f * (float)(t >> 2) + az[k][1] / 12);
+                        memcpy(col4[k], tint, sizeof tint);
+                    }
+                    part_quad(glass, pos, uv, col4, n);
+                }
+                if (face != FACE_FRONT)
+                    continue;
+                /* the cracks: this cell's corners in the vertex rows ls (bottom) and ls + 1 (top) */
+                float lv[4] = { b->vert[ls][col], b->vert[ls][col + 1], b->vert[ls + 1][col + 1], b->vert[ls + 1][col] };
+                if (lv[0] + lv[1] + lv[2] + lv[3] <= 0)
+                    continue;
+                float outer[4][2] = { { 0, 0 }, { CELL, 0 }, { CELL, STOREY }, { 0, STOREY } };
+                float in[4][2] = { { ol[0], ol[1] }, { ol[2], ol[1] }, { ol[2], ol[3] }, { ol[0], ol[3] } };
+                int bands = cell->state < 2 && ol[0] >= 0;
+                float start = CELL * (float)b->depth + CELL * (float)col, up = STOREY * (float)ls;
+                for (int band = 0; band < (bands ? 4 : 1); band++) {
+                    float az[4][2], al[4], pos[4][3], uv[4][2], col4[4][4];
+                    if (bands) {                         /* bottom, right, top, left of the window */
+                        int i = band, j = (band + 1) & 3;
+                        memcpy(az[0], outer[i], 8); memcpy(az[1], outer[j], 8);
+                        memcpy(az[2], in[j], 8); memcpy(az[3], in[i], 8);
+                        al[0] = lv[i]; al[1] = lv[j]; al[2] = lv[j]; al[3] = lv[i];
+                    } else {
+                        memcpy(az, outer, sizeof az);
+                        memcpy(al, lv, sizeof al);
+                    }
+                    for (int k = 0; k < 4; k++) {
+                        face_point(sb, face, col, az[k][0], az[k][1], -0.02f, bottom, height, pos[k]);
+                        uv[k][0] = (start + az[k][0]) * sb->crack_k;
+                        uv[k][1] = -(up + az[k][1]) * sb->crack_k;
+                        memcpy(col4[k], sb->crack_tint, 12);
+                        col4[k][3] = al[k] / 3;
+                    }
+                    part_quad(crack, pos, uv, col4, n);
+                }
+            }
+        }
+        /* the inner corner walls, behind the first and the last front cell */
+        for (int side = 0; side < 2; side++) {
+            int fi = building_cell_index(b, FACE_FRONT, side ? b->width - 1 : 0);
+            int si = building_cell_index(b, side ? FACE_RIGHT : FACE_LEFT, side ? 0 : b->depth - 1);
+            if (fi < 0 || si < 0 || b->cell[o][fi].state == 0)
+                continue;
+            float hw = b->width * CELL / 2, hd = b->depth * CELL / 2, x = side ? hw : -hw, in = side ? -0.3f : 0.3f;
+            float pos[4][3] = { { x, -hd, bottom }, { x + in, -hd + CELL, bottom }, { x + in, -hd + CELL, bottom + height },
+                                { x, -hd, bottom + height } };
+            float u0 = (float)(sb->inner_wall + 1) * 0.25f, u1 = (float)sb->inner_wall * 0.25f;
+            float v0 = b->cell[o][si].state * 0.25f;
+            float uv[4][2] = { { u0, v0 + 0.25f }, { u1, v0 + 0.25f }, { u1, v0 }, { u0, v0 } };
+            float grey[4][4] = { { 0.5f, 0.5f, 0.5f, 1 }, { 0.5f, 0.5f, 0.5f, 1 }, { 0.5f, 0.5f, 0.5f, 1 }, { 0.5f, 0.5f, 0.5f, 1 } };
+            float n[3] = { side ? -1.0f : 1.0f, 0, 0 };
+            part_quad(inner, pos, uv, grey, n);
+        }
+    }
+}
+
 static void building(City *c, Scene *s, Group inst, float row_offset)
 {
     Group t = template_of(c, group_str(inst, "TemplateName")), where;
@@ -519,7 +713,18 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     int sheet_name = sheet ? bdp_find_name(&c->bundle, sheet) : -1;
     int mesh = -1;
     if (nst && sheet_name >= 0) {
-        mesh = (int)scene_add_mesh(s, facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst), s->city);
+        Mesh fm = facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst);
+        fm.parts = realloc(fm.parts, sizeof *fm.parts * 4);   /* glass, cracks, inner corner walls (facade_passes) */
+        memset(fm.parts + 1, 0, sizeof *fm.parts * 3);
+        fm.nparts = 4;
+        Group sg = template_of(c, sheet);
+        const char *glass = group_str(t, "Texture|InnerWindowTexture"), *crack = sg.at ? group_str(sg, "CrackTexture") : NULL;
+        int gi = glass ? bdp_find_name(&c->bundle, glass) : -1, ki = crack ? bdp_find_name(&c->bundle, crack) : -1;
+        fm.parts[1].material = gi > 0 ? (uint32_t)gi : 0;
+        fm.parts[2].material = ki > 0 ? (uint32_t)ki : 0;
+        fm.parts[2].blend = 1;
+        fm.parts[3].material = (uint32_t)sheet_name;
+        mesh = (int)scene_add_mesh(s, fm, s->city);
         facade_inst = new_instance(s, node, -1);
         push_item(s, (uint32_t)mesh, facade_inst, -1, NULL);
     }
@@ -546,6 +751,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
         sb->b.min_crack = (int)group_num(t, "MinCollapseCrackLevel", (float)sb->b.min_crack);
+        sheet_columns(c, sb, sheet);
         memset(sb->quad, 0xFF, sizeof sb->quad);
         memset(sb->skeleton, 0xFF, sizeof sb->skeleton);
         memset(sb->damaged_skeleton, 0xFF, sizeof sb->damaged_skeleton);
@@ -594,6 +800,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         sb->rest = malloc(sizeof *sb->rest * (size_t)(sb->last - sb->first + 1));
         for (int i = sb->first; i < sb->last; i++)
             sb->rest[i - sb->first] = s->instances[i].base;
+        facade_passes(s, sb);
     }
 }
 
@@ -648,6 +855,8 @@ static void lighting(City *c, Scene *s, Group ld)
     } else {
         free(data);
     }
+    for (int k = 0; k < 3; k++)
+        s->cube_tint[k] = group_num(ld, k == 0 ? "CubeTintR" : k == 1 ? "CubeTintG" : "CubeTintB", 192);
     s->fog_colour[0] = group_num(ld, "FogR", 0) / 255;
     s->fog_colour[1] = group_num(ld, "FogG", 0) / 255;
     s->fog_colour[2] = group_num(ld, "FogB", 0) / 255;
@@ -1239,9 +1448,13 @@ void scene_buildings_update(Scene *s, float dt)
         if (moving || sb->moving || sb->b.dirty)
             building_place(s, sb);
         sb->moving = moving;
-        if (!sb->b.dirty || sb->mesh < 0)
+        if (!sb->b.dirty || sb->mesh < 0) {
+            if (moving)
+                facade_passes(s, sb);
             continue;
+        }
         sb->b.dirty = 0;
+        facade_passes(s, sb);
         MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
         for (int st = 0; st < sb->b.storeys; st++)
             for (int c = 0; c < BUILDING_CELLS; c++) {

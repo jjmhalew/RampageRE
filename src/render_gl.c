@@ -277,7 +277,18 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
         else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
         else { glDisableClientState(GL_COLOR_ARRAY); glColor4f(1, 1, 1, 1); }
+        if (p->blend) {                                      /* over what is behind, by its alpha */
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glAlphaFunc(GL_GREATER, 0.01f);
+            glDepthMask(GL_FALSE);
+        }
         glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+        if (p->blend) {
+            glDisable(GL_BLEND);
+            glAlphaFunc(GL_GREATER, 0.5f);
+            glDepthMask(GL_TRUE);
+        }
         r->drawn += p->ntris;
         if (scroll) {
             glMatrixMode(GL_TEXTURE);
