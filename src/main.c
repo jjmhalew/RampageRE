@@ -22,6 +22,7 @@
 #include "fx.h"
 #include "sound.h"
 #include "army.h"
+#include "hud.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -63,6 +64,9 @@ typedef struct {
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
+    Bundle gui_world, gui_common; int have_gui;      /* WorldGui.bdp, CommonGUI.bdp: the HUD (hud.c) */
+    Hud *hud; int no_hud;                            /* --nohud: none */
+    Camera hud_cam;                                  /* the frame's camera, for the floating scores */
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
     const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
 } Viewer;
@@ -261,6 +265,30 @@ static float army_clip_seconds(void *ctx, const char *anim, const char *shape)
     return 0;                                        /* army.c falls back to the clip's own length */
 }
 
+/* a world point on the GUI's 640 x 480 screen through the frame's camera (render_gl.c's look and perspective; the GUI
+ * at the window's height, centred): the floating scores */
+static int hud_project(void *ctx, const float p[3], float screen[2], float *px_per_unit)
+{
+    const Viewer *v = ctx;
+    const Camera *c = &v->hud_cam;
+    float cp = cosf(c->pitch), f[3] = { cp * cosf(c->yaw), cp * sinf(c->yaw), sinf(c->pitch) };
+    float s[3] = { f[1], -f[0], 0 }, sl = sqrtf(s[0] * s[0] + s[1] * s[1]);
+    s[0] /= sl; s[1] /= sl;
+    float u[3] = { s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0] };
+    if (c->use_rows)
+        for (int k = 0; k < 3; k++) { s[k] = c->rows[0][k]; f[k] = c->rows[1][k]; u[k] = c->rows[2][k]; }
+    float d[3] = { p[0] - c->pos[0], p[1] - c->pos[1], p[2] - c->pos[2] };
+    float x = d[0] * s[0] + d[1] * s[1] + d[2] * s[2], y = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+    float z = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+    if (z < 0.5f)
+        return 0;
+    float k = 1.0f / tanf(c->fov_deg * 3.14159265f / 360.0f) / z;
+    screen[0] = HUD_SCREEN_W / 2 + HUD_SCREEN_H / 2 * x * k;
+    screen[1] = HUD_SCREEN_H / 2 * (1 - y * k);
+    *px_per_unit = HUD_SCREEN_H / 2 * k;
+    return 1;
+}
+
 static void build(Viewer *v)
 {
     if (v->have_scene)
@@ -292,6 +320,16 @@ static void build(Viewer *v)
         }
     }
     v->scene.army = v->army;
+    hud_close(v->hud);                               /* player 1's HUD for this monster (Hud0.ifc) */
+    v->hud = NULL;
+    if (v->have_gui && v->have_scene && v->monster >= 0 && !v->no_hud) {
+        HudConfig hc = { 0, 1, HUD_PLAY_CAMPAIGN, 0, v->monsters[v->monster] };
+        v->hud = hud_open(&v->gui_world, &v->gui_common, &hc);
+        if (v->hud) {
+            hud_set(v->hud, v->hp, 200, v->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
+            hud_set_project(v->hud, hud_project, v);
+        }
+    }
     Group tt;
     if (city_camera(v->city, &tt) == 0)
         cam_settings(&v->cam_settings, tt);
@@ -661,7 +699,7 @@ static void push_out(Viewer *v)
 }
 
 /* NODE_STEER (0x2E8190): the turn towards the stick this frame, in degrees. The stick in the monster's own frame
- * against the state's forward axis; beyond one frame's worth of turning it turns by the angle × `turn` × dt, so it
+ * against the state's forward axis; beyond one frame's worth of turning it turns by the angle Ã— `turn` Ã— dt, so it
  * swings round fast and settles gently. */
 static float steer(const Viewer *v, const MoveState *st, float lx, float ly, float dt)
 {
@@ -886,6 +924,10 @@ static void army_step(Viewer *v, float dt)
             case AE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
             case AE_STATS_HEALTH: v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->amount)) : v->hp; break;
             case AE_STATS_ENERGY: v->energy = fmaxf(0, fminf(100, v->energy + e->amount)); break;
+            case AE_FLOAT:                           /* a PointsBanner: 0.8 for the army's awards (0x2BAB2C) */
+                if (v->hud)
+                    hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);
+                break;
             case AE_SCORE:
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  score %+.0f (category %d), total %.0f\n", e->amount, e->level,
@@ -1251,6 +1293,10 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     army_step(v, dt);
     fx_step(v, dt);
     shake_step(v->shakes, 8, dt);
+    if (v->hud) {                                    /* Hud.bsf: health, rage, the score (ArmyStats points[6]) */
+        hud_set(v->hud, v->hp, 200, v->energy, 100, v->army ? (int)army_stats(v->army, 0)->points[6] : 0, -1, -1);
+        hud_update(v->hud, dt);
+    }
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
         float turn = st->flags & NODE_ROOT_TURN ?
@@ -1423,6 +1469,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--night") == 0) night = 1;
         else if (strcmp(argv[i], "--nofog") == 0) v.fog = -1;
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
+        else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
         else if (strcmp(argv[i], "--cam") == 0 && i + 5 < argc) {   /* x y z yaw pitch (degrees): a fixed view */
             for (int k = 0; k < 5; k++)
                 view[k] = (float)atof(argv[++i]);
@@ -1456,6 +1503,9 @@ int main(int argc, char **argv)
     {                                                /* the effects: fx.bdp, its words from RAMPAGE.ELF beside the VOL */
         uint32_t size = 0;
         uint8_t *data = vol_read(&v.vol, "fx.bdp", &size);
+        uint32_t gsize = 0, csize = 0;                /* the HUD's: WorldGui.bdp and CommonGUI.bdp */
+        uint8_t *gui = vol_read(&v.vol, "WorldGui.bdp", &gsize), *common = vol_read(&v.vol, "CommonGUI.bdp", &csize);
+        v.have_gui = gui && common && bdp_load(&v.gui_world, gui, gsize) == 0 && bdp_load(&v.gui_common, common, csize) == 0;
         if (data && bdp_load(&v.fx_bundle, data, size) == 0) {
             char elf[512];
             snprintf(elf, sizeof elf, "%s", pos[0]);
@@ -1597,6 +1647,16 @@ int main(int argc, char **argv)
                 printf("particles %d, quads %d (first at %.1f %.1f %.1f, size %.2f, alpha %.2f)\n", fx_particles(v.fxw),
                        v.scene.nfx, v.scene.nfx ? quads[0].pos[0] : 0, v.scene.nfx ? quads[0].pos[1] : 0,
                        v.scene.nfx ? quads[0].pos[2] : 0, v.scene.nfx ? quads[0].size[0] : 0, v.scene.nfx ? quads[0].col[3] : 0);
+        }
+        {                                            /* the HUD, through this frame's camera */
+            static HudQuad hq[4096];
+            if (have_view) {
+                Camera fixed = { { view[0], view[1], view[2] }, view[3] / 57.2957795f, view[4] / 57.2957795f, 60 };
+                v.hud_cam = fixed;
+            } else
+                v.hud_cam = cam;
+            v.scene.hud = hq;
+            v.scene.nhud = v.hud ? hud_quads(v.hud, hq, 4096) : 0;
         }
         if (have_view) {
             Camera fixed = { { view[0], view[1], view[2] }, view[3] / 57.2957795f, view[4] / 57.2957795f, 60 };

@@ -10,7 +10,7 @@ cd /d "%~dp0"
 set "ZIG_VER=0.16.0"
 set "ZIG_SHA=68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"
 set "ZIG_NAME=zig-x86_64-windows-%ZIG_VER%"
-set "SRC=src\main.c src\shot.c src\render_gl.c src\city.c src\vol.c src\bundle.c src\tex.c src\mesh.c src\prb.c src\tree.c src\anim.c src\camera.c src\moves.c src\building.c src\climb.c src\ik.c src\people.c src\fx.c src\cloth.c src\sound.c src\army.c"
+set "SRC=src\main.c src\shot.c src\render_gl.c src\city.c src\vol.c src\bundle.c src\tex.c src\mesh.c src\prb.c src\tree.c src\anim.c src\camera.c src\moves.c src\building.c src\climb.c src\ik.c src\people.c src\fx.c src\cloth.c src\sound.c src\army.c src\hud.c"
 set "LIBS=-lopengl32 -lgdi32 -luser32"
 rem Plain x86-64, so the exe runs on older CPUs too.
 set "CPU=-target x86_64-windows-gnu -mcpu=baseline"

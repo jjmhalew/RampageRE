@@ -9,6 +9,7 @@
 #include "fx.h"
 #include "cloth.h"
 #include "army.h"
+#include "hud.h"
 
 typedef struct { float m[16]; } Mat4;
 
@@ -114,6 +115,7 @@ typedef struct {
     /* effects to start (fx.c, by main) and the particles to draw this frame */
     struct SceneFx { const char *name; float pos[3], dir[3]; } fxreq[64]; int nfxreq;
     const FxQuad *fx; int nfx;
+    const HudQuad *hud; int nhud;                     /* the HUD and the floating scores, over everything (hud.c) */
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
     struct WindowSlot { int building, storey, column, occupant; } *slots; int nslots, slots_made;

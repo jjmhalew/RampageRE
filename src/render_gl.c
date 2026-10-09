@@ -158,7 +158,7 @@ typedef struct { const Bundle *b; uint32_t name; int n; uint32_t frame[IFL_FRAME
 
 struct Renderer {
     const Scene *scene;
-    BundleTex cache[8]; int ncache;
+    BundleTex cache[16]; int ncache;
     Ifl ifl[32]; int nifl;
     uint32_t drawn;
 };
@@ -200,7 +200,7 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
         if (r->cache[k].b == b)
             bt = &r->cache[k];
     if (!bt) {
-        if (r->ncache == 8)
+        if (r->ncache == 16)
             return 0;
         bt = &r->cache[r->ncache++];
         bt->b = b;
@@ -358,6 +358,46 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
 
 /* the particles (fx.c): after the world, not writing depth, tested against it unless the effect says not to
  * (-TestZBuffer); additive or alpha blended; the colour times the texture (the game's 128 = 1) */
+/* the HUD's quads (hud.c): the GUI's 640 x 480 screen at the window's height, centred (its 4:3 kept), in order, no
+ * depth, alpha blended */
+static void draw_hud(Renderer *r, const Scene *s, float aspect)
+{
+    float half = HUD_SCREEN_H / 2 * aspect;
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(HUD_SCREEN_W / 2 - half, HUD_SCREEN_W / 2 + half, HUD_SCREEN_H, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_FOG);
+    glDisable(GL_ALPHA_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    for (int i = 0; i < s->nhud; i++) {
+        const HudQuad *q = &s->hud[i];
+        GLuint id = q->b ? texture(r, q->b, q->tex) : 0;
+        if (q->b && !id)
+            continue;
+        if (id) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, id);
+        } else
+            glDisable(GL_TEXTURE_2D);
+        glColor4fv(q->col);
+        glBegin(GL_QUADS);
+        glTexCoord2f(q->u0, q->v0); glVertex2f(q->x0, q->y0);
+        glTexCoord2f(q->u1, q->v0); glVertex2f(q->x1, q->y0);
+        glTexCoord2f(q->u1, q->v1); glVertex2f(q->x1, q->y1);
+        glTexCoord2f(q->u0, q->v1); glVertex2f(q->x0, q->y1);
+        glEnd();
+    }
+    glDisable(GL_BLEND);
+    glEnable(GL_ALPHA_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glColor4f(1, 1, 1, 1);
+}
+
 static void draw_fx(Renderer *r, const Camera *cam)
 {
     const Scene *s = r->scene;
@@ -544,4 +584,6 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         glEnable(GL_DEPTH_TEST);
         glColor3f(1, 1, 1);
     }
+    if (s->nhud)
+        draw_hud(r, s, w->height ? (float)w->width / w->height : 4.0f / 3);
 }
