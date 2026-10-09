@@ -852,6 +852,7 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
     free(cloth);
     s->monster = id;
     s->monster_anims = ab;
+    s->monster_bundle = mb;
     update(s, 0, 1);
     return 0;
 }
@@ -892,6 +893,58 @@ int scene_monster_clip(Scene *s, const char *suffix, float *speed)
         return 0;
     }
     return -1;
+}
+
+int scene_monster_play(Scene *s, const char *clip)
+{
+    if (s->monster < 0 || !s->monster_anims || !clip)
+        return -1;
+    Instance *in = &s->instances[s->monster];
+    const Bundle *ab = s->monster_anims;
+    for (uint32_t i = 0; i < ab->nentries; i++) {
+        const BdpEntry *e = &ab->entries[i];
+        if (e->type != ET_ANIM)
+            continue;
+        const char *n = bdp_name(ab, e->name);
+        if (!strncmp(n, "000", 3))
+            n += 3;
+        if (_stricmp(n, clip) != 0)
+            continue;
+        Clip c;
+        if (clip_read(e, &c) != 0)
+            return -1;
+        if (in->has_clip)
+            clip_free(&in->clip);
+        in->clip = c;
+        in->has_clip = 1;
+        s->monster_clip = n;
+        return 0;
+    }
+    return -1;
+}
+
+int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
+{
+    if (s->monster < 0)
+        return -1;
+    const Instance *in = &s->instances[s->monster];
+    int found = -1;
+    for (uint32_t i = 0; i < in->tree.n; i++) {      /* the first root the clip moves, else the first root */
+        const TreeNode *nd = &in->tree.nodes[i];
+        if (nd->parent >= 0)
+            continue;
+        memcpy(t, nd->t, sizeof nd->t);
+        memcpy(q, nd->q, sizeof nd->q);
+        if (in->has_clip && clip_pose(&in->clip, seconds, i, t, q))
+            return 0;
+        if (found < 0)
+            found = (int)i;
+    }
+    if (found < 0)
+        return -1;
+    memcpy(t, in->tree.nodes[found].t, sizeof in->tree.nodes[found].t);
+    memcpy(q, in->tree.nodes[found].q, sizeof in->tree.nodes[found].q);
+    return 0;
 }
 
 void scene_monster_place(Scene *s, float x, float y, float deg, int still_root)

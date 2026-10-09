@@ -10,7 +10,7 @@ Python tools' readers and of `tools/city.py`.
 build_viewer.bat
 rampage.exe                                   :: build\disc\RAMPAGE.VOL, Chicago, block 1
 rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play: walk George about, the game's camera follows
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit
 ```
 `build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
@@ -20,10 +20,13 @@ must have been extracted by `build.ps1` first (or pass the path to your own `RAM
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, M the next monster (none, then all 30), K / L
 the monster's clips, G play or the free camera, F12 a screenshot, Esc quit. In play (the default with `--monster`)
-W A S D or the arrows walk the monster about the street and the game's camera follows it ([CAMERA.md](CAMERA.md)).
-`--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a `--shot`, `--walk S` walks
-the monster right for S seconds before it. The console prints
-what each block holds (models, people, vehicles, anything not found).
+the keys are a pad: W A S D or the arrows the left stick, Space Cross (jump), J Square (punch), K Triangle (kick),
+L Circle (grab), R R2 (roar); the monster runs its own move graph and the game's camera follows it
+([CAMERA.md](CAMERA.md)). `--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a
+`--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
+directions held and buttons pressed, each followed by that many seconds; `--walk S` is `right S`). The console prints
+what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
+(`RAMPAGE_TRACE=1`: every frame's state, time, place and heading).
 
 ## Source
 | File | |
@@ -38,6 +41,7 @@ what each block holds (models, people, vehicles, anything not found).
 | `src/anim.c` | clips: KeyInterpAnim tracks with the game's rotation decode (0x192010), RawAnim segments (`tools/anim.py`) |
 | `src/city.c` | a block: ground, buildings with generated facades, objects, people, traffic, lighting (`tools/city.py`); a monster; posing and CPU skinning every frame |
 | `src/camera.c` | the game's play camera, TwoTilts, transcribed from 0x312B50 (docs/CAMERA.md) |
+| `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
 | `src/main.c` | the viewer: arguments, camera, keys |
@@ -53,11 +57,23 @@ What moves: props whose own RawAnim moves (helicopter rotors, the fountain), eve
 state its template starts in, the traffic, and a monster (`--monster`, M): its skeleton's keyframed clips, its body
 skinned on the CPU with its two bones per vertex, its hair or fur with the bones and weights of the cloth particle
 each vertex sits on. Between rotation keys the viewer slerps (the game's own interpolation, 0x104590, is not read
-yet); root motion stays in, so a walk walks off and jumps back when it loops.
+yet); with `--clip` root motion stays in, so a walk walks off and jumps back when it loops.
+
+In play the monster is driven the way the game drives it: the keys fill the pad's variable table (0x2C0AD0), the
+move graph picks the state and its clip (the transitions in their input window, by priority, until their switch
+window), and the clip's root carries the monster: each frame the root's travel in its clip (turned by the monster's
+heading) moves it, and the turn the root made over a state is added to the heading when the state ends (the
+turn-around clip turns George by 186°). Script checks the graph asks (`Monsters::canMount`, `canGrabPerson`, ...)
+answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin, punch). Three things stand
+in for game code not read yet: the landing (the graph's `Jump_Finish` event, here once the airborne clip played
+through), turning round (`Ground_TurnAround`, here when the stick points more than 135° away while walking) and
+steering while walking (270° per second towards the stick). The monster stays within the street (x ±75, y −30 … −3).
 
 ## Not there yet
 - the monster's face clips (`<MONSTER>_HEAD_*`) layered over its body, cloth simulation;
+- blending between clips (they switch at once; the state node's float at +0x14, which 0x2ECBE0 hands on with the
+  next clip, is likely the blend time);
 - effects (`tools/edf.py`), the GUI, sound;
-- the monster's real movement (here it walks at its walk clip's root speed, anywhere in the street), climbing,
-  attacks, collision and the game's rules;
+- the monster's physics (the viewer adds no jump height of its own), climbing buildings, grabbing, collision and the
+  game's rules;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

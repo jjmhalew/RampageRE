@@ -44,7 +44,7 @@ Las Vegas. The 3D picture still has errors (black ground), it runs slowly and th
 | Effects (297, rebuilt byte for byte), string tables (13, 9 languages), GUI layouts (XML) | ✅ [docs/FORMAT_EDF.md](docs/FORMAT_EDF.md) |
 | Native viewer in C (`rampage.exe`): every city block from `RAMPAGE.VOL`, lit, day and night, traffic, animated people and props, any monster with its clips | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 | The game's play camera (TwoTilts) transcribed; walk a monster about with it following | ✅ [docs/CAMERA.md](docs/CAMERA.md) |
-| Monster move graphs (`MONSTER_DATA`): 176 states and their transitions, all 30 parsed | 🔶 [docs/FORMAT_MONSTER.md](docs/FORMAT_MONSTER.md) |
+| Monster move graphs (`MONSTER_DATA`): all 30 parsed, the pad variables and the game's runner decoded; the native viewer plays every monster by its own graph | ✅ [docs/FORMAT_MONSTER.md](docs/FORMAT_MONSTER.md) |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -78,7 +78,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 | `tools/mesh.py` | exports bundle meshes with materials and textures as glTF (`--verify`: all 5,577 meshes) |
 | `tools/city.py` | assembles a city's blocks (ground, buildings, street objects) into glTF scenes |
 | `tools/edf.py` | decompiles the 297 effect files ("Text EDF file") to text and compiles them back (`--verify`) |
-| `tools/monster.py` | monster move graphs (`MONSTER_DATA`): parses all 30 (`--verify`), prints states, transitions, conditions |
+| `tools/monster.py` | monster move graphs (`MONSTER_DATA`): parses all 30 (`--verify`), prints states, transitions and their conditions by pad input (`Square==1(new) L.up==1`) |
 | `tools/loc.py` | string tables (`.loc`): 574 keys in 9 languages to TSV (`--verify`) |
 | `tools/anim.py` | skeletons and animations: exports each monster as an animated, skinned glTF, and a city's people, vehicles and bosses with their clips (`--verify`: all 615 node trees and 5,379 animations) |
 | `tools/prb.py` | prints property books (design data) as readable trees |

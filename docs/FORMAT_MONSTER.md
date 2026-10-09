@@ -42,23 +42,65 @@ A state: 0x2C bytes, then 0x74 bytes per transition.
 | State | | Transition | |
 |---|---|---|---|
 | +0x00 | index | +0x04 | offset of the target state |
-| +0x04 | offset of its state node | +0x08 | flags (0x18, 0x1018, 0x218, ...; 0x100 and 0x200 set at run time) |
-| +0x08 | f32 clip length (s) | +0x0C, +0x10 | f32 window A |
-| +0x0E | i16 transition count | +0x14, +0x18 | f32 window B |
-| +0x14 | offset | +0x1E | i16 condition count |
-| +0x18 | u8[16] | +0x20 | 4 × 16-byte conditions {u32 kind, u32 id, u32 value, u32 ?} |
-| +0x28 | offset of the transitions | +0x60 | callback name (−1 = none) |
+| +0x04 | offset of its state node | +0x08 | flags, see below |
+| +0x08 | f32 clip length (s) | +0x0C, +0x10 | f32 input window: from, to (s into the state) |
+| +0x0E | i16 transition count | +0x14, +0x18 | f32 switch window |
+| +0x10 | the "clip ended" transition: | +0x1C | i16 priority |
+| +0x14 | its target, the state that follows | +0x1E | i16 condition count |
+| +0x18 | its flags, ... | +0x20 | 4 × 16-byte conditions {u32 op, u32 variable, u32 value, u32 flags} |
+| +0x28 | offset of the transitions | +0x60 | name of a script check (−1 = none), +0x64..0x70 four floats for it |
 
-Conditions are of kind 4 (1,280 in George: ids 10, 14, 15, 16, 17, 31, 48, 49, 50, 53, 56, 57, values 0 or 1),
-kind 0 (164: ids 0, 31, 32, 40, 57, values 0 or a float, 0.8) and kind 3 (67, id 31). The last word looks like a
-negation. From the graph, kind 4 id 14 starts a jump, 15 a grab, 16 a punch (with 48 / 49 up and down), 17 a kick,
-10 a roar; kind 0 id 31 moves from idle to walk. These meanings are read off the graph, not yet from the evaluator.
+Transition flags: 0x10 the transition is open to a pad-controlled monster, 0x8 to the other kind (0x2FF750 decides
+which applies and returns 0, the pad, in this build; nearly all transitions have both, 0x18); 0x1000 switch at once
+(otherwise the switch waits a little); 0x1 the next clip keeps the phase (it starts at the same fraction of its
+length); 0x100 and 0x200 are set at run time (in the input / switch window); 0x200 is also stored set on the
+transitions the game's code fires itself (`Ground_TurnAround`, `Reactions`, falls).
+
+The node's +0x14 float goes with the next clip to the animation code (0x2ECBE0), most likely its blend time.
+
+## Conditions
+A condition is `variable OP value`, OP 0 `>`, 1 `>=`, 2 `<`, 3 `<=`, 4 `==` (the function tables at 0x3F5950 for
+floats and 0x3F5970 for booleans; the variable is the left operand). Flags bit 0: test the value as it is; clear:
+the input must be new, latched this frame (0x2C1A60, 0x2C17C0), so a button press counts once. `tools/monster.py`
+prints them as `Square==1(new) L.up==1`.
+
+The variables are a table per player (0x4D3330 + player × 0x3C4, +0x18; 16 bytes each from +0x14), filled each
+frame by 0x2C0AD0 from the pad record (gp−0x6FA8 + player × 0x5C) that the pad code (0x1A5220, after scePadRead)
+fills through the button table at 0x3B18B0:
+
+| Id | | Id | |
+|---|---|---|---|
+| 0, 1 | left stick x, y (y down) | 12, 13 | R1, L1 |
+| 2, 3 | right stick x, y | 14, 15, 16, 17 | Cross, Circle, Square, Triangle |
+| 4, 5, 6, 7 | d-pad up, down, left, right | 20, 21 | R3, L3 |
+| 8, 9 | Start, Select | 22 … 29 | pressures (28 R2, 29 L2) |
+| 10, 11 | R2, L2 | 30, 31 | right, left stick size: max(\|x\|, \|y\|) |
+| 32 … 47 | the left stick's sector in the monster's own frame (0x2C03E0; two sets of eight bits, the stick size where set) | 48 … 55 | the left stick's eighth: up, down, left, up-left, down-left, right, up-right, down-right (0x2C0870: (x, −y) turned by π/8, none under 0.2) |
+| 56, 57 | true, false | | |
+
+Ids 4 … 21 and 48 … 57 are booleans, the rest floats. When the monster is mirrored (+0x7DA1 of the monster) the
+left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). A transition whose only condition is
+`false == 0` never holds by itself: it is the game's own event (landing in `Jump_Finish`, `Ground_TurnAround`).
+
+George's graph reads naturally: Cross jumps (released early, the short hop `Jump_Start_2_copy`), Square punches
+(with the stick up or down, `Ground_Punch_Up` / `_Down`), Triangle kicks, Circle grabs, R2 roars
+(`Monsters::hasRoarEnergy`), a left stick size above 0 walks and 0 stops; climbing a building needs the stick held
+past 0.8 towards it and `Monsters::canMount`.
 
 All 30 monsters share the graph's shape (176 states and 1,085 transitions; Marco 177, Rojo 179) and differ in
 clips, settings and coded items.
 
 ## At run time
-0x2EBFE0 runs a monster's current state each frame: the state's time advances by dt × the monster's speed
-(+0xA8C of the monster object), each transition gets flag 0x100 while the time is inside window A and 0x200 inside
-window B, then 0x2EC3D0 tests the conditions (not decoded yet) and a transition that holds moves the monster to its
-target state.
+A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next one, +0x8 the transition taken,
++0x10 the time, +0x18 the monster, +0x1E the transition picked.
+
+1. 0x2EBFE0: the time advances by dt × the monster's speed (+0xA8C of the monster). A transition gets 0x100 while
+   the time is in its input window [from, to) or jumped over it this frame, 0x200 likewise for its switch window.
+2. 0x2EC3D0 (monsters with +0x108 set run 0x2E1AA0 instead): of the transitions with 0x100 and 0x10 whose
+   target is not disabled (0x80000000 in the target node's +0x2C), skipping any of lower priority than the one
+   already picked, the last one whose conditions all hold and whose script check (if any) says yes is picked.
+3. A picked transition that has 0x200 is taken: the next state is its target (0x1000 at once, otherwise after a
+   short wait counted at +0x14). With none, a state whose time passed its length takes its "clip ended" transition. A pick whose switch
+   window has passed is dropped; windows that passed are cleared.
+4. 0x2ECBE0 starts the next clip: at 0, or with flag 0x1 at the same fraction of its length (capped at its end);
+   looping into the same state carries the time over (time − length).

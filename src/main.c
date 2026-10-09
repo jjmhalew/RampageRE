@@ -2,11 +2,13 @@
  * with the game's layout, lights, traffic, people and a monster (city.c, anim.c, render_gl.c).
  *   rampage [RAMPAGE.VOL] [City] [block number] [--night] [--monster NAME] [--clip N] [--shot FILE.png] [--time T]
  * default build\disc\RAMPAGE.VOL, Chicago, 1. --shot draws one frame (at T seconds) as a PNG and quits; with a
- * monster in play the camera settles for 2 s first, after the monster walked right for --walk SECONDS.
+ * monster in play the camera settles for 2 s, then the monster plays --do "right 1, cross, wait 1.5, ..." (held
+ * stick directions and pressed buttons, each for its seconds; --walk S = "right S").
  * Keys: W A S D move, Q E down and up, Shift faster, right mouse button look, wheel speed; Page Up / Page Down the
  * block, 1-7 the city, N day / night, F fog, M the next monster (none, then the 30), K / L its clips, F12 a screenshot
- * (shot_NNN.png), Esc quit. With a monster, G switches to play: W A S D / the arrows walk it about the street and the
- * game's own camera (camera.c) follows it. */
+ * (shot_NNN.png), Esc quit. With a monster, G switches to play: the monster runs its own move graph (MONSTER_DATA,
+ * moves.c) from a pad made of keys - W A S D / the arrows the left stick, Space Cross (jump), J Square (punch),
+ * K Triangle (kick), L Circle (grab), R R2 (roar) - and the game's own camera (camera.c) follows it. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +16,7 @@
 #include "plat.h"
 #include "render_gl.h"
 #include "camera.h"
+#include "moves.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -27,8 +30,65 @@ typedef struct {
     Scene scene; int have_scene;
     Renderer *rnd;
     int play; CamSettings cam_settings; GameCamera cam;   /* play: the monster under control, the game camera */
-    float mx, my, heading, walk_speed; int walking;
+    float mx, my, heading;                           /* where the monster stands, its turn about Z (0: facing +Y) */
+    MoveGraph graph; MoveRunner run; MoveInput input; int have_graph;
+    int yaw_axis; float entry_yaw;                   /* the root's axis that tells its turn; its turn at the state's start */
 } Viewer;
+
+/* the clip's root at time t, held at the clip's last frame (clip_pose loops: its end is its start) */
+static int root_at(const Viewer *v, double t, float tr[3], float q[4])
+{
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    if (in->has_clip && t > in->clip.duration - 1e-4)
+        t = in->clip.duration - 1e-4;
+    return scene_monster_root(&v->scene, t < 0 ? 0 : t, tr, q);
+}
+
+static float root_yaw(const Viewer *v, double t)
+{
+    float tr[3], q[4];
+    if (root_at(v, t, tr, q) != 0)
+        return 0;
+    float zero[3] = { 0, 0, 0 };
+    Mat4 m = mat_tq(zero, q);
+    return atan2f(m.m[4 * v->yaw_axis + 1], m.m[4 * v->yaw_axis]) * 57.2957795f;
+}
+
+/* the monster plays the clip of the runner's state, from the runner's time */
+static void play_state(Viewer *v)
+{
+    const MoveState *st = &v->graph.states[v->run.state];
+    if (scene_monster_play(&v->scene, st->clip) != 0)
+        printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
+    v->entry_yaw = root_yaw(v, v->run.time);
+}
+
+static void start_moves(Viewer *v)
+{
+    if (v->have_graph) {
+        moves_stop(&v->run);
+        moves_free(&v->graph);
+        v->have_graph = 0;
+    }
+    if (v->scene.monster < 0 || !v->scene.monster_bundle || moves_read(v->scene.monster_bundle, &v->graph) != 0)
+        return;
+    v->have_graph = 1;
+    moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
+    memset(&v->input, 0, sizeof v->input);
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    v->yaw_axis = 0;                                 /* the most level axis of the root at rest */
+    for (uint32_t i = 0; i < in->tree.n; i++)
+        if (in->tree.nodes[i].parent < 0) {
+            float zero[3] = { 0, 0, 0 };
+            Mat4 m = mat_tq(zero, in->tree.nodes[i].q);
+            for (int k = 1; k < 3; k++)
+                if (fabsf(m.m[4 * k + 2]) < fabsf(m.m[4 * v->yaw_axis + 2]))
+                    v->yaw_axis = k;
+            break;
+        }
+    if (v->play)                                     /* with --clip the chosen clip stays until G */
+        play_state(v);
+}
 
 static void build(Viewer *v)
 {
@@ -38,7 +98,7 @@ static void build(Viewer *v)
     if (v->have_scene && v->monster >= 0 &&
         city_monster(v->city, &v->scene, v->monsters[v->monster], v->clip, v->mx, v->my, v->heading) == 0)
         printf("%s: %s\n", v->monsters[v->monster], v->scene.monster_clip ? v->scene.monster_clip : "-");
-    v->walking = 0;
+    start_moves(v);
     Group tt;
     if (city_camera(v->city, &tt) == 0)
         cam_settings(&v->cam_settings, tt);
@@ -68,30 +128,113 @@ static int open_city(Viewer *v, int index, uint32_t block)
     return 0;
 }
 
-/* one frame of play: the monster walks where (dx, dy) points (at its walk clip's own root speed: the game's movement
- * code is not read yet) or idles, and the game camera follows it */
-static void play_step(Viewer *v, float dx, float dy, float dt, float aspect)
+/* the viewer's answers to the graph's script checks (Monsters.bsf: there are no buildings, people or power-ups to
+ * test against here, so only the monster's own abilities say yes) */
+static int answer(void *ctx, const char *call)
 {
-    if (dx || dy) {
-        if (!v->walking && scene_monster_clip(&v->scene, "_WALK2", &v->walk_speed) != 0)
-            scene_monster_clip(&v->scene, "_WALK", &v->walk_speed);
-        v->walking = 1;
-        float len = sqrtf(dx * dx + dy * dy);
-        v->mx += dx / len * v->walk_speed * dt;
-        v->my += dy / len * v->walk_speed * dt;
+    static const char *const YES[] = { "Monsters::hasRoarEnergy", "Monsters::canDoPunch", "Monsters::canSpin",
+                                       "Monsters::hasDoubleJump", "Monsters::hasJumpSmash", "Monsters::hasChargePunch" };
+    (void)ctx;
+    for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
+        if (strcmp(call, YES[i]) == 0)
+            return 1;
+    return 0;
+}
+
+static int starts(const char *s, const char *prefix) { return s && _strnicmp(s, prefix, strlen(prefix)) == 0; }
+
+/* one frame of play. The left stick (x right, y down) and the buttons pressed this frame (MV_CROSS ...) or held.
+ * The graph picks the state; the clip's root carries the monster (its travel and turn added to where it stands). Two
+ * of the game's own events stand in for code not read yet: landing (Jump_Finish) after the airborne clip played
+ * once, and turning round (Ground_TurnAround) when the stick points back; and while walking the monster turns
+ * towards the stick. */
+static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
+{
+    if (v->have_graph) {
+        MoveInput *in = &v->input;
+        if (in->v[MV_LX] != lx) in->fresh[MV_LX] = 0.2f;
+        if (in->v[MV_LY] != ly) in->fresh[MV_LY] = 0.2f;
+        in->v[MV_LX] = lx;
+        in->v[MV_LY] = ly;
+        for (int k = MV_UP; k <= MV_L3; k++) {
+            in->v[k] = held[k] || pressed[k];
+            if (pressed[k]) in->fresh[k] = 0.2f;
+        }
+        moves_derive(in);
+        const MoveState *st = &v->graph.states[v->run.state];
+        float t0 = v->run.time, length = st->length;
+        int ev = -1;
+        if (starts(st->name, "Jump_Air_Borne") && t0 + dt >= length)
+            ev = moves_event(&v->run, "Jump_Finish");
+        float goal = atan2f(-ly, lx) * 57.2957795f - 90, turn = fmodf(goal - v->heading + 540, 360) - 180;
+        if (ev != 0 && in->v[MV_L_SIZE] > 0.5f && starts(st->name, "Ground_Walk") && fabsf(turn) > 135)
+            ev = moves_event(&v->run, "Ground_TurnAround");
+        int switched = ev == 0 || moves_step(&v->run, in, dt, answer, NULL);
+        float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
+        float a[3], b[3], q[4];                      /* the root's travel this frame, in the old clip */
+        if (root_at(v, t0, a, q) == 0 && root_at(v, t1, b, q) == 0) {
+            float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
+            float dx = b[0] - a[0], dy = b[1] - a[1];
+            v->mx += c * dx - s * dy;
+            v->my += s * dx + c * dy;
+        }
+        if (switched) {                              /* the turn the old clip made */
+            v->heading += fmodf(root_yaw(v, t1) - v->entry_yaw + 540, 360) - 180;
+            const MoveState *to = &v->graph.states[v->run.state];
+            if (v->run.from != v->run.state)
+                printf("%s -> %s (%s)\n", st->name ? st->name : "?", to->name ? to->name : "?", to->clip ? to->clip : "-");
+            play_state(v);
+        } else if (starts(st->name, "Ground_Walk") && in->v[MV_L_SIZE] > 0) {
+            float step = 270 * dt;
+            v->heading += turn > step ? step : turn < -step ? -step : turn;
+        }
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
         if (v->my < -30) v->my = -30;
         if (v->my > -3) v->my = -3;
-        v->heading = atan2f(dy, dx) * 57.2957795f - 90;   /* the monster faces +Y at rest */
-    } else if (v->walking) {
-        if (scene_monster_clip(&v->scene, "_IDLE", NULL) != 0)
-            scene_monster_clip(&v->scene, "_IDLE_SHORT", NULL);
-        v->walking = 0;
+        v->heading = fmodf(v->heading + 360, 360);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  %s %.2f at %.1f %.1f heading %.0f\n", v->graph.states[v->run.state].name, v->run.time, v->mx, v->my, v->heading);
     }
-    scene_monster_place(&v->scene, v->mx, v->my, v->heading, v->walking);
+    scene_monster_place(&v->scene, v->mx, v->my, v->heading, 1);
     float at[1][3] = { { v->mx, v->my, 0 } };
     cam_update(&v->cam, (const float (*)[3])at, 1, dt, aspect);
+}
+
+/* --do: "right 1, cross, wait 1.5": the stick held one way or a button pressed, then that many seconds of play */
+static void play_script(Viewer *v, const char *script, float aspect)
+{
+    static const struct { const char *name; int button; float x, y; } WORDS[] = {
+        { "left", -1, -1, 0 }, { "right", -1, 1, 0 }, { "up", -1, 0, -1 }, { "down", -1, 0, 1 }, { "wait", -1, 0, 0 },
+        { "cross", MV_CROSS, 0, 0 }, { "square", MV_SQUARE, 0, 0 }, { "triangle", MV_TRIANGLE, 0, 0 },
+        { "circle", MV_CIRCLE, 0, 0 }, { "r2", MV_R2, 0, 0 } };
+    char word[32];
+    const char *p = script;
+    while (*p) {
+        while (*p == ' ' || *p == ',') p++;
+        int n = 0;
+        while (*p && *p != ' ' && *p != ',' && n < 31) word[n++] = *p++;
+        word[n] = 0;
+        float seconds = 0;
+        while (*p == ' ') p++;
+        if ((*p >= '0' && *p <= '9') || *p == '.') {
+            char *end;
+            seconds = (float)strtod(p, &end);
+            p = end;
+        }
+        for (size_t i = 0; n && i < sizeof WORDS / sizeof *WORDS; i++) {
+            if (_stricmp(word, WORDS[i].name) != 0)
+                continue;
+            uint8_t pressed[MV_COUNT] = { 0 }, held[MV_COUNT] = { 0 };
+            if (WORDS[i].button >= 0) pressed[WORDS[i].button] = 1;
+            int frames = (int)(seconds * 60 + 0.5f);
+            if (frames < 1) frames = 1;
+            for (int k = 0; k < frames; k++) {
+                play_step(v, WORDS[i].x, WORDS[i].y, pressed, held, 1.0f / 60, aspect);
+                memset(pressed, 0, sizeof pressed);
+            }
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -100,13 +243,18 @@ int main(int argc, char **argv)
     const char *shot = NULL, *monster = NULL, *pos[3] = { "build\\disc\\RAMPAGE.VOL", "Chicago", "1" };
     int npos = 0, night = 0, clip = -1;
     double shot_time = 0;
-    float walk_seconds = 0;
+    const char *script = NULL;
+    char walk_script[48];
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) shot = argv[++i];
         else if (strcmp(argv[i], "--monster") == 0 && i + 1 < argc) monster = argv[++i];
         else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) clip = atoi(argv[++i]);
         else if (strcmp(argv[i], "--time") == 0 && i + 1 < argc) shot_time = atof(argv[++i]);
-        else if (strcmp(argv[i], "--walk") == 0 && i + 1 < argc) walk_seconds = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--walk") == 0 && i + 1 < argc) {
+            snprintf(walk_script, sizeof walk_script, "right %s", argv[++i]);
+            script = walk_script;
+        }
+        else if (strcmp(argv[i], "--do") == 0 && i + 1 < argc) script = argv[++i];
         else if (strcmp(argv[i], "--night") == 0) night = 1;
         else if (npos < 3) pos[npos++] = argv[i];
     }
@@ -159,8 +307,13 @@ int main(int argc, char **argv)
         if (w.pressed['N']) { v.night = !v.night; build(&v); }
         if (w.pressed['F']) v.fog = !v.fog;
         if (w.pressed['M']) { v.monster = v.monster + 1 < (int)v.nmonsters ? v.monster + 1 : -1; v.clip = -1; build(&v); }
-        if (w.pressed['G'] && v.monster >= 0) { v.play = !v.play; cam_init(&v.cam, &v.cam_settings); }
-        if (v.monster >= 0 && (w.pressed['K'] || w.pressed['L'])) {
+        if (w.pressed['G'] && v.monster >= 0) {
+            v.play = !v.play;
+            cam_init(&v.cam, &v.cam_settings);
+            if (v.play && v.have_graph)
+                play_state(&v);
+        }
+        if (v.monster >= 0 && !v.play && (w.pressed['K'] || w.pressed['L'])) {
             v.clip = w.pressed['L'] ? v.clip + 1 : (v.clip > 0 ? v.clip - 1 : 0);
             build(&v);
         }
@@ -176,12 +329,23 @@ int main(int argc, char **argv)
         if (playing) {
             float aspect = w.width ? (float)w.height / w.width : 0.75f;
             static int settled;
-            for (int k = 0; shot && !settled && k < 120 + (int)(walk_seconds * 60); k++)   /* a shot: let it settle */
-                play_step(&v, k < (int)(walk_seconds * 60) ? 1.0f : 0, 0, 1.0f / 60, aspect);
+            if (shot && !settled) {                     /* a shot: the camera settles, then the script */
+                play_script(&v, "wait 2", aspect);
+                if (script)
+                    play_script(&v, script, aspect);
+            }
             settled = 1;
-            float dx = (float)((w.keys['D'] || w.keys[VK_RIGHT]) - (w.keys['A'] || w.keys[VK_LEFT]));
-            float dy = (float)((w.keys['W'] || w.keys[VK_UP]) - (w.keys['S'] || w.keys[VK_DOWN]));
-            play_step(&v, dx, dy, dt > 0.1f ? 0.1f : dt, aspect);
+            float lx = (float)((w.keys['D'] || w.keys[VK_RIGHT]) - (w.keys['A'] || w.keys[VK_LEFT]));
+            float ly = (float)((w.keys['S'] || w.keys[VK_DOWN]) - (w.keys['W'] || w.keys[VK_UP]));
+            static const struct { int key, button; } PAD[] = {
+                { VK_SPACE, MV_CROSS }, { 'J', MV_SQUARE }, { 'K', MV_TRIANGLE }, { 'L', MV_CIRCLE }, { 'R', MV_R2 } };
+            uint8_t pressed[MV_COUNT] = { 0 }, held[MV_COUNT] = { 0 };
+            for (size_t k = 0; k < sizeof PAD / sizeof *PAD; k++) {
+                pressed[PAD[k].button] = w.pressed[PAD[k].key];
+                held[PAD[k].button] = w.keys[PAD[k].key];
+            }
+            play_step(&v, lx, ly, pressed, held, shot ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
+            v.scene.instances[v.scene.monster].offset = (float)(v.run.time - (shot ? shot_time : now - start));
             memcpy(cam.pos, v.cam.pos, sizeof cam.pos);
             memcpy(cam.rows, v.cam.rot, sizeof cam.rows);
             cam.use_rows = 1;
@@ -236,6 +400,10 @@ int main(int argc, char **argv)
         }
     }
     rnd_free(v.rnd);
+    if (v.have_graph) {
+        moves_stop(&v.run);
+        moves_free(&v.graph);
+    }
     if (v.have_scene)
         scene_free(&v.scene);
     city_close(v.city);

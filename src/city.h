@@ -48,6 +48,7 @@ typedef struct {
     int monster;                                      /* instance of the monster, -1 = none */
     const char *monster_clip;                         /* the name of the clip it plays */
     const Bundle *monster_anims;
+    const Bundle *monster_bundle;                     /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
 } Scene;
 
 typedef struct City City;
@@ -62,6 +63,9 @@ void scene_update(Scene *s, double t);               /* pose everything that mov
  * travels in that clip (units per second), for moving it by hand */
 int scene_monster_clip(Scene *s, const char *suffix, float *speed);
 void scene_monster_place(Scene *s, float x, float y, float deg, int still_root);
+int scene_monster_play(Scene *s, const char *clip);  /* the clip of that name (any case, as MONSTER_DATA names it) */
+/* the root node's translation and rotation in the monster's clip at `seconds`; 0 = ok */
+int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4]);
 int city_camera(City *c, Group *two_tilts);           /* camera.bdp's TwoTilts group; 0 = ok */
 void scene_free(Scene *s);
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);   /* the 30 monsters (NAME_anims.cmp) */
