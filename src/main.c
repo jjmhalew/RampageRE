@@ -26,6 +26,7 @@
 #include "vehicle.h"
 #include "edible.h"
 #include "game.h"
+#include "look.h"
 #include "boss.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
@@ -84,7 +85,10 @@ typedef struct {
     Hud *hud; int no_hud;                            /* --nohud: none */
     Camera hud_cam;                                  /* the frame's camera, for the floating scores */
     float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
-    const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
+    const MoveNode *face;                            /* the face layer's node playing now */
+    FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
+    HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
+    float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
 } Viewer;
 
 /* seconds into the monster's clip at the state's time: the game runs a clip on a 0 .. 1 clock that the state's rate
@@ -168,18 +172,24 @@ static void play_state(Viewer *v)
 
 /* setFacialAnim (0x2E9200, 0x2E9350): the state node of that name plays its clip on the face, from its start; a name
  * no node has does nothing */
-static void face_play(Viewer *v, const char *name, int head, int loop, int count)
+static void face_start(Viewer *v)
 {
-    const MoveNode *n = moves_node(&v->graph, name);
-    int r = n && n->clip ? scene_monster_face(&v->scene, n->clip, head) : -2;
+    const FaceRec *f = &v->faces.list[0];
+    const MoveNode *n = f->node;
+    int r = scene_monster_face(&v->scene, n->clip, f->head);
     if (getenv("RAMPAGE_TRACE"))
-        printf("face %s: %s (%d nodes) -> %d\n", name, n && n->clip ? n->clip : "-", v->graph.nnodes, r);
+        printf("face %s: %s -> %d\n", f->name, n->clip, r);
     if (r != 0)
         return;
     v->face = n;
-    v->face_loop = loop;
-    v->face_count = count;
     scene_monster_face_blend(&v->scene, n->blend);   /* 0x2FF910: from the face as it was, over the node's blend */
+}
+
+static void face_play(Viewer *v, const char *name, int head, int loop, int count)
+{
+    const MoveNode *n = moves_node(&v->graph, name);
+    if (n && n->clip && face_set(&v->faces, n, name, head, loop, count) == FACE_START)
+        face_start(v);
 }
 
 /* Monsters.bsf's DefaultFacialAnim: Expression_Idle, looping, the head itself left to the body */
@@ -189,20 +199,25 @@ static void face_default(Viewer *v)
 }
 
 /* the face clip's clock: 0 .. 1 at its node's rate; at its end (0x2E95D0) it plays again while it loops or has
- * plays left, else the default face comes back (nothing is queued here: queueFacialAnim is not called) */
+ * plays left, else the next queued face, else the default face (look.c); the delayed belches (appendBelch) */
 static void face_step(Viewer *v, float dt)
 {
     if (!v->face || v->scene.monster < 0)
         return;
+    if (face_tick(&v->faces, dt))
+        face_play(v, "Expression_Burp", 0, 0, 1);
     Instance *in = &v->scene.instances[v->scene.monster];
     in->face_t += v->face->rate * dt;
     if (in->face_t < 1)
         return;
-    if (v->face_loop || --v->face_count > 0) {
+    switch (face_clip_end(&v->faces)) {
+    case FACE_RESTART:
         in->face_t = 0;
         scene_monster_face_blend(&v->scene, v->face->blend);
-    } else
-        face_default(v);
+        break;
+    case FACE_START: face_start(v); break;
+    default: face_default(v); break;
+    }
 }
 
 static void start_moves(Viewer *v)
@@ -217,6 +232,10 @@ static void start_moves(Viewer *v)
     v->have_graph = 1;
     moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
     v->face = NULL;
+    face_init(&v->faces);
+    memset(&v->head, 0, sizeof v->head);
+    look_limits_default(&v->look_lim);
+    v->friction = MONSTER_FRICTION;
     face_default(v);                                 /* Monsters::PostInit */
     memset(&v->input, 0, sizeof v->input);
     memset(v->vel, 0, sizeof v->vel);
@@ -690,14 +709,10 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
     else if (!strcmp(n, "Monsters::setMirrorState")) { v->mirror_queued = e->p[0] != 0; return; }
     else if (!strcmp(n, "Monsters::faceAnim")) {     /* (expression, head layer, -, plays): never looping */
-        static const struct { int code; const char *name; } FACES[] = {
-            { 15, "Expression_Barf" }, { 1, "Expression_Burp" }, { 2, "Expression_Choke" }, { 3, "Expression_Yuck" },
-            { 10, "Expression_Chew" }, { 13, "Expression_Chomp" }, { 5, "Expression_Flex" }, { 12, "Expression_Roar" },
-            { 11, "Expression_Smile" }, { 8, "Expression_Spew" }, { 9, "Expression_Zap" }, { 18, "React_Intro" },
-            { 19, "React_Victory" }, { 20, "Expression_Intro" } };
-        for (size_t k = 0; k < sizeof FACES / sizeof *FACES; k++)
-            if (FACES[k].code == (int)e->p[0])
-                face_play(v, FACES[k].name, e->p[1] != 0, 0, (int)e->p[3]);
+        int head, plays;                             /* (and a delay > 1: the belch that many seconds later) */
+        const char *face = face_anim_event(&v->faces, e->p, &head, &plays);
+        if (face)
+            face_play(v, face, head, 0, plays);
         return;
     }
     else if (!strcmp(n, "Monsters::prepareToMount")) { climb_prepare(&v->mount); return; }
@@ -1414,7 +1429,7 @@ static void monster_hit(Viewer *v, const char *name, float amount, int level, co
     float heading = v->heading / 57.2957795f, at[3] = { v->mx, v->my, v->mz };
     int slot = army_reaction_slot(level, knock, v->mode, army_hit_behind(at, heading, from));
     if (slot >= 0) {
-        memcpy(v->vel, knock, sizeof v->vel);
+        v->friction = monster_knock_shot(v->vel, knock);   /* 0x2D9650: per axis the larger of knock and velocity */
         v->pending_slot = slot;
     }
     if (v->hp <= 0) {                                /* 0x2D9364: at 0 HP slot 67, React_Defeated */
@@ -1738,11 +1753,9 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
         int ev = -1;
         if (v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF) {   /* the air: velocity, then gravity */
-            v->mx += v->vel[0] * dt;
-            v->my += v->vel[1] * dt;
-            v->mz += v->vel[2] * dt;
-            if (!v->no_gravity)
-                v->vel[2] -= MOVES_GRAVITY * dt;
+            float pos[3] = { v->mx, v->my, v->mz };  /* 0x2DEBD8: drag, the move, gravity */
+            monster_air_velocity(v->vel, pos, dt, v->no_gravity);
+            v->mx = pos[0]; v->my = pos[1]; v->mz = pos[2];
             float g = ground_at(v, v->mx, v->my, v->mz);
             if (v->mz <= g && v->vel[2] <= 0) {
                 v->mz = g;
@@ -1770,13 +1783,15 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             }
         } else if (v->mode == MODE_BUILDING && v->mount.at.building >= 0) {
             memset(v->vel, 0, sizeof v->vel);        /* on a face: held there, no gravity, no ground */
-        } else {
-            memset(v->vel, 0, sizeof v->vel);
+        } else {                                     /* 0x2DF6F0: a knock slides it, friction stops it */
+            float pos[3] = { v->mx, v->my, v->mz };
+            monster_ground_velocity(v->vel, pos, v->friction, dt, st->flags, v->pending_slot >= 0);
+            v->mx = pos[0]; v->my = pos[1]; v->mz = pos[2];
             float g = ground_at(v, v->mx, v->my, v->mz);
-            if (g < v->mz - 0.5f)                    /* walked off a roof: it falls (a stand-in, the game's way is */
-                v->mode = MODE_AIRBORNE;             /* not read) and lands through the landing slot */
+            if (g < v->mz - 0.5f)                    /* walked off a roof: it falls (a stand-in: the game eases it */
+                v->mode = MODE_AIRBORNE;             /* down, 0x2E0330) and lands through the landing slot */
             else
-                v->mz = g;
+                v->mz = monster_ground_follow(v->mz, g, v->no_gravity);
         }
         {                                            /* wading (0x2E2900 -> 0x2E2BD0): the water pressed down under
                                                       * it, half its radius across, by how deep it stands */
@@ -1908,12 +1923,12 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                                                         45 of pitch (MONSTER_DATA +0xA08 .. +0xA10, the same in all
                                                         30); eased at pi / 2 a second (MD +0x174, +0x178), half that
                                                         while the stick is held; back to 0 outside */
-        int look = v->have_graph && (v->graph.states[v->run.state].flags & NODE_LOOK);
-        int held = look && (v->rx != 0 || v->ry != 0);
-        float ty = look ? -v->rx * 1.4137f : 0, tp = look ? -v->ry * 0.7854f : 0;
-        float step = 1.5707963f * dt * (held ? 0.5f : 1);
-        v->look_yaw += fmaxf(-step, fminf(step, ty - v->look_yaw));
-        v->look_pitch += fmaxf(-step, fminf(step, tp - v->look_pitch));
+        uint32_t fl = v->have_graph ? v->graph.states[v->run.state].flags : 0;
+        look_stick(&v->head, &v->look_lim, (fl & NODE_LOOK) != 0, v->rx, v->ry);
+        look_update(&v->head, &v->look_lim, 0, fl); /* no target: tracking is off in this build (look.c) */
+        look_step(&v->head, &v->look_lim, dt);
+        v->look_yaw = v->head.yaw;
+        v->look_pitch = v->head.pitch;
         v->scene.look_yaw = v->mirror ? -v->look_yaw : v->look_yaw;   /* mirrored: not traced [G] */
         v->scene.look_pitch = v->look_pitch;
     }
