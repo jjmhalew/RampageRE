@@ -81,9 +81,12 @@ hides them): the punch's fist, the kick's foot. The clips' `hitBuildingFront` ca
 game's rules: the front cell takes 2 HP, the hit spreads up or down and sideways as the cell weakens, floors and
 buildings keep their HP pools, and each facade tile shows its cell's state (the sheet's row), so five punches crack,
 break and wreck a cell and its neighbours ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage"). Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
-transition, so which way it comes in is not traced). The monster stays within the street (x ±75, y −30 … −8: 3 units off the front row, a stand-in for the game's
-collision with buildings), and the building a hit goes to is the one whose face lies within 5 units along the
-side's direction (the game's search, 0x2A3D20, is not read).
+transition, so which way it comes in is not traced). The monster's collision box is the game's (MONSTER_DATA +0x198 / +0x19C: 3 each way across, 8.5 tall, 0x2E2C50):
+it cannot go into a building's box (the viewer pushes it out the shorter way; the game's response, 0x2801A0, is not
+read), it can land on a roof (6 + 3 × storeys up) and stand there, and walking off the edge it falls (a stand-in: it
+drops in the state it is in until the landing slot catches it). The building a hit goes to is the one whose face
+lies within 5 units along the side's direction (the game's search, 0x2A3D20, is not read). The street ends at
+x ±75 and y −30.
 
 ## Not there yet
 - the monster's face clips (`<MONSTER>_HEAD_*`) layered over its body, cloth simulation;
@@ -91,6 +94,5 @@ side's direction (the game's search, 0x2A3D20, is not read).
 - the buildings' dents (vertex levels), floors collapsing and buildings falling (the HP and states are kept, the
   facade does not fall), debris effects, the interiors shown behind damaged floors;
 - effects (`tools/edf.py`), the GUI, sound;
-- the ground is the street at height 0 (no roofs, no collision with buildings), climbing buildings, grabbing, the
-  game's rules;
+- climbing buildings (`canMount` says no), grabbing, the game's rules;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

@@ -270,6 +270,48 @@ static void stick_world(const Viewer *v, float lx, float ly, float w[3])
     w[2] = 0;
 }
 
+/* the monster's collision box (0x2E2C50): MONSTER_DATA +0x198 across (3 each way) and +0x19C up (4.25 each way from
+ * its middle: 8.5 tall), against the buildings' boxes */
+#define MONSTER_HALF_WIDTH 3.0f
+#define MONSTER_HEIGHT 8.5f
+#define ROOF_BAND 1.5f                               /* a building box's top 1.5 is its roof's band (0x2D1A30) */
+
+/* the highest ground at (x, y) not above z + 1: the street, or the roof of a building it stands over */
+static float ground_at(const Viewer *v, float x, float y, float z)
+{
+    float g = 0;
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+        const Building *b = &v->scene.buildings[i].b;
+        float top = b->max[2] - ROOF_BAND;
+        if (b->state != BUILDING_DESTROYED && x >= b->min[0] && x <= b->max[0] && y >= b->min[1] && y <= b->max[1] &&
+            top <= z + 1 && top > g)
+            g = top;
+    }
+    return g;
+}
+
+/* the box out of the buildings it went into, the shorter way across (the game's response, 0x2801A0, is not read) */
+static void push_out(Viewer *v)
+{
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+        const Building *b = &v->scene.buildings[i].b;
+        if (b->state == BUILDING_DESTROYED || v->mz >= b->max[2] - ROOF_BAND - 0.01f || v->mz + MONSTER_HEIGHT <= b->min[2])
+            continue;
+        float dl = v->mx + MONSTER_HALF_WIDTH - b->min[0], dr = b->max[0] - (v->mx - MONSTER_HALF_WIDTH);
+        float df = v->my + MONSTER_HALF_WIDTH - b->min[1], db = b->max[1] - (v->my - MONSTER_HALF_WIDTH);
+        if (dl <= 0 || dr <= 0 || df <= 0 || db <= 0)
+            continue;
+        float dx = dl < dr ? -dl : dr, dy = df < db ? -df : db;
+        if (fabsf(dx) < fabsf(dy)) {
+            v->mx += dx;
+            v->air[0] = 0;
+        } else {
+            v->my += dy;
+            v->air[1] = 0;
+        }
+    }
+}
+
 /* NODE_STEER (0x2E8190): the turn towards the stick this frame, in degrees. The stick in the monster's own frame
  * against the state's forward axis; beyond one frame's worth of turning it turns by the angle × `turn` × dt, so it
  * swings round fast and settles gently. */
@@ -389,8 +431,9 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             v->mz += v->vel[2] * dt;
             if (!v->no_gravity)
                 v->vel[2] -= MOVES_GRAVITY * dt;
-            if (v->mz <= 0 && v->vel[2] <= 0) {
-                v->mz = 0;
+            float g = ground_at(v, v->mx, v->my, v->mz);
+            if (v->mz <= g && v->vel[2] <= 0) {
+                v->mz = g;
                 if (v->mode == MODE_AIRBORNE) {      /* landed (0x2DC450): slot 56 in the current column */
                     int to = moves_slot(&v->graph, SLOT_LAND, v->column);
                     if (to >= 0) {
@@ -405,7 +448,11 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             }
         } else {
             memset(v->vel, 0, sizeof v->vel);
-            v->mz = 0;
+            float g = ground_at(v, v->mx, v->my, v->mz);
+            if (g < v->mz - 0.5f)                    /* walked off a roof: it falls (a stand-in, the game's way is */
+                v->mode = MODE_AIRBORNE;             /* not read) and lands through the landing slot */
+            else
+                v->mz = g;
         }
         air_control(v, st, lx, ly, dt);
         if (v->mode == MODE_GROUND || v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF || v->mode == MODE_PRONE) {
@@ -457,7 +504,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
         if (v->my < -30) v->my = -30;
-        if (v->my > -8) v->my = -8;                  /* 3 off the front row (y -5): a stand-in for building collision */
+        push_out(v);
         v->heading = fmodf(v->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE"))
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", v->graph.states[v->run.state].name,

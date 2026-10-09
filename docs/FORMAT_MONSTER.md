@@ -162,6 +162,12 @@ relative calls turn it by the monster's matrix, 0x2E7330 / 0x2E74F0). Each frame
 0x2DE530 and on) moves the monster by velocity × dt and then takes 60 × dt off the upward velocity, gravity, unless
 `setDisableGravity` (+0xAB8) is set.
 
+## Collision
+The monster's box against the world (0x2E2C50, from the update): around its position, MONSTER_DATA +0x198 each way
+across (3 for George, scaled by +0xA78) and +0x19C each way up from a centre that high (4.25: the box is 8.5 tall),
+3 more each way while on a building (mode 5); the world (0x4D0900, vtable +0x30, mask 0x404000, up to 64) returns
+what it touches, and 0x2801A0 works out the push for each.
+
 ## Steering
 The stick is read in the camera's frame: x along the camera's right axis, −y along its forward axis, the height
 dropped (0x2E8410), using the camera's matrix (gp−0x6CFC +0x660) the monster copies to +0xA18 every frame unless the
