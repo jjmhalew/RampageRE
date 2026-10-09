@@ -871,6 +871,11 @@ static void play_script(Viewer *v, const char *script, float aspect)
             if (frames < 1) frames = 1;
             for (int k = 0; k < frames; k++) {
                 play_step(v, WORDS[i].x, WORDS[i].y, pressed, held, 1.0f / 60, aspect);
+                if (v->have_graph && v->scene.monster >= 0) {   /* posed each frame, as the main loop does */
+                    v->scene.instances[v->scene.monster].offset =
+                        (float)clip_at(v, &v->graph.states[v->run.state], v->run.time);
+                    scene_update(&v->scene, 0);
+                }
                 if (WORDS[i].button >= 0)
                     held[WORDS[i].button] = 1;
                 memset(pressed, 0, sizeof pressed);

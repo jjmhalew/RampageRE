@@ -28,7 +28,8 @@ L Circle (grab), R R2 (roar); the monster runs its own move graph and the game's
 directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
 buildings; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
-(`RAMPAGE_TRACE=1`: every frame's state, time, place and heading).
+(`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
+`RAMPAGE_NOIK=1`: the arms as the clips have them).
 
 ## Source
 | File | |
@@ -97,7 +98,8 @@ and sinks, leaving its rubble ("Collapse"; `--do "collapse"` destroys the buildi
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster
 pushed at a building's front mounts it, climbs with the stick (each stroke flipping the clip), hops along the front,
 swings round a corner onto a side unless a neighbour is flush with it, climbs down and steps off at the foot, or
-mantles onto the roof at the top, steps across onto the front of a building it touches, and braces itself across a
+mantles onto the roof at the top (its hands gripping the wall: the game's arm IK holds a planted hand where it took
+hold while the clip climbs on), steps across onto the front of a building it touches, and braces itself across a
 10-unit alley to climb between two buildings and turn onto the other one ([FORMAT_MONSTER.md](FORMAT_MONSTER.md)
 "Climbing"; the checks the game also makes against attachments, cells flagged 0x1000 and other monsters are left
 out). `--do "at x y"` puts the monster there, facing the buildings. Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
