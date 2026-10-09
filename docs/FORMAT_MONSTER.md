@@ -86,7 +86,7 @@ Flags (+0x2C), as the command and the monster update (0x2DE530 ...) test them:
 | 0x200 | the right stick turns its head (0x2FBE30, with the settings at +0xA08..+0xA10 of MONSTER_DATA) |
 | 0x40, 0x80, 0x80000 | the root's travel along x, y, z moves the monster ("Root motion"); `Ground_Walk` and the punches y, the kick and the landings x and y, the climbs z |
 | 0x100 | the root's turn about Z turns the monster (`Ground_TurnAround` only) |
-| 0x40000 | when the next clip starts, the root's place and turn in this clip become the monster's (0x2E6580, before it starts the next); the climbs, mounts, knock-downs |
+| 0x40000 | when the next clip starts, the root's place and turn in this clip become the monster's (0x2E6580, before it starts the next): the monster moves and turns so that the next clip's root, where it starts, is where this one's ended (the climbing clips hold the root turned 80° from the standing ones, so it is not the root's change over the clip); the climbs, mounts, knock-downs |
 | 0x80002 | either: the friction on its velocity (+0xF4 of the monster × dt, against the velocity's direction, 0x2DFDE8) takes z too, not only x and y |
 
 ## Conditions
@@ -116,7 +116,8 @@ right, left; 40 … 47 the eighth, the same tests with the stick turned by π / 
 front-left, right, left, back, back-right, back-left. None below a stick size of 0.01. `tools/monster.py` names
 them `M.front`, `M.front8`, ...; mirrored, the condition reader swaps 33 / 34, 41 / 42, 43 / 44 and 46 / 47.
 
-Ids 4 … 21 and 48 … 57 are booleans, the rest floats. When the monster is mirrored (+0x7DA1 of the monster) the
+Ids 4 … 21 and 48 … 57 are booleans, the rest floats. The stick sizes (30, 31) always count as new and 32 … 47 while
+they are set (0x2C17C0), so `|L|>0.7(new)` means only "pushed past 0.7". When the monster is mirrored (+0x7DA1 of the monster) the
 left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). Variable 57 reads 0 and is never new
 (0x2C1838), so a `false == 0` (new) or `false > 0` condition never holds: those transitions are switched off. The
 game's own events (landing, hits) come in through the slots instead ("Slots"), and nothing found fires
@@ -211,13 +212,48 @@ side-to-side (a clip entered with its phase kept moves that reference, 0x2FFCC4,
 125 take nothing, 14 y, 9 x and y, 3 x, 14 z, the turn-around its turn; 20 more bake (0x40000), 8 of them with z
 and one with y.
 
+## Climbing
+The Monster script bindings `canMount` (0x2DDA20), `canClimb` (0x2DD100), `prepareToMount` (0x2D6450),
+`mountBuilding` (0x2D63D0), `transitionToMount` (0x2D50C0), `unmountBuilding` (0x2D6380), `changeMountRail`
+(0x2D4FF0), `transitionFromBuildingTop` (0x2D50A0), `canTransfer` / `transferMount` (0x2DD8B0, 0x2DD680); the
+`Monsters.bsf` checks wrap them (`canMount` = 1, `canHop` = 3, `canSwing` = 4, `canMantle` = 5, `stopClimbUp` /
+`stopClimbDown` ≠ 2, `shouldUnmountDown` = −1, `hitElectricSign` = −2; the hop and swing go towards the monster's
+right, its left when mirrored). The monster's mount (+0xC628 … +0xC646, +0xC778): the building, a point on its face,
+the rail and the storey, whether it is mounted, whether the point came from the roof's edge, whether the rail changed
+in this clip, whether it is coming down from the top.
+
+- **Rails**: points 5 apart along the front's plane, x = min x + 5 × rail, y = min y; rail 0 is the left side at the
+  front-left corner, rail = width the right side at the front-right corner, the ones between the front.
+- **canMount(side, z offset)** (side 0 left, 1 right, 2 front, 5 the roof's edge) looks from the monster's position
+  plus MONSTER_DATA +0x1A0 to its right and +0x1A4 ahead (George: 2.5 ahead) for a standing building whose face is
+  just there: the front within 1.5 × the box's half-width (4.5) ahead, a side within 1.1 × (5.5 when mounted), the
+  roof's edge within 4.5 behind the front edge at the roof's height; the nearest such point (storey by the monster's
+  height) wins if the face goes on 11.5 above the monster, else −7. The place is then checked (0x2DDC40, the box
+  ± 4.1, 4.1, 4.5): −5 another building in the way (a neighbour flush with the side), −8 the building falling, −6 a
+  cell flagged 0x1000, −2 an attachment or object in the way, −3 another monster, −9 out of the camera's reach.
+- **Getting on**: `prepareToMount` takes the point canMount chose, `mountBuilding` mounts it (and
+  `transitionToMount(t)` slides the monster onto it over t seconds, root motion still moving the start).
+- **On the face** (each frame in mode 5, 0x2D5870, after the root motion): the monster faces the wall (+y at the
+  front, +x on the left side, −x on the right) and stands at its point, its height the clip's (the climbs move it by
+  root motion in z, flag 0x80000) kept between the building's foot and its top − 11.5; a clip that bakes is free
+  (with 0x120000 at the point, 0x100000 at the top − 11.5), one with 0x400 too until its rail changes. Getting on, it
+  is only lined up with the rail. The mount's height is the monster's + 7.5, taken before the clamp (0x2E14F0), so a
+  stroke past the limit lets canClimb answer 5. The place is re-checked every frame: failing it, the monster is
+  knocked off (slot 31, or 73 when the building falls).
+- **canClimb(dv, dh)**: −4 not mounted. Sideways: −7 off the building, −5 a building close by, else the place 5 along
+  is checked; 4 when it turns a corner (to or from a side), 3 a hop along the front. Up: 2 while the mount's height
+  + 4 is not above the top, else 5 (mantle) if there is room on the roof. Down: −1 when the feet reach the foot, else 2.
+- **Transfers**: to a building in the same row, its rail 9.75 … 10.25 away (front rails that touch, or sides across a
+  10-unit alley), keeping the storey.
+
 ## Slots
 The game's own events (hits, landing, rampage) start states through the 74 slots: slot k is a start list index at
 +0x4 + 4k, or, when the monster's column (+0xBAB4) is 0 … 5, that column's override if not −1. The code puts the
 start list entry at +0x110 of the monster, and the controller (0x2C0AD0) switches to its state next frame
 (0x2EBF50). The columns are set by the type-23 events of the state the monster is in: −1 the default, 0 butt slam,
 1 drop, 2 on a building's front, 3 on its side, 4 knocked down, 5 hit in the air. Starting any state's clip (Monster
-vtable +0x60, 0x2E6580) first resets the column to −1 and gravity to on (0x2E7F70).
+vtable +0x60, 0x2E6580) first resets the column to −1, gravity to on, the movement mode to 0 (so each clip's own
+events set the mode it is in), the attacks and the event records (0x2E7F70).
 
 Landing (0x2DC450) sets mode 4 and fires slot 56, or 57 when the ground's normal points against the monster's up
 axis: for George `Jump_Finish` by default, `Jump_Butt_Slam_impact` in the butt slam's column, `Jump_Fall_Finish2`

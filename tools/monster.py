@@ -129,7 +129,8 @@ class MonsterData:
                                         window=(self.f(o + 0xC),
                                         self.f(o + 0x10)), exit=(self.f(o + 0x14), self.f(o + 0x18)),
                                         priority=struct.unpack_from('<h', data, o + 0x1C)[0], conditions=conds,
-                                        call=self.name(self.i(o + 0x60))))
+                                        call=self.name(self.i(o + 0x60)),
+                                        args=struct.unpack_from('<4f', data, o + 0x64)))
             self.states.append(dict(at=at, node=self.u(at + 4), length=self.f(at + 8), next=self.u(at + 0x14),
                                     end_blend=self.u(at + 0x10) & 0xF, transitions=transitions))
             at += 0x2C + 0x74 * count
@@ -233,7 +234,7 @@ class MonsterData:
                     out.append('    events: ' + '; '.join(ev))
             for t in s['transitions']:
                 conds = ' '.join(condition_text(c) for c in t['conditions'])
-                call = f' call {t["call"]}' if t['call'] else ''
+                call = f' call {t["call"]}({", ".join(f"{a:g}" for a in t["args"][:3])})' if t['call'] else ''
                 out.append(f'    -> {self.state_name(t["target"])}  [{conds}]  input {t["window"][0]:.3g}..'
                            f'{t["window"][1]:.3g}  switch {t["exit"][0]:.3g}..{t["exit"][1]:.3g}  priority '
                            f'{t["priority"]}  flags {t["flags"]:#x}{call}{"" if t["blend"] else "  cut"}')

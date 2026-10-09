@@ -86,7 +86,12 @@ buildings keep their HP pools, and each facade tile shows its cell's state (the 
 break and wreck a cell and its neighbours, and a damaged storey shows its interior (the floor's `Skeleton`, then its
 `DamagedSkeleton` once half its `FloorHP` is gone) through the holes ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage"). A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
-and sinks, leaving its rubble ("Collapse"; `--do "collapse"` destroys the building in front of the monster). Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
+and sinks, leaving its rubble ("Collapse"; `--do "collapse"` destroys the building in front of the monster).
+Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster
+pushed at a building's front mounts it, climbs with the stick (each stroke flipping the clip), hops along the front,
+swings round a corner onto a side unless a neighbour is flush with it, climbs down and steps off at the foot, or
+mantles onto the roof at the top ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Climbing"; the checks the game also makes
+against attachments, other monsters and the camera are left out). Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
 transition, so which way it comes in is not traced). The monster's collision box is the game's (MONSTER_DATA +0x198 / +0x19C: 3 each way across, 8.5 tall, 0x2E2C50):
 it cannot go into a building's box (the viewer pushes it out the shorter way; the game's response, 0x2801A0, is not
 read), it can land on a roof (6 + 3 × storeys up) and stand there, and walking off the edge it falls (a stand-in: it
@@ -99,5 +104,5 @@ x ±75 and y −30.
 - friction on the velocity, the head turning with the right stick;
 - the buildings' dents (vertex levels are kept, the facade does not bend), debris and dust effects, scoring;
 - effects (`tools/edf.py`), the GUI, sound;
-- climbing buildings (`canMount` says no), grabbing, the game's rules;
+- transfers between buildings and spider climbing (`canTransfer` says no), grabbing, the game's rules;
 - vertex-coloured interiors of damaged buildings, shadows, reflections.

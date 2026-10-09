@@ -149,9 +149,15 @@ int moves_read(const Bundle *b, MoveGraph *g)
                 t->cond[c] = (MoveCond){ rd32(r), rd32(r + 4), rd32(r + 12), rd32(r + 8) };
             }
             t->call = name_at(b, (int32_t)rd32(q + 0x60));
+            for (int j = 0; j < 4; j++)
+                t->args[j] = rdf(q + 0x64 + 4 * j);
         }
     }
     free(offset);
+    g->box[0] = rdf(d + 0x198);
+    g->box[1] = rdf(d + 0x19C);
+    g->probe[0] = rdf(d + 0x1A0);
+    g->probe[1] = rdf(d + 0x1A4);
     uint32_t nsh = rd32(d + 0xA44), sh = rd32(d + 0xA48);
     if (sh + 24 * nsh <= size && nsh < 256) {
         g->shapes = calloc(nsh ? nsh : 1, sizeof *g->shapes);
@@ -204,7 +210,7 @@ void moves_sectors(MoveInput *in, float a, float b)
 {
     float *v = in->v, size = v[MV_L_SIZE];
     for (int k = MV_M_FRONT; k <= MV_M_BACKLEFT8; k++)
-        v[k] = 0;
+        v[k] = in->fresh[k] = 0;
     if (size < 0.01f)                                /* 0x2C0BC0: no direction */
         return;
     /* halves, and the quadrant by the larger of the two (0x2C0740) */
@@ -221,6 +227,8 @@ void moves_sectors(MoveInput *in, float a, float b)
                     : (ra >= 0 ? (ra + rb >= 0 ? MV_M_BACKRIGHT8 : MV_M_BACK8)
                                : (rb - ra >= 0 ? MV_M_LEFT8 : MV_M_BACKLEFT8));
     v[e] = size;
+    for (int k = MV_M_FRONT; k <= MV_M_BACKLEFT8; k++)   /* 0x2C18F0: new while they are set */
+        in->fresh[k] = v[k] > 0 ? 1.0f : 0.0f;
 }
 
 void moves_derive(MoveInput *in)
@@ -228,6 +236,7 @@ void moves_derive(MoveInput *in)
     float *v = in->v;
     v[MV_R_SIZE] = fmaxf(fabsf(v[MV_RX]), fabsf(v[MV_RY]));
     v[MV_L_SIZE] = fmaxf(fabsf(v[MV_LX]), fabsf(v[MV_LY]));
+    in->fresh[MV_R_SIZE] = in->fresh[MV_L_SIZE] = 1;   /* 0x2C17E8: the sizes always count as new */
     for (int k = MV_M_FRONT; k <= MV_M_BACKLEFT8; k++)   /* the monster's frame: moves_sectors */
         v[k] = 0;
     for (int k = MV_L_UP; k <= MV_L_DOWNRIGHT; k++)
@@ -348,7 +357,7 @@ int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
         for (int c = 0; c < t->ncond && ok; c++)
             ok = holds(&t->cond[c], in);
         if (ok && t->call)
-            ok = call ? call(ctx, t->call) : 0;
+            ok = call ? call(ctx, t->call, t->args) : 0;
         if (ok)
             r->chosen = i;
     }

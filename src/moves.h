@@ -26,6 +26,7 @@ typedef struct {
     float in0, in1, sw0, sw1;                        /* input window, switch window (seconds into the state) */
     int priority, ncond; MoveCond cond[4];
     const char *call;                                /* a script check (Monsters::canMount, ...), NULL = none */
+    float args[4];                                   /* its four arguments (+0x64 .. +0x70) */
     int blend;                                       /* +0x0: how the next clip comes in, BLEND_* (0x2FFA00) */
 } MoveTrans;
 typedef struct {                                     /* a timed event of the state's clip (MONSTER_DATA's coded items) */
@@ -61,6 +62,8 @@ typedef struct {
      * the default (+0x4), columns 1.. the overrides (+0xA98) the clip events of type 23 select (moves_slot) */
     int (*slot)[MOVES_SLOTS]; int ncolumns;
     MoveShape *shapes; int nshapes;
+    float box[2];                                    /* +0x198 across, +0x19C up: the collision box (3, 4.25) */
+    float probe[2];                                  /* +0x1A0, +0x1A4: where canMount looks for a face (0, 2.5) */
     /* the body parts (+0xA74: Arm L, Arm R, Body, Head, Leg L, Leg R) and their bones, which an attack event (type 0)
      * arms: a shape whose bone is armed can hit */
     const char *part_name[MOVES_PARTS]; int nparts;
@@ -83,7 +86,7 @@ void moves_derive(MoveInput *in);
  * stick as 0x2E8410 puts it in the world, against the monster's axes), after moves_derive */
 void moves_sectors(MoveInput *in, float a, float b);
 
-typedef int (*MoveCall)(void *ctx, const char *call);    /* the answer of a script check */
+typedef int (*MoveCall)(void *ctx, const char *call, const float *args);   /* the answer of a script check */
 typedef struct {
     const MoveGraph *g;
     int state; float time;

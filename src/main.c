@@ -17,6 +17,7 @@
 #include "render_gl.h"
 #include "camera.h"
 #include "moves.h"
+#include "climb.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 #define NCITIES 7
@@ -34,13 +35,14 @@ typedef struct {
     float vel[3]; int mode, no_gravity, column;      /* velocity (+0xBD30), movement mode (+0xAD8), no gravity
                                                         (+0xAB8), the slots' column (+0xBAB4) */
     MoveGraph graph; MoveRunner run; MoveInput input; int have_graph;
-    int yaw_axis; float entry_yaw, entry_root[3];    /* the root's axis that tells its turn; its turn and place at the
+    int yaw_axis; float entry_yaw, entry_root[3], entry_t;    /* the root's axis that tells its turn; its turn and place at the
                                                         state's start */
     float frame[2][3], stick[2];                     /* the camera's right and forward axes the stick is read in
                                                         (+0xA18, +0xA24) and the stick they were taken for (+0xA3C) */
     float air[3];                                    /* the stick's own velocity (+0xA68), NODE_AIR_* */
     uint32_t armed; int show_hits;                   /* body parts an attack event armed (bits); H draws them */
     int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
+    Mount mount;                                     /* on a building's face (climb.c) */
 } Viewer;
 
 /* the clip's root at time t (seconds of the clip: the state's time × its rate), held at the clip's last frame
@@ -51,6 +53,32 @@ static int root_at(const Viewer *v, double t, float tr[3], float q[4])
     if (in->has_clip && t > in->clip.duration - 1e-4)
         t = in->clip.duration - 1e-4;
     return scene_monster_root(&v->scene, t < 0 ? 0 : t, tr, q);
+}
+
+/* a root's place and rotation (rows of 3) in the monster's frame as drawn: mirrored, across x (S R S) */
+static void seen_root(int mirrored, float p[3], const Mat4 *m, float r[3][3])
+{
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            r[i][j] = m->m[4 * j + i] * (mirrored && (i == 0) != (j == 0) ? -1.0f : 1.0f);
+    if (mirrored)
+        p[0] = -p[0];
+}
+
+/* the root's turn about Z from clip time ta to tb, in degrees: the yaw of its rotation at tb against the one at ta
+ * (D = M(tb) x M(ta)^T, so a root that leans or crouches does not seem to turn) */
+static float root_turn(const Viewer *v, double ta, double tb)
+{
+    float tr[3], qa[4], qb[4], zero[3] = { 0, 0, 0 };
+    if (root_at(v, ta, tr, qa) != 0 || root_at(v, tb, tr, qb) != 0)
+        return 0;
+    Mat4 a = mat_tq(zero, qa), b = mat_tq(zero, qb);
+    float d00 = 0, d10 = 0;
+    for (int k = 0; k < 3; k++) {
+        d00 += b.m[4 * k] * a.m[4 * k];
+        d10 += b.m[4 * k + 1] * a.m[4 * k];
+    }
+    return atan2f(d10, d00) * 57.2957795f;
 }
 
 static float root_yaw(const Viewer *v, double t)
@@ -70,7 +98,15 @@ static void play_state(Viewer *v)
     if (scene_monster_play(&v->scene, st->clip) != 0)
         printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
     v->entry_yaw = root_yaw(v, v->run.time * st->rate);
-    v->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed */
+    v->entry_t = v->run.time * st->rate;
+    if (getenv("RAMPAGE_ROOT")) {
+        float rt[3], rq[4];
+        if (root_at(v, v->run.time * st->rate, rt, rq) == 0)
+            printf("  root of %s: %.2f %.2f %.2f\n", st->clip, rt[0], rt[1], rt[2]);
+    }
+    v->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed, on the ground */
+    v->mode = MODE_GROUND;                           /* (its events set the mode it is in) */
+    climb_clip_started(&v->mount);
     v->mirror = v->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
     v->input.mirrored = v->mirror;
     if (v->scene.monster >= 0)
@@ -94,6 +130,8 @@ static void start_moves(Viewer *v)
     memset(&v->input, 0, sizeof v->input);
     memset(v->vel, 0, sizeof v->vel);
     v->mirror = v->mirror_queued = 0;
+    memset(&v->mount, 0, sizeof v->mount);
+    v->mount.at.building = v->mount.cand.building = -1;
     memset(v->air, 0, sizeof v->air);
     memset(v->stick, 0, sizeof v->stick);
     memcpy(v->frame, v->cam.rot, sizeof v->frame);
@@ -156,15 +194,55 @@ static int open_city(Viewer *v, int index, uint32_t block)
 
 /* the viewer's answers to the graph's script checks (Monsters.bsf: there are no buildings, people or power-ups to
  * test against here, so only the monster's own abilities say yes) */
-static int answer(void *ctx, const char *call)
+static Climber climber(const Viewer *v)
+{
+    Climber c = { { v->mx, v->my, v->mz }, v->heading, v->graph.box[0], { v->graph.probe[0], v->graph.probe[1] } };
+    return c;
+}
+
+/* the hop / swing scripts' way along the face: canClimb(0, -1) for 0 mirrored or > 0 not, else (0, 1) */
+static int along(const Viewer *v, float p0)
+{
+    return (v->mirror && p0 == 0) || (!v->mirror && p0 > 0) ? -1 : 1;
+}
+
+static int answer(void *ctx, const char *call, const float *a)
 {
     static const char *const YES[] = { "Monsters::hasRoarEnergy", "Monsters::canDoPunch", "Monsters::canSpin",
                                        "Monsters::hasDoubleJump", "Monsters::hasJumpSmash", "Monsters::hasChargePunch" };
-    (void)ctx;
+    Viewer *v = ctx;
     for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
         if (strcmp(call, YES[i]) == 0)
             return 1;
-    return 0;
+    if (!v)
+        return 0;
+    Climber c = climber(v);
+    const Scene *sc = &v->scene;
+    if (!strcmp(call, "Monsters::canMount")) {       /* (side, z offset, style): styles 2 / 3 swap the sides */
+        int side = (int)a[0];
+        if ((a[2] == 2 && v->mirror) || (a[2] == 3 && !v->mirror))
+            side = side == 0 ? 1 : side == 1 ? 0 : side;
+        return climb_can_mount(&v->mount, sc, &c, side, a[1]) == 1;
+    }
+    if (!strcmp(call, "Monsters::mountIsOccupied")) {
+        int r = climb_can_mount(&v->mount, sc, &c, (int)a[0], 0);
+        return r == -1 || r == -2 || r == -3 || r == -5 || r == -6;
+    }
+    if (!strcmp(call, "Monsters::canHop")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0])) == 3;
+    if (!strcmp(call, "Monsters::canSwing")) return climb_can_climb(&v->mount, sc, &c, 0, along(v, a[0])) == 4;
+    if (!strcmp(call, "Monsters::canMantle")) return climb_can_climb(&v->mount, sc, &c, 1, 0) == 5;
+    if (!strcmp(call, "Monsters::stopClimbUp") || !strcmp(call, "Monsters::stopSpiderClimbUp")) {
+        int r = climb_can_climb(&v->mount, sc, &c, 1, 0);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  canClimb up %d (mount z %.1f, top %.1f)\n", r, v->mount.at.pt[2],
+                   v->mount.at.building >= 0 ? sc->buildings[v->mount.at.building].b.max[2] : 0);
+        return r != 2;
+    }
+    if (!strcmp(call, "Monsters::stopClimbDown")) return climb_can_climb(&v->mount, sc, &c, -1, 0) != 2;
+    if (!strcmp(call, "Monsters::shouldUnmountDown")) return climb_can_climb(&v->mount, sc, &c, -1, 0) == -1;
+    if (!strcmp(call, "Monsters::hitElectricSign"))
+        return climb_can_climb(&v->mount, sc, &c, a[0] == 0 ? 1 : -1, 0) == -2;
+    return 0;                                        /* canTransfer, canGrabPerson, ...: not here */
 }
 
 /* the clip events the viewer acts on: the movement mode, and Monsters.bsf's velocity functions (jumpNorm and its kin
@@ -256,6 +334,19 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
     else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
     else if (!strcmp(n, "Monsters::setMirrorState")) { v->mirror_queued = e->p[0] != 0; return; }
+    else if (!strcmp(n, "Monsters::prepareToMount")) { climb_prepare(&v->mount); return; }
+    else if (!strcmp(n, "Monsters::mountBuilding")) {
+        Climber cl = climber(v);
+        climb_mount(&v->mount, &cl, e->p[0]);        /* and transitionToMount(param0) */
+        return;
+    }
+    else if (!strcmp(n, "Monsters::unmountBuilding")) { climb_unmount(&v->mount); return; }
+    else if (!strcmp(n, "Monsters::changeMountRail")) {
+        float d = v->mirror ? -e->p[0] : e->p[0];
+        climb_change_rail(&v->mount, d < 0 ? -1 : 1);
+        return;
+    }
+    else if (!strcmp(n, "Monsters::transitionFromBuildingTop")) { v->mount.from_top = 1; return; }
     else if (strstr(n, "::hitBuildingFront")) { hit_building_front(v, e->p); return; }
     else return;
     if (relative) {                                  /* the monster's frame (0x2E7330 / 0x2E74F0: by its matrix) */
@@ -295,7 +386,7 @@ static float ground_at(const Viewer *v, float x, float y, float z)
     float g = 0;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
-        float top = b->max[2] - ROOF_BAND;
+        float top = b->max[2];
         if (b->max[2] > b->min[2] + ROOF_BAND && x >= b->min[0] && x <= b->max[0] && y >= b->min[1] && y <= b->max[1] &&
             top <= z + 1 && top > g)
             g = top;
@@ -303,12 +394,13 @@ static float ground_at(const Viewer *v, float x, float y, float z)
     return g;
 }
 
-/* the box out of the buildings it went into, the shorter way across (the game's response, 0x2801A0, is not read) */
+/* the box out of the buildings it went into, the shorter way across (the game's response, 0x2801A0, is not read);
+ * within a step (1) of a roof it is on the roof */
 static void push_out(Viewer *v)
 {
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
-        if (b->max[2] <= b->min[2] + 0.01f || v->mz >= b->max[2] - ROOF_BAND - 0.01f || v->mz + MONSTER_HEIGHT <= b->min[2])
+        if (b->max[2] <= b->min[2] + 0.01f || v->mz >= b->max[2] - 1.0f || v->mz + MONSTER_HEIGHT <= b->min[2])
             continue;
         float dl = v->mx + MONSTER_HALF_WIDTH - b->min[0], dr = b->max[0] - (v->mx - MONSTER_HALF_WIDTH);
         float df = v->my + MONSTER_HALF_WIDTH - b->min[1], db = b->max[1] - (v->my - MONSTER_HALF_WIDTH);
@@ -471,6 +563,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                     v->vel[2] = 0;
                 }
             }
+        } else if (v->mode == MODE_BUILDING && v->mount.at.building >= 0) {
+            memset(v->vel, 0, sizeof v->vel);        /* on a face: held there, no gravity, no ground */
         } else {
             memset(v->vel, 0, sizeof v->vel);
             float g = ground_at(v, v->mx, v->my, v->mz);
@@ -487,7 +581,19 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (st->flags & NODE_STEER)
             v->heading += steer(v, st, lx, ly, dt);
         scene_monster_blend_step(&v->scene, dt);
-        int switched = ev == 0 || moves_step(&v->run, in, dt, answer, NULL);
+        if (ev != 0) {                               /* 0x2E14F0: held on the face, or knocked off it */
+            Climber cl = climber(v);
+            int slot = climb_check(&v->mount, &v->scene, &cl, v->mode);
+            int to = slot >= 0 ? moves_slot(&v->graph, slot, v->column) : -1;
+            if (to >= 0) {
+                climb_unmount(&v->mount);
+                moves_force(&v->run, to);
+                v->mode = MODE_AIRBORNE;
+                ev = 0;
+            }
+        }
+        float before[3] = { v->mx, v->my, v->mz };
+        int switched = ev == 0 || moves_step(&v->run, in, dt, answer, v);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
         float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
         if (root_at(v, t0 * st->rate, a, q) == 0 && root_at(v, t1 * st->rate, b, q) == 0) {
@@ -496,31 +602,63 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             float m = v->mirror ? -1.0f : 1.0f;      /* mirrored: across the monster's x */
             v->mx += c * m * dx - s * dy;
             v->my += s * m * dx + c * dy;
+            if (st->flags & NODE_ROOT_Z)
+                v->mz += b[2] - a[2];
             if (st->flags & NODE_ROOT_TURN)
-                v->heading += m * (fmodf(root_yaw(v, t1 * st->rate) - root_yaw(v, t0 * st->rate) + 540, 360) - 180);
+                v->heading += m * root_turn(v, t0 * st->rate, t1 * st->rate);
         }
         clip_events(v, st, t0, t1);                  /* the old clip's events up to now */
+        if (v->mode == MODE_BUILDING && v->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
+            float pos[3] = { v->mx, v->my, v->mz }, delta[3] = { v->mx - before[0], v->my - before[1], v->mz - before[2] };
+            climb_place(&v->mount, &v->scene, st->flags, delta, dt, pos, &v->heading);
+            v->mx = pos[0];
+            v->my = pos[1];
+            v->mz = pos[2];
+        }
         if (switched) {
-            if ((st->flags & NODE_BAKE_ROOT) && root_at(v, t1 * st->rate, b, q) == 0) {
-                /* the place and turn the old clip's root reached (what it did not hand over already) become the
-                 * monster's */
-                float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
-                float m = v->mirror ? -1.0f : 1.0f;
-                float dx = st->flags & NODE_ROOT_X ? 0 : m * (b[0] - v->entry_root[0]);
-                float dy = st->flags & NODE_ROOT_Y ? 0 : b[1] - v->entry_root[1];
-                v->mx += c * dx - s * dy;
-                v->my += s * dx + c * dy;
-                if (!(st->flags & NODE_ROOT_TURN))
-                    v->heading += m * (fmodf(root_yaw(v, t1 * st->rate) - v->entry_yaw + 540, 360) - 180);
+            /* a clip that bakes: its root, as drawn where it ended (the axes it handed over were held at its start, a
+             * turn it handed over taken out), in the monster's frame as seen (mirrored if it was) */
+            int bake = (st->flags & NODE_BAKE_ROOT) && root_at(v, t1 * st->rate, b, q) == 0;
+            float bake_p[3], bake_r[3][3];
+            if (bake) {
+                for (int k = 0; k < 3; k++)
+                    bake_p[k] = st->flags & (k == 0 ? NODE_ROOT_X : k == 1 ? NODE_ROOT_Y : NODE_ROOT_Z) ?
+                                v->entry_root[k] : b[k];
+                float zero[3] = { 0, 0, 0 }, tw = st->flags & NODE_ROOT_TURN ? root_turn(v, v->entry_t, t1 * st->rate) : 0;
+                Mat4 r = mat_mul(mat_trs_z(0, 0, 0, -tw), mat_tq(zero, q));
+                seen_root(v->mirror, bake_p, &r, bake_r);
             }
             const MoveState *to = &v->graph.states[v->run.state];
             if (v->run.from != v->run.state)
-                printf("%s -> %s (%s)\n", st->name ? st->name : "?", to->name ? to->name : "?", to->clip ? to->clip : "-");
+                printf(getenv("RAMPAGE_TRACE") ? "%s -> %s (%s) by %d\n" : "%s -> %s (%s)\n", st->name ? st->name : "?",
+                       to->name ? to->name : "?", to->clip ? to->clip : "-", ev == 0 ? -2 : v->run.via);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  stick %.2f %.2f size %.2f\n", lx, ly, in->v[MV_L_SIZE]);
             /* the transition says whether the new clip blends in (over the new state's blend time) or cuts; a start
              * the game forces (a slot) takes no transition, and its blend is not traced: it blends */
             int blend = ev == 0 ? BLEND_IN : v->run.via >= 0 ? st->trans[v->run.via].blend : st->end_blend;
             scene_monster_blend(&v->scene, blend == BLEND_IN ? to->blend : 0);
             play_state(v);
+            if (bake && root_at(v, v->entry_t, b, q) == 0) {
+                /* 0x2E6580: the monster moves and turns so that the new clip's root, where it starts, is where the old
+                 * one's was: the old root's place and turn become the monster's */
+                float zero[3] = { 0, 0, 0 }, np[3] = { b[0], b[1], b[2] }, nr[3][3];
+                Mat4 r = mat_tq(zero, q);
+                seen_root(v->mirror, np, &r, nr);
+                float h = atan2f(bake_r[1][0] * nr[0][0] + bake_r[1][1] * nr[0][1] + bake_r[1][2] * nr[0][2],
+                                 bake_r[0][0] * nr[0][0] + bake_r[0][1] * nr[0][1] + bake_r[0][2] * nr[0][2]);
+                float ch = cosf(h), sh = sinf(h);
+                float d[3] = { bake_p[0] - (ch * np[0] - sh * np[1]), bake_p[1] - (sh * np[0] + ch * np[1]),
+                               bake_p[2] - np[2] };
+                float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
+                v->mx += c * d[0] - s * d[1];
+                v->my += s * d[0] + c * d[1];
+                v->mz += d[2];
+                v->heading += h * 57.2957795f;
+                if (getenv("RAMPAGE_ROOT"))
+                    printf("  bake: old root %.2f %.2f %.2f, new %.2f %.2f %.2f, turn %.0f\n", bake_p[0], bake_p[1],
+                           bake_p[2], np[0], np[1], np[2], h * 57.2957795f);
+            }
             v->column = -1;                         /* 0x2E7F70: a new state starts without the old one's effects */
             v->no_gravity = 0;
             /* and the new one's up to where it starts: the game's event player (0x2F45D0) begins at the clip's first
@@ -531,7 +669,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
         if (v->my < -30) v->my = -30;
-        push_out(v);
+        if (v->mode != MODE_BUILDING)               /* on a face it is held by it, not pushed out */
+            push_out(v);
         v->heading = fmodf(v->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE"))
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", v->graph.states[v->run.state].name,
@@ -542,7 +681,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
         float turn = st->flags & NODE_ROOT_TURN ?
-            fmodf(root_yaw(v, v->run.time * st->rate) - v->entry_yaw + 540, 360) - 180 : 0;
+            root_turn(v, v->entry_t, v->run.time * st->rate) : 0;
         scene_monster_root_motion(&v->scene, (st->flags & NODE_ROOT_X ? 1 : 0) | (st->flags & NODE_ROOT_Y ? 2 : 0),
                                   v->entry_root, turn);
     }
