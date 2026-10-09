@@ -947,12 +947,12 @@ int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
     return 0;
 }
 
-void scene_monster_place(Scene *s, float x, float y, float deg, int still_root)
+void scene_monster_place(Scene *s, float x, float y, float z, float deg, int still_root)
 {
     if (s->monster < 0)
         return;
     Instance *in = &s->instances[s->monster];
-    in->base = mat_trs_z(x, y, 0, deg);
+    in->base = mat_trs_z(x, y, z, deg);
     in->still_root = still_root;
 }
 

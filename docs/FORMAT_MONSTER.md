@@ -23,12 +23,12 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0x9C4..0xA2C | | | name indices (−1 = none), settings (f32 0x9F4..0xA10) |
 | 0xA30, 0xA34, 0xA38 | | | names of the skeleton, the mesh and the cloth model |
 | 0xA44 / 0xA48 | collision shapes | 11 × 24 at 0xAA8 | f32[3], f32[2], u32 bone \| part << 16 |
-| 0xA4C / 0xA50 | state nodes | 186 × 0x84 at 0xBB0 | +0x78 clip name, +0x7C state name, the rest settings |
+| 0xA4C / 0xA50 | state nodes | 186 × 0x84 at 0xBB0 | +0x14 blend time (likely), +0x28 its clip events (first << 16 \| count), +0x78 clip name, +0x7C state name, the rest settings |
 | 0xA60 / 0xA68 | coded item offsets | 1,325 × u16 at 0x6B98 | into the block at +0xA64 |
-| 0xA64 | coded items | at 0x75F4 | u32 type first (21, 6, 7, 23, 15, 0, 12, 8, 9, 16); types 6 and 21 carry names |
+| 0xA64 | clip events | at 0x75F4 | {u32 type, f32 time, ...}, see "Clip events" |
 | 0xA6C / 0xA70 / 0xA74 | body parts | 6 at 0xF678, pointers at 0xF748 | `Arm L`, `Arm R`, `Body`, `Head`, `Leg L`, `Leg R` with their bones |
-| 0xA58 / 0xA5C | start lists | 29 × 12 at 0xF760 | u32 ?, offset of a state, u32 ? |
-| 0xA94 / 0xA98 | modes | 6 × 0x128 at 0xF8BC | 74 slots each overriding the defaults (−1 = keep) |
+| 0xA58 / 0xA5C | start lists | 29 × 12 at 0xF760 | u32 ?, offset of a state, u32 flags (8: keep a time) |
+| 0xA94 / 0xA98 | slot columns | 6 × 0x128 at 0xF8BC | 74 slots each overriding the defaults (−1 = keep), see "Slots" |
 | 0xA78 / 0xA7C / 0xA80 | | 2 at 0xFFAC, pointers at 0x1022C | |
 | 0xA84 / 0xA88 | attachment nodes | 15 × 0x38 at 0x10234 | f32[12] matrix, name (`fxNode_Belch`, `Helper L Hand`, `Tracking_Node`, ...), bone \| index << 16 |
 | 0xA8C / 0xA90 | effect names | 12 at 0x1057C | `Monster_Belch.edf`, `Debris_mega_punch.edf`, ... |
@@ -89,6 +89,45 @@ past 0.8 towards it and `Monsters::canMount`.
 
 All 30 monsters share the graph's shape (176 states and 1,085 transitions; Marco 177, Rojo 179) and differ in
 clips, settings and coded items.
+
+## Clip events
+Each state node owns a run of the items at +0xA64 (+0x28: first << 16 | count), the timed events of its clip, in time
+order. Each starts {u32 type, f32 time}, the time a share of the clip's length; 0x2E7840 handles them (a switch on the
+type, table 0x4312F0):
+
+| Type | | |
+|---|---|---|
+| 21 | {name, f32 p[4]} | a script function of `Monsters.bsf` (or the monster's own, `George::EnableWeapon`) with four arguments, via 0x2E75C0: footsteps, `addVelocity`, `jumpNorm`, `damageRoof`, `fireWeapon`, ... |
+| 6 | {?, name} | a sound |
+| 7 | {mode} | the movement mode (+0xAD8 of the monster): 0 on the ground, 2 taking off, 1 in the air (`isAirborne`: 1 or 2), 4 down or landing, 5 on a building |
+| 23 | {column} | the slot column (+0xBAB4), see "Slots" |
+| 20, 22 | {value} | +0xBAAC, +0xBAB0 (not traced) |
+| 0, 8, 9, 12, 15, 16 | | not decoded (hits, effects) |
+
+`tools/monster.py` prints them under each state (`0.136 Monsters::addVelocity(1, 0, 0, 16); 0.136 mode 1`).
+
+## Movement
+A jump is the clip's events: `Jump_Start_1` (George) sets mode 2 at 0.102, then at 0.136 adds 16 up
+(`addVelocity(relative, x, y, z)`) and mode 1, and from 0.203 to 0.542 adds 3 or 4 up eight times, while the graph
+keeps it in that state only as long as Cross is held (released, it goes to `Jump_Start_2_copy`): the longer the
+press, the higher the jump. `Monsters.bsf`'s `jumpNorm` / `jumpLow` / `jumpDrop` / `jumpHighMonster` set the velocity
+outright (22, 15, −10, 32 up; the x argument mirrored with the monster). The velocity is at +0xBD30 (world; the
+relative calls turn it by the monster's matrix, 0x2E7330 / 0x2E74F0). Each frame the monster update (vtable +0x10,
+0x2DE530 and on) moves the monster by velocity × dt and then takes 60 × dt off the upward velocity, gravity, unless
+`setDisableGravity` (+0xAB8) is set.
+
+## Slots
+The game's own events (hits, landing, rampage) start states through the 74 slots: slot k is a start list index at
++0x4 + 4k, or, when the monster's column (+0xBAB4) is 0 … 5, that column's override if not −1. The code puts the
+start list entry at +0x110 of the monster, and the controller (0x2C0AD0) switches to its state next frame
+(0x2EBF50). The columns are set by the type-23 events of the state the monster is in: −1 the default, 0 butt slam,
+1 drop, 2 on a building's front, 3 on its side, 4 knocked down, 5 hit in the air. Starting any state's clip (Monster
+vtable +0x60, 0x2E6580) first resets the column to −1 and gravity to on (0x2E7F70).
+
+Landing (0x2DC450) sets mode 4 and fires slot 56, or 57 when the ground's normal points against the monster's up
+axis: for George `Jump_Finish` by default, `Jump_Butt_Slam_impact` in the butt slam's column, `Jump_Fall_Finish2`
+when knocked down. Hits (0x2D8078) appear to pick their slot from the direction and strength of the blow. That is why
+`Jump_Air_Borne_Descend` has no landing transition: the landing comes from the slot.
 
 ## At run time
 A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next one, +0x8 the transition taken,

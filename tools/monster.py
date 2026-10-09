@@ -43,7 +43,10 @@ VARIABLES = {0: 'LX', 1: 'LY', 2: 'RX', 3: 'RY', 4: 'Up', 5: 'Down', 6: 'Left', 
              17: 'Triangle', 20: 'R3', 21: 'L3', 28: 'R2.pressure', 29: 'L2.pressure', 30: '|R|', 31: '|L|',
              48: 'L.up', 49: 'L.down', 50: 'L.left', 51: 'L.upleft', 52: 'L.downleft', 53: 'L.right',
              54: 'L.upright', 55: 'L.downright', 56: 'true', 57: 'false'}
-OPERATORS = ['>', '>=', '<', '<=', '==']          # variable OP value (0x3F5950 floats, 0x3F5970 booleans)
+OPERATORS = ['>', '>=', '<', '<=', '==']
+# clip events with a value (0x2E7840): 7 the movement mode (+0xAD8), 23 the slots' column (+0xBAB4), 20 / 22 (+0xBAAC
+# / +0xBAB0, not traced)
+EVENT_VALUES = {7: 'mode', 23: 'column', 20: 'set BAAC', 22: 'set BAB0'}          # variable OP value (0x3F5950 floats, 0x3F5970 booleans)
 
 
 def is_bool(var):
@@ -81,8 +84,8 @@ class MonsterData:
         self.part('coded item offsets', item_offsets, (2 * n_items + 3) & ~3)
         n_bodyparts, bodydata, bodyptrs = self.u(0xA6C), self.u(0xA70), self.u(0xA74)
         self.part('coded items', items, bodydata - items)
-        self.item_types = [self.u(items + struct.unpack_from('<H', data, item_offsets + 2 * k)[0])
-                           for k in range(n_items)]
+        self.item_at = [items + struct.unpack_from('<H', data, item_offsets + 2 * k)[0] for k in range(n_items)]
+        self.item_types = [self.u(o) for o in self.item_at]
         self.part('body part data', bodydata, bodyptrs - bodydata)
         self.part('body part pointers', bodyptrs, 4 * n_bodyparts)
         self.bodyparts = [self.name(self.i(self.u(bodyptrs + 4 * k))) for k in range(n_bodyparts)]
@@ -163,6 +166,24 @@ class MonsterData:
         node = self.node_by_offset.get(self.states[k]['node'])
         return f'{k}:{node[2] if node else "?"}'
 
+    def events(self, node):
+        """A state node's clip events (+0x28: first << 16 | count): (type, share of the clip, text)."""
+        span = self.u(node + 0x28)
+        out = []
+        for k in range(span >> 16, (span >> 16) + (span & 0xFFFF)):
+            o = self.item_at[k]
+            t, at = self.u(o), self.f(o + 4)
+            if t == 21:
+                text = f'{self.name(self.i(o + 8))}({", ".join(f"{x:g}" for x in struct.unpack_from("<4f", self.d, o + 12))})'
+            elif t == 6:
+                text = f'sound {self.name(self.i(o + 12))}'
+            elif t in EVENT_VALUES:
+                text = f'{EVENT_VALUES[t]} {self.i(o + 8)}'
+            else:
+                text = f'type {t}'
+            out.append((t, at, text))
+        return out
+
     def dump(self):
         out = ['// slots (event -> start list -> state) per mode; - = the default']
         for k, l in enumerate(self.slots):
@@ -174,6 +195,10 @@ class MonsterData:
             node = self.node_by_offset.get(s['node'])
             out.append(f'state {self.state_name(s["at"])}  clip {node[1] if node else "?"}  length {s["length"]:.3g}'
                        f'  then {self.state_name(s["next"])}')
+            if node:
+                ev = [f'{at:.3g} {text}' for t, at, text in self.events(node[0]) if t != 6]
+                if ev:
+                    out.append('    events: ' + '; '.join(ev))
             for t in s['transitions']:
                 conds = ' '.join(condition_text(c) for c in t['conditions'])
                 call = f' call {t["call"]}' if t['call'] else ''

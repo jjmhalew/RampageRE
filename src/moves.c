@@ -49,6 +49,44 @@ int moves_read(const Bundle *b, MoveGraph *g)
     g->states = calloc(n ? n : 1, sizeof *g->states);
     g->all = calloc(total ? total : 1, sizeof *g->all);
     g->n = n;
+    /* coded items: +0xA60 count, +0xA64 the block, +0xA68 a u16 offset into it per item; a node's +0x28 holds
+     * first << 16 | count of its own */
+    uint32_t nitems = rd32(d + 0xA60), block = rd32(d + 0xA64), item_offsets = rd32(d + 0xA68);
+    g->all_events = calloc(nitems ? nitems : 1, sizeof *g->all_events);
+    for (uint32_t i = 0; i < nitems && item_offsets + 2 * i + 2 <= size; i++) {
+        uint32_t o = block + (d[item_offsets + 2 * i] | d[item_offsets + 2 * i + 1] << 8);
+        MoveEvent *ev = &g->all_events[i];
+        if (o + 28 > size)
+            continue;
+        ev->type = rd32(d + o);
+        ev->at = rdf(d + o + 4);
+        if (ev->type == 21) {                        /* {21, at, name, f32 p[4]} */
+            ev->name = name_at(b, (int32_t)rd32(d + o + 8));
+            for (int j = 0; j < 4; j++)
+                ev->p[j] = rdf(d + o + 12 + 4 * j);
+        } else if (ev->type == 6) {                  /* {6, at, ?, name} */
+            ev->name = name_at(b, (int32_t)rd32(d + o + 12));
+        } else {
+            ev->value = rd32(d + o + 8);             /* 7: {7, at, mode} */
+        }
+    }
+    /* slots: 74 start list indices at +0x4, then +0xA94 / +0xA98 columns of 74 overrides (-1 keep); start lists
+     * +0xA58 / +0xA5C, 12 bytes each, the state's offset at +4 */
+    uint32_t ncol = rd32(d + 0xA94), cols = rd32(d + 0xA98), nlists = rd32(d + 0xA58), lists = rd32(d + 0xA5C);
+    if (ncol > 64 || cols + 0x128 * ncol > size || lists + 12 * nlists > size)
+        ncol = nlists = 0;
+    g->ncolumns = (int)ncol + 1;
+    g->slot = malloc(sizeof *g->slot * g->ncolumns);
+    for (int c = 0; c < g->ncolumns; c++)
+        for (int k = 0; k < MOVES_SLOTS; k++) {
+            int32_t list = (int32_t)rd32(d + (c == 0 ? 4 + 4 * k : cols + 0x128 * (c - 1) + 4 * k));
+            int state = -1;
+            if (list >= 0 && (uint32_t)list < nlists)
+                for (int j = 0; j < n; j++)
+                    if (offset[j] == rd32(d + lists + 12 * list + 4))
+                        state = j;
+            g->slot[c][k] = c > 0 && list < 0 ? g->slot[0][k] : state;
+        }
     MoveTrans *t = g->all;
     for (int k = 0; k < n; k++) {
         MoveState *s = &g->states[k];
@@ -57,6 +95,11 @@ int moves_read(const Bundle *b, MoveGraph *g)
         if (node + 0x80 <= size) {
             s->clip = name_at(b, (int32_t)rd32(d + node + 0x78));
             s->name = name_at(b, (int32_t)rd32(d + node + 0x7C));
+            uint32_t span = rd32(d + node + 0x28), first = span >> 16, count = span & 0xFFFF;
+            if (first + count <= nitems) {
+                s->events = g->all_events + first;
+                s->nevents = (int)count;
+            }
         }
         s->length = rdf(p + 8);
         s->ntrans = (int16_t)(p[0xE] | p[0xF] << 8);
@@ -92,6 +135,8 @@ void moves_free(MoveGraph *g)
 {
     free(g->states);
     free(g->all);
+    free(g->all_events);
+    free(g->slot);
     memset(g, 0, sizeof *g);
 }
 
@@ -274,4 +319,29 @@ int moves_event(MoveRunner *r, const char *to)
         return 0;
     }
     return -1;
+}
+
+int moves_events_between(const MoveState *s, float from, float to, const MoveEvent **first)
+{
+    int i = 0, n = 0;
+    while (i < s->nevents && s->events[i].at * s->length <= from)
+        i++;
+    while (i + n < s->nevents && s->events[i + n].at * s->length <= to)
+        n++;
+    *first = s->events + i;
+    return n;
+}
+
+int moves_slot(const MoveGraph *g, int slot, int column)
+{
+    if (slot < 0 || slot >= MOVES_SLOTS || !g->slot)
+        return -1;
+    return g->slot[column >= 0 && column + 1 < g->ncolumns ? column + 1 : 0][slot];
+}
+
+void moves_force(MoveRunner *r, int state)
+{
+    r->from = r->state;
+    r->via = -1;
+    enter(r, state, 0);
 }

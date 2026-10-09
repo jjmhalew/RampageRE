@@ -62,7 +62,7 @@ void scene_update(Scene *s, double t);               /* pose everything that mov
 /* the monster plays the clip whose name ends in suffix ("_WALK2", "_IDLE"); 0 = ok. *speed: how fast its root
  * travels in that clip (units per second), for moving it by hand */
 int scene_monster_clip(Scene *s, const char *suffix, float *speed);
-void scene_monster_place(Scene *s, float x, float y, float deg, int still_root);
+void scene_monster_place(Scene *s, float x, float y, float z, float deg, int still_root);
 int scene_monster_play(Scene *s, const char *clip);  /* the clip of that name (any case, as MONSTER_DATA names it) */
 /* the root node's translation and rotation in the monster's clip at `seconds`; 0 = ok */
 int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4]);

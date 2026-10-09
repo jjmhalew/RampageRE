@@ -30,7 +30,9 @@ typedef struct {
     Scene scene; int have_scene;
     Renderer *rnd;
     int play; CamSettings cam_settings; GameCamera cam;   /* play: the monster under control, the game camera */
-    float mx, my, heading;                           /* where the monster stands, its turn about Z (0: facing +Y) */
+    float mx, my, mz, heading;                       /* where the monster stands, its turn about Z (0: facing +Y) */
+    float vel[3]; int mode, no_gravity, column;      /* velocity (+0xBD30), movement mode (+0xAD8), no gravity
+                                                        (+0xAB8), the slots' column (+0xBAB4) */
     MoveGraph graph; MoveRunner run; MoveInput input; int have_graph;
     int yaw_axis; float entry_yaw;                   /* the root's axis that tells its turn; its turn at the state's start */
 } Viewer;
@@ -75,6 +77,11 @@ static void start_moves(Viewer *v)
     v->have_graph = 1;
     moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
     memset(&v->input, 0, sizeof v->input);
+    memset(v->vel, 0, sizeof v->vel);
+    v->mz = 0;
+    v->mode = MODE_GROUND;
+    v->no_gravity = 0;
+    v->column = -1;
     const Instance *in = &v->scene.instances[v->scene.monster];
     v->yaw_axis = 0;                                 /* the most level axis of the root at rest */
     for (uint32_t i = 0; i < in->tree.n; i++)
@@ -143,11 +150,61 @@ static int answer(void *ctx, const char *call)
 
 static int starts(const char *s, const char *prefix) { return s && _strnicmp(s, prefix, strlen(prefix)) == 0; }
 
+/* the clip events the viewer acts on: the movement mode, and Monsters.bsf's velocity functions (jumpNorm and its kin
+ * set the velocity, addVelocity adds to it, in the world or turned with the monster) */
+static void clip_event(Viewer *v, const MoveEvent *e)
+{
+    float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
+    float mirror = s > 0 ? -1.0f : 1.0f;            /* Monster.getMirrorState: facing -x */
+    float w[3] = { 0, 0, 0 }, l[3] = { 0, 0, 0 };   /* world / relative velocity */
+    int set = 0, add = 0, relative = 0;
+    if (e->type == 7) {                              /* 0x2E7DE0 */
+        v->mode = (int)e->value;
+        return;
+    }
+    if (e->type == 23) {                             /* 0x2E7D38 */
+        v->column = (int32_t)e->value;
+        return;
+    }
+    if (e->type != 21 || !e->name)
+        return;
+    const char *n = e->name;
+    if (!strcmp(n, "Monsters::jumpNull"))        { w[0] = mirror * e->p[0]; w[1] = e->p[2]; set = 1; }
+    else if (!strcmp(n, "Monsters::jumpNorm"))   { w[0] = mirror * e->p[0]; w[2] = 22; set = 1; }
+    else if (!strcmp(n, "Monsters::jumpLow"))    { w[0] = mirror * e->p[0]; w[2] = 15; set = 1; }
+    else if (!strcmp(n, "Monsters::jumpDrop"))   { w[2] = -10; set = 1; }
+    else if (!strcmp(n, "Monsters::jumpHighMonster")) { l[1] = e->p[0]; l[2] = 32; set = relative = 1; }
+    else if (!strcmp(n, "Monsters::addVelocity")) {
+        relative = e->p[0] != 0;
+        float *dst = relative ? l : w;
+        dst[0] = e->p[1]; dst[1] = e->p[2]; dst[2] = e->p[3];
+        add = 1;
+    }
+    else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
+    else if (!strcmp(n, "Monsters::disableGravity")) { v->no_gravity = 1; return; }
+    else return;
+    if (relative) {                                  /* the monster's frame (0x2E7330 / 0x2E74F0: by its matrix) */
+        w[0] = c * l[0] - s * l[1];
+        w[1] = s * l[0] + c * l[1];
+        w[2] = l[2];
+    }
+    for (int k = 0; k < 3; k++)
+        v->vel[k] = set ? w[k] : v->vel[k] + (add ? w[k] : 0);
+}
+
+static void clip_events(Viewer *v, const MoveState *st, float from, float to)
+{
+    const MoveEvent *e;
+    int n = moves_events_between(st, from, to, &e);
+    for (int i = 0; i < n; i++)
+        clip_event(v, &e[i]);
+}
+
 /* one frame of play. The left stick (x right, y down) and the buttons pressed this frame (MV_CROSS ...) or held.
- * The graph picks the state; the clip's root carries the monster (its travel and turn added to where it stands). Two
- * of the game's own events stand in for code not read yet: landing (Jump_Finish) after the airborne clip played
- * once, and turning round (Ground_TurnAround) when the stick points back; and while walking the monster turns
- * towards the stick. */
+ * The graph picks the state; the clip's root carries the monster (its travel and turn added to where it stands), the
+ * clip's events set its movement mode and velocity, and in the air it falls by MOVES_GRAVITY until it meets the
+ * ground (here the street at z = 0), which is the graph's landing event. Two things stand in for game code not read
+ * yet: turning round (Ground_TurnAround) when the stick points back, and turning towards the stick while walking. */
 static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
 {
     if (v->have_graph) {
@@ -164,8 +221,30 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         const MoveState *st = &v->graph.states[v->run.state];
         float t0 = v->run.time, length = st->length;
         int ev = -1;
-        if (starts(st->name, "Jump_Air_Borne") && t0 + dt >= length)
-            ev = moves_event(&v->run, "Jump_Finish");
+        if (v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF) {   /* the air: velocity, then gravity */
+            v->mx += v->vel[0] * dt;
+            v->my += v->vel[1] * dt;
+            v->mz += v->vel[2] * dt;
+            if (!v->no_gravity)
+                v->vel[2] -= MOVES_GRAVITY * dt;
+            if (v->mz <= 0 && v->vel[2] <= 0) {
+                v->mz = 0;
+                if (v->mode == MODE_AIRBORNE) {      /* landed (0x2DC450): slot 56 in the current column */
+                    int to = moves_slot(&v->graph, SLOT_LAND, v->column);
+                    if (to >= 0) {
+                        moves_force(&v->run, to);
+                        ev = 0;
+                    }
+                    v->mode = MODE_PRONE;
+                    memset(v->vel, 0, sizeof v->vel);
+                } else {
+                    v->vel[2] = 0;
+                }
+            }
+        } else {
+            memset(v->vel, 0, sizeof v->vel);
+            v->mz = 0;
+        }
         float goal = atan2f(-ly, lx) * 57.2957795f - 90, turn = fmodf(goal - v->heading + 540, 360) - 180;
         if (ev != 0 && in->v[MV_L_SIZE] > 0.5f && starts(st->name, "Ground_Walk") && fabsf(turn) > 135)
             ev = moves_event(&v->run, "Ground_TurnAround");
@@ -178,12 +257,25 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             v->mx += c * dx - s * dy;
             v->my += s * dx + c * dy;
         }
-        if (switched) {                              /* the turn the old clip made */
-            v->heading += fmodf(root_yaw(v, t1) - v->entry_yaw + 540, 360) - 180;
+        clip_events(v, st, t0, t1);                  /* the old clip's events up to now */
+        if (switched) {                              /* the turn the old clip made, if it turned (not a sway) */
+            float turned = fmodf(root_yaw(v, t1) - v->entry_yaw + 540, 360) - 180;
+            if (fabsf(turned) > 90)
+                v->heading += turned;
             const MoveState *to = &v->graph.states[v->run.state];
             if (v->run.from != v->run.state)
                 printf("%s -> %s (%s)\n", st->name ? st->name : "?", to->name ? to->name : "?", to->clip ? to->clip : "-");
             play_state(v);
+            v->column = -1;                          /* 0x2E7F70: a new state starts without the old one's effects */
+            v->no_gravity = 0;
+            /* and the new one's first: those at its start (its set-up: mode, column) and, entered part-way (phase
+             * kept), those where it starts; the game's own event playback (under 0x2FFA00) is not read yet */
+            const MoveEvent *e0;
+            int n0 = moves_events_between(to, -1, 0, &e0);
+            for (int i = 0; i < n0; i++)
+                clip_event(v, &e0[i]);
+            if (v->run.time > 0)
+                clip_events(v, to, v->run.via >= 0 ? v->run.time - 1e-5f : 0, v->run.time);
         } else if (starts(st->name, "Ground_Walk") && in->v[MV_L_SIZE] > 0) {
             float step = 270 * dt;
             v->heading += turn > step ? step : turn < -step ? -step : turn;
@@ -194,14 +286,16 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (v->my > -3) v->my = -3;
         v->heading = fmodf(v->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE"))
-            printf("  %s %.2f at %.1f %.1f heading %.0f\n", v->graph.states[v->run.state].name, v->run.time, v->mx, v->my, v->heading);
+            printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", v->graph.states[v->run.state].name,
+                   v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
-    scene_monster_place(&v->scene, v->mx, v->my, v->heading, 1);
-    float at[1][3] = { { v->mx, v->my, 0 } };
+    scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading, 1);
+    float at[1][3] = { { v->mx, v->my, v->mz } };
     cam_update(&v->cam, (const float (*)[3])at, 1, dt, aspect);
 }
 
-/* --do: "right 1, cross, wait 1.5": the stick held one way or a button pressed, then that many seconds of play */
+/* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
+ * (no seconds: one frame, a tap) */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -231,6 +325,8 @@ static void play_script(Viewer *v, const char *script, float aspect)
             if (frames < 1) frames = 1;
             for (int k = 0; k < frames; k++) {
                 play_step(v, WORDS[i].x, WORDS[i].y, pressed, held, 1.0f / 60, aspect);
+                if (WORDS[i].button >= 0)
+                    held[WORDS[i].button] = 1;
                 memset(pressed, 0, sizeof pressed);
             }
         }

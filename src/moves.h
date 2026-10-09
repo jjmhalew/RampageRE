@@ -22,12 +22,25 @@ typedef struct {
     int priority, ncond; MoveCond cond[4];
     const char *call;                                /* a script check (Monsters::canMount, ...), NULL = none */
 } MoveTrans;
+typedef struct {                                     /* a timed event of the state's clip (MONSTER_DATA's coded items) */
+    uint32_t type;                                   /* 21 a script call, 7 the movement mode, 6 a sound, ... */
+    float at;                                        /* when, as a share of the clip's length */
+    const char *name;                                /* 21: the script function, 6: the sound */
+    float p[4]; uint32_t value;                      /* 21: its four arguments; 7: the mode */
+} MoveEvent;
 typedef struct {
     const char *name, *clip;                         /* the clip by name, as in the anims bundle (any case) */
     float length; int next;                          /* the state that follows when the clip ends */
     MoveTrans *trans; int ntrans;
+    MoveEvent *events; int nevents;                  /* in time order */
 } MoveState;
-typedef struct { MoveState *states; int n; MoveTrans *all; } MoveGraph;
+#define MOVES_SLOTS 74
+typedef struct {
+    MoveState *states; int n; MoveTrans *all; MoveEvent *all_events;
+    /* the game's own events (landing, hits, ...): per slot and column the state they start (-1 none); column 0 is
+     * the default (+0x4), columns 1.. the overrides (+0xA98) the clip events of type 23 select (moves_slot) */
+    int (*slot)[MOVES_SLOTS]; int ncolumns;
+} MoveGraph;
 
 int moves_read(const Bundle *monster, MoveGraph *g);  /* the bundle's MONSTER_DATA; 0 = ok */
 void moves_free(MoveGraph *g);
@@ -55,5 +68,15 @@ int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
  * turning around); 0 = done */
 int moves_event(MoveRunner *r, const char *to);
 void moves_stop(MoveRunner *r);
+/* the events of state s whose time lies in (from, to] seconds; *first: the first, returns how many (they follow it) */
+int moves_events_between(const MoveState *s, float from, float to, const MoveEvent **first);
+/* the state slot k starts in a column (the monster's +0xBAB4, -1 = default), -1 if none */
+int moves_slot(const MoveGraph *g, int slot, int column);
+void moves_force(MoveRunner *r, int state);           /* the state now, from its start (0x2EBF50) */
+enum { SLOT_LAND = 56, SLOT_LAND_BACK = 57 };         /* 0x2DC450: on its feet / the ground's normal against its up */
+
+/* movement modes (event type 7; the monster's +0xAD8): 1 and 2 are airborne (Monster.isAirborne) */
+enum { MODE_GROUND = 0, MODE_AIRBORNE = 1, MODE_TAKEOFF = 2, MODE_PRONE = 4, MODE_BUILDING = 5 };
+#define MOVES_GRAVITY 60.0f                          /* units / s², 0x2DF128; off while setDisableGravity (+0xAB8) */
 
 #endif
