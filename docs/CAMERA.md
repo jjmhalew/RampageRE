@@ -56,3 +56,25 @@ State: +0x5C first frame, +0x60 quaternion and +0x70 position of the smoothed ca
 
 The smoothing works per frame, so it depends on the frame rate (the game's is 30 or 60 Hz); the viewer applies it
 per drawn frame.
+
+## Shake
+The shake only turns the camera, by a small yaw X and pitch Y, after the TwoTilts smoothing (a camera "munger",
+`CamShakeApplier` 0x27F550, run by `CamController::update` 0x167690), so it never feeds back into it. Its position
+is kept. Shakes are effects (`type = camerashake`, `CameraShakeFx` vtable 0x446750, its definition 0x1E8C70):
+`val.duration`, and degree-1 graphs of t = age / duration for `graph.mag.x/y` and `graph.theta_mul.x/y` (an angle,
+not a factor: its slope is the frequency), `graph.wave` sin.
+
+| Effect | duration | mag | theta x | theta y | started by |
+|---|---|---|---|---|---|
+| `camshake` | 0.75 | 0.005 − 0.005 t | 160 − 40 t | 135 − 50 t | a monster's clip events (type 9, its strength); a floor falling (`Collapse_Floor_*_comp`, 1) |
+| `camshake_collapse` | 0.5 | 0.014 − 0.014 t | 160 − 80 t | 135 − 100 t | a toppling billboard (`building_collapse_comp`), the rage (`Rage.edf`), 1 |
+
+- **Start** (0x1E7ED0): age 0, the strength, random phases (Park-Miller × 2⁻³¹ × 2π), its place. Each monster has
+  one camshake of its own; a new start is dropped while the old one is stronger: strength × max(mag(t)) against
+  the new strength × max(mag(0)) (0x1E8420).
+- **Each frame** (0x1E86D0): x = strength × mag.x(t) × sin(phase.x + theta.x(t)), y likewise; nothing once t ≥ 1.
+- **Sum** (0x207050): X = Σ x × f, Y = Σ y × f, f = 1 within 100 of the camera, falling to 0.2 at 800.
+- **Turn**: S = rows (cX, sX, 0), (−cY sX, cY cX, sY), (sY sX, −sY cX, cY) (0x101330); the rows (right, forward,
+  up) become S × rows; a right row tilted by more than 0.001 in z is levelled and the frame made square again.
+
+A strength of 3 or 4 (the butt slam, the heavy punches) turns the camera by about 0.015 … 0.02 rad, at 8 … 11 Hz.

@@ -45,6 +45,9 @@ typedef struct {
     int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
     Mount mount;                                     /* on a building's face (climb.c) */
     Hand hand[2];                                    /* its hands on the wall (0 left, 1 right, as seen) */
+    CamShake shakes[8];                              /* 0: the monster's own (monster +0x7DFC +0x160), then effects' */
+    uint32_t shake_seed;
+    int last_collapse[64];                           /* per building: its collapse when last looked at */
     const MoveNode *face; int face_loop, face_count; /* the face layer's node (0x2E9350's record: loop, count) */
 } Viewer;
 
@@ -182,6 +185,8 @@ static void start_moves(Viewer *v)
     v->mirror = v->mirror_queued = 0;
     memset(&v->mount, 0, sizeof v->mount);
     memset(v->hand, 0, sizeof v->hand);
+    memset(v->shakes, 0, sizeof v->shakes);
+    for (int i = 0; i < 64; i++) v->last_collapse[i] = -1;
     v->mount.at.building = v->mount.cand.building = -1;
     memset(v->air, 0, sizeof v->air);
     memset(v->stick, 0, sizeof v->stick);
@@ -356,6 +361,12 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     int set = 0, add = 0, relative = 0;
     if (e->type == 7) {                              /* 0x2E7DE0 */
         v->mode = (int)e->value;
+        return;
+    }
+    if (e->type == 9) {                              /* 0x2E7E18 -> 0x2F5AC0: the camera shakes, f32 strength at +8 */
+        union { uint32_t u; float f; } k = { e->value };
+        float at[3] = { v->mx, v->my, v->mz };
+        shake_start(&v->shakes[0], &SHAKE_MONSTER, at, k.f, 1, &v->shake_seed);
         return;
     }
     if (e->type == 8) {                              /* 0x2E7F18: the next clip the other way round */
@@ -773,6 +784,22 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
     hands_step(v, dt);
     scene_buildings_update(&v->scene, dt);
+    /* a floor that starts to fall plays its Floor_Large / Floor_Small effect (Collapse_Floor_*_comp), which holds
+     * camshake.edf at strength 1 where it falls */
+    for (uint32_t i = 0; i < v->scene.nbuildings && i < 64; i++) {
+        const SceneBuilding *sb = &v->scene.buildings[i];
+        int k = sb->b.collapse;
+        if (k > 0 && k != v->last_collapse[i]) {
+            int slot = 1;
+            for (int j = 2; j < 8; j++)              /* a free one, else the oldest */
+                if (!v->shakes[j].def || v->shakes[j].age > v->shakes[slot].age)
+                    slot = j;
+            float at[3] = { sb->node.m[12], sb->node.m[13], 6 + 3 * (float)(k - 1) };
+            shake_start(&v->shakes[slot], &SHAKE_MONSTER, at, 1, 0, &v->shake_seed);
+        }
+        v->last_collapse[i] = k;
+    }
+    shake_step(v->shakes, 8, dt);
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
         float turn = st->flags & NODE_ROOT_TURN ?
@@ -1044,7 +1071,7 @@ int main(int argc, char **argv)
             v.scene.instances[v.scene.monster].offset =      /* the clip at the state's time (clip_at) */
                 (float)((v.have_graph ? clip_at(&v, &v.graph.states[v.run.state], v.run.time) : v.run.time) - (shot ? shot_time : now - start));
             memcpy(cam.pos, v.cam.pos, sizeof cam.pos);
-            memcpy(cam.rows, v.cam.rot, sizeof cam.rows);
+            cam_shaken(v.cam.pos, (const float (*)[3])v.cam.rot, v.shakes, 8, cam.rows);   /* after the smoothing */
             cam.use_rows = 1;
             cam.fov_deg = v.cam.s.fov * 57.2957795f;
         } else {

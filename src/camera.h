@@ -32,4 +32,17 @@ void cam_init(GameCamera *c, const CamSettings *s);
 /* follow the monsters (root positions); aspect_hw = the view's height / width */
 void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw);
 
+/* camera shake (CameraShakeFx, vtable 0x446750; its definition 0x1E8C70): an effect whose yaw and pitch, summed over
+ * the live shakes with a falloff by distance, turn the finished camera (CamShakeApplier 0x27F550, after the TwoTilts
+ * smoothing, so it does not feed back). Degree-1 graphs of t = age / duration: a + b t. */
+typedef struct { float duration, mag[2][2], theta[2][2]; } ShakeDef;
+extern const ShakeDef SHAKE_MONSTER;                 /* camshake.edf: the monsters' clip events, a floor falling */
+extern const ShakeDef SHAKE_COLLAPSE;                /* camshake_collapse.edf: a toppling billboard, the rage */
+typedef struct { const ShakeDef *def; float age, strength, phase[2], pos[3]; } CamShake;
+/* 0x1E7ED0: (re)start at pos with strength; with check, a stronger shake still going is kept (0x1E8420) */
+void shake_start(CamShake *s, const ShakeDef *def, const float pos[3], float strength, int check, uint32_t *seed);
+void shake_step(CamShake *s, int n, float dt);       /* 0x1E7E90: they age */
+/* 0x207050: the camera's rows (right, forward, up) turned by the shakes, its place kept */
+void cam_shaken(const float pos[3], const float rows[3][3], const CamShake *s, int n, float out[3][3]);
+
 #endif

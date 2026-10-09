@@ -239,3 +239,80 @@ void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, floa
     }
     rows_from_quat(c->q, c->rot);
 }
+
+/* ---------------------------------------------------------------- shake */
+
+const ShakeDef SHAKE_MONSTER = { 0.75f, { { 0.005f, -0.005f }, { 0.005f, -0.005f } }, { { 160, -40 }, { 135, -50 } } };
+const ShakeDef SHAKE_COLLAPSE = { 0.5f, { { 0.014f, -0.014f }, { 0.014f, -0.014f } }, { { 160, -80 }, { 135, -100 } } };
+
+static float shake_mag(const CamShake *s, float t)   /* the larger of the two magnitudes at t */
+{
+    float a = s->def->mag[0][0] + s->def->mag[0][1] * t, b = s->def->mag[1][0] + s->def->mag[1][1] * t;
+    return a > b ? a : b;
+}
+
+void shake_start(CamShake *s, const ShakeDef *def, const float pos[3], float strength, int check, uint32_t *seed)
+{
+    if (check && s->def && s->age < s->def->duration) {
+        CamShake n = { def, 0, strength, { 0, 0 }, { 0, 0, 0 } };
+        if (s->strength * shake_mag(s, s->age / s->def->duration) > strength * shake_mag(&n, 0))
+            return;
+    }
+    s->def = def;
+    s->age = 0;
+    s->strength = strength;
+    for (int k = 0; k < 2; k++) {                    /* Park-Miller (0x106BD0) x 2^-31 x 2 pi */
+        *seed = (uint32_t)((uint64_t)(*seed ? *seed : 1) * 16807 % 2147483647u);
+        s->phase[k] = (float)*seed / 2147483648.0f * 6.2831853f;
+    }
+    memcpy(s->pos, pos, sizeof s->pos);
+}
+
+void shake_step(CamShake *s, int n, float dt)
+{
+    for (int i = 0; i < n; i++)
+        if (s[i].def && s[i].age < s[i].def->duration)
+            s[i].age += dt;
+}
+
+void cam_shaken(const float pos[3], const float rows[3][3], const CamShake *s, int n, float out[3][3])
+{
+    float X = 0, Y = 0;
+    memcpy(out, rows, sizeof(float) * 9);
+    for (int i = 0; i < n; i++) {
+        const ShakeDef *d = s[i].def;
+        if (!d || s[i].age >= d->duration)
+            continue;
+        float t = s[i].age / d->duration, dd = 0, v[2];
+        for (int k = 0; k < 3; k++)
+            dd += (s[i].pos[k] - pos[k]) * (s[i].pos[k] - pos[k]);
+        float dist = sqrtf(dd), f = dist < 100 ? 1 : dist <= 800 ? 1 - (dist - 100) * 0.00114286f : 0.2f;
+        for (int k = 0; k < 2; k++)                  /* strength x mag(t) x sin(phase + theta(t)) */
+            v[k] = s[i].strength * (d->mag[k][0] + d->mag[k][1] * t) *
+                   sinf(s[i].phase[k] + d->theta[k][0] + d->theta[k][1] * t);
+        X += v[0] * f;
+        Y += v[1] * f;
+    }
+    if (X == 0 && Y == 0)
+        return;
+    float sx = sinf(X), cx = cosf(X), sy = sinf(Y), cy = cosf(Y);
+    float S[3][3] = { { cx, sx, 0 }, { -cy * sx, cy * cx, sy }, { sy * sx, -sy * cx, cy } };   /* 0x101330 */
+    for (int i = 0; i < 3; i++)
+        for (int k = 0; k < 3; k++)
+            out[i][k] = S[i][0] * rows[0][k] + S[i][1] * rows[1][k] + S[i][2] * rows[2][k];
+    if (fabsf(out[0][2]) > 0.001f) {                 /* no roll: right stays level, the rest made square again */
+        out[0][2] = 0;
+        float l = sqrtf(out[0][0] * out[0][0] + out[0][1] * out[0][1]);
+        out[0][0] /= l;
+        out[0][1] /= l;
+        float d = out[1][0] * out[0][0] + out[1][1] * out[0][1];
+        for (int k = 0; k < 3; k++)
+            out[1][k] -= d * out[0][k];
+        l = sqrtf(out[1][0] * out[1][0] + out[1][1] * out[1][1] + out[1][2] * out[1][2]);
+        for (int k = 0; k < 3; k++)
+            out[1][k] /= l;
+        out[2][0] = out[0][1] * out[1][2] - out[0][2] * out[1][1];
+        out[2][1] = out[0][2] * out[1][0] - out[0][0] * out[1][2];
+        out[2][2] = out[0][0] * out[1][1] - out[0][1] * out[1][0];
+    }
+}

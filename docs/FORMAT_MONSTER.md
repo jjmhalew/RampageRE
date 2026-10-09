@@ -143,7 +143,7 @@ type, table 0x4312F0):
 | 6 | {u16, u16, name} | a sound: +0xA set, a world sound (0x26B960), otherwise one of the monster's own (+0x8, 0x287860) |
 | 7 | {mode} | the movement mode (+0xAD8 of the monster): 0 on the ground, 2 taking off, 1 in the air (`isAirborne`: 1 or 2), 4 down or landing, 5 on a building |
 | 8 | | the queued mirror state flips (+0xAA1, taken at the next clip's start); the climbs flip at each hand, so one clip climbs with both |
-| 9 | {f32} | a camera shake of that strength in a random direction (0x2F5AC0 → 0x1E7ED0, the camera-shake effect's own start); 3 or 4 on the heavy punches and the butt slam |
+| 9 | {f32} | a camera shake of that strength (0x2F5AC0 → 0x1E7ED0: the monster's own `camshake.edf`; CAMERA.md "Shake"); 3 or 4 on the heavy punches and the butt slam |
 | 12 | {u16 slot, u16 effect, u32 on} | an effect of MONSTER_DATA's list (+0xA90) starts (1) or stops (0) in that slot: `Monster_Belch.edf` on the burp, `Charged_Punch.edf` on the charge punch, `Collapse_Floor_concrete_comp.edf` on the butt slam |
 | 23 | {column} | the slot column (+0xBAB4), see "Slots" |
 | 15, 16 | {..., f32 +0x10} | the record is kept at +0xBA9C / +0xBAA0 (on a building, −5.5; leaving it, −5 … −6.25); not traced |
