@@ -129,13 +129,13 @@ lies within 5 units along the side's direction (the game's search, 0x2A3D20, is 
 x ±75 and y −30.
 
 ## Not there yet
-- `queueFacialAnim`, the head turning towards a target, friction on the velocity;
-- effects: 3D mesh debris (XForm particles), streams, collisions with buildings; the effects' and objects' sounds;
-- the game flow's choreography: the intro and walk-out moves, the walks to the next block, the script cameras, the
-  results screens (game.c gives them; the viewer answers them at once); the rage's camera and banner;
-- the edibles' speed power-up on the clips, the Rage and message banners, the boss health bar;
-- vertex-coloured interiors of damaged buildings, shadows.
+- the challenges (the item counts, ChallengeText's cards), the King and Timed Run results screens, the Pause menu;
+- which monster a cryotube reveals (the banner names the next one in the viewer's list), findPointInRubble;
+- the game's footstep effects and the splash effects' own triggers (the viewer splashes on landing in water);
+- vertex-coloured interiors of damaged buildings, the facades darkened by their neighbours' shadows.
 
-Ported as modules and driven by the viewer: the HUD (hud.c), people (people.c), the army (army.c), the traffic,
-rockets and fire truck (vehicle.c), the edibles and the rage (edible.c), the bosses (boss.c), the water
-(water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), effects (fx.c) and sound (sound.c).
+Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
+(people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
+the bosses (boss.c), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
+choreography and camera modes (director.c), the face queue, head turn and friction (look.c), shadows (shadow.c),
+effects with their mesh debris and sounds (fx.c) and sound (sound.c).
