@@ -203,8 +203,10 @@ static void hit_building_front(Viewer *v, const float *p)
     }
     int hit = best && building_hit(&best->b, bq, 2.0f);
     if (getenv("RAMPAGE_TRACE"))
-        printf("  hitBuildingFront side %d at %.1f %.1f %.1f: %s\n", side, w[0], w[1], w[2],
-               !best ? "no building" : hit ? "hit" : "no damage");
+        printf("  hitBuildingFront side %d at %.1f %.1f %.1f: %s", side, w[0], w[1], w[2],
+               !best ? "no building\n" : hit ? "hit" : "no damage");
+    if (getenv("RAMPAGE_TRACE") && best)
+        printf(" (state %d, %d storeys, HP %d)\n", best->b.state, best->b.n, best->b.hp);
 }
 
 static void clip_event(Viewer *v, const MoveEvent *e)
@@ -283,7 +285,7 @@ static float ground_at(const Viewer *v, float x, float y, float z)
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
         float top = b->max[2] - ROOF_BAND;
-        if (b->state != BUILDING_DESTROYED && x >= b->min[0] && x <= b->max[0] && y >= b->min[1] && y <= b->max[1] &&
+        if (b->max[2] > b->min[2] + ROOF_BAND && x >= b->min[0] && x <= b->max[0] && y >= b->min[1] && y <= b->max[1] &&
             top <= z + 1 && top > g)
             g = top;
     }
@@ -295,7 +297,7 @@ static void push_out(Viewer *v)
 {
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
-        if (b->state == BUILDING_DESTROYED || v->mz >= b->max[2] - ROOF_BAND - 0.01f || v->mz + MONSTER_HEIGHT <= b->min[2])
+        if (b->max[2] <= b->min[2] + 0.01f || v->mz >= b->max[2] - ROOF_BAND - 0.01f || v->mz + MONSTER_HEIGHT <= b->min[2])
             continue;
         float dl = v->mx + MONSTER_HALF_WIDTH - b->min[0], dr = b->max[0] - (v->mx - MONSTER_HALF_WIDTH);
         float df = v->my + MONSTER_HALF_WIDTH - b->min[1], db = b->max[1] - (v->my - MONSTER_HALF_WIDTH);
@@ -511,7 +513,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                    v->run.time, v->mx, v->my, v->mz, v->heading, v->mode, v->vel[2]);
     }
     scene_monster_place(&v->scene, v->mx, v->my, v->mz, v->heading);
-    scene_buildings_redraw(&v->scene);
+    scene_buildings_update(&v->scene, dt);
     if (v->have_graph) {                             /* the pose keeps what the monster did not take over */
         const MoveState *st = &v->graph.states[v->run.state];
         float turn = st->flags & NODE_ROOT_TURN ?
@@ -524,7 +526,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
 }
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
- * (no seconds: one frame, a tap) */
+ * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -544,6 +546,14 @@ static void play_script(Viewer *v, const char *script, float aspect)
             char *end;
             seconds = (float)strtod(p, &end);
             p = end;
+        }
+        if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
+            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+                Building *b = &v->scene.buildings[i].b;
+                if (v->mx >= b->min[0] && v->mx <= b->max[0] && v->my < b->min[1] && v->my > b->min[1] - 10)
+                    building_destroy(b);
+            }
+            continue;
         }
         for (size_t i = 0; n && i < sizeof WORDS / sizeof *WORDS; i++) {
             if (_stricmp(word, WORDS[i].name) != 0)
@@ -679,6 +689,8 @@ int main(int argc, char **argv)
             cam.use_rows = 1;
             cam.fov_deg = v.cam.s.fov * 57.2957795f;
         } else {
+            if (v.have_scene)
+                scene_buildings_update(&v.scene, dt > 0.1f ? 0.1f : dt);
             if (cam.use_rows) {                        /* back to the free camera where the game camera was */
                 cam.use_rows = 0;
                 cam.fov_deg = 60;

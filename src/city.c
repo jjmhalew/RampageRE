@@ -493,9 +493,11 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     }
     int width = (int)group_num(t, "width", 1), depth = (int)group_num(t, "depth", 2);
     Mat4 node = mat_trs_z(group_num(inst, "LeftEdgeXPos", 0) + width * CELL / 2, row_offset * group_num(inst, "Row", 0), 0, 0);
+    int first = (int)s->ninstances, ground_inst = -1, facade_inst = -1, top_inst = -1;
+    uint32_t had = s->nbuildings;
     const char *ground = str_item(group_sub(t, "ShapeSet|GroundFloorShapes"), 0);
     if (ground)
-        place_model(c, s, ground, node, -1);
+        ground_inst = place_model(c, s, ground, node, -1);
     static Record fr[64], tiles[64][64];
     static Group floors[64];
     static uint32_t ntiles[64];
@@ -517,7 +519,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     int mesh = -1;
     if (nst && sheet_name >= 0) {
         mesh = (int)scene_add_mesh(s, facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst), s->city);
-        push_item(s, (uint32_t)mesh, new_instance(s, node, -1), -1, NULL);
+        facade_inst = new_instance(s, node, -1);
+        push_item(s, (uint32_t)mesh, facade_inst, -1, NULL);
     }
     /* its cells (the game's grid, 0x2D1A30): the box is 6 + 3 x storeys + 1.5 (the roof's band) high */
     if (nst && width > 0 && depth > 0 && 2 * depth + width <= BUILDING_CELLS) {
@@ -530,6 +533,17 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
         sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
         sb->b.seed = s->nbuildings;
         sb->mesh = mesh;
+        sb->node = node;
+        sb->ground = ground_inst;
+        sb->facade = facade_inst;
+        sb->top = sb->rubble = -1;
+        sb->first = sb->last = 0;
+        sb->rest = NULL;
+        sb->moving = 0;
+        sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
+        sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
+        sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
+        sb->b.min_crack = (int)group_num(t, "MinCollapseCrackLevel", (float)sb->b.min_crack);
         memset(sb->quad, 0xFF, sizeof sb->quad);
         memset(sb->skeleton, 0xFF, sizeof sb->skeleton);
         memset(sb->damaged_skeleton, 0xFF, sizeof sb->damaged_skeleton);
@@ -559,11 +573,26 @@ static void building(City *c, Scene *s, Group inst, float row_offset)
     }
     const char *top = str_item(group_sub(t, "ShapeSet|TopFloorShapes"), 0);
     if (top)
-        place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)nfloors, 0)), -1);
+        top_inst = place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)nfloors, 0)), -1);
     Record obj[MAX_REC];
     uint32_t no = group_values(inst, "ObjectInstance|", &where, obj, MAX_REC);
     for (uint32_t i = 0; i < no; i++)
         place_object(c, s, record_group(where, obj[i]), node);
+    if (s->nbuildings > had) {                       /* its pieces, to move */
+        SceneBuilding *sb = &s->buildings[s->nbuildings - 1];
+        const char *rubble = group_str(t, "Shape|RubbleShape");
+        int missing = s->missing;
+        sb->rubble = rubble ? place_model(c, s, rubble, node, -1) : -1;
+        s->missing = missing;
+        if (sb->rubble >= 0)
+            s->instances[sb->rubble].hidden = 1;
+        sb->top = top_inst;
+        sb->first = first;
+        sb->last = (int)s->ninstances;
+        sb->rest = malloc(sizeof *sb->rest * (size_t)(sb->last - sb->first + 1));
+        for (int i = sb->first; i < sb->last; i++)
+            sb->rest[i - sb->first] = s->instances[i].base;
+    }
 }
 
 static void read_lights(Scene *s, const char *text, uint32_t len)
@@ -712,7 +741,7 @@ static void update(Scene *s, double t, int all)
     for (uint32_t i = 0; i < s->nitems; i++) {
         DrawItem *it = &s->items[i];
         Instance *in = &s->instances[it->instance];
-        if (!all && !in->has_clip && in->vehicle < 0 && (int)(in - s->instances) != s->monster)
+        if (!all && !in->has_clip && in->vehicle < 0 && !in->dynamic && (int)(in - s->instances) != s->monster)
             continue;
         if (it->skin) {
             skin_item(s, in, it);
@@ -978,31 +1007,99 @@ int scene_monster_play(Scene *s, const char *clip)
     return -1;
 }
 
-void scene_buildings_redraw(Scene *s)
+/* a building's pieces where it now is: its sway, its storeys coming down, its body sinking */
+static void building_place(Scene *s, SceneBuilding *sb)
+{
+    const Building *b = &sb->b;
+    float x = building_shake(b), sink = building_sink(b);
+    int gone = b->state == BUILDING_GONE;
+    Mat4 sway = mat_trs_z(x, 0, -sink, 0);
+    for (int i = sb->first; i < sb->last && sb->rest; i++) {
+        Instance *in = &s->instances[i];
+        in->dynamic = 1;
+        if (i == sb->rubble) {
+            in->hidden = sink <= 0;
+            continue;
+        }
+        in->base = mat_mul(sway, sb->rest[i - sb->first]);
+        if (i == sb->facade)
+            in->base = mat_mul(mat_trs_z(x, 0, 0, 0), sb->rest[i - sb->first]);   /* its storeys move by vertex */
+        else if (i == sb->top) {
+            float bottom, height;
+            building_storey(b, b->n, &bottom, &height);    /* where a storey above the last would stand */
+            float was = GROUND_FLOOR + STOREY * (float)b->storeys;
+            in->base = mat_mul(mat_trs_z(x, 0, bottom - was, 0), sb->rest[i - sb->first]);
+        }
+        if (gone && i != sb->rubble)
+            in->hidden = 1;
+    }
+    for (int o = 0; o < b->storeys; o++) {           /* the interiors: at their storey, a falling one squashed */
+        int ls = building_live_of(b, o);
+        float bottom = 0, height = STOREY;
+        if (ls >= 0)
+            building_storey(b, ls, &bottom, &height);
+        int ids[2] = { sb->skeleton[o], sb->damaged_skeleton[o] };
+        for (int k = 0; k < 2; k++) {
+            if (ids[k] < 0)
+                continue;
+            Mat4 m = mat_mul(sb->node, mat_trs_z(x, 0, bottom, 0));
+            for (int r = 0; r < 3; r++)
+                m.m[8 + r] *= height / STOREY;
+            s->instances[ids[k]].base = m;
+            if (ls < 0)
+                s->instances[ids[k]].hidden = 1;
+        }
+    }
+    if (sb->mesh >= 0) {                             /* the facade's storeys: each quad's corners, bottom and top */
+        MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
+        for (int o = 0; o < b->storeys; o++) {
+            int ls = building_live_of(b, o);
+            float bottom = 0, height = 0;
+            if (ls >= 0)
+                building_storey(b, ls, &bottom, &height);
+            for (int c = 0; c < BUILDING_CELLS; c++) {
+                int32_t v = sb->quad[o][c];
+                if (v < 0 || (uint32_t)v + 4 > p->nverts)
+                    continue;
+                for (int k = 0; k < 4; k++)          /* a storey that has gone: no height, nothing drawn */
+                    p->pos[3 * (v + k) + 2] = bottom + (k & 1 ? height : 0);
+            }
+        }
+    }
+}
+
+void scene_buildings_update(Scene *s, float dt)
 {
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         SceneBuilding *sb = &s->buildings[i];
+        building_update(&sb->b, dt);
+        int moving = sb->b.collapse >= 0 || sb->b.shake_time > 0 || building_sink(&sb->b) > 0 ||
+                     (sb->b.state != BUILDING_STANDING && sb->b.state != BUILDING_FLOOR_FALLING);
+        if (moving || sb->moving || sb->b.dirty)
+            building_place(s, sb);
+        sb->moving = moving;
         if (!sb->b.dirty || sb->mesh < 0)
             continue;
         sb->b.dirty = 0;
         MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
-        for (int st = 0; st < sb->b.nstoreys; st++)
+        for (int st = 0; st < sb->b.storeys; st++)
             for (int c = 0; c < BUILDING_CELLS; c++) {
                 int32_t v = sb->quad[st][c];
                 if (v < 0 || (uint32_t)v + 4 > p->nverts)
                     continue;
                 /* the sheet's row is the damage state (0 intact .. 3): a quad's corners are bottom, top, bottom, top */
-                float row = (sb->b.state == BUILDING_DESTROYED ? 3 : sb->b.cell[st][c].state) * 0.25f;
+                float row = sb->b.cell[st][c].state * 0.25f;
                 for (int k = 0; k < 4; k++)
                     p->uv[2 * (v + k) + 1] = row + (k & 1 ? 0 : 0.25f);
             }
-        for (int st = 0; st < sb->b.nstoreys; st++) {    /* the interiors */
+        for (int st = 0; st < sb->b.storeys; st++) {     /* the interiors */
             int damaged = 0;
             for (int c = 0; c < BUILDING_CELLS && !damaged; c++)
                 damaged = sb->b.cell[st][c].state > 0;
             int worn = sb->b.floor_hp[st] <= sb->skeleton_hp[st] && sb->damaged_skeleton[st] >= 0;
-            if (sb->skeleton[st] >= 0) s->instances[sb->skeleton[st]].hidden = !damaged || worn;
-            if (sb->damaged_skeleton[st] >= 0) s->instances[sb->damaged_skeleton[st]].hidden = !damaged || !worn;
+            int gone = building_live_of(&sb->b, st) < 0 || sb->b.state == BUILDING_GONE;
+            if (sb->skeleton[st] >= 0) s->instances[sb->skeleton[st]].hidden = !damaged || worn || gone;
+            if (sb->damaged_skeleton[st] >= 0) s->instances[sb->damaged_skeleton[st]].hidden = !damaged || !worn || gone;
         }
     }
 }
@@ -1101,6 +1198,8 @@ void scene_free(Scene *s)
     free(s->instances);
     free(s->items);
     free(s->vehicles);
+    for (uint32_t i = 0; i < s->nbuildings; i++)
+        free(s->buildings[i].rest);
     free(s->buildings);
     memset(s, 0, sizeof *s);
 }

@@ -362,6 +362,34 @@ units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.
 4. The facade shows each cell's state as its tile's row; a floor with any damaged cell shows its `Skeleton`, the
    interior, and its `DamagedSkeleton` once `DamagedSkeletonHP` (half of `FloorHP`) is passed (around 0x2CD898).
 
+### Collapse
+The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then its state (jump table 0x42FA00).
+`DefBuildingProps` gives the times: `CollapseTime` 0.25, `CrackSpreadTime` 0.05, `HesitationTime` 0.4,
+`MinCollapseCrackLevel` 1, a `ShakerDef` and the debris effects (`Floor_Large` `Collapse_Floor_brnbrick_comp.edf`,
+`Glass_*` `Window_Shatter.edf`, `Wall_*` `Debris_concrete_big.edf`); each template its `Shape|RubbleShape`
+(`GENRUBBLE_10X10` … `10X20`, by footprint).
+
+- **A floor falls** (its FloorHP gone, 0x2BAE70 with k = storey + 1; the building is in state 3 meanwhile and takes no
+  hits; only one at a time): its cells go to state 3 and its vertex rows to level 3, and over `CollapseTime` the
+  storeys above come down onto it, 3 units (one storey) in all, squashing it (0x2D2D00, 0x2D2A40: the collapsing
+  storey G+0x1CC, the progress 0 … 1 at G+0x1D0; G+0x1CC = INT_MAX when none). Then it is gone: the storeys above
+  take its place (the storey table G+0x48 shifts down), the building is a storey lower, and the one below is
+  crushed (0x2BD3B0): each front cell under it loses the weight table's HP for the cell that came down onto it
+  (0x3F5710, by that cell's HP 0 … 10: 0, 0, 1, 1, 2, 2, 2, 6, 6, 6, 6; 2 if the top storey fell), and the cells that
+  came down with 5 HP or more lose 2, which may start the next collapse. Scoring `floor.Base` (50).
+- **The building is destroyed** (its BuildingHP gone, the `collapseBuilding` binding 0x2BB8B0, or a hit of kind 8;
+  scoring `Building.Base`, 100): state 4, the front cracks bottom up, a vertex every `CrackSpreadTime` (0x2BD7D0:
+  the lowest row with an intact vertex, from a random column, to level 1 … 3, and the cells beside it to at least
+  `MinCollapseCrackLevel`, now and then glass or wall debris); then state 5, it shakes for 2 s
+  (`Building_Pre_Collapse.edf`, a rumble for the monsters on it); then state 6 (0x2BD610): every `HesitationTime`
+  less up to half of it at random, its lowest storey falls as above (without the crush), until only the ground
+  floor is left, which sinks 7 units into the ground over 7/3 × `CollapseTime` while the rubble shows; then only
+  the rubble is drawn (0x2CD394) and the building is inert (state 0).
+- **The shaker** (+0x8AC, from `ShakerDef`: `MasterAmp` 0.05, `ShakeLength` 0.5, and (period, phase, amp) triples
+  (0.05, 1, 3), (0.25, 2, 0.25), (0.33, 3, 0.25), (0.61, 4, 0.25)) sways the building along x: MasterAmp × the sum
+  of amp × a parabolic sine of (t + phase) / period (0x2CC450), fading over the last fifth. Every cell hit and every
+  frame of a falling storey adds ShakeLength × (1 + a random share) to it (0x2CC5E0).
+
 `CellDetachDamage` and `VertDetachDamage` belong to a building's attachments (AC units, fire escapes; 0x2C617C), not
 to the grid.
 

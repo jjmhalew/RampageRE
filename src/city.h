@@ -28,6 +28,7 @@ typedef struct {
     float (*pose)[7];                                 /* the monster: each node's last local pose (t, q) */
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
     int hidden;                                       /* not drawn (a building's interior until it is damaged) */
+    int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
 } Instance;
 
 typedef struct {
@@ -46,6 +47,10 @@ typedef struct {                                      /* a building's cells and 
     /* per storey its interior models (instances, -1 none): Skeleton once a cell is damaged, DamagedSkeleton once
      * FloorHP is down to DamagedSkeletonHP (half of FloorHP unless set; drawn around 0x2CD898) */
     int skeleton[BUILDING_STOREYS], damaged_skeleton[BUILDING_STOREYS], skeleton_hp[BUILDING_STOREYS];
+    int ground, facade, top, rubble;                  /* its instances (-1 none) */
+    int first, last; Mat4 *rest;                      /* all its instances, first .. last - 1, where they were built */
+    Mat4 node;                                        /* its place */
+    int moving;                                       /* it moved last frame */
 } SceneBuilding;   /* a car on a lane, phase 0..1 along it */
 
 typedef struct {
@@ -84,7 +89,9 @@ void scene_monster_place(Scene *s, float x, float y, float z, float deg);
  * monster itself makes */
 void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn);
 int scene_monster_play(Scene *s, const char *clip);
-void scene_buildings_redraw(Scene *s);              /* the facades of damaged buildings to their cells' states */
+/* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,
+ * storeys and rubble drawn as they now are */
+void scene_buildings_update(Scene *s, float dt);
 /* the next clip blends in over `seconds` from the pose the monster has now, as the game's animation player does
  * (0x2FFA00): call before scene_monster_play; scene_monster_blend_step counts it down */
 void scene_monster_blend(Scene *s, float seconds);
