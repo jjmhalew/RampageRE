@@ -35,9 +35,13 @@ typedef struct {
                                                         (+0xAB8), the slots' column (+0xBAB4) */
     MoveGraph graph; MoveRunner run; MoveInput input; int have_graph;
     int yaw_axis; float entry_yaw;                   /* the root's axis that tells its turn; its turn at the state's start */
+    float frame[2][3], stick[2];                     /* the camera's right and forward axes the stick is read in
+                                                        (+0xA18, +0xA24) and the stick they were taken for (+0xA3C) */
+    float air[3];                                    /* the stick's own velocity (+0xA68), NODE_AIR_* */
 } Viewer;
 
-/* the clip's root at time t, held at the clip's last frame (clip_pose loops: its end is its start) */
+/* the clip's root at time t (seconds of the clip: the state's time × its rate), held at the clip's last frame
+ * (clip_pose loops: its end is its start) */
 static int root_at(const Viewer *v, double t, float tr[3], float q[4])
 {
     const Instance *in = &v->scene.instances[v->scene.monster];
@@ -62,7 +66,7 @@ static void play_state(Viewer *v)
     const MoveState *st = &v->graph.states[v->run.state];
     if (scene_monster_play(&v->scene, st->clip) != 0)
         printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
-    v->entry_yaw = root_yaw(v, v->run.time);
+    v->entry_yaw = root_yaw(v, v->run.time * st->rate);
 }
 
 static void start_moves(Viewer *v)
@@ -78,6 +82,9 @@ static void start_moves(Viewer *v)
     moves_start(&v->run, &v->graph, moves_find(&v->graph, "Ground_Idle"));
     memset(&v->input, 0, sizeof v->input);
     memset(v->vel, 0, sizeof v->vel);
+    memset(v->air, 0, sizeof v->air);
+    memset(v->stick, 0, sizeof v->stick);
+    memcpy(v->frame, v->cam.rot, sizeof v->frame);
     v->mz = 0;
     v->mode = MODE_GROUND;
     v->no_gravity = 0;
@@ -148,8 +155,6 @@ static int answer(void *ctx, const char *call)
     return 0;
 }
 
-static int starts(const char *s, const char *prefix) { return s && _strnicmp(s, prefix, strlen(prefix)) == 0; }
-
 /* the clip events the viewer acts on: the movement mode, and Monsters.bsf's velocity functions (jumpNorm and its kin
  * set the velocity, addVelocity adds to it, in the world or turned with the monster) */
 static void clip_event(Viewer *v, const MoveEvent *e)
@@ -200,11 +205,79 @@ static void clip_events(Viewer *v, const MoveState *st, float from, float to)
         clip_event(v, &e[i]);
 }
 
+/* the stick (x right, y down) as a direction on the ground, in the camera's frame the monster keeps (0x2E8410) */
+static void stick_world(const Viewer *v, float lx, float ly, float w[3])
+{
+    for (int k = 0; k < 3; k++)
+        w[k] = lx * v->frame[0][k] - ly * v->frame[1][k];
+    w[2] = 0;
+}
+
+/* NODE_STEER (0x2E8190): the turn towards the stick this frame, in degrees. The stick in the monster's own frame
+ * against the state's forward axis; beyond one frame's worth of turning it turns by the angle × `turn` × dt, so it
+ * swings round fast and settles gently. */
+static float steer(const Viewer *v, const MoveState *st, float lx, float ly, float dt)
+{
+    float w[3], h = v->heading / 57.2957795f, c = cosf(h), s = sinf(h);
+    stick_world(v, lx, ly, w);
+    float l[2] = { c * w[0] + s * w[1], -s * w[0] + c * w[1] };   /* by the monster's matrix: right, forward */
+    float n = l[0] * l[0] + l[1] * l[1];
+    if (n <= 1e-6f)
+        return 0;
+    n = 1 / sqrtf(n);
+    l[0] *= n;
+    l[1] *= n;
+    float d = l[0] * st->fwd[0] + l[1] * st->fwd[1];
+    float angle = acosf(d < -1 ? -1 : d > 1 ? 1 : d);
+    if (angle <= st->turn * dt)
+        return 0;
+    float sign = l[0] * st->fwd[1] - l[1] * st->fwd[0] < 0 ? 1.0f : -1.0f;
+    return sign * angle * st->turn * dt * 57.2957795f;
+}
+
+/* NODE_AIR_* (0x2E6580): the stick asks for `speed` along the monster's own axes the state allows; the velocity
+ * moves towards that by MOVES_AIR_ACCEL (MOVES_AIR_BRAKE when slowing), each axis on its own, and is kept to the
+ * state's speed */
+static void air_control(Viewer *v, const MoveState *st, float lx, float ly, float dt)
+{
+    float goal[3] = { 0, 0, 0 }, w[3];
+    if (st->flags & (NODE_AIR_X | NODE_AIR_Y | NODE_AIR_Z)) {
+        stick_world(v, lx, ly, w);
+        float n = w[0] * w[0] + w[1] * w[1];
+        if (n >= 1e-6f) {
+            float h = v->heading / 57.2957795f, c = cosf(h), s = sinf(h);
+            float axis[2][3] = { { c, s, 0 }, { -s, c, 0 } };   /* the monster's x (right) and y (forward) */
+            n = st->speed / sqrtf(n);
+            for (int k = 0; k < 3; k++)
+                w[k] *= n;
+            for (int a = 0; a < 2; a++)
+                if (st->flags & (a ? NODE_AIR_Y : NODE_AIR_X)) {
+                    float p = w[0] * axis[a][0] + w[1] * axis[a][1];
+                    for (int k = 0; k < 3; k++)
+                        goal[k] += p * axis[a][k];
+                }
+        }
+    }
+    float cur = v->air[0] * v->air[0] + v->air[1] * v->air[1] + v->air[2] * v->air[2];
+    float want = goal[0] * goal[0] + goal[1] * goal[1] + goal[2] * goal[2];
+    float step = (cur <= want ? MOVES_AIR_ACCEL : MOVES_AIR_BRAKE) * dt;
+    for (int k = 0; k < 3; k++) {
+        float d = goal[k] - v->air[k];
+        v->air[k] += d > step ? step : d < -step ? -step : d;
+    }
+    cur = v->air[0] * v->air[0] + v->air[1] * v->air[1] + v->air[2] * v->air[2];
+    if (cur > st->speed * st->speed) {
+        float k = st->speed / sqrtf(cur);
+        for (int i = 0; i < 3; i++)
+            v->air[i] *= k;
+    }
+}
+
 /* one frame of play. The left stick (x right, y down) and the buttons pressed this frame (MV_CROSS ...) or held.
- * The graph picks the state; the clip's root carries the monster (its travel and turn added to where it stands), the
- * clip's events set its movement mode and velocity, and in the air it falls by MOVES_GRAVITY until it meets the
- * ground (here the street at z = 0), which is the graph's landing event. Two things stand in for game code not read
- * yet: turning round (Ground_TurnAround) when the stick points back, and turning towards the stick while walking. */
+ * The graph picks the state; the clip's root carries the monster (its travel added to where it stands, its turn
+ * when a NODE_BAKE_ROOT state ends), the stick turns it (NODE_STEER) or drives it (NODE_AIR_*) in the camera's frame,
+ * the clip's events set its movement mode and velocity, and in the air it falls by MOVES_GRAVITY until it meets the
+ * ground (here the street at z = 0), which fires the landing slot. */
 static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
 {
     if (v->have_graph) {
@@ -219,6 +292,12 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         }
         moves_derive(in);
         const MoveState *st = &v->graph.states[v->run.state];
+        /* the camera frame the stick is read in: every frame (0x2E0738), or, in a NODE_HOLD_FRAME state, only when the
+         * stick moves (0x2E8190), so a climb keeps its direction while the camera swings */
+        if (!(st->flags & NODE_HOLD_FRAME) || lx != v->stick[0] || ly != v->stick[1])
+            memcpy(v->frame, v->cam.rot, sizeof v->frame);
+        v->stick[0] = lx;
+        v->stick[1] = ly;
         float t0 = v->run.time, length = st->length;
         int ev = -1;
         if (v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF) {   /* the air: velocity, then gravity */
@@ -245,23 +324,26 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
             memset(v->vel, 0, sizeof v->vel);
             v->mz = 0;
         }
-        float goal = atan2f(-ly, lx) * 57.2957795f - 90, turn = fmodf(goal - v->heading + 540, 360) - 180;
-        if (ev != 0 && in->v[MV_L_SIZE] > 0.5f && starts(st->name, "Ground_Walk") && fabsf(turn) > 135)
-            ev = moves_event(&v->run, "Ground_TurnAround");
+        air_control(v, st, lx, ly, dt);
+        if (v->mode == MODE_GROUND || v->mode == MODE_AIRBORNE || v->mode == MODE_TAKEOFF || v->mode == MODE_PRONE) {
+            v->mx += v->air[0] * dt;                 /* 0x2E0C50: in modes 0, 1, 2 and 4 */
+            v->my += v->air[1] * dt;
+        }
+        if (st->flags & NODE_STEER)
+            v->heading += steer(v, st, lx, ly, dt);
         int switched = ev == 0 || moves_step(&v->run, in, dt, answer, NULL);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + dt < length ? t0 + dt : length)) : v->run.time;
         float a[3], b[3], q[4];                      /* the root's travel this frame, in the old clip */
-        if (root_at(v, t0, a, q) == 0 && root_at(v, t1, b, q) == 0) {
+        if (root_at(v, t0 * st->rate, a, q) == 0 && root_at(v, t1 * st->rate, b, q) == 0) {
             float c = cosf(v->heading / 57.2957795f), s = sinf(v->heading / 57.2957795f);
             float dx = b[0] - a[0], dy = b[1] - a[1];
             v->mx += c * dx - s * dy;
             v->my += s * dx + c * dy;
         }
         clip_events(v, st, t0, t1);                  /* the old clip's events up to now */
-        if (switched) {                              /* the turn the old clip made, if it turned (not a sway) */
-            float turned = fmodf(root_yaw(v, t1) - v->entry_yaw + 540, 360) - 180;
-            if (fabsf(turned) > 90)
-                v->heading += turned;
+        if (switched) {
+            if (st->flags & NODE_BAKE_ROOT)          /* the turn the old clip made becomes the monster's */
+                v->heading += fmodf(root_yaw(v, t1 * st->rate) - v->entry_yaw + 540, 360) - 180;
             const MoveState *to = &v->graph.states[v->run.state];
             if (v->run.from != v->run.state)
                 printf("%s -> %s (%s)\n", st->name ? st->name : "?", to->name ? to->name : "?", to->clip ? to->clip : "-");
@@ -276,9 +358,6 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                 clip_event(v, &e0[i]);
             if (v->run.time > 0)
                 clip_events(v, to, v->run.via >= 0 ? v->run.time - 1e-5f : 0, v->run.time);
-        } else if (starts(st->name, "Ground_Walk") && in->v[MV_L_SIZE] > 0) {
-            float step = 270 * dt;
-            v->heading += turn > step ? step : turn < -step ? -step : turn;
         }
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
@@ -441,7 +520,8 @@ int main(int argc, char **argv)
                 held[PAD[k].button] = w.keys[PAD[k].key];
             }
             play_step(&v, lx, ly, pressed, held, shot ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
-            v.scene.instances[v.scene.monster].offset = (float)(v.run.time - (shot ? shot_time : now - start));
+            v.scene.instances[v.scene.monster].offset =      /* the clip at the state's time × its rate */
+                (float)(v.run.time * (v.have_graph ? v.graph.states[v.run.state].rate : 1) - (shot ? shot_time : now - start));
             memcpy(cam.pos, v.cam.pos, sizeof cam.pos);
             memcpy(cam.rows, v.cam.rot, sizeof cam.rows);
             cam.use_rows = 1;

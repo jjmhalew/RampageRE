@@ -92,7 +92,19 @@ int moves_read(const Bundle *b, MoveGraph *g)
         MoveState *s = &g->states[k];
         const uint8_t *p = d + offset[k];
         uint32_t node = rd32(p + 4);
+        s->rate = 1;
+        s->fwd[1] = 1;
         if (node + 0x80 <= size) {
+            const uint8_t *nd = d + node;
+            s->rate = rdf(nd);
+            s->turn = rdf(nd + 0x4);
+            s->speed = rdf(nd + 0x8);
+            s->blend = rdf(nd + 0x14);
+            s->fwd[0] = rdf(nd + 0x18);
+            s->fwd[1] = rdf(nd + 0x1C);
+            s->flags = rd32(nd + 0x2C);
+            if (!(s->rate > 0))
+                s->rate = 1;
             s->clip = name_at(b, (int32_t)rd32(d + node + 0x78));
             s->name = name_at(b, (int32_t)rd32(d + node + 0x7C));
             uint32_t span = rd32(d + node + 0x28), first = span >> 16, count = span & 0xFFFF;

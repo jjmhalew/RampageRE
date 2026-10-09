@@ -31,6 +31,10 @@ typedef struct {                                     /* a timed event of the sta
 typedef struct {
     const char *name, *clip;                         /* the clip by name, as in the anims bundle (any case) */
     float length; int next;                          /* the state that follows when the clip ends */
+    /* the state's node: the clip plays at `rate` (length = the clip's duration / rate); with NODE_STEER the monster
+     * turns towards the stick at `turn` × the angle per second (0x2E8190), its forward axis `fwd` (x, y); with
+     * NODE_AIR_* the stick drives it at up to `speed` units / s; `blend` seconds to blend into the clip */
+    float rate, turn, speed, blend, fwd[2]; uint32_t flags;   /* node +0x0, +0x4, +0x8, +0x14, +0x18, +0x2C */
     MoveTrans *trans; int ntrans;
     MoveEvent *events; int nevents;                  /* in time order */
 } MoveState;
@@ -78,5 +82,17 @@ enum { SLOT_LAND = 56, SLOT_LAND_BACK = 57 };         /* 0x2DC450: on its feet /
 /* movement modes (event type 7; the monster's +0xAD8): 1 and 2 are airborne (Monster.isAirborne) */
 enum { MODE_GROUND = 0, MODE_AIRBORNE = 1, MODE_TAKEOFF = 2, MODE_PRONE = 4, MODE_BUILDING = 5 };
 #define MOVES_GRAVITY 60.0f                          /* units / s², 0x2DF128; off while setDisableGravity (+0xAB8) */
+
+/* state node flags (+0x2C), as the monster's command (0x2E6580) and update (0x2DE530 ...) test them */
+enum {
+    NODE_AIR_Z = 0x2, NODE_AIR_X = 0x10, NODE_AIR_Y = 0x1000,   /* the stick drives it along its own axes */
+    NODE_HOLD_FRAME = 0x4,                           /* the camera frame for the stick is kept until the stick moves */
+    NODE_STEER = 0x8,                                /* it turns towards the stick (0x2E8190) */
+    NODE_LOOK = 0x200,                               /* the right stick turns its head (0x2FBE30) */
+    NODE_BAKE_ROOT = 0x40000                         /* when the next clip starts, the root's place and turn become
+                                                        the monster's (0x2E6580) */
+};
+#define MOVES_AIR_ACCEL 50.0f                        /* units / s² towards the stick's speed, gp−0x722C */
+#define MOVES_AIR_BRAKE 100.0f                       /* ... when slowing down, gp−0x7230 */
 
 #endif

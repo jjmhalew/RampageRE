@@ -61,23 +61,25 @@ yet); with `--clip` root motion stays in, so a walk walks off and jumps back whe
 
 In play the monster is driven the way the game drives it: the keys fill the pad's variable table (0x2C0AD0), the
 move graph picks the state and its clip (the transitions in their input window, by priority, until their switch
-window), and the clip's root carries the monster: each frame the root's travel in its clip (turned by the monster's
-heading) moves it, and a real turn the root made over a state (more than 90°, not a sway) is added to the heading
-when the state ends (the turn-around clip turns George by 186°). The clip's events act too: the movement mode, the
+window), the clip plays at its state's rate, and the clip's root carries the monster: each frame the root's travel in
+its clip (turned by the monster's heading) moves it, and when a state whose node says so ends (flag 0x40000: the
+climbs, mounts, knock-downs) the turn its root made becomes the monster's. The stick is read in the camera's frame:
+where a state allows it (`Ground_Walk`, the flip) the monster turns towards it at 6 × the angle per second (0x2E8190),
+and in a jump it drives the monster at up to 16 units/s (the stick's own velocity, +0xA68)
+([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "State nodes", "Steering"). The clip's events act too: the movement mode, the
 slot column and `Monsters.bsf`'s velocity calls (`addVelocity`, `jumpNorm`, ...); in the air the monster moves by
 its velocity and falls by 60 units/s² (unless `disableGravity`), and meeting the street fires the landing slot (56)
 in its column, so a held Cross jumps higher, a double jump flips, a butt slam lands in its impact
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
-punch). Stand-ins for game code not read yet: turning round (`Ground_TurnAround`, here when the stick points more
-than 135° away while walking), steering while walking (270° per second towards the stick), and a state's events at
-its start firing even when it is entered part-way (the game's event playback, under 0x2FFA00, is not read). The
-monster stays within the street (x ±75, y −30 … −3).
+punch). One stand-in remains for game code not read: a state's events at its start fire even when it is entered
+part-way (the game's event playback, under 0x2FFA00, is not read). The monster stays within the street (x ±75,
+y −30 … −3).
 
 ## Not there yet
 - the monster's face clips (`<MONSTER>_HEAD_*`) layered over its body, cloth simulation;
-- blending between clips (they switch at once; the state node's float at +0x14, which 0x2ECBE0 hands on with the
-  next clip, is likely the blend time);
+- blending between clips (they switch at once; the node's +0x14 is the blend time, 0x2FFA00), friction on the
+  velocity, the head turning with the right stick;
 - effects (`tools/edf.py`), the GUI, sound;
 - the ground is the street at height 0 (no roofs, no collision with buildings), climbing buildings, grabbing, the
   game's rules;

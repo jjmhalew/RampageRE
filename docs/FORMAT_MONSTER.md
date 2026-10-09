@@ -23,7 +23,7 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0x9C4..0xA2C | | | name indices (−1 = none), settings (f32 0x9F4..0xA10) |
 | 0xA30, 0xA34, 0xA38 | | | names of the skeleton, the mesh and the cloth model |
 | 0xA44 / 0xA48 | collision shapes | 11 × 24 at 0xAA8 | f32[3], f32[2], u32 bone \| part << 16 |
-| 0xA4C / 0xA50 | state nodes | 186 × 0x84 at 0xBB0 | +0x14 blend time (likely), +0x28 its clip events (first << 16 \| count), +0x78 clip name, +0x7C state name, the rest settings |
+| 0xA4C / 0xA50 | state nodes | 186 × 0x84 at 0xBB0 | the clip and how it plays, see "State nodes" |
 | 0xA60 / 0xA68 | coded item offsets | 1,325 × u16 at 0x6B98 | into the block at +0xA64 |
 | 0xA64 | clip events | at 0x75F4 | {u32 type, f32 time, ...}, see "Clip events" |
 | 0xA6C / 0xA70 / 0xA74 | body parts | 6 at 0xF678, pointers at 0xF748 | `Arm L`, `Arm R`, `Body`, `Head`, `Leg L`, `Leg R` with their bones |
@@ -53,10 +53,35 @@ A state: 0x2C bytes, then 0x74 bytes per transition.
 Transition flags: 0x10 the transition is open to a pad-controlled monster, 0x8 to the other kind (0x2FF750 decides
 which applies and returns 0, the pad, in this build; nearly all transitions have both, 0x18); 0x1000 switch at once
 (otherwise the switch waits a little); 0x1 the next clip keeps the phase (it starts at the same fraction of its
-length); 0x100 and 0x200 are set at run time (in the input / switch window); 0x200 is also stored set on the
-transitions the game's code fires itself (`Ground_TurnAround`, `Reactions`, falls).
+length); 0x100 and 0x200 are set at run time (in the input / switch window); 0x200 is also stored set on some of
+the switched-off `false == 0` transitions (`Ground_TurnAround`, `Reactions`; see "Conditions").
 
-The node's +0x14 float goes with the next clip to the animation code (0x2ECBE0), most likely its blend time.
+## State nodes
+0x84 bytes each; the runner hands the node on with the next clip (0x2ECBE0) and the monster's command (0x2E6580)
+plays it:
+
+| Node | | |
+|---|---|---|
+| +0x00 | f32 rate | the clip plays at this speed: the state's length is the clip's duration / rate (all 176 of George's states; `Ground_Idle` plays its 1 s clip at 0.15, 6.67 s) |
+| +0x04 | f32 turn | with flag 0x8, how fast it turns towards the stick (6 on the ground, 1.5 in the air, 12 in the flip) |
+| +0x08 | f32 speed | with the air flags, the speed the stick drives it at (16 in a jump, 1 on the ground) |
+| +0x14 | f32 blend | seconds to blend into the clip (0x2FFA00, +0x4E58 of the animation player and 1 / it) |
+| +0x18, +0x1C | f32 x, y | its forward axis in its own frame for the turn (0, 1; x negated when mirrored) |
+| +0x28 | u32 | its clip events: first << 16 \| count, see "Clip events" |
+| +0x2C | u32 flags | below |
+| +0x78, +0x7C | | clip name, state name |
+
+Flags (+0x2C), as the command and the monster update (0x2DE530 ...) test them:
+
+| Flag | |
+|---|---|
+| 0x2, 0x10, 0x1000 | the stick drives the monster along its own z, x, y axis ("Steering"); the jumps have 0x1012 or 0x1010 |
+| 0x4 | the camera frame the stick is read in is kept until the stick moves (otherwise taken every frame, 0x2E0738); climbing |
+| 0x8 | it turns towards the stick (0x2E8190); `Ground_Walk` (0x288), carrying (`Ground_Hold_Walk`), the flip |
+| 0x200 | the right stick turns its head (0x2FBE30, with the settings at +0xA08..+0xA10 of MONSTER_DATA) |
+| 0x80002 | the friction on its velocity (+0xF4 of the monster × dt, against the velocity's direction, 0x2DFDE8) takes z too, not only x and y |
+| 0x40000 | when the next clip starts, the root's place and turn in this clip become the monster's (0x2E6580, before it starts the next); the climbs, mounts, knock-downs |
+| 0x40, 0x80, 0x100, 0x80000 | not traced |
 
 ## Conditions
 A condition is `variable OP value`, OP 0 `>`, 1 `>=`, 2 `<`, 3 `<=`, 4 `==` (the function tables at 0x3F5950 for
@@ -79,8 +104,10 @@ fills through the button table at 0x3B18B0:
 | 56, 57 | true, false | | |
 
 Ids 4 … 21 and 48 … 57 are booleans, the rest floats. When the monster is mirrored (+0x7DA1 of the monster) the
-left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). A transition whose only condition is
-`false == 0` never holds by itself: it is the game's own event (landing in `Jump_Finish`, `Ground_TurnAround`).
+left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). Variable 57 reads 0 and is never new
+(0x2C1838), so a `false == 0` (new) or `false > 0` condition never holds: those transitions are switched off. The
+game's own events (landing, hits) come in through the slots instead ("Slots"), and nothing found fires
+`Ground_TurnAround` for a pad-controlled monster: it turns with the stick ("Steering").
 
 George's graph reads naturally: Cross jumps (released early, the short hop `Jump_Start_2_copy`), Square punches
 (with the stick up or down, `Ground_Punch_Up` / `_Down`), Triangle kicks, Circle grabs, R2 roars
@@ -115,6 +142,22 @@ outright (22, 15, −10, 32 up; the x argument mirrored with the monster). The v
 relative calls turn it by the monster's matrix, 0x2E7330 / 0x2E74F0). Each frame the monster update (vtable +0x10,
 0x2DE530 and on) moves the monster by velocity × dt and then takes 60 × dt off the upward velocity, gravity, unless
 `setDisableGravity` (+0xAB8) is set.
+
+## Steering
+The stick is read in the camera's frame: x along the camera's right axis, −y along its forward axis, the height
+dropped (0x2E8410), using the camera's matrix (gp−0x6CFC +0x660) the monster copies to +0xA18 every frame unless the
+state has flag 0x4. Both of the following are in the monster's command (0x2E6580) for the state it is in:
+
+- Flag 0x8, turning (0x2E8190): the stick's direction in the monster's own frame against the state's forward axis
+  (+0x18) gives an angle (acos of the dot product); if it is more than turn × dt (node +0x4), the monster turns by
+  the angle × turn × dt towards it this frame (+0xA14, a turn about Z the update applies to its matrix), so it swings
+  round fast and settles gently, and within one frame's step it does not turn at all. Walking turns this way, at 6:
+  pushing the stick back turns the monster round while it walks on.
+- Flags 0x10 / 0x1000 / 0x2, the stick's own velocity (+0xA68): the stick's direction × the state's speed (+0x8),
+  kept to the monster's x / y / z axes the flags allow, is the goal; each axis moves towards it by 50 × dt (gp−0x722C)
+  while speeding up, 100 × dt (gp−0x7230) while slowing down (a state without the flags slows it to 0), and the whole
+  is kept to the speed. The update adds it × dt to the monster's x and y in modes 0, 1, 2 and 4 (0x2E0C50), on top
+  of the velocity (+0xBD30, `getVelocity` is their sum, 0x2E7460): it is how a jump is steered in the air, at up to 16.
 
 ## Slots
 The game's own events (hits, landing, rampage) start states through the 74 slots: slot k is a start list index at

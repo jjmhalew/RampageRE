@@ -9,7 +9,8 @@ the start of the entry, little endian):
   0x9C4..0xA2C  name indices (-1 = none) and settings (floats 0x9F4..0xA10)
   0xA30 / 0xA34 / 0xA38  skeleton, mesh and cloth model names     0xAA4  the monster's property book (George_prop.prb)
   0xA44 / 0xA48  11 x 24 bytes: collision shapes (3 floats, 2 floats, bone | part << 16)
-  0xA4C / 0xA50  state nodes, 0x84 bytes each: +0x78 clip name, +0x7C state name, the rest settings
+  0xA4C / 0xA50  state nodes, 0x84 bytes each: +0x0 rate, +0x4 turn, +0x8 stick speed, +0x14 blend, +0x18 forward
+                 axis, +0x28 clip events, +0x2C flags, +0x78 clip name, +0x7C state name
   0xA60 / 0xA64 / 0xA68  coded items: u16 offset per item (at A68) into a block (at A64), u32 type first
   0xA6C / 0xA70 / 0xA74  body parts (Arm L, Arm R, Body, Head, Leg L, Leg R): data, then a pointer per part
   0xA58 / 0xA5C  start lists, 12 bytes each: u32 ?, offset of a state, u32 ?
@@ -195,6 +196,11 @@ class MonsterData:
             node = self.node_by_offset.get(s['node'])
             out.append(f'state {self.state_name(s["at"])}  clip {node[1] if node else "?"}  length {s["length"]:.3g}'
                        f'  then {self.state_name(s["next"])}')
+            if node:
+                o = node[0]
+                out.append(f'    node: rate {self.f(o):.3g}  turn {self.f(o + 4):.3g}  speed {self.f(o + 8):.3g}  blend '
+                           f'{self.f(o + 0x14):.3g}  forward {self.f(o + 0x18):.3g} {self.f(o + 0x1C):.3g}  flags '
+                           f'{self.u(o + 0x2C):#x}')
             if node:
                 ev = [f'{at:.3g} {text}' for t, at, text in self.events(node[0]) if t != 6]
                 if ev:
