@@ -66,6 +66,16 @@ int moves_read(const Bundle *b, MoveGraph *g)
                 ev->p[j] = rdf(d + o + 12 + 4 * j);
         } else if (ev->type == 6) {                  /* {6, at, ?, name} */
             ev->name = name_at(b, (int32_t)rd32(d + o + 12));
+        } else if (ev->type == 0 && o + 0x38 <= size) {   /* {0, at, i16 part[4], u16 count, flags, ...} */
+            int count = d[o + 0x10] | d[o + 0x11] << 8;
+            for (int j = 0; j < count && j < 4; j++) {
+                int part = (int16_t)(d[o + 8 + 2 * j] | d[o + 9 + 2 * j] << 8);
+                if (part >= 0 && part < 32)
+                    ev->value |= 1u << part;
+            }
+            ev->p[0] = rd32(d + o + 0x14) & 6 ? 1.0f : 0.0f;
+            for (int j = 1; j < 4; j++)
+                ev->p[j] = rdf(d + o + 0x28 + 4 * j);
         } else {
             ev->value = rd32(d + o + 8);             /* 7: {7, at, mode} */
         }
@@ -142,6 +152,31 @@ int moves_read(const Bundle *b, MoveGraph *g)
         }
     }
     free(offset);
+    uint32_t nsh = rd32(d + 0xA44), sh = rd32(d + 0xA48);
+    if (sh + 24 * nsh <= size && nsh < 256) {
+        g->shapes = calloc(nsh ? nsh : 1, sizeof *g->shapes);
+        for (uint32_t k = 0; k < nsh; k++) {
+            const uint8_t *p = d + sh + 24 * k;
+            MoveShape *s = &g->shapes[g->nshapes++];
+            for (int i = 0; i < 3; i++)
+                s->off[i] = rdf(p + 4 * i);
+            s->size = rdf(p + 12);
+            s->radius = rdf(p + 16);
+            s->bone = (int16_t)(p[20] | p[21] << 8);
+            s->part = (int16_t)(p[22] | p[23] << 8);
+        }
+    }
+    uint32_t nparts = rd32(d + 0xA6C), parts = rd32(d + 0xA74);
+    for (uint32_t k = 0; k < nparts && k < MOVES_PARTS && parts + 4 * k + 4 <= size; k++) {
+        uint32_t o = rd32(d + parts + 4 * k);        /* {name, ?, ?, u16 count, i16 bones[]} */
+        if (o + 0xE > size)
+            break;
+        int nb = d[o + 0xC] | d[o + 0xD] << 8;
+        g->part_name[k] = name_at(b, (int32_t)rd32(d + o));
+        for (int i = 0; i < nb && i < MOVES_PART_BONES && o + 0x10 + 2 * i <= size; i++)
+            g->part_bone[k][g->part_nbones[k]++] = (int16_t)(d[o + 0xE + 2 * i] | d[o + 0xF + 2 * i] << 8);
+        g->nparts = (int)k + 1;
+    }
     return 0;
 }
 
@@ -151,6 +186,7 @@ void moves_free(MoveGraph *g)
     free(g->all);
     free(g->all_events);
     free(g->slot);
+    free(g->shapes);
     memset(g, 0, sizeof *g);
 }
 

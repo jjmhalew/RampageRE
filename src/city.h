@@ -53,6 +53,7 @@ typedef struct {
     const char *monster_clip;                         /* the name of the clip it plays */
     const Bundle *monster_anims;
     const Bundle *monster_bundle;                     /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
+    float spheres[64][4]; int nspheres;               /* drawn over the scene as wire spheres: centre, radius */
 } Scene;
 
 typedef struct City City;

@@ -39,6 +39,7 @@ typedef struct {
     float frame[2][3], stick[2];                     /* the camera's right and forward axes the stick is read in
                                                         (+0xA18, +0xA24) and the stick they were taken for (+0xA3C) */
     float air[3];                                    /* the stick's own velocity (+0xA68), NODE_AIR_* */
+    uint32_t armed; int show_hits;                   /* body parts an attack event armed (bits); H draws them */
 } Viewer;
 
 /* the clip's root at time t (seconds of the clip: the state's time × its rate), held at the clip's last frame
@@ -68,6 +69,7 @@ static void play_state(Viewer *v)
     if (scene_monster_play(&v->scene, st->clip) != 0)
         printf("%s: no clip %s\n", st->name ? st->name : "?", st->clip ? st->clip : "-");
     v->entry_yaw = root_yaw(v, v->run.time * st->rate);
+    v->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed */
     float q[4];
     if (root_at(v, v->run.time * st->rate, v->entry_root, q) != 0)
         memset(v->entry_root, 0, sizeof v->entry_root);
@@ -173,6 +175,12 @@ static void clip_event(Viewer *v, const MoveEvent *e)
     }
     if (e->type == 23) {                             /* 0x2E7D38 */
         v->column = (int32_t)e->value;
+        return;
+    }
+    if (e->type == 0) {                              /* 0x2E7880: the parts' bones armed with this attack, or not */
+        v->armed = e->p[0] != 0 ? v->armed | e->value : v->armed & ~e->value;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  attack %x %s (%g %g %g)\n", e->value, e->p[0] != 0 ? "on" : "off", e->p[1], e->p[2], e->p[3]);
         return;
     }
     if (e->type != 21 || !e->name)
@@ -282,6 +290,32 @@ static void air_control(Viewer *v, const MoveState *st, float lx, float ly, floa
  * when a NODE_BAKE_ROOT state ends), the stick turns it (NODE_STEER) or drives it (NODE_AIR_*) in the camera's frame,
  * the clip's events set its movement mode and velocity, and in the air it falls by MOVES_GRAVITY until it meets the
  * ground (here the street at z = 0), which fires the landing slot. */
+/* the collision spheres an armed attack can hit with, in the world (0x2DA9E0: the shape's offset by its bone's
+ * matrix, then by the monster's), into the scene's overlay */
+static void hit_spheres(Viewer *v)
+{
+    v->scene.nspheres = 0;
+    if (!v->have_graph || !v->show_hits || !v->armed || v->scene.monster < 0)
+        return;
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    const MoveGraph *g = &v->graph;
+    for (int i = 0; i < g->nshapes && v->scene.nspheres < 64; i++) {
+        const MoveShape *sh = &g->shapes[i];
+        int armed = 0;
+        for (int p = 0; p < g->nparts && !armed; p++)
+            if (v->armed >> p & 1)
+                for (int k = 0; k < g->part_nbones[p]; k++)
+                    armed |= g->part_bone[p][k] == sh->bone;
+        if (!armed || sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
+            continue;
+        Mat4 m = mat_mul(in->base, in->node[sh->bone]);
+        float *c = v->scene.spheres[v->scene.nspheres++];
+        for (int r = 0; r < 3; r++)
+            c[r] = m.m[r] * sh->off[0] + m.m[4 + r] * sh->off[1] + m.m[8 + r] * sh->off[2] + m.m[12 + r];
+        c[3] = sh->radius;
+    }
+}
+
 static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, const uint8_t *held, float dt, float aspect)
 {
     if (v->have_graph) {
@@ -476,6 +510,7 @@ int main(int argc, char **argv)
     v.rnd = rnd_create();
     v.night = night;
     v.mx = 0; v.my = -18; v.heading = 180;          /* in the street, facing the camera */
+    v.show_hits = 1;
     v.nmonsters = monster_names(&v.vol, v.monsters, 64);
     v.monster = -1;
     v.clip = clip;
@@ -504,6 +539,7 @@ int main(int argc, char **argv)
         if (w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }
         if (w.pressed['N']) { v.night = !v.night; build(&v); }
         if (w.pressed['F']) v.fog = !v.fog;
+        if (w.pressed['H']) v.show_hits = !v.show_hits;
         if (w.pressed['M']) { v.monster = v.monster + 1 < (int)v.nmonsters ? v.monster + 1 : -1; v.clip = -1; build(&v); }
         if (w.pressed['G'] && v.monster >= 0) {
             v.play = !v.play;
@@ -566,8 +602,13 @@ int main(int argc, char **argv)
             if (w.keys['Q']) cam.pos[2] -= step;
         }
         double t = shot ? shot_time : now - start;
-        if (v.have_scene)
+        if (v.have_scene) {
             scene_update(&v.scene, t);
+            if (playing)
+                hit_spheres(&v);
+            else
+                v.scene.nspheres = 0;
+        }
         rnd_frame(v.rnd, &w, &cam, t, v.fog);
         if (shot) {
             if (cam.use_rows)

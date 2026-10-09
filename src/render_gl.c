@@ -310,4 +310,27 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
+    if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
+        glDisable(GL_LIGHTING);
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_FOG);
+        glColor3f(1, 0.2f, 0.1f);
+        for (int i = 0; i < s->nspheres; i++) {
+            const float *c = s->spheres[i];
+            for (int axis = 0; axis < 3; axis++) {
+                glBegin(GL_LINE_LOOP);
+                for (int k = 0; k < 32; k++) {
+                    float a = k * 6.2831853f / 32, u = c[3] * cosf(a), v = c[3] * sinf(a);
+                    float p[3] = { c[0], c[1], c[2] };
+                    p[(axis + 1) % 3] += u;
+                    p[(axis + 2) % 3] += v;
+                    glVertex3fv(p);
+                }
+                glEnd();
+            }
+        }
+        glEnable(GL_DEPTH_TEST);
+        glColor3f(1, 1, 1);
+    }
 }

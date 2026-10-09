@@ -22,11 +22,11 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0x12C..0x9C0 | | | not decoded |
 | 0x9C4..0xA2C | | | name indices (−1 = none), settings (f32 0x9F4..0xA10) |
 | 0xA30, 0xA34, 0xA38 | | | names of the skeleton, the mesh and the cloth model |
-| 0xA44 / 0xA48 | collision shapes | 11 × 24 at 0xAA8 | f32[3], f32[2], u32 bone \| part << 16 |
+| 0xA44 / 0xA48 | collision spheres | 11 × 24 at 0xAA8 | f32[3] centre in the bone's frame, f32 (not traced), f32 radius, i16 bone, i16 body part; 0x2DA9E0 places them: bone matrix, the monster's scale (+0xA78), its matrix |
 | 0xA4C / 0xA50 | state nodes | 186 × 0x84 at 0xBB0 | the clip and how it plays, see "State nodes" |
 | 0xA60 / 0xA68 | coded item offsets | 1,325 × u16 at 0x6B98 | into the block at +0xA64 |
 | 0xA64 | clip events | at 0x75F4 | {u32 type, f32 time, ...}, see "Clip events" |
-| 0xA6C / 0xA70 / 0xA74 | body parts | 6 at 0xF678, pointers at 0xF748 | `Arm L`, `Arm R`, `Body`, `Head`, `Leg L`, `Leg R` with their bones |
+| 0xA6C / 0xA70 / 0xA74 | body parts | 6 at 0xF678, pointers at 0xF748 | `Arm L`, `Arm R`, `Body`, `Head`, `Leg L`, `Leg R`: {name, u32, u32, u16 count at +0xC, i16 bones from +0xE} (George's arms bones 28 … 37 and 38 … 47) |
 | 0xA58 / 0xA5C | start lists | 29 × 12 at 0xF760 | u32 ?, offset of a state, u32 flags (8: keep a time) |
 | 0xA94 / 0xA98 | slot columns | 6 × 0x128 at 0xF8BC | 74 slots each overriding the defaults (−1 = keep), see "Slots" |
 | 0xA78 / 0xA7C / 0xA80 | | 2 at 0xFFAC, pointers at 0x1022C | |
@@ -131,7 +131,7 @@ type, table 0x4312F0):
 | Type | | |
 |---|---|---|
 | 21 | {name, f32 p[4]} | a script function of `Monsters.bsf` (or the monster's own, `George::EnableWeapon`) with four arguments, via 0x2E75C0: footsteps, `addVelocity`, `jumpNorm`, `damageRoof`, `fireWeapon`, ... |
-| 0 | {i16 part[4], u16 count, u32 flags, ...}, 0x80 bytes | an attack: the collision shapes of the listed body parts (`Arm R` for a punch, `Leg R` for the kick, both arms for `Ground_Punch_Down`) take this record as theirs (+0xBD60 of the monster, 0x1C per shape, through the mirror map at +0xC4D0 when mirrored); flags 7 arms them, 0 disarms them, so an attack is a pair: on, then off. After the flags: u32 +0x18 (0xF, 0x1F), +0x20 (1 or 3), +0x24, +0x28 (4), f32 +0x2C (5 a punch, 20 the kick, 10 or 20), +0x30 (15, 10), +0x34 (0.2 … 0.4), +0x38 (0 or 1), +0x40 (1); their use (0x2D4390 tests the shapes) is not traced |
+| 0 | {i16 part[4], u16 count, u32 flags, ...}, 0x80 bytes | an attack: the bones of the listed body parts (`Arm R` for a punch, `Leg R` for the kick, both arms for `Ground_Punch_Down`) take this record as theirs (+0xBD60 of the monster, 0x1C per bone, through the mirror map at +0xC4D0 when mirrored); flags 7 arms them, 0 disarms them, so an attack is a pair: on, then off, and a collision sphere on an armed bone can hit (George's punch: Arm R's two spheres for 0.07 s; starting a clip disarms all, 0x2E7F70). After the flags: u32 +0x18 (0xF, 0x1F), +0x20 (1 or 3), +0x24, +0x28 (4), f32 +0x2C (5 a punch, 20 the kick, 10 or 20), +0x30 (15, 10), +0x34 (0.2 … 0.4), +0x38 (0 or 1), +0x40 (1); their use (0x2D4390 tests the shapes) is not traced |
 | 6 | {u16, u16, name} | a sound: +0xA set, a world sound (0x26B960), otherwise one of the monster's own (+0x8, 0x287860) |
 | 7 | {mode} | the movement mode (+0xAD8 of the monster): 0 on the ground, 2 taking off, 1 in the air (`isAirborne`: 1 or 2), 4 down or landing, 5 on a building |
 | 8 | | the queued mirror state flips (+0xAA1, taken at the next clip's start); the climbs flip at each hand, so one clip climbs with both |

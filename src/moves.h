@@ -24,10 +24,12 @@ typedef struct {
     int blend;                                       /* +0x0: how the next clip comes in, BLEND_* (0x2FFA00) */
 } MoveTrans;
 typedef struct {                                     /* a timed event of the state's clip (MONSTER_DATA's coded items) */
-    uint32_t type;                                   /* 21 a script call, 7 the movement mode, 6 a sound, ... */
+    uint32_t type;                                   /* 21 a script call, 7 the mode, 6 a sound, 0 an attack, ... */
     float at;                                        /* when, as a share of the clip's length */
     const char *name;                                /* 21: the script function, 6: the sound */
-    float p[4]; uint32_t value;                      /* 21: its four arguments; 7: the mode */
+    float p[4]; uint32_t value;                      /* 21: its four arguments; 7: the mode; 0: the body
+                                                        parts (bits), p[0] 1 arms / 0 disarms them, p[1..3] its
+                                                        floats at +0x2C (5 a punch, 20 the kick), +0x30, +0x34 */
 } MoveEvent;
 typedef struct {
     const char *name, *clip;                         /* the clip by name, as in the anims bundle (any case) */
@@ -41,11 +43,23 @@ typedef struct {
     MoveEvent *events; int nevents;                  /* in time order */
 } MoveState;
 #define MOVES_SLOTS 74
+typedef struct {                                     /* a collision sphere (+0xA48, 24 bytes; 0x2DA9E0 places them) */
+    float off[3];                                    /* in its bone's frame */
+    float size, radius;                              /* +0xC not traced; +0x10 the sphere's radius */
+    int bone, part;                                  /* the skeleton node, the body part */
+} MoveShape;
+#define MOVES_PARTS 8
+#define MOVES_PART_BONES 32
 typedef struct {
     MoveState *states; int n; MoveTrans *all; MoveEvent *all_events;
     /* the game's own events (landing, hits, ...): per slot and column the state they start (-1 none); column 0 is
      * the default (+0x4), columns 1.. the overrides (+0xA98) the clip events of type 23 select (moves_slot) */
     int (*slot)[MOVES_SLOTS]; int ncolumns;
+    MoveShape *shapes; int nshapes;
+    /* the body parts (+0xA74: Arm L, Arm R, Body, Head, Leg L, Leg R) and their bones, which an attack event (type 0)
+     * arms: a shape whose bone is armed can hit */
+    const char *part_name[MOVES_PARTS]; int nparts;
+    int part_nbones[MOVES_PARTS]; int16_t part_bone[MOVES_PARTS][MOVES_PART_BONES];
 } MoveGraph;
 
 int moves_read(const Bundle *monster, MoveGraph *g);  /* the bundle's MONSTER_DATA; 0 = ok */

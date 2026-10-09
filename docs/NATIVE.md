@@ -18,7 +18,7 @@ from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and 
 must have been extracted by `build.ps1` first (or pass the path to your own `RAMPAGE.VOL`).
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
-Page Up / Page Down the block, 1-7 the city, N day or night, F fog, M the next monster (none, then all 30), K / L
+Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
 the monster's clips, G play or the free camera, F12 a screenshot, Esc quit. In play (the default with `--monster`)
 the keys are a pad: W A S D or the arrows the left stick, Space Cross (jump), J Square (punch), K Triangle (kick),
 L Circle (grab), R R2 (roar); the monster runs its own move graph and the game's camera follows it
@@ -75,7 +75,8 @@ its velocity and falls by 60 units/s² (unless `disableGravity`), and meeting th
 in its column, so a held Cross jumps higher, a double jump flips, a butt slam lands in its impact
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
-punch). One stand-in remains for game code not read: a start through a slot (a landing) blends in (it takes no
+punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
+hides them): the punch's fist, the kick's foot. One stand-in remains for game code not read: a start through a slot (a landing) blends in (it takes no
 transition, so which way it comes in is not traced). The monster stays within the street (x ±75, y −30 … −3).
 
 ## Not there yet
