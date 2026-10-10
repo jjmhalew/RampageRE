@@ -192,7 +192,8 @@ it and are pulled onto it, so the fires sit about 8 from the centre, at z ≈ �
   after a point is found (Levels.scr 355 … 358): `game_rng`, `game_frand`.
 - `Free` (0x166BA0) is a debug fly camera on a pad, holding the camera without input; the scripts pass through it
   within one call [R]. `Follow` (0x3124E0 / 0x3123F0) keeps the shown camera's turn and fov and follows player 1's
-  monster at the offset it had when it began [R]; **here it holds the camera** (no script uses it). A local offset is
+  monster at the offset it had when it began (a world offset; 0 without a monster) [R]; as here, `DCM_FOLLOW` (no
+  script uses it). A local offset is
   off.x × row0 + off.y × row1 + off.z × row2 + place of the object's matrix (0x311884) [R]; here it turns by the
   object's facing, the same for an upright object (every script passes 0). The script camera's callback
   (`setCallback`), `setFovTarg`, `enableInertia`, `setPosParms` … are not bound (no script calls them).

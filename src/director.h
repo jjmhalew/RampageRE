@@ -183,7 +183,10 @@ typedef struct {
     CamView snap;            /* +0x24 the camera when the blend began */
     CamView out;             /* +0x70 the result (before the shake munger) */
     float rage_time;         /* Monsters::restoreCam's timer, 0 none */
-    float frame_hz;          /* the game's frame rate for the per-frame smoothing: 60 */
+    CamView follow;          /* the Follow mode (FollowPlayerCamMode 0x4D5D10): the camera shown when it began */
+    float follow_off[3];     /* +0x40: that camera's place less player 1's monster's then (0 without one) */
+    float p1[3]; int have_p1;   /* player 1's monster (gWorld +0x40) as the last frame gave it */
+    float frame_hz;          /* the world's step rate for the per-frame smoothing: 30 */
 } CamDirector;
 
 void dircam_init(CamDirector *d, GameCamera *tt);    /* TwoTilts current */

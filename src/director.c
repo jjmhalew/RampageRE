@@ -1431,6 +1431,11 @@ static void activate(CamDirector *d, int m)          /* the mode's +0xC */
         cam_activate(d->tt);
     else if (m == DCM_SCRIPT)
         script_activate(&d->script, &d->out);
+    else if (m == DCM_FOLLOW) {                      /* 0x3124E0: the shown camera's turn, place and fov; the place */
+        d->follow = d->out;                          /* less player 1's monster's (+0x2C), else 0x409FF8 (0, 0, 0) [R] */
+        for (int k = 0; k < 3; k++)
+            d->follow_off[k] = d->have_p1 ? d->out.pos[k] - d->p1[k] : 0;
+    }
 }
 
 /* CamController::setMode (0x167400): the mode the blend comes from is not taken again; the new one is (re)activated;
@@ -1535,8 +1540,14 @@ static void mode_view(CamDirector *d, int m, const DirObject *o, int n, float dt
         memcpy(v->pos, s->last_pos, sizeof v->pos);
         rows_from_quat(s->last_q, v->rows);
         v->fov = s->fov;
+    } else if (m == DCM_FOLLOW) {                    /* 0x3123F0: player 1's monster + the offset, the turn and fov kept;
+                                                      * without a monster the camera stays [R] (no script uses it) */
+        *v = d->follow;
+        if (n > 0)
+            for (int k = 0; k < 3; k++)
+                d->follow.pos[k] = v->pos[k] = o[0].pos[k] + d->follow_off[k];
     } else {
-        *v = d->out;                                 /* Free, Follow: the camera stays [G: not used by the scripts] */
+        *v = d->out;                                 /* Free: a debug fly camera on a pad, held without input [R] */
     }
 }
 
@@ -1547,6 +1558,10 @@ void dircam_update(CamDirector *d, float dt, const DirObject *objs, int nobjs, C
     if (d->rage_time > 0 && (d->rage_time -= dt) <= 0) {   /* Monsters::restoreCam */
         d->rage_time = 0;
         dircam_set_prev_mode(d, 0.5f);
+    }
+    if (nobjs > 0) {
+        memcpy(d->p1, objs[0].pos, sizeof d->p1);
+        d->have_p1 = 1;
     }
     CamView nv;
     mode_view(d, d->cur, objs, nobjs, dt, &nv);
