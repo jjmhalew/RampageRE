@@ -94,16 +94,6 @@ static void rot_z(float r[9], float a)
     float m[9] = { c, s, 0, -s, c, 0, 0, 0, 1 };
     memcpy(r, m, sizeof m);
 }
-/* the rotation by a about the unit axis u (right-handed) */
-static void rot_axis(float r[9], const float u[3], float a)
-{
-    float c = cosf(a), s = sinf(a), t = 1 - c, x = u[0], y = u[1], z = u[2];
-    float m[9] = { t * x * x + c, t * x * y + s * z, t * x * z - s * y,
-                   t * x * y - s * z, t * y * y + c, t * y * z + s * x,
-                   t * x * z + s * y, t * y * z - s * x, t * z * z + c };
-    memcpy(r, m, sizeof m);
-}
-
 static void update_world(StreetObj *o)
 {
     for (int c = 0; c < 3; c++) {
@@ -120,25 +110,39 @@ static void world_to_object(const StreetObj *o, const float w[3], float l[3])   
         l[r] = o->rot[r * 3] * w[0] + o->rot[r * 3 + 1] * w[1] + o->rot[r * 3 + 2] * w[2];
 }
 
-/* WorldObject.rotateAA(angle, axis): about the axis in its own frame [G: right-handed, so a tree leans away from the
- * monster that pushed it] */
+/* WorldObject.rotateAA(angle, axis) (case 0xE, 0x278320) [R]: R = I + [angle axis]x (0x101F70), its axes made
+ * square again (0x1017F0), in its own frame: right-handed, so a tree leans away from the monster that pushed it;
+ * the turn is atan(angle), and a rotateAA(-total) does not quite undo it */
 static void rotate_aa(StreetObj *o, float angle, const float axis[3])
 {
-    float r[9];
-    rot_axis(r, axis, angle);
+    float tx = angle * axis[0], ty = angle * axis[1], tz = angle * axis[2];
+    float r[9] = { 1, tz, -ty, -tz, 1, tx, ty, -tx, 1 };
+    for (int c = 0; c < 3; c++) {                    /* Gram-Schmidt, axis by axis */
+        float *a = r + 3 * c;
+        for (int p = 0; p < c; p++) {
+            const float *b = r + 3 * p;
+            float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+            for (int k = 0; k < 3; k++)
+                a[k] -= d * b[k];
+        }
+        float l = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        if (l > 1e-3f)
+            for (int k = 0; k < 3; k++)
+                a[k] /= l;
+    }
     mul33(o->rot, r, o->rot);
     update_world(o);
     o->moved = 1;
 }
-/* WorldObject.rotate(e): rot = rot x Rx(e[0]) x Ry(e[1]) x Rz(e[2]), about its own axes [G: as vehicle.c's] */
+/* WorldObject.rotate(e) (case 0xD, 0x278258) [R]: rot = rot x Rz(e[2]) x Rx(e[0]) x Ry(e[1]), about its own axes */
 static void rotate_local(StreetObj *o, const float e[3])
 {
     float r[9];
+    rot_z(r, e[2]);
+    mul33(o->rot, r, o->rot);
     rot_x(r, e[0]);
     mul33(o->rot, r, o->rot);
     rot_y(r, e[1]);
-    mul33(o->rot, r, o->rot);
-    rot_z(r, e[2]);
     mul33(o->rot, r, o->rot);
     update_world(o);
     o->moved = 1;
@@ -157,11 +161,10 @@ static void set_facing(StreetObj *o, const float e[3])
     o->moved = 1;
 }
 
-/* setPulseDelay: [G] the next pulse is that far from now and they go on at that delay; 0 stops them */
+/* setPulseDelay (0x2AA2A0): only the delay; the pulse's clock (o->pulse) runs on [R] */
 static void set_pulse(StreetObj *o, float delay)
 {
     o->pulse_delay = delay;
-    o->pulse = delay;
 }
 
 /* ---------------------------------------------------------------- properties */
@@ -830,10 +833,10 @@ static void step(StreetObjs *s)
         StreetObj *o = &s->o[i];
         if (!o->alive)
             continue;
-        if (o->pulse_delay > 0) {                    /* onPulse */
-            o->pulse -= TIMESTEP;
-            if (o->pulse <= 1e-6f) {
-                o->pulse += o->pulse_delay;
+        if (o->pulse_delay >= 0.01f) {               /* onPulse [R 0x309BA0]: the clock runs only with a delay of */
+            o->pulse += TIMESTEP;                    /* 0.01 or more; at the delay it is taken off, once a frame */
+            if (o->pulse >= o->pulse_delay) {
+                o->pulse -= o->pulse_delay;
                 if (o->kind == SK_STREET)
                     street_pulse(s, o);
                 else
@@ -997,18 +1000,14 @@ int streetobj_impact(StreetObjs *s, const float centre[3], float radius)
 
 int streetobj_force_damage(StreetObjs *s, const char *name, const float pos[3])
 {
+    /* gWorld.findWorldObject(name) (0x279E70 -> 0x284930) [R]: by name alone (a case-blind hash), the first of its
+     * chain [G: the chain's order, taken as the objects'] */
     int best = -1;
-    float bd = 25;                                   /* [G] within 5 */
-    for (int i = 0; i < s->n; i++) {
+    (void)pos;
+    for (int i = 0; i < s->n && best < 0; i++) {
         const StreetObj *o = &s->o[i];
-        if (!o->alive || o->kind != SK_ROOF || !same_text(o->name, name))
-            continue;
-        float d[3] = { o->world[12] - pos[0], o->world[13] - pos[1], o->world[14] - pos[2] };
-        float q = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        if (q < bd) {
-            bd = q;
+        if (o->alive && o->kind == SK_ROOF && same_text(o->name, name))
             best = i;
-        }
     }
     if (best < 0)
         return -1;

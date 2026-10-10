@@ -2010,6 +2010,7 @@ static void feet_update(void *ctx, IkFeet *f)
     }
     m.blend_left = in->blend_left;
     m.blend_time = in->blend_time;
+    m.steps = 30.0f / 60;                            /* a viewer frame of 1/60 s is half a world step */
     foot_update(&mo->feet, &m, f->w, f->pos);
 }
 

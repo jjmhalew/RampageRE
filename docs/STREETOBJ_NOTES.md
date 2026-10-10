@@ -192,12 +192,21 @@ leans away, held while the monster stays within 7.
 ## Not traced (stand-ins in streetobj.c) [G]
 - The shape tests are the collision world's (collide.c): a blow is the attack sphere against the object's shape
   (0x280470, `collide_obj_sphere`), a touch the monster's box (3 each way across, 8.5 tall) against it (0x2801A0,
-  `collide_obj_box`) [G: the game tries the monster's spheres for a touch]. The shape is 0x28FD70's
+  `collide_obj_box`); the game tests the monster's unarmed spheres for a touch (0x2E22B0 → 0x280470), its box only
+  for the push-out (0x2E2C50) [R; not done here]. The shape is 0x28FD70's
   (`collide_shape_pick`: the template's then the instance's `CollisionBox`, `CollisionRadius` or `AutoCollisionBox`
-  with the model's box; else the model's bounding sphere [G: taken as the box's, so a `TelephonePole1`, which sets
-  none, is a sphere of 6.1]), read when the object is added; `box_min` / `box_max` hold its box. One hit list for the
-  whole attack (the game keeps one per body part's attack record).
-- `setPulseDelay` restarts the count from the call and the pulses go on at that delay; 0 stops them.
+  with the model's box; else the sphere the model keeps (0x184CB0) [R; taken here as the box's, so a
+  `TelephonePole1`, which sets none, is a sphere of 6.1]), read when the object is added; `box_min` / `box_max` hold
+  its box. One hit list for the whole attack (the game keeps one per body part's attack record, 8 ids at +0x6,
+  0x2E33A0).
+- `setPulseDelay` only sets the delay (0x2AA2A0) and the clock runs on: with a delay of 0.01 or more it grows by the
+  step and at the delay it is taken off, onPulse once a frame; below 0.01 neither (0x309BA0) [R].
+- `rotate(e)` is rot × Rz(e[2]) Rx(e[0]) Ry(e[1]) (case 0xD, 0x278258) and `rotateAA(a, axis)` rot × (I + [a axis]×)
+  made square again (case 0xE, 0x278320; 0x101F70, 0x1017F0) [R].
+- `requestDelete` (0x285DD0) only marks an object in the world (0x800) for the world's walk to delete at its turn,
+  one frame later than here, the rest of the script call running on [R]; here it goes at once.
+- `gWorld.findWorldObject(name)` (0x279E70 → 0x284930) finds by name alone in a case-blind hash [R]; the first of
+  its chain is taken as the first such object [G].
 - `rotateAA` turns about the object's own axis, right-handed (so a pole falls away from the monster); `rotate` is
   rot × Rx × Ry × Rz (as vehicle.c's RocketBase); `setFacing` is Rz × Rx × Ry. A requestDelete takes the object at the
   end of its call (the rest of the call still runs, as the chimney's fallOff after DeleteOnHit).

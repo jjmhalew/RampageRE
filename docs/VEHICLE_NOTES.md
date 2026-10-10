@@ -59,8 +59,10 @@ template's script.
   - 2 at the end;
   - 4 every frame a monster is nearer than that (3D distance) while it simply moves.
 
-[G] Only these reach the script: `Vehicle_FireTruck.bsf` deletes its truck on any callback, so "moving" cannot be
-one of them. The speed is constant: a car never brakes for a monster.
+Only these reach the script [R]: the frame (0x309AC0) sends the mover's answers 2, 3 and 4 as onMoverCallback,
+never 1 or 0, and a LineMover (0x315E10) answers 1 moving, 3 at a new segment (none on a 2-point line), 2 at the end
+(every frame after), 4 moving with a monster within MonsterResponseDist; `Vehicle_FireTruck.bsf` deletes its truck on
+any callback. The speed is constant: a car never brakes for a monster.
 
 ## Vehicle.bsf
 `this.flags` [R]:
@@ -209,11 +211,13 @@ reports every award with its template name, so the viewer can count challenge go
   and the radius of the object's shape (√ of a box's max x, as the game reads it). OnHitGround every sub-step it
   touches the street (so a car left on the street reaches 40 and explodes), TakeImpact on both objects it meets:
   Vehicle.bsf's on the car, `VE_IMPACT` for another module's (a building is hit with radius Mass / 1000 = 12).
-  There is no rest: it rolls on. [G] The smash's spin is its turn rates about the car's own axes; the sphere is
-  centred on the car's place, which is its base, so a car on the street rests one radius up; the mover leaves the
-  monsters out (`COLLIDE_F_MONSTER`). The meeting of two flying objects takes the other as static (collide.c).
+  There is no rest: it rolls on. The smash's spin is its turn rates as an angular velocity about a world axis
+  (smashObject 0x2B2F50 → setRotation 0x28DD80) [R]; the sphere is centred on the car's place, which is its base, so
+  a car on the street rests one radius up; the mover leaves the monsters out (their spheres are type 3, met by
+  nothing: 0x27FD70) [R]. The meeting of two flying objects takes the other as static (collide.c).
 - **The shape** in the world: 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox with
-  the model's box, else the model's bounding sphere [G: the box's]), read once. The traffic is PushOutMonsters: the
+  the model's box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres) [R; here the box's
+  bounding sphere, G]), read once. The traffic is PushOutMonsters: the
   monster is pushed out of a car's box (collide_monster).
 - **A blow's shape:** the model's box (AutoCollisionBox) from the host, else the `ShadowRect` 2.5 high.
 - **The hold:** the HeldObjectMover's `MajorAxis` frame is not ported; the object takes the hand's turn. A thrown

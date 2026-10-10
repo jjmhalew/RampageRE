@@ -286,8 +286,9 @@ static void record_update(FootState *s, int r, const FootFrame *m, const float f
 {
     FootRec *f = &s->rec[r];
     int planted = (f->flags & FOOT_PLANTED) != 0;
+    float steps = m->steps > 0 ? m->steps : 1;
     if (f->flags & FOOT_EASING) {
-        float k = planted ? s->keep[1] : s->keep[3];
+        float k = powf(planted ? s->keep[1] : s->keep[3], steps);
         f->shown = f->weight * (1 - k) + f->shown * k;
         if (fabsf(f->shown) <= SNAP)
             f->shown = 0;
@@ -319,7 +320,7 @@ static void record_update(FootState *s, int r, const FootFrame *m, const float f
         }
     }
     if (f->flags & FOOT_HELD) {
-        float k = planted ? s->keep[0] : s->keep[2];
+        float k = powf(planted ? s->keep[0] : s->keep[2], steps);
         for (int j = 0; j < 3; j++)
             f->held[j] = f->at[j] + k * (f->held[j] - f->at[j]);
     }

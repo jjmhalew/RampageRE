@@ -97,8 +97,8 @@ The foot lifts: record +0x24 &= ~3, +0x0 = 0. Nothing else: no effect, the ancho
 5. 0x2F4A20 (record 1) / 0x2F4B70 (record 0) on the effect record: the definition +0x144 (water) or +0x140
    (ground), none: return. The foot's own live effect (+0x14C for record 1, +0x148 for record 0) is made anew
    (0x208220 on the effect manager 0x48A340, the old one freed with 0x207A40) only when it holds another
-   definition; then it is placed (vtable +0x8C, 0x1F2500: +0x50), given the frame at gp−0x70F0 (+0x90, 0x1F1D60:
-   [G] the identity) and restarted (+0x2C, 0x1F2260).
+   definition; then it is placed (vtable +0x8C, 0x1F2500: +0x50), given the frame at gp−0x70F0 (+0x90, 0x1F1D60: the
+   identity 0x40A040, set by the static initializer 0x435D80 [R]) and restarted (+0x2C, 0x1F2260).
 
 The record itself is not touched: footPlant only makes the footfall. No sound but the effect's, no camera shake, no
 damage to people, vehicles or roofs (the roof stomp is the separate event `Monsters::damageRoof` →
@@ -211,7 +211,8 @@ node +0x7DB0, through the matrix as above); p.z = the water's +0x34 with a water
 (0x2E8530); 0x2F48D0 starts WaterImpactFx (+0x154) or GroundImpactFx (+0x150) in the landing's own live effect
 (+0x158), the same way as a step. In the same function: mode 4, the landing slot, the water pressed 1.25 × the radius
 across (0x2DCA94 → 0x2E2BD0, WATER_NOTES.md), the fall's damage (+0xBA88), and, coming from modes 1 / 2 and unless
-+0x108, a call on the object at gp−0x6F5C (vtable +0x28, with +0xFC and 400) [G: the pad's rumble].
++0x108, a call on the object at gp−0x6F5C (vtable +0x28, with +0xFC and 400): the pad's rumble, a
+PS2ControllerPack (0x488700, static initializer 0x4372C0; 0x1A5020 → scePadSetActDirect) [R]; not ported.
 
 ## Where there are none
 - Climbing (mode 5): the climb clips send no footPlant. The mantle onto a roof (`Side_L_Transition_Mantle` at 0.625
@@ -245,11 +246,11 @@ at once and the walk is as fast as without the IK.
   cancel's test, the drop rule, the slip's share, the easing shares and snaps, the planted z and reach clamp, the
   drag's arc and its end, the two IK classes and their chains, the 3-link solve at the full share, the ankle.
 - [G]: that the viewer's `scene_monster_node` side convention equals the game's swap (argued from the two, not run);
-  the frame gp−0x70F0 being the identity; restarting a foot's effect (the game) versus starting a new one (the
+  restarting a foot's effect (the game) versus starting a new one (the
   viewer) is the same for these one-shot effects; the 3-link's blend below the full share, read as 0x2F7E10's (the
-  same blocks with one bone less, as ik_arm ports it) and not traced line by line; 0x1017F0 taken as a no-op on rigid
-  matrices; the arc cap kept per monster (the game keeps the first monster's for the whole game); the shares applied
-  once a viewer frame (the game's frame rate: 60 [G]); `ik_clip_node` holding and turning the root as the viewer's
+  same blocks with one bone less, as ik_arm ports it) and not traced line by line; 0x1017F0 is a row Gram-Schmidt, a
+  no-op on rigid matrices [R]; the arc cap kept per monster (the game keeps the first monster's for the whole game); the shares applied
+  per world step, 1/30 s (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`); `ik_clip_node` holding and turning the root as the viewer's
   posing does (the player's own clip query was not traced into); the mirrored 3-link solved on the other side's nodes
   with the target reflected (as the arms), where the game solves the mirrored pose itself — the same up to the bend's
   sense, which both put forward.

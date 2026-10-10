@@ -149,6 +149,8 @@ typedef struct {
     float reach[2];                                  /* its leg's length (0x2F9060) */
     float blend_left, blend_time;                    /* the clip blend (animation player +0x4E58, 1 / +0x4E5C):
                                                       * a drag lasts as long, on an arc of sin(pi x done) */
+    float steps;                                     /* this frame in world steps (dt x 30; 0: one): the shares are
+                                                      * per 1/30 s step (RWorld 0x2B7800) */
 } FootFrame;
 /* 0x33D450, every frame: each record's share eased (0x33CF90), a planted foot on the ground under the monster (+ the
  * ankle) and within its leg's reach, a free one where the clip has it, a dragged one at least on its arc until the

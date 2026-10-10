@@ -105,15 +105,16 @@ static void mul33(const float a[9], const float b[9], float out[9])
             t[c * 3 + r] = a[r] * b[c * 3] + a[3 + r] * b[c * 3 + 1] + a[6 + r] * b[c * 3 + 2];
     memcpy(out, t, sizeof t);
 }
-/* rot = rot x Rx(e[0]) x Ry(e[1]) x Rz(e[2]): the object turned about its own axes [G: WorldObject.rotate's order] */
+/* WorldObject.rotate(e) (case 0xD, 0x278258) [R]: R = 0x101330(z, x, y) = Rz(e[2]) Rx(e[0]) Ry(e[1]), as setFacing,
+ * taken in the object's own frame: rot = rot x R */
 static void rotate_local(float rot[9], const float e[3])
 {
     float cx = cosf(e[0]), sx = sinf(e[0]), cy = cosf(e[1]), sy = sinf(e[1]);
     float rx[9] = { 1, 0, 0, 0, cx, sx, 0, -sx, cx }, ry[9] = { cy, 0, -sy, 0, 1, 0, sy, 0, cy }, rz[9];
     rot_z(rz, e[2]);
+    mul33(rot, rz, rot);
     mul33(rot, rx, rot);
     mul33(rot, ry, rot);
-    mul33(rot, rz, rot);
 }
 
 static void update_world(VehObj *o)
@@ -318,10 +319,9 @@ static void obj_delete(Vehicles *v, VehObj *o)
     emit(v, VE_REMOVED, idx(v, o), o->name, o->pos);
 }
 
-static void set_pulse(VehObj *o, float delay)        /* setPulseDelay: [G] the next pulse is that far from now */
+static void set_pulse(VehObj *o, float delay)        /* setPulseDelay (0x2AA2A0): only the delay [R] */
 {
     o->pulse_delay = delay;
-    o->pulse_timer = delay;
 }
 
 /* ---------------------------------------------------------------- the movers */
@@ -463,9 +463,8 @@ static void sphere_step(Vehicles *v, VehObj *o, float dt)
         collide_mover_init(&o->cm, r, tnum(o, "Gravity", 9.81f), tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
                            tnum(o, "SlidingFriction", 0.4f), tnum(o, "InertiaSolidity", 1));
         float w[3];
-        for (int k = 0; k < 3; k++)                  /* the turn rates about its own axes, in the world */
-            w[k] = o->sphere.tumble ? o->rot[k] * o->sphere.spin[0] + o->rot[3 + k] * o->sphere.spin[1] +
-                                      o->rot[6 + k] * o->sphere.spin[2] : 0;
+        for (int k = 0; k < 3; k++)                  /* [R 0x2B2F50 -> 0x28DD80] the rates as given: a world axis */
+            w[k] = o->sphere.tumble ? o->sphere.spin[k] : 0;
         collide_mover_spin(&o->cm, w);
         memcpy(o->cmat, o->rot, sizeof o->rot);
         memcpy(o->cmat + 9, o->pos, sizeof o->pos);
@@ -925,17 +924,17 @@ static void ft_init(Vehicles *v, VehObj *o)
 
 /* [G] gWorld.getRandomBuilding: any standing building; Building.getPosition: the middle of its footprint, on the
  * ground */
+/* gWorld.getRandomBuilding (0x2AEC40) [R]: from (int)(n x frand) round the list, the first not gone */
 static int ft_pick_building(Vehicles *v)
 {
-    int n = 0;
-    for (int i = 0; i < v->nb; i++)
-        n += !v->b[i].gone;
-    if (!n)
+    if (v->nb <= 0)
         return -1;
-    int k = (int)(frand(v) * (float)n);
-    for (int i = 0; i < v->nb; i++)
-        if (!v->b[i].gone && k-- == 0)
-            return i;
+    int start = (int)(frand(v) * (float)v->nb);
+    for (int i = 0; i < v->nb; i++) {
+        int k = (start + i) % v->nb;
+        if (!v->b[k].gone)
+            return k;
+    }
     return -1;
 }
 static void building_pos(const ArmyBox *b, float out[3])
@@ -1069,7 +1068,8 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
         float sy = o->w.rot_rate * dt, sp = o->w.elev_rate * dt;
         o->ft_yaw = wrap_pi(o->ft_yaw + (fabsf(dy) <= sy ? dy : (dy > 0 ? sy : -sy)));
         o->ft_pitch += fabsf(dp) <= sp ? dp : (dp > 0 ? sp : -sp);
-        on_target = fabsf(wrap_pi(want_yaw - o->ft_yaw)) < 0.02f && fabsf(want_pitch - o->ft_pitch) < 0.02f;
+        /* [R 0x29ADE0] on target: the turn within pi / 50, the pitch within pi / 100 */
+        on_target = fabsf(wrap_pi(want_yaw - o->ft_yaw)) <= 0.0628f && fabsf(want_pitch - o->ft_pitch) < 0.0314f;
     }
     float yaw = o->facing + o->ft_yaw, cp = cosf(o->ft_pitch);
     float dir[3] = { -sinf(yaw) * cp, cosf(yaw) * cp, sinf(o->ft_pitch) };
@@ -1084,8 +1084,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
         } else {
             o->w.age += dt;
             float reach = fminf(o->w.velocity > 0 ? o->w.velocity * o->w.age : o->w.range, o->w.range);
-            if (o->ft_has_target && tdist < reach)
-                reach = tdist;
+            (void)tdist;                             /* [R 0x295750] the beam is not cut at its target */
             int mon;
             float t = reach > 0.001f ? ray_monster(v, from, dir, reach, &mon) : -1;
             o->beam.on = 1;
@@ -1349,11 +1348,12 @@ static void obj_step(Vehicles *v, VehObj *o)
         if (o->kind == VK_FIRETRUCK)
             ft_weapon(v, o, TIMESTEP);
     }
-    o->pulse_timer -= TIMESTEP;
-    if (o->pulse_timer <= 0) {
-        o->pulse_timer = o->pulse_delay > 0 ? o->pulse_timer + o->pulse_delay : 0;
-        if (o->pulse_timer < 0)
-            o->pulse_timer = 0;
+    /* [R 0x309BA0] the pulse's clock runs only with a delay of 0.01 or more; at the delay it is taken off, once a
+     * frame (a delay below 0.01 stops the pulses) */
+    if (o->pulse_delay >= 0.01f)
+        o->pulse_timer += TIMESTEP;
+    if (o->pulse_delay >= 0.01f && o->pulse_timer >= o->pulse_delay) {
+        o->pulse_timer -= o->pulse_delay;
         switch (o->kind) {
         case VK_CAR: if (car_pulse(v, o)) return; break;
         case VK_FIRETRUCK: if (o->phase == VP_ALIVE) ft_pulse(v, o); break;
@@ -1510,9 +1510,20 @@ void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored
     if (g.at && group_items(g, r, 3) == 3)
         for (int k = 0; k < 3; k++)
             off[k] = record_num(r[k]);
-    for (int c = 0; c < 3; c++)
-        for (int k = 0; k < 3; k++)
-            o->rot[c * 3 + k] = hand_world[c * 4 + k];
+    /* [R 0x310ED0] the turn kept in the hand: the MajorAxis row is the hand's z, the next its y, the third their cross
+     * (the cars and the fire truck have MajorAxis 1: x = -hand x, y = hand z, z = hand y) */
+    int major = (int)tnum(o, "MajorAxis", 2);
+    if (major < 0 || major > 2)
+        major = 2;
+    int i1 = (major + 1) % 3, i2 = (major + 2) % 3;
+    float *ax = o->rot;
+    for (int k = 0; k < 3; k++) {
+        ax[major * 3 + k] = hand_world[8 + k];
+        ax[i1 * 3 + k] = hand_world[4 + k];
+    }
+    ax[i2 * 3 + 0] = ax[major * 3 + 1] * ax[i1 * 3 + 2] - ax[major * 3 + 2] * ax[i1 * 3 + 1];
+    ax[i2 * 3 + 1] = ax[major * 3 + 2] * ax[i1 * 3 + 0] - ax[major * 3 + 0] * ax[i1 * 3 + 2];
+    ax[i2 * 3 + 2] = ax[major * 3 + 0] * ax[i1 * 3 + 1] - ax[major * 3 + 1] * ax[i1 * 3 + 0];
     for (int k = 0; k < 3; k++)
         o->pos[k] = hand_world[12 + k] + hand_world[k] * off[0] + hand_world[4 + k] * off[1] + hand_world[8 + k] * off[2];
     update_world(o);
