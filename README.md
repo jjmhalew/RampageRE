@@ -1,5 +1,7 @@
 # RampageRE
 
+[![build](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml/badge.svg)](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml)
+
 A native PC port of *Rampage: Total Destruction* (PS2, Pipeworks / Midway, 2006) that runs the game from
 **your own disc**: no game files are included in this repository.
 
@@ -61,6 +63,15 @@ cd RampageRE
 The first build extracts the disc into `build\disc`, recompiles the game to C++ and builds it (about 30 minutes).
 After that, `.\build.ps1 -Run` rebuilds and starts it. Everything generated lives in `build\` and in the
 PS2Recomp submodule's `src/runner` folder, which are not committed.
+
+### Prebuilt viewer
+The native viewer ([docs/NATIVE.md](docs/NATIVE.md)) is built by GitHub Actions on every push and pull request:
+`rampage.exe` for Windows (`build_viewer.bat`) and `rampage` for Linux (`build_viewer.sh`, needs SDL2). Each run of
+the [build workflow](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml) keeps them as artifacts, and
+each version tag publishes them on the [releases](https://github.com/jjmhalew/RampageRE/releases) page. They hold
+only the port's own code (the program, README.md, LICENSE and two docs), **no game data**: start them with the
+`RAMPAGE.VOL` from your own disc, e.g. `rampage.exe D:\RAMPAGE.VOL Chicago 1`. The recompiled game (`build.ps1`) is
+not built there, as it needs the disc.
 
 ## Repository layout
 | Path | |

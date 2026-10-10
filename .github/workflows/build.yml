@@ -1,0 +1,174 @@
+# Builds the native viewer on every push to main, every pull request and every tag v*: rampage.exe with
+# build_viewer.bat (Windows, Zig) and rampage with build_viewer.sh (Linux, SDL2). No game data is involved: the
+# programs hold only the port's own code, the submodules (PS2Recomp, which with recomp/ needs the disc) are not checked
+# out and build.ps1 never runs. Each package is listed file by file and checked for disc files before it is uploaded.
+# A pushed tag v* also publishes a GitHub release with RampageRE-windows-<tag>.zip and
+# RampageRE-linux-x86_64-<tag>.tar.gz (the program, README.md, LICENSE, docs/NATIVE.md, docs/TEXTURES.md).
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      # build_viewer.bat downloads Zig into tools\zig (checked against its SHA-256) when it is not there yet
+      - uses: actions/cache@v6
+        with:
+          path: tools/zig
+          key: zig-x86_64-windows-0.16.0
+
+      - name: Build
+        shell: cmd
+        run: build_viewer.bat
+
+      - name: Check the exe
+        shell: bash
+        run: ls -l rampage.exe
+
+      # No disc in CI: the viewer must find no RAMPAGE.VOL, say so on stderr (--shot: no message box) and exit 1
+      - name: Smoke test
+        shell: bash
+        timeout-minutes: 2
+        run: |
+          rc=0
+          timeout 60 ./rampage.exe no-such-dir/RAMPAGE.VOL --shot smoke.png --mute > smoke.out 2> smoke.err || rc=$?
+          echo "exit code $rc"; echo "stdout:"; cat smoke.out; echo "stderr:"; cat smoke.err
+          if [ "$rc" = 124 ]; then echo "::error::rampage.exe did not exit (timeout)"; exit 1; fi
+          if [ "$rc" = 0 ]; then echo "::error::rampage.exe exited 0 without a RAMPAGE.VOL"; exit 1; fi
+          grep -q "Cannot read no-such-dir/RAMPAGE.VOL" smoke.err || { echo "::error::no error message on stderr"; exit 1; }
+          if [ -e smoke.png ]; then echo "::error::a picture was written"; exit 1; fi
+          rm -f smoke.out smoke.err
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { $env:GITHUB_SHA.Substring(0, 7) }
+          $name = "RampageRE-windows-$ver"
+          # file by file, never a folder or a glob: nothing else can end up in the zip
+          foreach ($f in 'rampage.exe', 'README.md', 'LICENSE', 'docs/NATIVE.md', 'docs/TEXTURES.md') {
+            $dir = "pkg/$name/" + (Split-Path $f)
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Copy-Item $f $dir
+          }
+          Compress-Archive -Path "pkg/$name" -DestinationPath "$name.zip"
+          "PKG=$name.zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Check the package (no game data)
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $env:PKG))
+          $names = @($zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' })
+          $zip.Dispose()
+          $names
+          $bad = @($names | Where-Object { $_ -match '(?i)\.(vol|elf|iso|bin|cue)$|(^|/)SLES_|(^|/)build/' })
+          if ($bad.Count) { "::error::game data in the package: $($bad -join ', ')"; exit 1 }
+          $root = [IO.Path]::GetFileNameWithoutExtension($env:PKG)
+          $want = 'rampage.exe', 'README.md', 'LICENSE', 'docs/NATIVE.md', 'docs/TEXTURES.md' | ForEach-Object { "$root/$_" }
+          $extra = @($names | Where-Object { -not $_.EndsWith('/') -and $_ -notin $want })
+          $missing = @($want | Where-Object { $_ -notin $names })
+          if ($extra.Count -or $missing.Count) { "::error::unexpected: $($extra -join ', ') missing: $($missing -join ', ')"; exit 1 }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RampageRE-windows
+          path: ${{ env.PKG }}
+
+  # Ubuntu 22.04: glibc 2.35 and SDL 2.0.20, so the binary also runs on older distributions and on SteamOS.
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Install SDL2
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libsdl2-dev libgl-dev
+
+      - name: Build
+        run: sh build_viewer.sh rampage && ls -l rampage && ldd rampage
+
+      # No disc in CI: the viewer must find no RAMPAGE.VOL, say so on stderr (--shot: no message box) and exit 1
+      - name: Smoke test
+        timeout-minutes: 2
+        env:
+          SDL_VIDEODRIVER: offscreen
+          SDL_AUDIODRIVER: dummy
+        run: |
+          rc=0
+          timeout 60 ./rampage no-such-dir/RAMPAGE.VOL --shot smoke.png --mute > smoke.out 2> smoke.err || rc=$?
+          echo "exit code $rc"; echo "stdout:"; cat smoke.out; echo "stderr:"; cat smoke.err
+          if [ "$rc" = 124 ]; then echo "::error::rampage did not exit (timeout)"; exit 1; fi
+          if [ "$rc" = 0 ]; then echo "::error::rampage exited 0 without a RAMPAGE.VOL"; exit 1; fi
+          grep -q "Cannot read no-such-dir/RAMPAGE.VOL" smoke.err || { echo "::error::no error message on stderr"; exit 1; }
+          if [ -e smoke.png ]; then echo "::error::a picture was written"; exit 1; fi
+          rm -f smoke.out smoke.err
+
+      - name: Package
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="$GITHUB_REF_NAME"; else ver="${GITHUB_SHA:0:7}"; fi
+          name="RampageRE-linux-x86_64-$ver"
+          # file by file, never a folder or a glob: nothing else can end up in the tar
+          mkdir -p "pkg/$name/docs"
+          cp rampage README.md LICENSE "pkg/$name/"
+          cp docs/NATIVE.md docs/TEXTURES.md "pkg/$name/docs/"
+          tar -C pkg -czf "$name.tar.gz" "$name"
+          echo "PKG=$name.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Check the package (no game data)
+        run: |
+          tar -tzf "$PKG" | tee pkg.txt
+          if grep -iE '\.(vol|elf|iso|bin|cue)$|(^|/)SLES_|(^|/)build/' pkg.txt; then
+            echo "::error::game data in the package"; exit 1
+          fi
+          root="${PKG%.tar.gz}"
+          printf "$root/%s\n" rampage README.md LICENSE docs/NATIVE.md docs/TEXTURES.md | sort > want.txt
+          grep -v '/$' pkg.txt | sort > have.txt
+          diff want.txt have.txt || { echo "::error::the package does not hold exactly the listed files"; exit 1; }
+          rm -f pkg.txt want.txt have.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RampageRE-linux
+          path: ${{ env.PKG }}
+
+  # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start.
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          new=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed -e 's/[[:space:]]*$//')
+          start="Windows: unzip and start rampage.exe with the path to RAMPAGE.VOL from the root of your own European PS2 disc (SLES-53800), e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1. Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Keys and options: docs/NATIVE.md. The game files are not included - see README.md."
+          if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* --title "RampageRE $GITHUB_REF_NAME" --notes-file notes.md
