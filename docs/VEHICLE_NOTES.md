@@ -200,8 +200,8 @@ reports every award with its template name, so the viewer can count challenge go
 | a rocket started | 0 (destruction) | 100 |
 
 ## Not traced (stand-ins in vehicle.c)
-- **Random numbers and time:** an LCG for both of the game's generators. The scripts run at a fixed 1/60 frame
-  (gWorld.getTimeStep).
+- **Random numbers and time:** an LCG for both of the game's generators. The scripts run at the world's fixed
+  step, gWorld.getTimeStep, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
 - **Pulses:** `setPulseDelay` is taken to restart the count from the call.
 - **The SphereMover** is the game's SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) in the frame's
   collision world (`vehicle_set_collide`, `vehicle_collide_add`): the template's `Gravity` (35 from

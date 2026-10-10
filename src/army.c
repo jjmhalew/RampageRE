@@ -7,7 +7,7 @@
 #include "army.h"
 
 #define PI 3.14159265f
-#define TIMESTEP (1.0f / 60.0f)                      /* [G] gWorld.getTimeStep(): one frame */
+#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
 #define DELETE_ME (4 | 8 | 16)                       /* [R] what a script handler returns to have its object deleted */
 #define MAX_EVENTS 512
 #define MAX_SHOTS 128

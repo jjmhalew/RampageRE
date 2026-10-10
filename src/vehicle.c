@@ -7,7 +7,7 @@
 #include "vehicle.h"
 
 #define PI 3.14159265f
-#define TIMESTEP (1.0f / 60.0f)                      /* [G] gWorld.getTimeStep(): one frame */
+#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
 #define MAX_OBJS 128
 #define MAX_EVENTS 512
 #define SLOTS 3                                      /* the current block and the two behind it */

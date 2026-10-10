@@ -106,7 +106,14 @@ flags (0x167660: 1 for TwoTilts and Script).
 camera.prb's `Script` group is empty; the loader 0x3121C0 sets: nothing linked, smoothing (+0x54) 0.95, inertia on
 (+0xEC place, +0xED rotation), a place follower (+0xA8, 0x13B1B0: speed 1000, accel 1000, radius 0.1), a rotation
 follower (+0x58, 0x13AD70: π/2 rad/s, π/2 rad/s², 0.001) and a fov follower (+0xDC, 0x13B2E0: π/2 rad/s). The
-followers keep per-frame steps (× the frame's dt at load) **[G: one frame at load, 1/60]**.
+followers keep per-frame steps (× the frame's dt at load: gWorld +4, the world's step, 1/30) [R 0x3121C0; the step
+0x13AF00 takes no dt].
+
+**The world's step** [R]: the world's init sets its rate +8 = 60 (50 below a 51 Hz display, 0x285A20), then RWorld's
+(0x2B7800) +8 = 30 (25) and the step +4 = 1/30 (1/25); nothing else writes it. The game's tick (0x288340) and the
+camera manager (0x27EFA0) pass that step as their dt, and `gWorld.getTimeStep()` (0x2AEFB8) answers it: the game
+runs at 30 steps a second. The port's script modules (army, parade, people, rail, streetobj, vehicle) use 1/30 for
+it, and the camera's smoothing is per 1/30 s step (`frame_hz` 30).
 
 - **setTarget / setLocation(obj, local, x, y, z, cut)**: with an object, its place plus the offset (local: through its
   matrix) each frame; with `nul`, the offset is a world point. The sixth argument cuts.
@@ -178,14 +185,19 @@ it and are pulled onto it, so the fires sit about 8 from the centre, at z ≈ �
 
 ## What the port does not have
 
-- **[G]** findPointInRubble: the shape's +0x20 … +0x34 taken as the model's bounds (`city_shape_box`); a missing
-  BackRowOffset taken as 10 (the game reads address 0); gWorld's generator shared with `frand` is not (reveal.c keeps
-  its own seed).
-- **[G]** The follower constants per second (one frame's dt at load taken as 1/60); the script camera's smoothing per
-  frame at 60 Hz (`frame_hz`).
-- **[G]** `Free` and `Follow` hold the camera (the scripts only pass through Free). A local offset turns by the
-  object's facing. The script camera's callback (`setCallback`), `setFovTarg`, `enableInertia`, `setPosParms` … are
-  not bound (the struct has their fields).
-- **[G]** Obstacle avoidance of the walk (0x2EDB40 with its fourth argument: other monsters), the destroy-buildings
-  goal (type 2, the bots: now ported, MULTIPLAYER_NOTES.md), the global 0x4D6A9A.
-- **[G]** A play-move goal whose state is unknown ends at once (the game's would never begin).
+- findPointInRubble [R]: the shape's +0x20 … +0x34 are the union of its parts' boxes (0x193B80), which equal the
+  meshes' vertex bounds (all 1645 type-0 meshes of HongKong.bdp and Chicago.bdp checked), so `city_shape_box` gives
+  the same box; every BlockDef has its own BackRowOffset (the game would read address 0 without one); the search
+  shares gWorld +0x828 with `frand` (0x106BD0), drawing only when a box counts, and ResultsNI draws its fire's frand
+  after a point is found (Levels.scr 355 … 358): `game_rng`, `game_frand`.
+- `Free` (0x166BA0) is a debug fly camera on a pad, holding the camera without input; the scripts pass through it
+  within one call [R]. `Follow` (0x3124E0 / 0x3123F0) keeps the shown camera's turn and fov and follows player 1's
+  monster at the offset it had when it began [R]; **here it holds the camera** (no script uses it). A local offset is
+  off.x × row0 + off.y × row1 + off.z × row2 + place of the object's matrix (0x311884) [R]; here it turns by the
+  object's facing, the same for an upright object (every script passes 0). The script camera's callback
+  (`setCallback`), `setFovTarg`, `enableInertia`, `setPosParms` … are not bound (no script calls them).
+- The walk (WalkToGoal 0x2F1F20) calls 0x2EDB40 with mode 0 and no avoidance: the stick along the flat direction,
+  action 9 [R]; only the bots' callers avoid other monsters. 0x4D6A9A is a debug byte nothing writes [R].
+- **[G]** A play-move goal whose state is unknown ends at once. In the game (0x2D9890 → NULL, 0x2F1DB0) it never
+  begins and is forced every frame: no moveComplete, the queue stuck. Only `Ground_Shakeoff` is missing, asked by
+  Levels.scr only when frand comes out at exactly 1.0 (odds about 6e-8).

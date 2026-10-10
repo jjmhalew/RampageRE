@@ -165,6 +165,9 @@ void game_add_points(Game *g, int slot, int cat, int amount);
 /* <City>::setBossBlockFinished, the boss AIInstance's CompletionCallback; centre_down: New York's centre building
  * (0, 10, 1) is falling or destroyed */
 void game_set_boss_finished(Game *g, int centre_down);
+/* gWorld +0x828, the state frand and findPointInRubble share (0x106BD0), and a draw of frand from it */
+uint32_t *game_rng(Game *g);
+float game_frand(Game *g);
 
 /* ---- the monster graph's script calls (Monsters.bsf) */
 /* Monsters::becomeHuman: 1 = make the streaker (createStreaker) and hide the monster; only while a block is played

@@ -486,11 +486,9 @@ static float results_ni(Game *g, float last)         /* ResultsNI: the winners p
             reset_at(g, w[3], -28, -24, PI * 1.25f);
             emit(g, GE_AI, w[3])->a = 1;
         }
-        for (int i = 0; i < 3; i++) {                /* fires in the rubble around (0, -21): findPointInRubble(8) */
-            int fx = (int)(2.0f * frand(g));
-            GameEvent *e = emit(g, GE_RUBBLE_FX, -1);
-            e->a = i;
-            e->name = fx < 1 ? "Rubble_Smolder" : "Fire_Loop";
+        for (int i = 0; i < 3; i++) {                /* fires in the rubble around (0, -21): findPointInRubble(8); */
+            GameEvent *e = emit(g, GE_RUBBLE_FX, -1);   /* the host draws (int)(2 frand) once a point is found */
+            e->a = i;                                /* (Levels.scr 355 .. 358), from game_rng's state */
             e->pos[1] = 20.0f - 41.0f;
             e->f = 8;
         }
@@ -1151,6 +1149,9 @@ void game_set_result(Game *g, int result) { if (g) g->result = result; }
 void game_auto_results(Game *g, float seconds) { if (g) g->auto_results = seconds; }
 void game_restart_shell(Game *g) { if (g) set_state(g, GS_EXIT); }
 void game_add_points(Game *g, int slot, int cat, int amount) { if (g) add_points(g, slot, cat, amount); }
+
+uint32_t *game_rng(Game *g) { return g ? &g->rng : NULL; }
+float game_frand(Game *g) { return g ? frand(g) : 0; }
 
 void game_set_boss_finished(Game *g, int centre_down)
 {

@@ -136,7 +136,7 @@ typedef struct {
 } Rubble;
 typedef struct {
     Group (*tmpl)(void *ctx, const char *name);      /* a building template by TemplateName (0x285710) */
-    /* the shape's bounds in its own frame (its +0x20 .. +0x34) [G: the model's bounds]; 0 = ok */
+    /* the shape's bounds in its own frame (its +0x20 .. +0x34, its parts' boxes: 0x193B80) [R]; 0 = ok */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
     void *ctx;
 } RubbleHost;

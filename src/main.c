@@ -2351,9 +2351,16 @@ static void game_step(Viewer *v, float dt)
             case GE_RUBBLE_FX: {                     /* findPointInRubble(pos, 8): a point in the block left's
                                                       * rubble, 1.5 up; none, no effect */
                 float loc[3];
-                if (v->fxw && e->a >= 0 && e->a < 3 && e->name && rubble_find_point(&v->rubble, e->pos, e->f, loc)) {
+                uint32_t *rng = game_rng(v->game);
+                if (rng)                             /* the world's one state (gWorld +0x828) */
+                    v->rubble.seed = *rng;
+                int found = v->fxw && e->a >= 0 && e->a < 3 && rubble_find_point(&v->rubble, e->pos, e->f, loc);
+                if (rng)
+                    *rng = v->rubble.seed;
+                if (found) {
                     float at[3] = { loc[0], loc[1] + v->block_shift, loc[2] + 1.5f };
-                    const char *name = !strcmp(e->name, "Rubble_Smolder") && loc[1] > -23 ? e->name : "Fire_Loop";
+                    int fx = (int)(2.0f * game_frand(v->game));   /* Levels.scr: drawn after the point is found */
+                    const char *name = fx < 1 && loc[1] > -23 ? "Rubble_Smolder" : "Fire_Loop";
                     if (v->rubble_fx[e->a] >= 0)
                         fx_stop(v->fxw, v->rubble_fx[e->a]);
                     v->rubble_fx[e->a] = fx_spawn(v->fxw, name, at, NULL, 1);

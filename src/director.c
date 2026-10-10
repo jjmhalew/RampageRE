@@ -1354,7 +1354,7 @@ void dircam_init(CamDirector *d, GameCamera *tt)
     d->tt = tt;
     d->cur = d->prev = DCM_TWOTILTS;
     d->old = DCM_NONE;
-    d->frame_hz = 60;
+    d->frame_hz = 30;                                /* the world's step: gWorld +8 = 30 (RWorld 0x2B7800) [R] */
     script_load(&d->script);
     for (int i = 0; i < 3; i++)
         d->out.rows[i][i] = 1;

@@ -287,7 +287,8 @@ Floating = 100
 `army_score_building` keeps the chain per building.
 
 ## Not traced (stand-ins in army.c)
-- **Random numbers:** the sequence (an LCG stands in for Park-Miller 0x106BD0) and the frame step (1/60).
+- **Random numbers:** the sequence (an LCG stands in for Park-Miller 0x106BD0); the frame step is the world's, 1/30
+  (0x2B7800) [R].
 - **The collision world** (collide.c, the frame's world the viewer builds, `army_set_collide` /
   `army_collide_add`): the shots' and beams' rays and the flights are the game's. Left:
   - flag 4 is taken as every object's but a VolumeTrigger's (so a shell stops at a soldier or a passing car), and a

@@ -7,7 +7,7 @@
 #include "rail.h"
 
 #define SPI 3.1415927f                               /* the scripts' own pi */
-#define TIMESTEP (1.0f / 60.0f)                      /* [G] gWorld.getTimeStep(): one frame */
+#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
 #define MAX_OBJS 128
 #define MAX_EVENTS 512
 #define MAX_SPAWN 8

@@ -167,7 +167,8 @@ street at 6 takes (its z / 6 / a frame; 0.01 for 0, after a dbgAssert); a frame'
   `Scene.street`: the block's own and its buildings' `ObjectInstance|` entries whose script is one of the two, with
   the instances of its model and its flags' cloths), then `streetobj_start(buildings)` attaches the others by the
   footprint.
-- `streetobj_update(dt, monsters, buildings)` runs the pulses at 1/60 s and onBuildingDestruction; `streetobj_arm`
+- `streetobj_update(dt, monsters, buildings)` runs the pulses at the world's step, 1/30 s (0x2B7800), and
+  onBuildingDestruction; `streetobj_arm`
   empties the hit list when an attack is armed; `streetobj_hit` (an armed sphere: type 0, once an attack for an
   0x8000 object) and `streetobj_touch` (the monster's box: type 1, not on 0x8000 objects) call TakeDamage, at most one
   an object a frame; `streetobj_impact` is TakeImpact; `streetobj_force_damage(name, pos)` is boss.c's
