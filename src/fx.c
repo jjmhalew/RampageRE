@@ -7,7 +7,7 @@
  * The game keeps an emitter's particles in the emitter's frame when +EmitterRelativeParticles; a spawned effect never
  * moves here, so everything is simulated in world axes relative to the effect's origin, unscaled, and scaled on output.
  * The game advances effects once per frame with gravity added per frame [R 0x2105E0], so fx_update runs fixed 1/60 s
- * frames [G: the frame clock 0x169068 starts at 1/60]. */
+ * frames: the effects world's dt is 1 / the display rate (0x309210), 60 here (50 for a PAL game) [R]. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,7 +168,15 @@ static int lib_points(FxLib *L, int n)
 /* "const v", "poly n c0 .. cn" (or polynomial; n = 0 is a constant), "lininterp n x0 y0 x1 y1 .." (or
  * linearinterpolation), "sin a f p o" (or sine). The factory looks for the words with strstr in this order; a
  * reciprocal is not used by any effect and becomes 0 [R 0x20D630..0x20E0F8] */
+static int graph_parse_into(FxLib *L, Graph *g, const char *s);
+/* [R 0x1EDC60] a line the factory cannot read (0x20D630 answers NULL) leaves the slot as it was */
 static void graph_parse(FxLib *L, Graph *g, const char *s)
+{
+    Graph t;
+    if (graph_parse_into(L, &t, s))
+        *g = t;
+}
+static int graph_parse_into(FxLib *L, Graph *g, const char *s)
 {
     memset(g, 0, sizeof *g);
     if (strstr(s, "const")) {
@@ -182,13 +190,13 @@ static void graph_parse(FxLib *L, Graph *g, const char *s)
         long n = strtol(p, &end, 10);
         if (end == p || n < 0 || n > 5) {
             g->kind = GR_CONST;
-            return;
+            return 1;
         }
         p = end;
         if (n == 0) {
             g->kind = GR_CONST;
             g->c[0] = (float)atof(p);
-            return;
+            return 1;
         }
         g->kind = GR_POLY;
         g->n = (uint8_t)n;
@@ -199,13 +207,13 @@ static void graph_parse(FxLib *L, Graph *g, const char *s)
         long n = strtol(p, &end, 10);
         if (end == p || n <= 0 || n > 255) {
             g->kind = GR_CONST;
-            return;
+            return 1;
         }
         p = end;
         int at = lib_points(L, (int)n);
         if (at < 0) {
             g->kind = GR_CONST;
-            return;
+            return 1;
         }
         g->kind = GR_LERP;
         g->n = (uint8_t)n;
@@ -229,14 +237,15 @@ static void graph_parse(FxLib *L, Graph *g, const char *s)
         const char *p = skip_word(strstr(s, "sin"));
         g->kind = GR_SINE;
         int got = read_floats(&p, g->c, 4);
-        if (got <= 0) {                               /* "sin" alone: 1 sin(t) [R 0x20E0A8] */
+        if (got <= 1) {                               /* "sin" with fewer than two numbers: 1 sin(t) [R 0x20E06C] */
+            memset(g->c, 0, sizeof g->c);
             g->c[0] = 1;
             g->c[1] = 1;
         }
         sine_init();
-    } else {
-        g->kind = GR_CONST;                           /* not a graph: the game rejects the line [G] */
-    }
+    } else
+        return 0;                                     /* not a graph: rejected [R 0x20E0D8] */
+    return 1;
 }
 
 static float graph_eval(const FxLib *L, const Graph *g, float t)
@@ -491,7 +500,8 @@ static void find_texture(const FxLib *L, const char *name, const Bundle **b, uin
 
 /* a shape by name, added to the library the first time: the model "<name>.pwk" (type 16) of the first bundle that has
  * one, and that bundle's meshes "<name>|<object>" (the game resolves shapes.name to SimpleShapes at load, refcounted
- * [R 0x1F91F8]; the lookup by name through the loaded bundles is [G]) */
+ * [R 0x1F91F8]; 0x19B300 adds ".pwk", reuses a loaded one (a case-blind hash), else a loose file, else the loaded
+ * bundles (0x19BA60 -> 0x1D2930) [R]) */
 static int lib_shape(FxLib *L, const char *name)
 {
     for (int i = 0; i < L->nshapes; i++)
@@ -635,7 +645,7 @@ static void emdef_finish(EmDef *d)
         if (d->g[G_EMVC + i].kind == GR_NONE)
             graph_const(&d->g[G_EMVC + i], 1);                       /* [R 0x1FF4C0: all three 1] */
         if (d->g[G_VC + i].kind == GR_NONE)
-            graph_const(&d->g[G_VC + i], 1);                         /* [G] every effect gives them */
+            graph_const(&d->g[G_VC + i], 1);                         /* required: a file without them fails */
     }
     if (d->g[G_SIZEMUL].kind == GR_NONE)
         graph_const(&d->g[G_SIZEMUL], 1);
@@ -651,7 +661,7 @@ static void emdef_finish(EmDef *d)
         d->eflags &= ~(uint32_t)EF_EMITEMITTERS;                     /* [R 0x1FF0D0] */
     for (int i = 0; i < 2; i++) {
         if (d->ntiles[i] < 0)
-            d->ntiles[i] = -d->ntiles[i];                            /* one effect says -4 [G] */
+            d->ntiles[i] = -d->ntiles[i];                            /* one says -4 (unsigned there, a NoRender) */
         if (d->ntiles[i] == 0)
             d->ntiles[i] = 1;
     }
@@ -967,7 +977,7 @@ static int emit_new(FxWorld *w, int fx, const Effect *owner, const EmDef *d, int
     } else {
         memcpy(e->R, w->fx[fx].R, sizeof e->R);
     }
-    if (d->eflags & EF_RANDOMXF) {     /* three random angles (0x101330) [G: their order] */
+    if (d->eflags & EF_RANDOMXF) {     /* three random angles 2 pi r1, r2, r3 (0x1F8164 -> 0x101330) [R] */
         float a = 2 * FX_PI * rnd01(w), b = 2 * FX_PI * rnd01(w), c = 2 * FX_PI * rnd01(w);
         float ca = cosf(a), sa = sinf(a), cb = cosf(b), sb = sinf(b), cc = cosf(c), sc = sinf(c);
         float X[3][3] = { { ca * cc - sa * sb * sc, sa * cc + ca * sb * sc, -cb * sc }, { -sa * cb, ca * cb, sb },
@@ -1057,12 +1067,24 @@ static void start_area(FxWorld *w, const EmDef *d, const float a[3], float out[3
     }
 }
 
+/* an emitter's shutdown (0x1F7CD0): it emits no more, its sounds end, and with EndOfLifeUponShutdown its particles
+ * age out */
+static void emit_shutdown(FxWorld *w, Emit *e)
+{
+    e->shut = 1;
+    emit_sounds_stop(w, e);
+    if (e->d->eflags & EF_ENDOFLIFE)
+        for (int p = e->head; p >= 0; p = w->p[p].next)
+            w->p[p].age = w->p[p].life + 1;
+}
+
 static void part_free(FxWorld *w, int i)
 {
     Part *p = &w->p[i];
-    if (p->child >= 0 && w->em[p->child].used) {               /* its emitter (EmitEmitters) stops [G 0x213E30] */
-        w->em[p->child].parent = -1;
-        w->em[p->child].shut = 1;
+    if (p->child >= 0 && w->em[p->child].used) {   /* [R 0x1F21F0] its emitter (EmitEmitters): shut down (0x1F7CD0) */
+        Emit *ce = &w->em[p->child];
+        ce->parent = -1;
+        emit_shutdown(w, ce);
     }
     p->used = 0;
     p->next = w->free_part;
@@ -1128,12 +1150,17 @@ static void xform_start(FxWorld *w, const Emit *e, Part *p)
         for (int c = 0; c < 3; c++)
             p->xr0[r][c] = e->R[0][r] * R0[0][c] + e->R[1][r] * R0[1][c] + e->R[2][r] * R0[2][c];
     p->xaxis[0] = p->xaxis[1] = 0;
-    p->xaxis[2] = 1;                                       /* [G: the default axis at 0x40A028] */
+    p->xaxis[2] = 1;                                       /* the default axis at 0x40A028 [R 0x211EE8] */
     p->xrate = 0;
     const Graph *g = &d->g[G_SRD];
     if (!naxes || (g->kind == GR_CONST && g->c[0] == 0))
         return;
     xform_axis(w, mask, naxes, p->xaxis);
+    if (d->eflags & EF_RELATIVE) {                       /* kept raw (+0x5C); a relative one's turns with its */
+        float t[3];                                      /* emitter at the draw, here taken into the world now */
+        vec_rows(e->R, p->xaxis, t);
+        memcpy(p->xaxis, t, sizeof t);
+    }
     p->xrate = graph_eval(w->lib, g, (d->eflags & EF_XF_AGE) ? e->age * e->inv_cycle : rnd01(w));
 }
 
@@ -1256,7 +1283,7 @@ static int part_step(FxWorld *w, Emit *e, Part *p, float dt, float ground)
         const float *c = COL_TABLE[d->gnd];
         float h = p->pos[2] - ground;
         float r = 0.5f * p->size * graph_eval(w->lib, &d->g[G_SIZEMUL], t);
-        int hit = c[0] >= 0 ? h - c[0] * r < 0 : h + r < 0;   /* DeleteCheckEntire: all of it under [G] */
+        int hit = c[0] >= 0 ? h - c[0] * r < 0 : h + r < 0;   /* h - c0 r < 0 (0x210918), c0 -1: all of it under [R] */
         if (hit && p->vel[2] <= 0.01f) {
             p->vel[2] *= -c[1];                             /* what goes into the ground comes back x c1 */
             p->vel[0] *= c[2];
@@ -1497,13 +1524,8 @@ void fx_stop(FxWorld *w, int id)
     int slot = (int)(f - w->fx);
     for (int i = 0; i < MAX_EMITS; i++) {
         Emit *e = &w->em[i];
-        if (!e->used || e->fx != slot)
-            continue;
-        e->shut = 1;
-        emit_sounds_stop(w, e);
-        if (e->d->eflags & EF_ENDOFLIFE)
-            for (int p = e->head; p >= 0; p = w->p[p].next)
-                w->p[p].age = w->p[p].life + 1;
+        if (e->used && e->fx == slot)
+            emit_shutdown(w, e);
     }
 }
 
@@ -1566,7 +1588,9 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
             float tp = (d->pnorm & 4) ? t : p->age;
             FxQuad q;
             memset(&q, 0, sizeof q);
-            float size = p->size * graph_eval(L, &d->g[G_SIZEMUL], tp) * f->scale;
+            /* [R 0x22233C] a billboard's axes are size x size_mul along the camera's right and up: the effect's matrix
+             * (its scale) does not reach them; a relative flat quad's and a streak's do */
+            float size = p->size * graph_eval(L, &d->g[G_SIZEMUL], tp), size_s = size * f->scale;
             float v[4];                                 /* the colour [R 0x21C5BC.., 0x222680..] */
             for (int i = 0; i < 4; i++)
                 v[i] = graph_eval(L, &d->g[G_VC + i], (d->pnorm & (i < 3 ? 1 : 2)) ? t : p->age);
@@ -1599,16 +1623,32 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
                     q.pos[i] += q.axis[0][i];
                 }
                 q.size[0] = 2 * half;
-                q.size[1] = size;
-            } else if (d->pflags & PF_NOBILLBOARD) {    /* in the emitter's frame, normal = int.forward_axis [G] */
-                int a0 = d->fwd_axis == 0 ? 1 : 0, a1 = d->fwd_axis == 2 ? 1 : 2;
-                float c = cosf(rot) * size * 0.5f, sn = sinf(rot) * size * 0.5f;
+                q.size[1] = size_s;
+            } else if (d->pflags & PF_NOBILLBOARD) {
+                /* [R 0x222C08] DontBillboard: not relative, the world's x and y (the draw's model matrix), forward_axis
+                 * unused; relative, rows 0 and 1 of the emitter's frame x B (forward_axis 2: identity; 1: rows (1, 0,
+                 * 0), (0, 0, 1), (0, -1, 0); 0: (0, 1, 0), (-1, 0, 0), (0, 0, 1)), the effect's scale with them; then
+                 * the spin (0x223344) [G: which of 0x478 / 0x47C is the sine] */
+                float A[2][3] = { { 1, 0, 0 }, { 0, 1, 0 } }, sz = size;
+                if (d->eflags & EF_RELATIVE) {
+                    const float (*M)[3] = (const float (*)[3])e->R;
+                    for (int r = 0; r < 2; r++) {
+                        if (d->fwd_axis == 1) {
+                            A[r][0] = M[r][0]; A[r][1] = -M[r][2]; A[r][2] = M[r][1];
+                        } else if (d->fwd_axis == 0) {
+                            A[r][0] = -M[r][1]; A[r][1] = M[r][0]; A[r][2] = M[r][2];
+                        } else
+                            memcpy(A[r], M[r], sizeof A[r]);
+                    }
+                    sz = size_s;
+                }
+                float c = cosf(rot) * sz * 0.5f, sn = sinf(rot) * sz * 0.5f;
                 q.kind = FXQ_FLAT;
                 for (int i = 0; i < 3; i++) {
-                    q.axis[0][i] = c * e->R[a0][i] + sn * e->R[a1][i];
-                    q.axis[1][i] = -sn * e->R[a0][i] + c * e->R[a1][i];
+                    q.axis[0][i] = c * A[0][i] + sn * A[1][i];
+                    q.axis[1][i] = -sn * A[0][i] + c * A[1][i];
                 }
-                q.size[0] = q.size[1] = size;
+                q.size[0] = q.size[1] = sz;
             } else {
                 q.kind = FXQ_BILLBOARD;
                 q.size[0] = q.size[1] = size;
@@ -1651,9 +1691,9 @@ int fx_shape_meshes(const FxLib *L, int i, const BdpEntry **out, int max)
 }
 
 /* per particle [R 0x21B780..0x21BAA8]: s = size_mul(t) (t over the life with NormalizedSizeMultiplier); s <= 0 is not
- * drawn, else the renderer state at 0x4CB52C gets s [G: the shape's uniform scale; every XForm effect has a constant
- * size_mul of 1]; the turn = the start orientation x the tumble about its axis by rate x age (0x185A50 axis-angle,
- * 0x105340 to a quaternion, 0x196F30 the product, 0x104BB0 to a matrix) [G: the tumble in the mesh's own frame];
+ * drawn, else the renderer state at 0x4CB52C gets s [G: the shape's uniform scale, read by VU1; every XForm effect has
+ * a constant size_mul of 1]; the turn = the tumble about its world-fixed axis by rate x age, after the start
+ * orientation (0x185A50 axis-angle, 0x105340 to a quaternion, 0x196F30 the product, 0x104BB0 to a matrix) [R];
  * the place the particle's; then the shape draws (its vtable +0x10, SimpleShape 0x184BB0). The particle size is only
  * the ground collision's radius. */
 int fx_meshes(const FxWorld *w, FxMesh *out, int max)
@@ -1677,9 +1717,9 @@ int fx_meshes(const FxWorld *w, FxMesh *out, int max)
                 continue;
             float T[3][3], R[3][3];
             axis_angle(p->xaxis, p->xrate * (p->age > 0 ? p->age : 0), T);
-            for (int r = 0; r < 3; r++)
+            for (int r = 0; r < 3; r++)                 /* [R 0x21B8EC] mat(Q x quat(axis, -rate age)): T x xr0 */
                 for (int c = 0; c < 3; c++)
-                    R[r][c] = p->xr0[r][0] * T[0][c] + p->xr0[r][1] * T[1][c] + p->xr0[r][2] * T[2][c];
+                    R[r][c] = T[r][0] * p->xr0[0][c] + T[r][1] * p->xr0[1][c] + T[r][2] * p->xr0[2][c];
             FxMesh *m = &out[n++];
             s *= f->scale;
             for (int c = 0; c < 3; c++) {

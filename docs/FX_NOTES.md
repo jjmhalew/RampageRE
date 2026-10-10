@@ -74,7 +74,7 @@ Emitter graphs run over the emitter's cycle (t = age / cycle length), particle g
 | `enum.particle_mode` | +0xDC | normal 0, RotatesOnly 2, TilesNoRotation 4, Tiles 6, StreamsNoRotation 8, Streams 10 |
 
 Enum and flag names are compared over the name's length, in the table's order (so `HalfBounceAgeHalf` reads as
-`HalfBounce`); case does not matter [G: the files write `nothing`, `normal`]. Also read: `enum.sound_2d`,
+`HalfBounce`); case does not matter (strncasecmp 0x32D1B0 over the table name's length, keys strcasecmp) [R]. Also read: `enum.sound_2d`,
 `enum.sound_loop_2d` (sounds), `val.cost_*`, `int.num_emitters_reserved`, `graph.texture_center/radius` (+0xF8…
 +0x104; centre 0.5, radius 1 by default; no file uses them), the old `rgb.vertex_color` (0…255) and
 `graph.vertex_alpha`.
@@ -105,7 +105,9 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 - **Start**: cycle = lo + r (hi − lo); age = cycle × em_start_time(r) − dt; a random rotation with
   +RandomizeEmitterXF; a sound. Only +AutoStart emitters start with the effect; the others are carried
   (+EmitEmitters).
-- **Frame** (dt = 1 / the display rate, 0x4CB550 [G: 60]): age += dt; past the cycle with +CycleLoops (and not
+- **Frame** (dt = the effects world's +0x64 × +0x10: 1 / the display rate 0x4CB550 and 1.0, set at its init 0x309210
+  [R]; the rate is 60, or 50 in PAL mode without option flag 0x80 (0x25E1A0): this disc is PAL, so a 50 Hz game steps
+  its effects at 1/50 s, gravity still per frame; the port takes 60): age += dt; past the cycle with +CycleLoops (and not
   shut down) age −= cycle; past it with +ParticlesDieWithEmitter all its particles go. A carried emitter sits on
   its particle.
 - **How many**: +OneTimeEmission: n = gen_rate(0) on the frame age ≤ dt, else 0. Otherwise rate = gen_rate(age /
@@ -146,8 +148,14 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 5. Air (0x2118E0, 0x210450): v ×= max(0, 1 − dt × air × |v|), or with +LinearAirResistance max(0, 1 − dt × air).
 
 ## Drawing (0x2214D0, 0x21C060)
-- t = age / lifetime. Size = size × size_mul(t), the quad's full width [G: the VU1 code that expands it was not
-  read; the ground test and the bounding box use half the size as the radius].
+- t = age / lifetime. Size = size × size_mul(t), the quad's full width: its two axes are size × size_mul(t) times the
+  current camera's right (+0x30) and up (+0x3C) (0x22233C … 0x2223D8), the corners (±0.5, ±0.5) (0x3B2480) [R]. The
+  effect's matrix never reaches these axes, so a scaled effect's billboards keep their size (only their places
+  scale). The ground test and the bounding box use half the size as the radius.
+- **DontBillboard** (0x222C08) [R]: not relative, the quad lies in the world's x y plane (the draw's model matrix ×
+  size), forward_axis unused (Barf_pool, chocolate_pool, the Carbinator's glows); relative, rows 0 and 1 of (emitter
+  × effect) × B, B by forward_axis: 2 identity, 1 rows (1, 0, 0), (0, 0, 1), (0, −1, 0), 0 rows (0, 1, 0), (−1, 0,
+  0), (0, 0, 1); then the spin (0x223344). The relative ones scale with the effect.
 - Colour: rgb = vertex_color(t), alpha = vertex_color.a(t), combined with the emitter colour the particle got:
   Normal / None: as is; Lighten v + e; Darken e − v; Difference v − e; Multiply v × e; then clamped to 0 … 1. None
   with constant graphs gives the emitter colour (0x213420). Sent as 128 × colour (128 = 1.0: the texture as is).
@@ -176,13 +184,15 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
   `start_rot_distribution` graph is the constant 0; else an axis picked the same way (+0x5C) and a speed
   start_rot_distribution(r) (+0x68; at the emitter's cycle point with +XF_AgeNotDistribution).
 - **Drawing** (0x21B330 / 0x21DC20, the shape branch) [R]: per particle s = size_mul(t); s ≤ 0 is skipped; the
-  renderer state at 0x4CB52C gets {flags, 1, s} [G: a uniform scale; every XForm effect has size_mul 1]; the matrix
-  is quat(+0x4C) × quat(axis +0x5C, speed × age) with the particle's place (× the emitter's matrix when
-  relative); then the shape's vtable +0x10 draws it (SimpleShape 0x184BB0: culled by its sphere, drawn like a
+  renderer state at 0x4CB52C gets {flags, 1, s} (0x21B740; renderer +0xAC: u16 flags, bit 0 "clip needed", u16, float,
+  sent to VU1 at 0x4CC040) [G: a uniform scale, read only by the VU1 code; every XForm effect has size_mul 1]; the
+  matrix is quat(+0x4C) × quat(axis +0x5C, speed × age) with the particle's place (× the emitter's matrix when
+  relative): B × RowRot(axis, rate × age), the tumble after the start turn about an axis fixed in the world
+  (0x21B8EC … 0x21B914; the axis kept raw, 0x2119D0); then the shape's vtable +0x10 draws it (SimpleShape 0x184BB0: culled by its sphere, drawn like a
   prop). No particle colour or alpha is applied, so the debris does not fade. The particle size is only the ground
   test's radius.
-- `src/fx.c`: `fx_shape_*`, `fx_meshes` (a column-major model-to-world matrix per particle). [G] the tumble is
-  applied in the mesh's own frame (start turn × tumble); the order of the quaternion product was not read.
+- `src/fx.c`: `fx_shape_*`, `fx_meshes` (a column-major model-to-world matrix per particle): the tumble × the start
+  turn; a relative emitter's axis is taken into the world when the particle starts.
 
 ## Sounds
 `enum.sound_loop_2d` (def +0xA4) and `enum.sound_2d` (+0xB0) keep the name after the `|` [R 0x1FE1D4]. When an
@@ -212,4 +222,5 @@ street writes Z) was not read.
 - Streams modes (no effect uses them), RenderAsDatapoints, UsesTinyParticles (drawn as ordinary quads here),
   `RelativeDistanceLimit`, the orbit graphs.
 - The VU1 microcode: the billboard's exact corner layout, uv orientation, UseDiscreteRotation, the depth it tests.
-- The frame rate the effects were tuned at (gravity is per frame).
+- Which of the two update variants (0x21AD40's template match against 0x4CAE10) the XForm emitters get: only the
+  order of random draws could differ (meshes use neither the angle nor the spin).
