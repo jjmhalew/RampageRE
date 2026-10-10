@@ -123,6 +123,9 @@ typedef struct {                                      /* a building's cells and 
      * light and that have no normals (0x31CCA0: lit per vertex, less the shadows), and the shared meshes they were
      * copied from (the normals the light is made from) */
     int lit_item[16], lit_src[16], nlit_items;
+    /* its place in the work queue (0x4D7870) for a relight: the frame it was queued + 1 (0 not queued), and a change
+     * of its own still waiting to be served (+0x154, kept until a grant) */
+    int light_queued, light_pending;
 } SceneBuilding;
 
 struct IkFeet;
@@ -218,6 +221,7 @@ typedef struct {
     SceneMonster mon[SCENE_MONSTERS]; int nmon;      /* the monsters, slot 0 .. nmon - 1 (city_monster adds one) */
     float spheres[256][4]; int nspheres;              /* drawn over the scene as wire spheres: centre, radius */
     SceneBuilding *buildings; uint32_t nbuildings;
+    int light_frame, light_granted;                  /* the work queue's frame count (+0x10), a grant this frame */
     /* the next two blocks of the city's BlockList, drawn behind this one at y + 41 and y + 82 (the block manager
      * 0x4D4E80's slots 1 and 2, 0x302AF0): their buildings are scenery, out of the play */
     SceneBuilding *scenery; uint32_t nscenery;

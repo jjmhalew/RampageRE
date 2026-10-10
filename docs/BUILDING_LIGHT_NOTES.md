@@ -31,7 +31,8 @@ and `WorldData.LightingData` / `LightingDataNight` [R]:
 | +0x2EC | the file's `BEGIN_AMBIENT` | 0.1 grey |
 | +0x308, +0x314, +0x324 | the shadows' direction, `MShadowR/G/B`, 0.2 | [SHADOW_NOTES.md](SHADOW_NOTES.md) |
 
-With fewer than three lights the rest are copied from 0x409FF8 (taken as black [G]).
+With fewer than three lights the rest get colour and direction (0, 0, 0) from the shared zero vector at 0x409FF8
+(0x2B94B0 … 0x2B950C) [R].
 
 **0x2B8C40, the light at a point** p with a normal n (unit):
 - ramp r = 0 while p.z ≤ `RampStart`; `RampIntensity` / (`RampEnd` − `RampStart`) × (p.z − `RampStart`) below
@@ -46,8 +47,11 @@ the model's matrix's z, clamped (`building_light_ambient`).
 
 Called with the grid and its building's shadow object (building +0x914, "S"; NULL for the blocks behind: 0x3059D0
 lights their grids once, with no shadows) whenever the building is redrawn changed (+0x154) or a neighbour's top has
-changed (0x2BF180, from the buildings' draw 0x320280 → 0x320750; a work queue at 0x4D7870 lets it run, 0x2BF270
-[G: a per-frame budget]). It sets G+0x1E4 = −1 and G+0x670 = 1 (the meshes to be made again).
+changed (0x2BF180, from the buildings' draw 0x320280 → 0x320750), when the work queue at 0x4D7870 lets it run
+(0x2BF270(Q, item, 4)) [R]: the first request of a frame is granted, a later one once it has been queued 4 frames
+(0x2BF360 queues it with its frame; 0x2B8F80 starts each frame with none granted). A grant unqueues it. The
+building's own change (+0x154) stays asked until it is served; a neighbour's top change is used up even when
+refused (0x31C860). The queue also serves the damage mesh, the models' records and 0x31F8B0. It sets G+0x1E4 = −1 and G+0x670 = 1 (the meshes to be made again).
 
 For every vertex row r (0 … the storeys: z = 6 + 3 × its slot, less 3 × the falling storey's progress above it)
 and face (0 left, 1 right, 2 front; normals (−1, 0, 0), (1, 0, 0), (0, −1, 0) from 0x430EE0), every vertex 0 … D
@@ -80,7 +84,8 @@ through a record each of S (+0x2A8 rubble, +0xD8 ground floor, +0x1C0 top; 0xE8 
   (s8 / 127) into it;
 - 0x31CB10 draws it: dirty → 0x31CCA0 lights it; without a buffer (or +0x17) the model is drawn the usual way, lit by
   the GS with 0x2B8AD0's ambient;
-- 0x31CCA0: when the highest a shadow reaches on S (+0x84 [G: the front polygon's top], the right boxes' tops +0xA0,
+- 0x31CCA0: when the highest a shadow reaches on S (+0x84: the front polygon's top, the neighbour's edge projected
+  along the light onto the front, capped at its own top + 2, 0 without one (0x31D6B0, 0x31DD90, 0x31DC00) [R]; the right boxes' tops +0xA0,
   +0xB8) is below the model's z − 3 (and 0x4D203C is clear), +0x17: drawn the usual way. Otherwise every vertex: the light at
   its place (the model's position + the vertex; buildings are not turned) with its normal, less the shadows
   (0x31D560: the front's planes where p.y ≤ min y + 0.1, the right face's boxes where p.x > max x − 1), as bytes
@@ -100,8 +105,10 @@ format 0x152 (with normals). 0x2CD220 draws them (when G+0x1E0 has 8, for every 
 the `DamagedSkeleton` once FloorHP (+0x14) is not above `DamagedSkeletonHP` (+0x18, half of FloorHP unless set);
 a falling floor's squashed by 1 − its progress) after a plain world matrix (0x25B950) and no light of its own: nothing
 in the game darkens, burns or tints them by damage or by storey. Without normals they cannot be lit by the GS; they
-show their baked colour × the texture, as the game's own 0x142 buffers (shader 0x51) do [G: the VU1 programs were
-not decoded; that a section without normals is drawn unlit is inferred from the format].
+show their baked colour × the texture, as the game's own 0x142 buffers (shader 0x51) do: its VU1 program (0x357B50,
+record 0x3B8398) transforms the place, makes STQ from the uv and stores the vertex colour straight into RGBAQ, never
+reading the light rows 13 … 16 (the lit 0x152 program 0x37A2A0 does); none of the 0x142 shaders' programs reads them
+[R]. That the GS multiplies it by the texture (TEX0.TFX modulate) is taken from the 0x80 = 1.0 convention [G].
 
 ## The neighbours' shadows (0x31C8C0, 0x31C860, 0x31C7B0)
 
@@ -133,12 +140,15 @@ building at its end (`light_buildings`); `scene_buildings_update` lights a build
 neighbour's top changes, before its facade passes. The facade quads and cracks carry the colours and no normals;
 `render_gl.c` draws a part with colours and no normals with the GL lighting off.
 
-Differences [G]:
+Differences (the game's side read: 0x2CD220, 0x31CB10, 0x2CD060, 0x2CD470) [R]:
 - the viewer lights the ground floor and top always per vertex (the game: only while a shadow can reach them, else
-  the GS with the ramp at their foot), and the blocks behind's models too (the game: the GS);
-- the adornments (0x2CD060) and the rubble keep the GL lights, without the ramp;
-- the window glass and the inner corner walls keep the GL lights;
-- the lights are made again every frame a building moves (the game: through its work queue).
+  the GS with the ramp at their foot, 0x31CC00 → 0x2B8AD0), and the blocks behind's models too (the game: the GS);
+- the adornments keep the GL lights without the ramp (the game: the GS lights and the ramp at each one's height,
+  0x2CD060); the rubble too (the game: with a shadow object as the ground floor, without one no ambient call of its
+  own, so the last one set).
+
+The window glass behind an InnerWindowTexture (one colour G+0x6F0 at every corner, format 0x142: 0x2C92F0, 0x2D2700)
+and the inner corner walls (0xFF808080 halved, 0x2C63A0) have no normals, and are drawn unlit here too [R].
 
 ## Drawing it (OpenGL 1.1)
 

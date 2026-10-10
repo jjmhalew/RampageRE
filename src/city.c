@@ -1463,6 +1463,25 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
     }
     free(crack->nrm);                                /* the cracks carry their light: drawn unlit (render_gl.c) */
     crack->nrm = NULL;
+    free(inner->nrm);                                /* the inner corner walls: 0xFF808080 halved, no normal (0x2C63A0) */
+    inner->nrm = NULL;
+    if (glass->material) {                           /* the glass behind an InnerWindowTexture: one colour (G +0x6F0) */
+        free(glass->nrm);                            /* at every corner, format 0x142, unlit (0x2C92F0, 0x2D2700) */
+        glass->nrm = NULL;
+    }
+}
+
+/* the work queue (0x2BF270(Q, item, 4)) a relight goes through: the first request of a frame is granted, a later one
+ * once it has waited 4 frames [R]; a grant takes it off the queue */
+static int light_grant(Scene *s, SceneBuilding *sb)
+{
+    if (!sb->light_queued)
+        sb->light_queued = s->light_frame + 1;
+    if (s->light_granted && s->light_frame - (sb->light_queued - 1) < 4)
+        return 0;
+    s->light_granted = 1;
+    sb->light_queued = 0;
+    return 1;
 }
 
 /* the open windows (0x2BECC0, every frame): per window of the building's list (the first 40), a flat quad of colour
@@ -3002,6 +3021,8 @@ void scene_buildings_update(Scene *s, float dt)
     for (; s->water_acc >= 1.0f / 60; s->water_acc -= 1.0f / 60)
         for (int k = 0; k < s->nwater; k++)
             water_step(s->water[k], 1.0f / 60);
+    s->light_frame++;                                /* 0x2B8F80: the queue's frame; no grant yet */
+    s->light_granted = 0;
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         SceneBuilding *sb = &s->buildings[i];
         building_update(&sb->b, dt);
@@ -3009,11 +3030,16 @@ void scene_buildings_update(Scene *s, float dt)
                      (sb->b.state != BUILDING_STANDING && sb->b.state != BUILDING_FLOOR_FALLING);
         if (moving || sb->moving || sb->b.dirty)
             building_place(s, sb);
-        /* its light again (0x2BF180: when it changed, +0x154, or a neighbour's top did, 0x31C860), before the passes
-         * that use it */
-        int relit = moving || sb->moving || sb->b.dirty || shade_changed(s, sb);
-        if (relit)
+        /* its light again (0x2BF180: when it changed, +0x154, kept until it is served, or a neighbour's top did,
+         * 0x31C860, used up even when refused), through the work queue, before the passes that use it */
+        if (moving || sb->moving || sb->b.dirty)
+            sb->light_pending = 1;
+        int asked = shade_changed(s, sb) || sb->light_pending;
+        int relit = asked && light_grant(s, sb);
+        if (relit) {
             light_building(s, sb, 1);
+            sb->light_pending = 0;
+        }
         sb->moving = moving;
         open_windows(s, sb);                         /* the open windows, as they now are (0x2BECC0) */
         if (!sb->b.dirty || sb->mesh < 0) {
