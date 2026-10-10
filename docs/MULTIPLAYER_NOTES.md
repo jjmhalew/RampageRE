@@ -102,7 +102,11 @@ set [R]:
 - the attacker's collision spheres on bones of an armed attack record (+0xBD60 + 0x1C × bone; the clip's attack event,
   docs/FORMAT_MONSTER.md): record +0x18 the victims (bits 0 .. 3 the slots, 4 the objects; George 0xF / 0x1F), +0x14
   bit 2 in front, bit 4 behind;
-- swept sphere against swept sphere (0x100230), the closest pair;
+- swept sphere against swept sphere: 0x100230 is the origin's squared distance from the segment between the pair's
+  offset last frame (the victim's centres +0x430 when +0x688 is set, else this frame's) and now (+0x6D4), t held to
+  0 .. 1; a pair meets within the radii's sum, each × its monster's +0xA78 (else 1; the attacker's last place
+  also by its +0x688), and the closest pair is kept (after a bounding test of the two sweeps, 0x102DA0) [R]; as here
+  (main.c `monsters_fight`, `seg_dist2`; the radii unscaled);
 - the hit: 0x2D6A50(victim, …, level = +0x24, damage = +0x2C (5 a punch, 20 the kick)), the reaction by
   army_reaction_slot's table, the knock: the victim slides +0x30 in +0x34 s on the ground; HP −= damage, at 0 slot 67;
   ignored while the victim is not interruptible, held, at 0 HP, or with cheat flag 4 (0x4D7E68);
@@ -188,9 +192,8 @@ pays +0x190 as well. Everything else (army, people, vehicles) goes through addSt
 Stand-ins and gaps:
 - Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here
   they have no keys and are made AI with the bots' goal.
-- Not ported (the game's side read above): one attack record per bone and the swept test (0x100230); here one record
-  per monster (the last armed) and the spheres where they are this frame; the follow-up slots, the interruptible flag
-  (+0xAA2), held / holder and cheat 4.
+- Not ported (the game's side read above): one attack record per bone; here one record per monster (the last
+  armed); the follow-up slots, the interruptible flag (+0xAA2) and held / holder.
 - The bots' rand01 is the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, seeded by 0x1069C0 from
   GameStatus seed[1] at the world's reset) [R]; the world's other users of it are not ported, so the sequence
   differs. The mount point is at the street, z 0, and min x − 5 on a front under 2 wide (0x2EEDE0) [R]. The

@@ -121,6 +121,7 @@ typedef struct Mon {
      * ones it hit already (0x2E33A0: each once an attack) */
     struct { float damage, knock, knock_time; int level; uint32_t flags, victims, hit; } atk;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
+    float sph_prev[64][3]; int sph_prev_n;           /* its collision spheres' centres last frame (+0x430, valid +0x688) */
     int reveal, shown;                               /* the cryotube's monster (Viewer.extra): out of the world
                                                       * (+0x108 / +0x109) until the reveal shows it */
 } Mon;
@@ -1966,12 +1967,67 @@ static void hit_spheres(Mon *mo)
     }
 }
 
+/* the squared distance of the origin from the segment a .. b (0x100230; t clamped to 0 .. 1, a point when
+ * |b - a|^2 < 0.001) */
+static float seg_dist2(const float a[3], const float b[3])
+{
+    float d[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    float t = dd < 0.001f ? 0 : -(a[0] * d[0] + a[1] * d[1] + a[2] * d[2]) / dd;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    float p[3] = { a[0] + t * d[0], a[1] + t * d[1], a[2] + t * d[2] };
+    return p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+}
+
+/* is the collision shape i on a bone of an armed attack part */
+static int shape_armed(const Mon *mo, int i)
+{
+    const MoveGraph *g = &mo->graph;
+    for (int p = 0; p < g->nparts; p++)
+        if (mo->armed >> p & 1)
+            for (int k = 0; k < g->part_nbones[p]; k++)
+                if (g->part_bone[p][k] == g->shapes[i].bone)
+                    return 1;
+    return 0;
+}
+
+/* every collision shape's sphere in the world by its shape index (-1 radius: no bone), as mon_spheres */
+static int mon_shape_spheres(const Mon *mo, float out[64][4])
+{
+    const Instance *in = mon_in(mo);
+    if (!mo->have_graph || !in)
+        return 0;
+    const MoveGraph *g = &mo->graph;
+    int n = g->nshapes < 64 ? g->nshapes : 64;
+    for (int i = 0; i < n; i++) {
+        const MoveShape *sh = &g->shapes[i];
+        out[i][3] = -1;
+        if (sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
+            continue;
+        const float *m = in->node[sh->bone].m, *bm = in->base.m;
+        float l[3];
+        for (int r = 0; r < 3; r++)
+            l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
+        if (mo->mirror)
+            l[0] = -l[0];
+        for (int r = 0; r < 3; r++)
+            out[i][r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
+        out[i][3] = sh->radius;
+    }
+    return n;
+}
+
 /* monster against monster (0x2E35D0, each frame for each attacker): its armed spheres against the others' collision
- * spheres; a victim within 40, not hidden, not down, in front or behind as the attack allows and in its victims'
- * mask, is hit once an attack: the record's damage and ReactionLevel, knocked the record's distance in its time away
- * from the attacker (0x2D6A50 as for the army's hits). No points, no team [R] */
+ * spheres, each swept from its place last frame (0x100230 on the pair's offset then and now: the closest the two
+ * came; unswept without last frame's), a pair meeting when that is within the radii; a victim within 40, not hidden,
+ * not down, in front or behind as the attack allows and in its victims' mask, is hit once an attack: the record's
+ * damage and ReactionLevel, knocked the record's distance in its time away from the attacker (0x2D6A50 as for the
+ * army's hits). No points, no team [R] */
 static void monsters_fight(Viewer *v)
 {
+    static float now[MONSTERS][64][4];
+    int nnow[MONSTERS];
+    for (int a = 0; a < v->nmon; a++)
+        nnow[a] = mon_shape_spheres(&v->mon[a], now[a]);
     for (int a = 0; a < v->nmon; a++) {
         Mon *at = &v->mon[a];
         if (!at->nsph || at->defeated)
@@ -1988,13 +2044,18 @@ static void monsters_fight(Viewer *v)
             int front = fwd[0] * dx + fwd[1] * dy >= 0;
             if (!(at->atk.flags & (front ? 2u : 4u)))
                 continue;
-            float sp[64][4];
-            int ns = monster_spheres(vi, sp, 64), hit = 0;
-            for (int i = 0; i < at->nsph && !hit; i++) {
-                const float *c = v->scene.spheres[at->sph0 + i];
-                for (int k = 0; k < ns && !hit; k++) {
-                    float ex = sp[k][0] - c[0], ey = sp[k][1] - c[1], ez = sp[k][2] - c[2], r = sp[k][3] + c[3];
-                    hit = ex * ex + ey * ey + ez * ez < r * r;
+            int hit = 0;
+            for (int i = 0; i < nnow[a] && !hit; i++) {
+                const float *c = now[a][i], *c0 = i < at->sph_prev_n ? at->sph_prev[i] : c;
+                if (c[3] < 0 || !shape_armed(at, i))
+                    continue;
+                for (int k = 0; k < nnow[j] && !hit; k++) {
+                    const float *s = now[j][k], *s0 = k < vi->sph_prev_n ? vi->sph_prev[k] : s;
+                    if (s[3] < 0)
+                        continue;
+                    float d0[3] = { s0[0] - c0[0], s0[1] - c0[1], s0[2] - c0[2] };
+                    float d1[3] = { s[0] - c[0], s[1] - c[1], s[2] - c[2] }, r = s[3] + c[3];
+                    hit = seg_dist2(d0, d1) < r * r;
                 }
             }
             if (!hit)
@@ -2007,6 +2068,12 @@ static void monsters_fight(Viewer *v)
             snprintf(name, sizeof name, "monster %d", a + 1);
             monster_hit(vi, name, at->atk.damage, at->atk.level, knock, from);
         }
+    }
+    for (int a = 0; a < v->nmon; a++) {               /* this frame's places, for the next frame's sweep */
+        Mon *mo = &v->mon[a];
+        for (int i = 0; i < nnow[a]; i++)
+            memcpy(mo->sph_prev[i], now[a][i], sizeof mo->sph_prev[i]);
+        mo->sph_prev_n = nnow[a];
     }
 }
 
