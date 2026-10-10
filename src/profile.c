@@ -150,7 +150,7 @@ void profile_init(Profile *p)
     memset(p, 0, sizeof *p);
     profile_set_roster(p, PROFILE_MONSTER_NAMES, PROFILE_MONSTERS, PROFILE_CITY_NAMES, PROFILE_CITIES);
     p->play_type = CAMPAIGN;
-    p->allow_save = 1;                               /* [G] autosave on, as after the boot's card check */
+    /* allow_save 0 [R]: flag 4 is clear in .bss and the boot's card check does not set it */
     p->last_city = 0;
     profile_create(p, NULL);
 }

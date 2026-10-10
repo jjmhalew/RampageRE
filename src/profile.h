@@ -111,7 +111,12 @@ typedef struct {
     int last_city;                                   /* +0x4D4: getLastCityIdx */
     uint32_t cheats;                                 /* +0x4D8 (0x4D7E68) */
     int cheat_param;                                 /* +0x4DC (0x4D7E6C) */
-    int allow_save;                                  /* the SaveGame popup's flags (0x4D7FF8) & 4: getAllowSave */
+    int allow_save;                                  /* the SaveGame popup's flags (0x4D7FF8) & 4: getAllowSave;
+                                                      * clear at the boot, set by a load picked from the list
+                                                      * (0x34559C) and setAllowSave(1) (Results' Save) */
+    int was_saving;                                  /* & 8: set with 4 but by setAllowSave, cleared only by
+                                                      * warn-continue (0x343B00) */
+    int profile_shown;                               /* & 0x200: a popup closed with a result but 3 */
     int loaded;                                      /* the popup's +0x25C: hasLoadedProfile (a profile loaded or
                                                       * created on a card) */
 } Profile;

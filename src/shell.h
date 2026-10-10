@@ -43,7 +43,10 @@
  * getAllowSave, getSaveFilesExist] */
 typedef struct {
     int loaded;                     /* gCommon.hasLoadedProfile(): one was loaded or created */
-    int allow_save;                 /* gCommon.getAllowSave() */
+    int allow_save;                 /* gCommon.getAllowSave(): the popup's flag 4 */
+    int was_saving;                 /* its flag 8: set with 4 by a load (and a save the card id changed for), cleared
+                                     * only by warn-continue's Continue / Don't Save */
+    int profile_shown;              /* 0x4D7FF8 & 0x200: a popup closed with a result but 3 (getShowProfile() 0) */
     char name[16];                  /* its name (the popup shows it) */
     /* gCommon.getMonsterFlags(player, monster): 0x80 unlocked, 1 2 4 8 the four upgrades (Charge Punch, Double Punch,
      * Roar Attack, Jump Smash); player 0 the profile, 1 .. 3 a buddy's profile when loaded, else the profile's [R
@@ -94,6 +97,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p);
 void shell_close(Shell *s);
 /* the profile changed (after SHELL_EVT_PROFILE_LOAD / _CREATE, or a buddy's for player n): the shell takes a copy */
 void shell_set_profile(Shell *s, const ShellProfile *p);
+/* ShellProfile.profile_shown as the shell has it now (keep it for the next shell_open) */
+int shell_profile_shown(const Shell *s);
 /* seconds a movie "plays" (a black screen) where the game would play a .pss; 0 (default): skipped at once */
 void shell_set_movie_time(Shell *s, float seconds);
 /* the movie SHELL_EVT_MOVIE named is played: it lasts until shell_movie_end (or the pad skips it) */

@@ -102,7 +102,10 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   the card watcher (0x345100) starts state 12 again when the status changes; Don't Save goes to state 2, which with
   flag 4 clear closes at once (close(3)) [R].
 - The port shows the notice and goes on once it is accepted: a writable host, status 0 [R]. Not ported: the no-room
-  case; no card and unformatted have no host meaning, and corruption is checked at the load (error 18).
+  case (the host's free space is not the card's 8 MB); no card and unformatted have no host meaning, and corruption
+  is checked at the load (error 18).
+- Neither state sets autosave (flag 4), so the main menu that follows restores the profile and does not open the
+  list (MainMenu.scr:207 asks `getShowProfile() && getAllowSave()`); the list opens from Back ("Profiles") [R].
 
 **Profile list (`gCommon.loadProfile` → 0x345700 with "create allowed", flag 0x10):**
 - When it opens:
@@ -120,14 +123,21 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
 - The pad (0x3410E0):
   - Up and down move with `Rollover`.
   - Cross picks: item 0 opens the name entry (state 7), any other loads that profile (state 8). Both play `Click`.
-  - Back is state 9 (Cancel).
-- The port's events: `SHELL_EVT_PROFILE_LOAD` (the index into `ShellProfile.profiles`). On Back it shows the
-  warn-continue message.
+    A load closes with 1 in op 3: flags 4 and 8 set (0x34559C).
+  - Back is state 9 (Cancel), then state 2, warn-continue.
+- The port's events: `SHELL_EVT_PROFILE_LOAD` (the index into `ShellProfile.profiles`); the viewer sets
+  `allow_save` and `was_saving`.
+- The attract mode's interrupt (0x341790) closes the autosave notice, or the list while show-profile (0x200) is
+  clear [R].
 
-**Warn-continue message (0x3439E8):**
-- Text: "WARNING: No Profile" or "Autosave Turned Off", with Continue / Don't Save and Back.
-- Continue gives `SHELL_EVT_PROFILE_NONE` (nothing is saved) and Back returns to the list. The list's cancel leads
-  there: its panel state 9 goes to 0x343DF8, sub-state 2 [R].
+**Warn-continue message (0x3439E8) [R]:**
+- With flag 0x20 set (flag 8 and a name held as the list opened) or flag 4 clear it closes at once, close(3): the
+  list just goes.
+- Else the text: a name held, "Autosave Turned Off" with Don't Save; none, "WARNING: No Profile" with Continue.
+  `btn_select` (Cross) reads Back and returns to the state it came from (op 3, the list); `btn_cancel` (Triangle)
+  reads Continue / Don't Save: flags 4 and 8 cleared (0x343B00), close(2). The port gives `SHELL_EVT_PROFILE_NONE`
+  there.
+- The list's cancel leads there: its panel state 9 goes to 0x343DF8, sub-state 2.
 
 **Name entry (0x340980, 0x340320):**
 - `keyboard`: `profile_id`, `profile_name` with a blinking caret, and rows `row0`..`row3` of 11, 11, 10 and 11 keys.
@@ -148,8 +158,10 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   again, the name lost) and Overwrite (Back: state 11); for a save Retry (state 5 again), Don't Save (state 2) and
   Overwrite (button0: state 11). State 11 (0x343868) asks "OVERWRITE FILE?" with NO (Cross: state 3 for the list,
   5 for a save) and YES (Back: op 9, state 5, writing into the file). A list request's new-profile hook (+0x2A0 =
-  0x33F0F0) runs 0x33F630 on the copy first (0x344444), so the old file gets a fresh profile. **Not ported**: the
-  port checks the saved names at DONE, case-blind, and shows OK back to the keyboard.
+  0x33F0F0) runs 0x33F630 on the copy first (0x344444), so the old file gets a fresh profile. The port: DONE looks
+  among the saved names (the case counts, as the directory's crc32 does) and shows the same two messages; YES
+  creates the profile anew (`SHELL_EVT_PROFILE_CREATE`). A create closes with 1 in op 5: flags 4 and 8 stay.
+  CHECKING / SAVING are not shown (the host's write is at once).
 - The port's event: `SHELL_EVT_PROFILE_CREATE` with the name.
 - `shell_type` is not in the game: it types a character straight in.
 
@@ -502,12 +514,11 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
     the halves' own art, not the port's lights.
 - **Popup** (traced above, not ported): the memory card's own states (CHECKING, SAVING, LOADING, the errors through
   0x341DF0 and the table 0x435640, formatting; during an autosave, flag 4, only SaveIcon shows, 0x3447FC / 0x3440C4);
-  the list scrolling beyond six profiles (`mc_open_list` keeps the top at 0; the viewer has one profile); the
-  duplicate name's Cancel / Overwrite (above).
+  the list scrolling beyond six profiles (`mc_open_list` keeps the top at 0; the viewer has one profile).
 - **Show-profile's life** [R]: bit 0x200 starts clear (.bss) and is set only at 0x34561C, on any close whose result is
-  not 3 (mode 12 sets 0x100 only), buddy loads too; nothing clears it. The port clears it on every close but the
-  notice's (`mc_close`), where the game keeps it through the result-3 closes, and a shell opened from the game starts
-  it at 0.
+  not 3 (mode 12 sets 0x100 only), buddy loads too; nothing clears it. As the port's `mc_close(result)`; the viewer
+  keeps it (`ShellProfile.profile_shown`, `shell_profile_shown`) for the next shell. A buddy list's Back closes with
+  2 [G: its result].
 - **Bits and flags** [R]: `getButtons` (0x16A180) sets bit i from the pad's button byte i + 4 (names 0x3F67C0): Up 1,
   Down 2, Left 4, Right 8, Start 16, as shell.h; flag 0x400 is 0.6 .. 1 at 1 Hz (0x242950: 1 − (0.2 + 0.2 sin), read
   by the text, quad, line, rect, slider and list draws); a rect without `<B>` is 5 (setBorderWidth 0x244410 from the

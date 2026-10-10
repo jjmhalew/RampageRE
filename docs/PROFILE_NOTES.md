@@ -177,7 +177,9 @@ host: same logic, but the profile now holds those flags.
 
   It calls the popup 0x345950 with the block and the callback 0x33F230, which clears both changed bytes on success.
   The popup writes only with its flag 4 (autosave) set; otherwise 0x345540(3): no message, the popup closed with
-  result 3 (no show-profile change), the profile not written and its changed bytes kept **[R 0x345950]**.
+  result 3 (no show-profile change), the profile not written and its changed bytes kept **[R 0x345950]**. The
+  port: `profile_write` with force 0, from Results (HUD_CALL_SAVE_PROFILE) and the Options page. The
+  port: `profile_write` with force 0, from Results (HUD_CALL_SAVE_PROFILE) and the Options page.
 - **Where it is called**:
   - Results.bsf, every block won: `updateProfile` and `saveProfile` 1.5 s into the screen;
   - Results.bsf's **save button**: it shows when a profile is loaded and autosave is off. Pressing it calls
@@ -270,15 +272,21 @@ The cheats are not in the saved block.
 
 ## The port (src/profile.c)
 - **Setup**:
-  - `profile_init`: zeros, the built-in ShellData rosters, then a new profile; the campaign; autosave on, which
-    opens the list on the first MainMenu. The game's flag 4 [R] starts clear (.bss, no constructor store found) and
-    is set by setAllowSave(1) (0x2C3568; only Results.scr:358's Save button), a close(1) of loadProfile (flag 0x10)
+  - `profile_init`: zeros, the built-in ShellData rosters, then a new profile; the campaign; autosave off. The
+    game's flag 4 [R] starts clear (.bss, no constructor store found; the popup's init 0x345C90 and unload 0x345D00
+    clear only flag 1) and is set by setAllowSave(1) (0x2C3568; only Results.scr:358's Save button), a close(1) of loadProfile (flag 0x10)
     in mode 3, 6 or 7 (0x34559C: a load picked from the list, or a save; a create closes in mode 5 and does not),
     the card watcher in mode 1 with the status now 0 and a name held (0x3454E0), and saveProfile when the card id
     changed and a name is held (0x3459D8, its entry 0x345950); cleared by setAllowSave(0) and warn-continue's Don't
     Save / Continue (0x343B00). It gates getAllowSave (MainMenu.scr:209 loadProfile vs restoreProfile, Results'
     Save button and its 3 s), saveProfile (clear: close(3), nothing written) and warn-continue (only with 4 set and
-    0x20 clear). Not ported: the port autosaves without a load and after a create, and never sets it after a load;
+    0x20 clear). So the boot's card check (close(1) in mode 12) leaves it clear and MainMenu restores the profile
+    without opening the list; the list waits for Back ("Profiles"). Flag 8 is set with 4 (0xC) at the same three
+    places but not by setAllowSave, and cleared only by warn-continue; flag 0x20 is flag 8 and a name held when
+    loadProfile opens (0x345760). The port keeps 4 as `allow_save`, 8 as `was_saving` and 0x200 as
+    `profile_shown`: a load from the list sets 4 and 8, a create neither, Results' Save 4, warn-continue clears
+    both. A viewer started straight in a game with a profile file sets 4 and 8 (as a load). The card watcher's and
+    the card-id case need a card that comes and goes and are not ported;
   - `profile_set_roster`: the rosters from the books.
 - **The shell**: `profile_create`, `profile_restore`, `profile_restore_checkpoint`.
 - **The game**:

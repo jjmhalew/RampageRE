@@ -1604,11 +1604,12 @@ typedef struct {
 
 /* the SaveGame popup's panels [R 0x341880: +0x2D0 1 the profile list, 2 the name entry, 3 the messages] */
 enum { MC_OFF, MC_LIST, MC_KEYBOARD, MC_MESSAGE };
-enum { MSG_AUTOSAVE, MSG_WARN_CONTINUE, MSG_DUPLICATE };
+enum { MSG_AUTOSAVE, MSG_WARN_CONTINUE, MSG_DUPLICATE, MSG_OVERWRITE };
 enum { MCP_BOOT, MCP_LOAD, MCP_BUDDY };
 typedef struct {
     Layout *L;
     int mode, purpose, msg, buddy;
+    int had;                                             /* flag 0x20: flag 8 and a name held when it opened */
     Node *profiles, *keyboard, *messages;
     /* the messages (0x3401E0) */
     Node *message_rect, *autosave_rect, *nodata_rect, *title, *text, *btn_select, *btn_cancel, *btn_button0;
@@ -1803,22 +1804,34 @@ static void mc_message(Shell *s, int msg)
     show(m->autosave_rect, msg == MSG_AUTOSAVE);
     show(m->nodata_rect, 0);
     show(m->message_rect, msg != MSG_AUTOSAVE);
+    /* 0x33FD10(title, text, .., btn_select's, btn_cancel's, btn_button0's text) [R 0x3401E0: +0x2C / +0x30 / +0x34] */
+    const char *title = NULL, *text = NULL, *sel = NULL, *can = NULL;
     if (msg == MSG_WARN_CONTINUE) {
-        /* 0x3439E8: "WARNING: No Profile" (no profile yet) or "Autosave Turned Off"; Continue / Don't Save, Back */
-        int had = s->prof.loaded;
-        node_localize(&s->gui, m->title, had ? "mcWarnContinueTitle" : "mcWarnContinueTitle (NoProfile)");
-        node_localize(&s->gui, m->text, had ? "mcWarnContinue" : "mcWarnContinue (NoProfile)");
-        node_localize(&s->gui, m->btn_select, had ? "MC_BUTTON_DONTSAVE" : "MC_BUTTON_CONTINUE");
-        node_localize(&s->gui, m->btn_cancel, "MC_BUTTON_BACK");
+        /* 0x3439E8: a name held, "Autosave Turned Off" with Don't Save; none, "WARNING: No Profile" with Continue.
+         * Back on Cross, the other on Triangle [R] */
+        int named = s->prof.loaded;
+        title = named ? "mcWarnContinueTitle" : "mcWarnContinueTitle (NoProfile)";
+        text = named ? "mcWarnContinue" : "mcWarnContinue (NoProfile)";
+        sel = "MC_BUTTON_BACK";
+        can = named ? "MC_BUTTON_DONTSAVE" : "MC_BUTTON_CONTINUE";
+    } else if (msg == MSG_DUPLICATE) {                   /* error 24 for the list's request [R 0x3423B8] */
+        title = "mcErrorTitle";
+        text = "mcDuplicate";
+        sel = "MC_BUTTON_CANCEL";
+        can = "MC_BUTTON_OVERWRITE";
+    } else if (msg == MSG_OVERWRITE) {                   /* state 11 [R 0x343868] */
+        title = "mcConfirmOverwriteTitle";
+        text = "mcConfirmOverwrite";
+        sel = "MC_BUTTON_NO";
+        can = "MC_BUTTON_YES";
+    }
+    if (title) {
+        node_localize(&s->gui, m->title, title);
+        node_localize(&s->gui, m->text, text);
+        node_localize(&s->gui, m->btn_select, sel);
+        node_localize(&s->gui, m->btn_cancel, can);
         show(m->btn_select, 1);
         show(m->btn_cancel, 1);
-        show(m->btn_button0, 0);
-    } else if (msg == MSG_DUPLICATE) {
-        node_localize(&s->gui, m->title, "mcErrorTitle");
-        node_localize(&s->gui, m->text, "mcDuplicate");
-        node_localize(&s->gui, m->btn_select, "MC_BUTTON_OK");
-        show(m->btn_select, 1);
-        show(m->btn_cancel, 0);
         show(m->btn_button0, 0);
     }
 }
@@ -1895,11 +1908,12 @@ static void mc_open_keyboard(Shell *s)
     set_col(m->key, m->col_selected);
 }
 
-static void mc_close(Shell *s)
+/* close(result) [R 0x345540]: a result other than 3 (the list's Back with nothing to warn of, the attract mode's
+ * interrupt) sets 0x300 (show-profile off, boot done), or only 0x100 for the boot's check (op 12): the autosave
+ * notice. Nothing sets show-profile again */
+static void mc_close(Shell *s, int result)
 {
-    /* [R 0x345540] a close with a result other than 3 (the attract mode's interrupt) sets 0x300 (show-profile off,
-     * boot done), or only 0x100 for the boot's check (op 12): the autosave notice */
-    if (!(s->mc.mode == MC_MESSAGE && s->mc.msg == MSG_AUTOSAVE))
+    if (result != 3 && !(s->mc.mode == MC_MESSAGE && s->mc.msg == MSG_AUTOSAVE))
         s->show_profile = 0;
     s->mc.mode = MC_OFF;
     if (s->mc.L)
@@ -1921,6 +1935,14 @@ static void mc_name_changed(Shell *s)
         m->caret->p[0] = text_w(&s->gui, m->kb_name);
 }
 
+/* the name written as a new profile (state 5's write; close(1) in op 5: flags 4 and 8 stay as they are) */
+static void mc_create(Shell *s)
+{
+    MemCard *m = &s->mc;
+    event(s, SHELL_EVT_PROFILE_CREATE, m->name, m->purpose == MCP_BUDDY ? m->buddy : 0, 0);
+    mc_close(s, 1);
+}
+
 /* DONE with a name [R 0x340700: trailing spaces cut, an empty name refused with "Cancel"] */
 static void mc_done(Shell *s)
 {
@@ -1933,14 +1955,14 @@ static void mc_done(Shell *s)
         return;
     }
     sound(s, "Click");
+    /* [R] DONE does not look: state 5 opens the file by its name (the directory is crc32 of the name, so the case
+     * counts) and finds it there: error 24, "The Profile name already exists." */
     for (int i = 0; i < s->prof.nprofiles; i++)
-        if (_stricmp(s->prof.profiles[i], m->name) == 0) {   /* "The Profile name already exists." [G: when] */
+        if (strcmp(s->prof.profiles[i], m->name) == 0) {
             mc_message(s, MSG_DUPLICATE);
             return;
         }
-    event(s, SHELL_EVT_PROFILE_CREATE, m->name, m->purpose == MCP_BUDDY ? m->buddy : 0, 0);
-    s->show_profile = 0;
-    mc_close(s);
+    mc_create(s);
 }
 
 static void mc_key_add(Shell *s, char ch)
@@ -2026,17 +2048,17 @@ static void mc_list_input(Shell *s, int ev)
         else {                                           /* state 8: load */
             event(s, m->purpose == MCP_BUDDY ? SHELL_EVT_BUDDY_PROFILE : SHELL_EVT_PROFILE_LOAD,
                   s->prof.profiles[sel - 1], m->purpose == MCP_BUDDY ? m->buddy : sel - 1, (float)(sel - 1));
-            if (m->purpose != MCP_BUDDY)
-                s->show_profile = 0;
-            mc_close(s);
+            mc_close(s, 1);                              /* (op 3: flags 4 and 8 set, the viewer's) */
         }
     } else if (ev == EV_BACK) {
         sound(s, "Cancel");                              /* state 9 */
         if (m->purpose == MCP_BUDDY) {
-            mc_close(s);
+            mc_close(s, 2);                              /* [G: the result] */
             mc_finish_buddy(s, -1);
-        } else
-            mc_message(s, MSG_WARN_CONTINUE);            /* [R 0x3439E8's texts; the list's Back, 0x343DF8] */
+        } else if (m->had || !s->prof.allow_save)
+            mc_close(s, 3);                              /* [R 0x3439E8: 0x20 set or 4 clear, nothing to warn of] */
+        else
+            mc_message(s, MSG_WARN_CONTINUE);            /* [R the list's Back, 0x343DF8: state 2] */
     }
 }
 
@@ -2053,17 +2075,26 @@ static void mc_message_input(Shell *s, int ev, int button)
     sound(s, "Click");
     if (m->msg == MSG_AUTOSAVE) {
         m->boot_done = 1;
-        mc_close(s);
+        mc_close(s, 1);
     } else if (m->msg == MSG_WARN_CONTINUE) {
-        if (ok) {                                        /* continue without a profile: nothing saved */
-            s->prof.allow_save = 0;
-            s->show_profile = 0;
+        if (back) {                                      /* [R 0x343B00] Continue / Don't Save: flags 4 and 8 off */
+            s->prof.allow_save = s->prof.was_saving = 0;
             event(s, SHELL_EVT_PROFILE_NONE, NULL, 0, 0);
-            mc_close(s);
+            mc_close(s, 2);
         } else
-            mc_open_list(s, m->purpose, m->buddy);
-    } else if (m->msg == MSG_DUPLICATE)
-        mc_open_keyboard(s);
+            mc_open_list(s, m->purpose, m->buddy);       /* Back: the state it came from, the list */
+    } else if (m->msg == MSG_DUPLICATE) {
+        if (back)
+            mc_message(s, MSG_OVERWRITE);                /* Overwrite: state 11 */
+        else
+            mc_open_list(s, m->purpose, m->buddy);       /* Cancel: state 3, the name lost */
+    } else if (m->msg == MSG_OVERWRITE) {
+        if (back)                                        /* YES: op 9, state 5 writes a new profile into the file
+                                                          * (the list's hook 0x33F0F0, 0x344444) */
+            mc_create(s);
+        else
+            mc_open_list(s, m->purpose, m->buddy);       /* NO: state 3 */
+    }
 }
 
 static void mc_input(Shell *s, int ev, int button)
@@ -2123,6 +2154,7 @@ static void load_profile(Shell *s)
     if (!s->mc.L)
         return;
     mc_show(s);
+    s->mc.had = s->prof.was_saving && s->prof.loaded;   /* [R 0x345760: flag 8 and a name held: 0x20] */
     mc_open_list(s, MCP_LOAD, 0);
 }
 
@@ -4204,8 +4236,9 @@ static void idle_update(Shell *s, float dt)
         return;
     if (popup) {
         s->idle = 0;
-        if (s->mc.mode == MC_KEYBOARD || s->mc.purpose != MCP_BOOT || !s->show_profile)
-            return;                                      /* only the boot's choice is interrupted */
+        /* [R 0x341790] the autosave notice, or the list while show-profile is on */
+        if (!((s->mc.mode == MC_MESSAGE && s->mc.msg == MSG_AUTOSAVE) || (s->mc.mode == MC_LIST && s->show_profile)))
+            return;
         s->mc.mode = MC_OFF;                             /* result 3: show-profile stays */
         if (s->mc.L)
             show(s->mc.L->root, 0);
@@ -4264,7 +4297,6 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     }
     if (p) s->prof = *p;
     else {
-        s->prof.allow_save = 1;
         s->prof.sound = 0.5f;                            /* a new profile's (0x33F630) [R] */
         s->prof.music = 0.25f;
         s->prof.rumble = 1;
@@ -4316,8 +4348,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
         }
     } else {
         s->state = 1;                                    /* 0x308950: state 0 -> 1, the memory card check */
-        s->show_profile = 1;                             /* [G: 0x4D7FF8 bit 0x200 at the boot] */
     }
+    s->show_profile = !s->prof.profile_shown;            /* [R 0x30697C: !(0x4D7FF8 & 0x200), clear in .bss] */
     cr_open(s);
     return s;
 }
@@ -4341,6 +4373,8 @@ void shell_close(Shell *s)
     free(s->quads);
     free(s);
 }
+
+int shell_profile_shown(const Shell *s) { return s && !s->show_profile; }
 
 void shell_set_profile(Shell *s, const ShellProfile *p)
 {

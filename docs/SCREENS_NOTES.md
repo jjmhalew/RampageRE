@@ -94,6 +94,11 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
 - **Buttons** (once the intro is done): Continue (X / Start) — "MOVING ON TO <next block>" in the title, then the
   walkout (the field, list, total, band and buttons slide away in 0.5 s); Change Monster (button 0) — result 3; Quit
   (Back) — the ConfirmQuit dialog, Yes → result 4. Change Monster and Quit are hidden once the city is destroyed.
+- **Save** (Results.scr:215, 354): at 1.5 s `updateProfile`, `saveProfile` and `bTrackSave`; from then on each frame
+  the Save button ("Autosave", button 1) shows while `hasLoadedProfile() && !getAllowSave()` (a profile created
+  or loaded, autosave off), and when it goes from shown to hidden `saveProfile` runs. Button 1 while it shows (not in
+  the walkout): `Click`, `setAllowSave(1)`, 0.25 s before Continue answers. Continue clears `bTrackSave`. The port:
+  HUD_CALL_SAVE_PROFILE (arg 1 at 1.5 s: updateProfile first) and HUD_CALL_ALLOW_SAVE; key V, `menu b1`.
 - **The end**: after the walkout, result 1 (DONE), 5 s more on screen, a 0.5 s fade, `endResults`. The game goes on
   to the next block meanwhile (game.c moves on at DONE).
 - The script's `processIntro(dt, niFlag)` clears `bDoIntro` through its reference: the PP interpreter passes a

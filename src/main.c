@@ -201,6 +201,8 @@ typedef struct Viewer {
     Rubble rubble;                                   /* findPointInRubble's slots: the block left's buildings */
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
     int prof_on_card;                                /* its file exists (the shell's profile list) */
+    char card_name[16];                              /* the name in it */
+    int results_update;                              /* the Results' updateProfile is the campaign's */
     Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
     struct GuiDraw *gd;                              /* its 3D objects: models, effects, this frame's layers */
     char elf_path[512];                              /* RAMPAGE.ELF beside the VOL (fx.c's words) */
@@ -2590,15 +2592,13 @@ static void game_step(Viewer *v, float dt)
                     r.par_score = game_par_score(v->game);
                     r.city_flags = game_city_flags(v->game) | (v->challenges_lost ? 0 : CITY_FLAG_CHALLENGES);
                     r.monster_revealed = reveal_was_revealed(&v->reveal);
-                    if (e->a == GR_SCREEN_RESULTS && r.play_type == GP_CAMPAIGN) {   /* Results.bsf: updateProfile,
-                                                      * saveProfile (1.5 s in) */
+                    v->results_update = e->a == GR_SCREEN_RESULTS && r.play_type == GP_CAMPAIGN;
+                    if (v->results_update)           /* the block won; Results.bsf's updateProfile and saveProfile
+                                                      * 1.5 s in (HUD_CALL_SAVE_PROFILE) */
                         profile_block_won(&v->prof, r.city_flags | PC_AVAILABLE, r.city_score, game_block(v->game, NULL),
                                           r.city_destroyed);
-                        profile_update(&v->prof);
-                        if (v->prof_write && v->prof_path &&
-                            profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000) < 0)
-                            printf("could not write the profile %s\n", v->prof_path);
-                    }
+                    r.allow_save = v->prof.allow_save && v->prof_write;
+                    r.loaded = v->prof.loaded;
                     hud_results(v->hud, e->a, &r);
                 }
                 break;
@@ -2679,6 +2679,14 @@ static void hud_frame(Viewer *v, int after)
             if (!music_playing() && v->scene.music)
                 music_play(v->scene.music);
             break;
+        case HUD_CALL_SAVE_PROFILE:
+            if (calls[i].arg && v->results_update)
+                profile_update(&v->prof);
+            if (v->prof_write && v->prof_path &&
+                profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000) < 0)
+                printf("could not write the profile %s\n", v->prof_path);
+            break;
+        case HUD_CALL_ALLOW_SAVE: v->prof.allow_save = 1; break;   /* setAllowSave(1): flag 4 alone */
         default: break;                              /* the vibration, the cheats: no pad here */
         }
     HudSound hs[16];
@@ -4320,10 +4328,12 @@ static void play_script(Viewer *v, const char *script, float aspect)
             pause_open(v);
             continue;
         }
-        if (_stricmp(word, "menu") == 0) {           /* menu up / down / left / right / accept / back / start */
-            static const struct { const char *name; int ev; } EV[] = {
-                { "up", HUD_EV_UP }, { "down", HUD_EV_DOWN }, { "left", HUD_EV_LEFT }, { "right", HUD_EV_RIGHT },
-                { "accept", HUD_EV_ACCEPT }, { "back", HUD_EV_BACK }, { "start", HUD_EV_START } };
+        if (_stricmp(word, "menu") == 0) {           /* menu up / down / left / right / accept / back / start, b0 /
+                                                      * b1 (the Results' Change Monster / Save) */
+            static const struct { const char *name; int ev, button; } EV[] = {
+                { "up", HUD_EV_UP, 0 }, { "down", HUD_EV_DOWN, 0 }, { "left", HUD_EV_LEFT, 0 },
+                { "right", HUD_EV_RIGHT, 0 }, { "accept", HUD_EV_ACCEPT, 0 }, { "back", HUD_EV_BACK, 0 },
+                { "start", HUD_EV_START, 0 }, { "b0", HUD_EV_BUTTON, 0 }, { "b1", HUD_EV_BUTTON, 1 } };
             char name[16];
             int k = 0;
             while (*p == ' ') p++;
@@ -4331,7 +4341,7 @@ static void play_script(Viewer *v, const char *script, float aspect)
             name[k] = 0;
             for (size_t i = 0; i < sizeof EV / sizeof *EV; i++)
                 if (v->hud && _stricmp(name, EV[i].name) == 0)
-                    hud_input(v->hud, EV[i].ev, 0);
+                    hud_input(v->hud, EV[i].ev, EV[i].button);
             continue;
         }
         if (_stricmp(word, "collapseall") == 0) {    /* every building of the block falls (the end of a block) */
@@ -4424,6 +4434,8 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     memset(sp, 0, sizeof *sp);
     sp->loaded = v->prof.loaded;
     sp->allow_save = v->prof.allow_save && v->prof_write;
+    sp->was_saving = v->prof.was_saving;
+    sp->profile_shown = v->prof.profile_shown;
     snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
     for (int p = 0; p < 4; p++)
         for (int m = 0; m < SHELL_MONSTERS; m++)
@@ -4438,7 +4450,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->cheats = profile_cheat_flags(&v->prof);
     sp->nprofiles = v->prof_on_card ? 1 : 0;         /* one profile file: the "card" holds it or nothing */
     if (sp->nprofiles)
-        snprintf(sp->profiles[0], sizeof sp->profiles[0], "%s", v->prof.block.name[0] ? v->prof.block.name : "Profile");
+        snprintf(sp->profiles[0], sizeof sp->profiles[0], "%s", v->card_name[0] ? v->card_name : "Profile");
 }
 
 /* ---- the front end's 3D objects (shell_3d): each shape's model from its interface's bundle, every mesh on its node at
@@ -4799,13 +4811,14 @@ static int shell_answer(Viewer *v)
                 v->sfx_vol = sv / 0.75f;
                 v->music_vol = v->music_now = mv / 0.75f;
                 sound_volume(v->sfx_vol, v->music_now);
-                if (v->prof_write && v->prof.loaded)
-                    profile_write(&v->prof, v->prof_path, 1, (uint64_t)time(NULL) * 1000);
+                if (v->prof_write)                   /* saveProfile: only with autosave on */
+                    profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000);
                 break;
             case SHELL_EVT_PROFILE_LOAD: {           /* the one profile file */
                 ShellProfile sp;
                 if (profile_read(&v->prof, v->prof_path) > 0) {
                     v->prof.loaded = 1;
+                    v->prof.allow_save = v->prof.was_saving = 1;   /* [R 0x34559C: close(1) in op 3] */
                     profile_restore_checkpoint(&v->prof);
                 }
                 shell_profile(v, &sp);
@@ -4816,13 +4829,15 @@ static int shell_answer(Viewer *v)
                 ShellProfile sp;
                 profile_create(&v->prof, e->name);
                 v->prof.loaded = 1;
-                if (v->prof_write && profile_write(&v->prof, v->prof_path, 1, (uint64_t)time(NULL) * 1000) > 0)
+                if (v->prof_write && profile_write(&v->prof, v->prof_path, 1, (uint64_t)time(NULL) * 1000) > 0) {
                     v->prof_on_card = 1;
+                    snprintf(v->card_name, sizeof v->card_name, "%s", v->prof.block.name);
+                }
                 shell_profile(v, &sp);
                 shell_set_profile(v->shell, &sp);
                 break;
             }
-            case SHELL_EVT_PROFILE_NONE: v->prof.allow_save = 0; break;
+            case SHELL_EVT_PROFILE_NONE: v->prof.allow_save = v->prof.was_saving = 0; break;
             case SHELL_EVT_BUDDY_PROFILE: shell_buddy_profile(v->shell, -1); break;   /* no second profile here */
             case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
             case SHELL_EVT_START: start = 1; break;
@@ -4888,6 +4903,7 @@ static void shell_start_game(Viewer *v)
     v->last_game = *g;
     movie_stop(v);
     gui3d_free(v);
+    v->prof.profile_shown = shell_profile_shown(v->shell);
     shell_close(v->shell);
     v->shell = NULL;
     v->exit_game = 0;
@@ -5123,8 +5139,11 @@ int main(int argc, char **argv)
     if (!newprofile && v.prof_write && profile_read(&v.prof, v.prof_path) > 0) {
         printf("profile %s\n", v.prof_path);
         v.prof_on_card = 1;
+        snprintf(v.card_name, sizeof v.card_name, "%s", v.prof.block.name);
         if (v.shell_mode)                            /* the shell's popup loads it */
             profile_init(&v.prof);
+        else                                         /* straight into a game: as if picked from the list */
+            v.prof.allow_save = v.prof.was_saving = 1;
     }
     profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
     if (cheat && !profile_cheat_code(&v.prof, cheat))
@@ -5219,11 +5238,12 @@ int main(int argc, char **argv)
             continue;
         }
         if (v.hud && hud_results_showing(v.hud)) {   /* a results screen has the pad: Enter / Space go on,
-                                                      * Backspace quits, the arrows choose, C changes monster */
+                                                      * Backspace quits, the arrows choose, C changes monster, V
+                                                      * saves */
             static const struct { int key, ev, button; } KEYS[] = {
                 { VK_RETURN, HUD_EV_ACCEPT, 0 }, { VK_SPACE, HUD_EV_ACCEPT, 0 }, { VK_BACK, HUD_EV_BACK, 0 },
                 { VK_UP, HUD_EV_UP, 0 }, { VK_DOWN, HUD_EV_DOWN, 0 }, { VK_LEFT, HUD_EV_LEFT, 0 },
-                { VK_RIGHT, HUD_EV_RIGHT, 0 }, { 'C', HUD_EV_BUTTON, 0 } };
+                { VK_RIGHT, HUD_EV_RIGHT, 0 }, { 'C', HUD_EV_BUTTON, 0 }, { 'V', HUD_EV_BUTTON, 1 } };
             for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
                 if (w.pressed[KEYS[k].key])
                     hud_input(v.hud, KEYS[k].ev, KEYS[k].button);

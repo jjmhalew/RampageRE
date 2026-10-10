@@ -1233,7 +1233,7 @@ typedef struct {
     char played[64], current[64], results_text[64], city[64];
     /* Results.scr (and LevelResults.scr: rating) */
     int ni_state, do_intro, do_walkout, scroll, count_up, live_vis, cu_index, cu_value, cu_total, sound_on, last_block;
-    int rating;
+    int rating, track_save, allow_save;                  /* bTrackSave; getAllowSave as the screen has it */
     float intro_t, live_delay, cu_progress, pulse_t, left_x, right_x, title_w, save_delay;
     Node *list, *total, *live, *title1, *title2, *base, *save, *cu_item;
     Intro intro[MAX_INTRO], walk[MAX_WALK];
@@ -2249,6 +2249,9 @@ static void results_start(Hud *h, Screen *s)
     s->live_vis = 1;
     s->save = layout_find(root, "save");
     show(s->save, 0);
+    s->track_save = 0;
+    s->save_delay = 0;
+    s->allow_save = r->allow_save;
     root->fade = 1;
     set_result(h, HUD_RESULT_NONE);
     s->list = layout_find(root, "pointsList");
@@ -2325,7 +2328,7 @@ static void results_start(Hud *h, Screen *s)
     intro_y(s, "pointsList", 1.25f, 1.5f, -40, 216);
     intro_y(s, "totalScore", 1.25f, 1.5f, -93, 163);
     intro_y(s, "TotalDamage", 1.25f, 1.5f, -121, 135);
-    float save_t = 0;                                    /* 3 x gCommon.getAllowSave(): no saving here */
+    float save_t = 3.0f * (float)(s->allow_save != 0);   /* 3 x gCommon.getAllowSave(): the autosave's time */
     static const char *const fades[3] = { "continue", "select", "quit" };
     static const float ft[3][2] = { { 2.05f, 2.15f }, { 2.15f, 2.26f }, { 2.25f, 2.36f } };
     for (int i = 0; i < 3; i++) {
@@ -2352,6 +2355,8 @@ static void results_start(Hud *h, Screen *s)
 
 /* Results::processIntro: returns its flag (the script's niFlag, passed by reference: the PP interpreter passes a
  * writable variable uncopied, 0x1B9870 / 0x1C3270 [R]); cleared before its early return */
+static void hud_call(Hud *h, int what, float value, int arg);
+
 static int results_intro(Hud *h, Screen *s, float dt)
 {
     float prev = s->intro_t;
@@ -2399,7 +2404,10 @@ static int results_intro(Hud *h, Screen *s, float dt)
             flag = s->rating != 4;
         }
     } else if (s->ni_state == 0) {
-        (void)prev;                                      /* at 1.5 s: gCommon.updateProfile / saveProfile */
+        if (prev < 1.5f && s->intro_t >= 1.5f) {         /* bTrackSave; gCommon.updateProfile, saveProfile */
+            s->track_save = 1;
+            hud_call(h, HUD_CALL_SAVE_PROFILE, 0.0f, 1);
+        }
         s->scroll = s->intro_t >= 1.5f;
         if (!s->count_up)
             s->count_up = s->cu_index == -1 && s->intro_t >= 1.5f;
@@ -2513,6 +2521,13 @@ static void results_frame(Hud *h, Screen *s, float dt)
     if (dt > 0.5f)
         return;
     s->save_delay -= dt;
+    if (s->track_save && s->save) {                      /* Save shows with a profile and autosave off; hidden
+                                                          * again (pressed): saveProfile */
+        int was = s->save->visible;
+        show(s->save, s->r.loaded && !s->allow_save);
+        if (was && !s->save->visible)
+            hud_call(h, HUD_CALL_SAVE_PROFILE, 0.0f, 0);
+    }
     if (s->do_intro)
         s->do_intro = results_intro(h, s, dt);
     if (s->scroll)
@@ -2568,6 +2583,7 @@ static void results_input(Hud *h, Screen *s, int ev, int button)
             return;
         if (s->ni_state == 1 && !s->do_walkout) {
             sound(h, "Click", 0);
+            s->track_save = 0;
             if (!s->last_block && strcmp(s->current, s->played) != 0) {   /* "MOVING ON TO <the next block>" */
                 const char *mo = loc_find(&h->gui, "Results_MovingOnTo"), *bn = loc_find(&h->gui, s->current);
                 char msg[MAX_TEXT];
@@ -2589,8 +2605,14 @@ static void results_input(Hud *h, Screen *s, int ev, int button)
             s->exit_fn = 1;
             s->exit_val = HUD_RESULT_SELECT;
         }
+    } else if (ev == HUD_EV_BUTTON && button == 1) {
+        if (!s->do_walkout && s->save && s->save->visible) {   /* Save: autosave on, the button hides next frame */
+            sound(h, "Click", 0);
+            s->allow_save = 1;
+            hud_call(h, HUD_CALL_ALLOW_SAVE, 1.0f, 0);
+            s->save_delay = 0.25f;
+        }
     }
-    /* button 1: "Autosave" (gCommon.setAllowSave): no saving here, the button stays hidden */
 }
 
 /* LevelResults.scr [R]: the city's name, DESTROYED, its score against the par, a star for each goal met */

@@ -174,6 +174,9 @@ typedef struct {
     /* TimedRunResults */
     float clock_time;        /* gWorld.getGameClockTime (game_clock): the seconds left, this block's added */
     float clock_limit;       /* gWorld.getGameClockLimit (game_clock_limit): the seconds this block added */
+    /* Results' Save button */
+    int allow_save;          /* gCommon.getAllowSave() as the screen opens */
+    int loaded;              /* gCommon.hasLoadedProfile() */
 } HudResults;
 /* show results screen `screen` (any open one is unloaded): GameOver, Results (the block's: the score lines counting up,
  * the time bonus among them), LevelResults (the city's: its score, the par, the stars), WorldResults (the campaign's
@@ -247,7 +250,10 @@ enum {
     HUD_CALL_RUMBLE_PULSE,   /* gCommon.rumble(arg ms): a test buzz when the vibration is turned ON */
     HUD_CALL_PLAY_MUSIC,     /* the music slider went up: if no music plays, start the block's "Music" */
     HUD_CALL_SAVE_SETTINGS,  /* gCommon.setSoundVolume / setMusicVolume / setEnableRumble(.., 1): hud_settings */
-    HUD_CALL_CLEAR_CHEATS    /* gCommon.clearCheatFlags(arg): 65536 when quitting (the cheat 082864's flag) */
+    HUD_CALL_CLEAR_CHEATS,   /* gCommon.clearCheatFlags(arg): 65536 when quitting (the cheat 082864's flag) */
+    HUD_CALL_SAVE_PROFILE,   /* Results: gCommon.saveProfile() (it writes only with autosave on); arg 1: 1.5 s in,
+                              * gCommon.updateProfile() first */
+    HUD_CALL_ALLOW_SAVE      /* Results' Save button: gCommon.setAllowSave(1) */
 };
 typedef struct { int call; float value; int arg; } HudCall;
 int hud_calls(Hud *h, HudCall *out, int max);
