@@ -1,4 +1,4 @@
-/* render_gl.h - the window (Win32 + WGL) and an OpenGL 1.1 renderer for a city block (render_gl.c), the WoodyRE way.
+/* render_gl.h - the window (Win32 + WGL in render_gl.c; SDL2 elsewhere, plat_sdl.c) and an OpenGL 1.1 renderer for a city block (render_gl.c), the WoodyRE way.
  * The game lights its city at run time with an ambient colour and directional lights from a light file
  * (docs/FORMAT_BDP.md "Lighting"): texture x (ambient + sum of colour x N.L), which is what GL's fixed-function
  * lighting computes, so the lights go in as GL lights. */
@@ -12,7 +12,9 @@ typedef struct {
     int pressed[256];                  /* went down since the last win_poll */
     int mouse_dx, mouse_dy, mouse_right, wheel;
     int quit;
-    void *hwnd, *hdc, *hglrc;
+    int focused;                       /* has the keyboard focus */
+    int dev_changes;                   /* counts devices plugged in or out (pads) */
+    void *hwnd, *hdc, *hglrc;          /* Win32: HWND, HDC, HGLRC; SDL: SDL_Window *, -, SDL_GLContext */
 } Window;
 
 int  win_open(Window *w, const char *title, int width, int height, int hidden);   /* 0 = ok; hidden: offscreen */
@@ -21,6 +23,9 @@ void win_swap(Window *w);
 void win_close(Window *w);
 void win_title(Window *w, const char *title);
 double win_time(void);
+/* an offscreen framebuffer of width x height (GL 3.0's or EXT_framebuffer_object's), bound from now on: a hidden
+ * window draws there; 0 = ok */
+int gl_offscreen(int width, int height);
 
 typedef struct {
     float pos[3], yaw, pitch, fov_deg;               /* Z up; yaw 0 looks along +x, pitch up is positive */

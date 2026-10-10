@@ -916,7 +916,7 @@ int sound_mix(int16_t *out, int frames)
     return frames;
 }
 
-/* ---- the output: waveOut, from winmm.dll loaded when asked for (so the viewer links nothing new) */
+/* ---- the output: on Windows waveOut, from winmm.dll loaded when asked for (so the viewer links nothing new) */
 #ifdef _WIN32
 #include <mmsystem.h>
 #define NBUF 12
@@ -1010,10 +1010,59 @@ void sound_end(void)
 
 static int out_open(void) { return W.wo != NULL; }
 #else
-int sound_start(void) { return -1; }
-void sound_end(void) {}
-static void out_feed(void) {}
-static int out_open(void) { return 0; }
+/* SDL2's audio queue, pushed from the main thread as waveOut is (no callback, no thread): the same 5 x 1024 frames
+ * ahead */
+#include <SDL.h>
+#define BUF_FRAMES 1024
+#define AHEAD 5
+static SDL_AudioDeviceID g_dev;
+static int16_t g_pcm[BUF_FRAMES * 2];
+
+static void out_feed(void)
+{
+    if (!g_dev)
+        return;
+    while (SDL_GetQueuedAudioSize(g_dev) < AHEAD * sizeof g_pcm) {
+        int manual = S.manual_mix;
+        sound_mix(g_pcm, BUF_FRAMES);
+        S.manual_mix = manual;
+        if (SDL_QueueAudio(g_dev, g_pcm, sizeof g_pcm) != 0)
+            break;
+    }
+}
+
+int sound_start(void)
+{
+    if (g_dev)
+        return 0;
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0)
+        return -1;
+    SDL_AudioSpec want, have;
+    memset(&want, 0, sizeof want);
+    want.freq = SOUND_RATE;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = BUF_FRAMES;
+    want.callback = NULL;                        /* SDL_QueueAudio */
+    if (!(g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0))) {   /* SDL converts to what the device takes */
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        return -1;
+    }
+    out_feed();
+    SDL_PauseAudioDevice(g_dev, 0);
+    return 0;
+}
+
+void sound_end(void)
+{
+    if (!g_dev)
+        return;
+    SDL_CloseAudioDevice(g_dev);
+    g_dev = 0;
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+}
+
+static int out_open(void) { return g_dev != 0; }
 #endif
 
 /* ---- the frame */

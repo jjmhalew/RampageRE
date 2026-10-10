@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "plat.h"
 #include "moves.h"
 
 static const char *name_at(const Bundle *b, int32_t i)

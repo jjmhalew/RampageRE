@@ -5162,7 +5162,10 @@ int main(int argc, char **argv)
     const char *script = NULL;
     char walk_script[48];
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) { shot = argv[++i]; v.unattended = 1; }
+        if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {   /* no window, no sound, no message boxes */
+            shot = argv[++i];
+            v.unattended = plat_quiet = 1;
+        }
         else if (strcmp(argv[i], "--monster") == 0 && i + 1 < argc) monster[0] = argv[++i];
         else if (!strncmp(argv[i], "--monster", 9) && argv[i][9] >= '1' && argv[i][9] <= '4' && !argv[i][10] &&
                  i + 1 < argc)               /* --monster2 Lizzie: player 2's (--monster1 is --monster) */

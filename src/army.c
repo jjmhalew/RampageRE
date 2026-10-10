@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "plat.h"
 #include "army.h"
 #include "wrand.h"
 

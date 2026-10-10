@@ -1,6 +1,7 @@
 @echo off
 rem build_viewer.bat - builds rampage.exe, RampageRE's native viewer (src\), the WoodyRE way: one C99 compile with Zig.
 rem   build_viewer.bat          rampage.exe (console window: it prints what each block holds)
+rem Linux: build_viewer.sh (SDL2), the same SRC list plus src\plat_sdl.c; keep the two in step.
 rem Run it from the repository root once build.ps1 has extracted the disc: rampage.exe [RAMPAGE.VOL] [City] [block].
 rem The C compiler is Zig (ziglang.org): tools\zig, a zig on PATH or "pip install ziglang" is used when there,
 rem otherwise the official Windows build is downloaded once into tools\zig and checked against its SHA-256.

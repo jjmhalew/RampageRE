@@ -59,6 +59,34 @@ world). The fog is on (F toggles it, `--nofog` starts without). Texture packs: P
 game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes
 ([TEXTURES.md](TEXTURES.md)).
 
+## Platforms
+As in WoodyRE (its docs/PLATFORM.md): the Windows build keeps its own Win32 + WGL window, and everything else runs on
+SDL2 behind the same functions (`win_*` in render_gl.h, `plat_*` in plat.h). Keys are the Windows virtual-key codes
+on every system, so main.c has one spelling of them.
+
+| | Windows (`build_viewer.bat`) | Linux (`build_viewer.sh`) |
+|---|---|---|
+| Window, GL context, keys, mouse | render_gl.c (`#ifdef _WIN32`): Win32 + WGL | plat_sdl.c: SDL2; SDL scancodes to VK codes |
+| Offscreen frame (`--shot`) | a window never shown, the frame in a framebuffer object (`gl_offscreen`, render_gl.c) | `SDL_WINDOW_HIDDEN`, never shown, the same framebuffer object; without one, no window at all |
+| Files, messages, free room | plat.h: `<windows.h>`, MessageBoxA, GetDiskFreeSpaceExA | plat.h / plat_sdl.c: `fopen` looks paths up ignoring case and with `\` as `/` (so `build\disc\RAMPAGE.VOL` works), SDL message box, statvfs |
+| Sound output | sound.c: waveOut (winmm.dll loaded at run time) | sound.c: SDL2's audio queue (`SDL_QueueAudio`), pushed from the main thread as waveOut is |
+| Renderer | render_gl.c: OpenGL 1.1 fixed function, the same on both | |
+
+A `--shot` run opens no window, no sound and no message box anywhere: a message (a missing `RAMPAGE.VOL`) goes to
+stderr and the run exits with 1.
+
+On Linux (Debian / Ubuntu; WSL2 too):
+```sh
+sudo apt install build-essential libsdl2-dev libgl-dev
+./build_viewer.sh                                   # ./rampage (CC=clang ./build_viewer.sh for another compiler)
+./rampage build/disc/RAMPAGE.VOL Chicago 1 --monster George
+SDL_VIDEODRIVER=offscreen ./rampage build/disc/RAMPAGE.VOL Chicago 1 --mute --shot s.png   # no display needed
+```
+`SDL_VIDEODRIVER=offscreen` is SDL's EGL pbuffer driver: it needs no X or Wayland server (CI, WSL without WSLg).
+The disc is extracted on Windows (`build.ps1`); copy `build/disc/RAMPAGE.VOL` and `RAMPAGE.ELF` over, or pass their
+path. A shot on Mesa's llvmpipe differs from the Windows one only in rounding (under 0.1 % of the pixels by more
+than 8 of 255).
+
 ## Source
 | File | |
 |---|---|
@@ -75,6 +103,7 @@ game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under th
 | `src/building.c` | a building's cells and the game's hit on them: 0x2BC150, 0x2BB7B0, 0x2BB950, the roof stomp's 0x2BBE80 (docs/FORMAT_BDP.md "Damage") |
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
+| `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
 | `src/texpack.c` | texture packs: `mods/textures/` replacements and `--dumptex` (WoodyRE's, [TEXTURES.md](TEXTURES.md)); `src/stb/` stb_image and stb_image_write |
 | `src/main.c` | the viewer: arguments, camera, keys; the monsters in play (`Mon`), their pads and their world |

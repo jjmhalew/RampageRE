@@ -1,4 +1,5 @@
-/* render_gl.c - Win32 window, WGL context and an OpenGL 1.1 renderer for a Scene (city.c). */
+/* render_gl.c - the Win32 window and WGL context (the SDL2 one for the other systems is plat_sdl.c) and an OpenGL 1.1
+ * renderer for a Scene (city.c). */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,52 @@
 
 /* ---------------------------------------------------------------- window */
 
+int plat_quiet;
+
+/* GL 3.0's framebuffer objects, or EXT_framebuffer_object's (the same enums); a GL that has neither fails: the
+ * names alone do not tell (glXGetProcAddress hands out a stub for any name) */
+int gl_offscreen(int width, int height)
+{
+    typedef void (APIENTRY *Gen)(GLsizei, GLuint *);
+    typedef void (APIENTRY *Bind)(GLenum, GLuint);
+    typedef void (APIENTRY *Storage)(GLenum, GLenum, GLsizei, GLsizei);
+    typedef void (APIENTRY *Attach)(GLenum, GLenum, GLenum, GLuint);
+    typedef GLenum (APIENTRY *Status)(GLenum);
+    const char *ver = (const char *)glGetString(GL_VERSION), *ext = (const char *)glGetString(GL_EXTENSIONS);
+    const char *sfx = ver && ver[0] >= '3' && ver[0] <= '9' ? "" :
+                      ext && strstr(ext, "GL_EXT_framebuffer_object") ? "EXT" : NULL;
+    if (!sfx)
+        return -1;
+    char n[7][40];
+    static const char *const base[7] = { "glGenFramebuffers", "glGenRenderbuffers", "glBindFramebuffer",
+                                         "glBindRenderbuffer", "glRenderbufferStorage", "glFramebufferRenderbuffer",
+                                         "glCheckFramebufferStatus" };
+    for (int i = 0; i < 7; i++)
+        snprintf(n[i], sizeof n[i], "%s%s", base[i], sfx);
+    Gen gen_fb = (Gen)(void *)plat_gl_proc(n[0]);
+    Gen gen_rb = (Gen)(void *)plat_gl_proc(n[1]);
+    Bind bind_fb = (Bind)(void *)plat_gl_proc(n[2]);
+    Bind bind_rb = (Bind)(void *)plat_gl_proc(n[3]);
+    Storage storage = (Storage)(void *)plat_gl_proc(n[4]);
+    Attach attach = (Attach)(void *)plat_gl_proc(n[5]);
+    Status status = (Status)(void *)plat_gl_proc(n[6]);
+    if (!gen_fb || !gen_rb || !bind_fb || !bind_rb || !storage || !attach || !status)
+        return -1;
+    GLuint fb, rb[2];
+    gen_fb(1, &fb);
+    gen_rb(2, rb);
+    bind_fb(0x8D40, fb);                                   /* GL_FRAMEBUFFER */
+    bind_rb(0x8D41, rb[0]);                                /* GL_RENDERBUFFER */
+    storage(0x8D41, 0x8058, width, height);                /* GL_RGBA8 */
+    attach(0x8D40, 0x8CE0, 0x8D41, rb[0]);                 /* GL_COLOR_ATTACHMENT0 */
+    bind_rb(0x8D41, rb[1]);
+    storage(0x8D41, 0x88F0, width, height);                /* GL_DEPTH24_STENCIL8 */
+    attach(0x8D40, 0x8D00, 0x8D41, rb[1]);                 /* GL_DEPTH_ATTACHMENT */
+    attach(0x8D40, 0x8D20, 0x8D41, rb[1]);                 /* GL_STENCIL_ATTACHMENT */
+    return status(0x8D40) == 0x8CD5 ? 0 : -1;              /* GL_FRAMEBUFFER_COMPLETE */
+}
+
+#ifdef _WIN32
 static Window *g_win;
 
 static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -37,43 +84,15 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
     case WM_MOUSEWHEEL: if (w) w->wheel += GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA; return 0;
-    case WM_KILLFOCUS: if (w) memset(w->keys, 0, sizeof w->keys); return 0;
+    case WM_SETFOCUS: if (w) w->focused = 1; break;
+    case WM_KILLFOCUS: if (w) { w->focused = 0; memset(w->keys, 0, sizeof w->keys); } return 0;
+    case WM_DEVICECHANGE: if (w) w->dev_changes++; break;
     }
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
-/* hidden: never shown nor focused (--shot); the frame goes to an offscreen framebuffer (EXT_framebuffer_object)
- * of width x height, or, without one, to the window shown without taking the focus, off the screen */
-static int offscreen(int width, int height)
-{
-    typedef void (APIENTRY *Gen)(GLsizei, GLuint *);
-    typedef void (APIENTRY *Bind)(GLenum, GLuint);
-    typedef void (APIENTRY *Storage)(GLenum, GLenum, GLsizei, GLsizei);
-    typedef void (APIENTRY *Attach)(GLenum, GLenum, GLenum, GLuint);
-    typedef GLenum (APIENTRY *Status)(GLenum);
-    Gen gen_fb = (Gen)(void *)wglGetProcAddress("glGenFramebuffersEXT");
-    Gen gen_rb = (Gen)(void *)wglGetProcAddress("glGenRenderbuffersEXT");
-    Bind bind_fb = (Bind)(void *)wglGetProcAddress("glBindFramebufferEXT");
-    Bind bind_rb = (Bind)(void *)wglGetProcAddress("glBindRenderbufferEXT");
-    Storage storage = (Storage)(void *)wglGetProcAddress("glRenderbufferStorageEXT");
-    Attach attach = (Attach)(void *)wglGetProcAddress("glFramebufferRenderbufferEXT");
-    Status status = (Status)(void *)wglGetProcAddress("glCheckFramebufferStatusEXT");
-    if (!gen_fb || !gen_rb || !bind_fb || !bind_rb || !storage || !attach || !status)
-        return -1;
-    GLuint fb, rb[2];
-    gen_fb(1, &fb);
-    gen_rb(2, rb);
-    bind_fb(0x8D40, fb);                                   /* GL_FRAMEBUFFER_EXT */
-    bind_rb(0x8D41, rb[0]);                                /* GL_RENDERBUFFER_EXT */
-    storage(0x8D41, 0x8058, width, height);                /* GL_RGBA8 */
-    attach(0x8D40, 0x8CE0, 0x8D41, rb[0]);                 /* GL_COLOR_ATTACHMENT0_EXT */
-    bind_rb(0x8D41, rb[1]);
-    storage(0x8D41, 0x88F0, width, height);                /* GL_DEPTH24_STENCIL8_EXT */
-    attach(0x8D40, 0x8D00, 0x8D41, rb[1]);                 /* GL_DEPTH_ATTACHMENT_EXT */
-    attach(0x8D40, 0x8D20, 0x8D41, rb[1]);                 /* GL_STENCIL_ATTACHMENT_EXT */
-    return status(0x8D40) == 0x8CD5 ? 0 : -1;              /* GL_FRAMEBUFFER_COMPLETE_EXT */
-}
-
+/* hidden: never shown nor focused (--shot); the frame goes to an offscreen framebuffer (gl_offscreen) of width x
+ * height, or, without one, to the window shown without taking the focus, off the screen */
 int win_open(Window *w, const char *title, int width, int height, int hidden)
 {
     memset(w, 0, sizeof *w);
@@ -109,7 +128,7 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
         swap(1);
     w->hwnd = hwnd; w->hdc = hdc; w->hglrc = rc_gl;
     w->width = width; w->height = height;
-    if (hidden && offscreen(width, height) != 0) {
+    if (hidden && gl_offscreen(width, height) != 0) {
         SetWindowPos(hwnd, HWND_BOTTOM, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }
@@ -147,6 +166,7 @@ double win_time(void)
     QueryPerformanceCounter(&now);
     return (double)now.QuadPart / (double)freq.QuadPart;
 }
+#endif
 
 /* ---------------------------------------------------------------- renderer */
 

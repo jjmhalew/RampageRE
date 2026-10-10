@@ -1,6 +1,6 @@
 /* sound.h - the game's sound: the sound banks (Rampage.uber/.samp, RShell.uber/.samp), their event programs, the 3D
- * sounds around the camera, the music streams (*.mic), and a small mixer feeding the Windows audio output
- * (docs/FORMAT_SOUND.md).
+ * sounds around the camera, the music streams (*.mic), and a small mixer feeding the audio output (waveOut
+ * on Windows, SDL2 elsewhere; docs/FORMAT_SOUND.md).
  *
  * [R] What the game does (SoundDevice gSndDev 0x4CF1B0, its event player 0x4CFAB0, its 3D sound list 0x4CFB40,
  * MultiStream V7.1 on the IOP for the voices):
@@ -25,7 +25,8 @@
 
 int  sound_init(const Vol *v);           /* read the banks from the Vol; the number of events, -1 if none */
 void sound_free(void);
-int  sound_start(void);                  /* open the audio output (waveOut, winmm.dll loaded at run time); 0 = ok */
+int  sound_start(void);                  /* open the audio output (waveOut from winmm.dll loaded at run
+                                          * time; SDL2 outside Windows); 0 = ok */
 void sound_end(void);                    /* close it */
 void sound_update(float dt);             /* a game frame: the 3D list, the event programs, fades, the output */
 int  sound_mix(int16_t *out, int frames);/* render frames (stereo) by hand instead of the output (tests, capture);

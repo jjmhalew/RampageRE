@@ -10,6 +10,7 @@ __pycache__/
 
 # The native viewer and its compiler
 rampage.exe
+/rampage
 shot_*.png
 tools/zig/
 *.pdb
