@@ -57,6 +57,13 @@ uint32_t material_texture(const Bundle *b, uint32_t material);   /* texture name
  * the see-through ones (fog masks, skylines, tree cards); 0 for a part that names a texture directly */
 enum { MAT_TWO_SIDED = 1 };
 uint32_t material_flags(const Bundle *b, uint32_t material);
+/* the material's diffuse colour (f32 rgba at +0x08): 218 materials have no texture and only this colour (the
+ * saucer's orange blades, its green glass at alpha 0.38, flag poles, bumpers); every textured one is white. 0 when
+ * the name is not a material (a texture named directly): white */
+int material_color(const Bundle *b, uint32_t material, float rgba[4]);
+/* a reflection layer: the material's second texture (u16 at +0x3A) when its layer kind (u16 at +0x2) is 5, the
+ * sphere map "cubemap" on 12 materials (the saucer's top, the trash cans, the Jumper's shiny body); 0 none */
+uint32_t material_env(const Bundle *b, uint32_t material);
 
 /* ---- property books (type 22), read in place; a value of a group-valued record is an offset into the book */
 enum { PK_INT = 0, PK_FLOAT = 1, PK_NAME = 2, PK_GROUP = 3 };

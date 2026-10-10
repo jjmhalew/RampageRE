@@ -260,6 +260,13 @@ texture; the rest have none or name an `.ifl` animation or another material. An 
 one line per frame, its image's name (`Parking00.bmp`: the texture `Parking00`) and how many frames it shows
 (taken as 3ds Max's 30 per second; 20 of them, 9 in Las Vegas: neon signs, fans).
 
+The colour at 0x08 (diffuse rgba) is all a material without a texture has: 218 of them (the saucer's orange
+`saucer_blades`, its green `Saucer_glass` at alpha 0.38, flag poles, bumpers, cloth); every textured material's is
+white. Alpha below 1 is see-through glass (9 materials: the saucer's, the hover tank's, the helicopter's canopy).
+The u16 at +0x2 is the kind of a second layer named by the u16 at +0x3A: 5 a reflection, the sphere map `cubemap`
+(12 materials: the saucer's top `SB_shinyNOTreflective`, the trash cans, the Jumper's shiny body), 8 a damage blend
+`DestroyedGeneric` (38 vehicle materials, not drawn yet).
+
 Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees, cloth, teeth), bit 1 see-through
 (fog masks, skylines, tree cards), 0xC the monsters' own; 0x100 on 78 city materials, not decoded.
 

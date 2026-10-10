@@ -124,6 +124,26 @@ uint32_t material_texture(const Bundle *b, uint32_t material)
     return bdp_entry_of(b, material, ET_TEXTURE) ? material : 0;   /* 2,524 of the 6,292 parts name a texture */
 }
 
+int material_color(const Bundle *b, uint32_t material, float rgba[4])
+{
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    rgba[0] = rgba[1] = rgba[2] = rgba[3] = 1;
+    if (!e || e->size < 0x18)
+        return 0;
+    memcpy(rgba, e->data + 0x08, 4 * sizeof(float));
+    for (int k = 0; k < 4; k++)
+        rgba[k] = rgba[k] < 0 ? 0 : rgba[k] > 1 ? 1 : rgba[k];
+    return 1;
+}
+
+uint32_t material_env(const Bundle *b, uint32_t material)
+{
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    if (!e || e->size < 0x3C || rd16(e->data + 2) != 5)
+        return 0;
+    return rd16(e->data + 0x3A);
+}
+
 uint32_t material_flags(const Bundle *b, uint32_t material)
 {
     const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);

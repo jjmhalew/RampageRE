@@ -333,27 +333,51 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
         else { glDisableClientState(GL_NORMAL_ARRAY); glNormal3f(0, 0, 1); }
         if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, p->uv); }
         else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        float mc[4];                                         /* the material's colour (white when textured) */
+        material_color(sm->b, p->material, mc);
         if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
-        else { glDisableClientState(GL_COLOR_ARRAY); glColor4f(1, 1, 1, 1); }
+        else { glDisableClientState(GL_COLOR_ARRAY); glColor4fv(mc); }
+        int see_through = !p->blend && mc[3] < 0.98f;        /* the glass of the saucer, the hover tank, the
+                                                              * helicopter's canopy: blended by the colour's alpha */
         /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
          * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
          * 0x51), the facades and cracks the building light colours, the ground and top models lit with it */
         int prelit = p->col && !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
         if (prelit)
             glDisable(GL_LIGHTING);
-        if (p->blend) {                                      /* over what is behind, by its alpha */
+        if (p->blend || see_through) {                       /* over what is behind, by its alpha */
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glAlphaFunc(GL_GREATER, 0.01f);
             glDepthMask(GL_FALSE);
         }
         glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
-        if (p->blend) {
+        if (p->blend || see_through) {
             glDisable(GL_BLEND);
             glAlphaFunc(GL_GREATER, 0.5f);
             glDepthMask(GL_TRUE);
         }
         r->drawn += p->ntris;
+        GLuint env = p->uv || p->nrm || skin ? texture(r, sm->b, material_env(sm->b, p->material)) : 0;
+        if (env && (p->nrm || skin)) {                       /* the reflection layer: its sphere map added over
+                                                              * the part [G: the blend and its strength] */
+            glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT | GL_LIGHTING_BIT);
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, env);
+            glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+            glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+            glEnable(GL_TEXTURE_GEN_S);
+            glEnable(GL_TEXTURE_GEN_T);
+            glDisable(GL_LIGHTING);
+            glDisableClientState(GL_COLOR_ARRAY);
+            glColor4f(1, 1, 1, 1);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+            glDepthFunc(GL_LEQUAL);
+            glDepthMask(GL_FALSE);
+            glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+            glPopAttrib();
+        }
         if (prelit)
             glEnable(GL_LIGHTING);
         if (scroll) {
