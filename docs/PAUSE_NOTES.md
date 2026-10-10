@@ -187,14 +187,27 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
 - `hud_set_settings` gives the menu the profile's volumes and vibration. Default a new profile's 0.5, 0.25, on
   (0x33F630) [R]; the slider's full scale is 0.75.
 
-## Not ported, or guessed [G]
+## Not ported, or guessed
 - The `<x>` matrix's turn: quads cannot turn, so the "COMPLETED" stamp is drawn level at its place and scale.
   Mirrors (the arrows) are kept.
 - `setFlags(1024)` on "COMPLETED" is the GUI's pulse: object flag 0x400 multiplies the alpha by 1 − (0.2 + 0.2 sin
-  phase), the phase 2π a second (0x242950): 0.6 … 1 at 1 Hz [R]. **[G]** The list's `setExtraSpacing` (0x254868 keeps
-  the byte at +0x11, added beside the list's spacing; where, not read) and the sizer's layout (its items stay where
-  the layout puts them).
-- The line's width (drawn 1 pixel) and `<ep>`'s layout (taken as a count, then x y z points).
+  phase), the phase 2π a second (0x242950): 0.6 … 1 at 1 Hz [R].
+- The list's `setExtraSpacing` is GuiListBox id 0x4D (dispatcher 0x253730, case 0x253D48): it replaces the list's
+  `<sp>` (+0x130, the `sp` tag 0x22AA90's) [R] (0x254868 is GuiText's setLineSpacing, OFont +0x11). The list lays
+  its items out every frame (0x23CF60, vtable 0x447850 +0x10; window 0x23BF10) [R]: each shown item (F & 0x41 clear)
+  at a running place from 0, horizontal (`<a>` & 8) step its width + sp, vertical its height + its line spacing + sp;
+  x by its justify (0, ½, 1 of its width, or of the list's when vertical), y by the origin (0, ½, 1 of the list's
+  height, or of the item's when vertical), 0x20 centred; items outside the window get F 0x200. Checked: ON / OFF
+  (ArialBlack24 × 0.8: 30.4 and 40 wide) come at 15.2 and 110.4, the layout's. Not ported: the port keeps the
+  layout's English places, so Dutch (`setExtraSpacing(30)`, scale 0.6) does not move them.
+- The sizer [R] (GuiSizer type 0x12, ctor 0x249160, vtable 0x447B20, update 0x248B80 with F 0x100): each child's box
+  (its bounds with children, joined with the origin, through its 3 × 3) laid along x (flag 1) or y: place_i =
+  place_i−1 + max_i−1 + after_i−1 + before_i − min_i, `<si>` before (u16 +0), after (+2), stretch (byte +6); flag 4
+  ends at 0, 8 centres; across 0x20 / 0x40 / 0x10 (horizontal) or 2 / 8 / 4; 0x100 spreads (stretch − total) / Σ(s +
+  1) below `<stretch>` (0x2490D0); hidden children count. Checked: Cancel / Accept come at −61.8375 / −161.7125, the
+  layout's. Not ported: the places are the layout's (other languages would move them).
+- The line [R]: GuiLine (ctor 0x23BA10) is 3 wide by default (+0x228), drawn as a band ± width / 2 across its points
+  (0x23A8E0); `<ep>` (0x22C0E0) copies two points, floats 0 .. 2 and 3 .. 5 after the count. As here (`<width>`, 3).
 - The slider steps: one per script frame, the world's step 1/30 s (the GuiManager's update in the tick 0x288340,
   paused or not, with gWorld +4 as dt) [R]: a full sweep in about 3.3 s.
 - `getPlatform()` answers 2 in this build (App case 0x28B1A0) [R], so the foreign boss card is used from French on.

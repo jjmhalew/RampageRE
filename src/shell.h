@@ -167,6 +167,7 @@ typedef struct {
     float col[4];
     const Bundle *b;                /* NULL: untextured */
     uint32_t tex;
+    int additive;                   /* M 0x80: drawn additively (HudQuad's) */
 } ShellQuad;
 int shell_quads(const Shell *s, HudQuad *out, int max);
 
@@ -189,9 +190,9 @@ typedef struct {
     int parent;                     /* an effect on a shape's node: the shape's index here, and the node; -1 / NULL */
     const char *attach;
     int running, stopping, gen;     /* an effect: playing; stopped, playing out (shut it down once) */
-    int lit;                        /* a shape: its light set (ambient, up to two lights, each a direction it travels) */
+    int lit;                        /* a shape: its light set (ambient, up to three lights, each a direction it travels) */
     float ambient[3]; int nlights;
-    float light_dir[2][3], light_diffuse[2][3], light_ambient[2][3], light_specular[2][3];
+    float light_dir[3][3], light_diffuse[3][3], light_ambient[3][3], light_specular[3][3];
 } Shell3D;
 /* the 3D objects in their markers' order, then the effects that run unseen; marks the drawn effects drawn (an effect
  * starts on the first update after it was drawn once [R 0x237590]) */

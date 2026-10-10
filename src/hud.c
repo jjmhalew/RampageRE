@@ -234,7 +234,7 @@ static const char *loc_find(const Gui *g, const char *key)
 }
 
 /* ---------------------------------------------------------------- the draw list */
-typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; float skew; } Emit;
+typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; float skew; int additive; } Emit;
 
 static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                       const float col[4], const Bundle *b, uint32_t tex, float z)
@@ -251,6 +251,7 @@ static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0,
     q->x0 = x0; q->y0 = y0; q->x1 = x1; q->y1 = y1;
     q->u0 = u0; q->v0 = v0; q->u1 = u1; q->v1 = v1;
     q->skew = e->skew;
+    q->additive = e->additive;
     memcpy(q->col, col, sizeof q->col);
     q->b = b;
     q->tex = tex;
@@ -507,6 +508,7 @@ typedef struct Node {
     int sel, pulse;
     int clip; float clip_x0, clip_x1;
     float ep[4]; int has_ep;    /* line (<l>): <ep> its first and last point (x y) */
+    float lw;                   /* line: <width>, 3 without (GuiLine ctor 0x23BA10: +0x228) */
     int visible;
     float fade;
     struct Node *parent, *child, *next;
@@ -685,7 +687,7 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         nd->m = sqrtf(x[0] * x[0] + x[1] * x[1]);
         nd->flip_y = x[0] * x[4] - x[1] * x[3] < 0;
     } else if (strcmp(tag, "ep") == 0) {
-        float e[16] = { 0 };                             /* the count, then x y z each [G] */
+        float e[16] = { 0 };                             /* the count, then x y z each (0x22C0E0 copies two points) */
         parse_floats(text, e, 16);
         int n = (int)e[0];
         if (n >= 2 && n <= 5) {
@@ -693,6 +695,10 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
             nd->ep[2] = e[1 + 3 * (n - 1)]; nd->ep[3] = e[2 + 3 * (n - 1)];
             nd->has_ep = 1;
         }
+    } else if (strcmp(tag, "width") == 0) {              /* a GuiLine's width (+0x228) */
+        float w = 3;
+        parse_floats(text, &w, 1);
+        nd->lw = w;
     }
     /* sc (script), f (entry function), R, a, sp, growth, si / sflags / stretch (sizers), X / xf (child interfaces):
      * not needed for drawing */
@@ -728,6 +734,7 @@ static Node *node_new(Layout *L, int kind)
     nd->sel = -1;
     nd->visible = 1;
     nd->fade = 1;
+    nd->lw = 3;
     return nd;
 }
 
@@ -1082,10 +1089,12 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             float vs = nd->has_tex ? nd->tex.vs : 1, v0 = nd->flip_y ? vs : 0, v1 = nd->flip_y ? 0 : vs;
             if (nd->flip_y)                              /* mirrored about the origin */
                 y0 = -(y0 + h);
+            e->additive = (nd->M & 0x80) != 0;           /* [R 0x17D100] Pause's icons, ChallengeText's icon1 */
             if (drawn && w > 0 && h > 0)
                 emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, v0,
                           nd->has_tex ? nd->tex.us : 1, v1, c,
                           nd->has_tex ? nd->tex.b : NULL, nd->has_tex ? nd->tex.name : 0, nz);
+            e->additive = 0;
         } else if (nd->kind == N_SLIDER) {
             float w = nd->has_d ? nd->d[0] : 100, h = nd->has_d ? nd->d[1] : 20;
             float f = nd->vmax != nd->vmin ? (nd->val - nd->vmin) / (nd->vmax - nd->vmin) : 0;
@@ -1116,11 +1125,11 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             /* the text's own scale s goes into its matrix (GuiText 0x234D88 scales the matrix by it) */
             text_emit(e, g, &ts, nd->text, nox, noy, nsc * nd->tscale, c, s, f->shadow_dx, f->shadow_dy, nz);
         } else if (nd->kind == N_LINE && nd->has_ep) {
-            /* a GuiLine (Pause's options rule) [G: its draw is not traced]: one pixel wide between its points */
-            float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
+            /* a GuiLine (Pause's options rule) [R 0x23A8E0]: a band of +- width / 2 across its points, in its frame */
+            float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf }, hw = 0.5f * nd->lw;
             float x0 = fminf(nd->ep[0], nd->ep[2]), x1 = fmaxf(nd->ep[0], nd->ep[2]);
             float y0 = fminf(nd->ep[1], nd->ep[3]), y1 = fmaxf(nd->ep[1], nd->ep[3]);
-            if (x1 - x0 >= y1 - y0) { y0 -= 0.5f; y1 += 0.5f; } else { x0 -= 0.5f; x1 += 0.5f; }
+            if (x1 - x0 >= y1 - y0) { y0 -= hw; y1 += hw; } else { x0 -= hw; x1 += hw; }
             emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * x1, noy + nsc * y1, 0, 0, 1, 1, c, NULL, 0, nz);
         } else if (nd->kind == N_RECT)
             rect_emit(e, nd, nox, noy, nsc, nz, nf);

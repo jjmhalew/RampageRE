@@ -592,6 +592,7 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
         } else
             glDisable(GL_TEXTURE_2D);
         glColor4fv(col);
+        glBlendFunc(GL_SRC_ALPHA, q->additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
         glBegin(GL_QUADS);
         glTexCoord2f(q->u0, q->v0); glVertex2f(q->x0 + q->skew, q->y0);
         glTexCoord2f(q->u1, q->v0); glVertex2f(q->x1 + q->skew, q->y0);
@@ -599,6 +600,7 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
         glTexCoord2f(q->u0, q->v1); glVertex2f(q->x0, q->y1);
         glEnd();
     }
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_BLEND);
     glEnable(GL_ALPHA_TEST);
     glEnable(GL_DEPTH_TEST);

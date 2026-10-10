@@ -237,6 +237,7 @@ typedef struct {
                                                       * layouts (shell_3d) */
     const void *layout;                              /* the layout being emitted */
     float skew;                                      /* the top edge moved along x (a slanted glyph) */
+    int additive;                                    /* M 0x80: the additive shader [R 0x17D100] */
 } Emit;
 
 /* a picture: the rectangle (x0, y0) .. (x1, y1) of frame f with the texture's (u0, v0) .. (u1, v1) on it */
@@ -255,6 +256,7 @@ static void emit_quad(Emit *e, const Frame *f, float x0, float y0, float x1, flo
     memcpy(q->col, col, sizeof q->col);
     q->b = b;
     q->tex = tex;
+    q->additive = e->additive;
 }
 
 /* ---------------------------------------------------------------- texts (hud.c) */
@@ -470,7 +472,6 @@ typedef struct Node {
     float col[4];
     unsigned F, Q, M;
     TexRef tex; int has_tex;
-    int white_mask;             /* an untextured 0xFFFFFE quad: the layouts' mask colour (below) */
     char text[MAX_TEXT];
     const Font *font;
     int justify, origin, spacing, has_spacing, linesp, has_linesp;
@@ -489,6 +490,7 @@ typedef struct Node {
     float hl_d[2];
     int sel, pulse, top;        /* list box: the selection, setHighlightPulse, the first item shown */
     float ep[4]; int has_ep;
+    float lw;                                            /* a line's <width>: 3 without (GuiLine ctor 0x23BA10) */
     int visible;
     int video;                  /* the Video quad: the movie's picture when there is one */
     /* the 3D objects (N_FX): what they are, their files and their state */
@@ -654,10 +656,8 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         else if (strcmp(which, "disabled") == 0) { memcpy(nd->dis_col, c, sizeof c); nd->has_dis = 1; }
         else if (strcmp(which, "selector") == 0) memcpy(nd->sel_col, c, sizeof c);
         else if (nd->kind == N_TEXT) { memcpy(nd->tcol, c, sizeof c); nd->has_tcol = 1; }
-        else {
+        else
             memcpy(nd->col, c, sizeof c);
-            nd->white_mask = (v >> 8) == 0xFFFFFE;
-        }
     } else if (strcmp(tag, "b") == 0) {
         if (strcmp(which, "highlight") == 0) nd->has_hl_tex = tex_find(g, text, &nd->hl_tex);
         else if (strcmp(which, "endcap") == 0) nd->has_endcap = tex_find(g, text, &nd->endcap);
@@ -735,6 +735,10 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
             nd->ep[2] = e[1 + 3 * (n - 1)]; nd->ep[3] = e[2 + 3 * (n - 1)];
             nd->has_ep = 1;
         }
+    } else if (strcmp(tag, "width") == 0) {              /* a GuiLine's width (+0x228) */
+        float w = 3;
+        parse_floats(text, &w, 1);
+        nd->lw = w;
     }
 }
 
@@ -769,7 +773,9 @@ static Node *node_new(Layout *L, int kind)
     for (int i = 0; i < 4; i++) nd->col[i] = nd->bar_col[i] = nd->mask_col[i] = nd->border[i] = 1;
     nd->val = 100;
     nd->vmax = 100;
-    nd->B = 5;                                           /* [R GuiRect ctor 0x245650: 5.0 at +0x180; G: that it is B] */
+    nd->B = 5;                                           /* [R GuiRect ctor 0x245650: 5.0 at +0x180, setBorderWidth's
+                                                          * (0x244410, the `B` tag 0x22A9E0)] */
+    nd->lw = 3;
     nd->sel = -1;
     nd->visible = 1;
     nd->fade = 1;
@@ -1410,15 +1416,19 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             float x0 = nd->Q & 2 ? -0.5f * w : 0, y0 = nd->Q & 4 ? -0.5f * h : 0;
             float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
             /* M 0x200 (the 0x310 boxes): a mask, not drawn [G hud.c]; an untextured 0xFFFFFE quad without it (the
-             * title boxes of MonsterSelect and MonsterSheet) is the same mask colour: not drawn either [G] */
-            int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex) && !(nd->white_mask && !nd->has_tex);
+             * title boxes of MonsterSelect and MonsterSheet) is drawn, a faint white bar: neither the colour's handler
+             * (0x22C650 -> 0x22B530) nor the draw (0x2439E0) tests that colour [R] */
+            int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
             if (nd->video && g->video_pic && w > 0 && h > 0) {   /* Video.setVideo: the movie's picture */
                 float wc[4] = { 1, 1, 1, c[3] };
                 emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, 1, 1, wc, NULL, HUD_TEX_VIDEO);
-            } else if (drawn && w > 0 && h > 0)
+            } else if (drawn && w > 0 && h > 0) {
+                e->additive = (nd->M & 0x80) != 0;       /* CitySelect's `basic` glow over the globe */
                 emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, nd->has_tex ? nd->tex.us : 1,
                           nd->has_tex ? nd->tex.vs : 1, c, nd->has_tex ? nd->tex.b : NULL,
                           nd->has_tex ? nd->tex.name : 0);
+                e->additive = 0;
+            }
         } else if (nd->kind == N_SLIDER) {
             float w = nd->has_d ? nd->d[0] : 100, h = nd->has_d ? nd->d[1] : 20;
             float fr = nd->vmax != nd->vmin ? (nd->val - nd->vmin) / (nd->vmax - nd->vmin) : 0;
@@ -1448,11 +1458,11 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             tf = fr_mul(&tf, &df);
             text_emit(e, g, &ts, nd->text, &tf, c, s, nd->has_shadow ? nd->sh_dx : fo->shadow_dx,
                       nd->has_shadow ? nd->sh_dy : fo->shadow_dy);
-        } else if (nd->kind == N_LINE && nd->has_ep) {
-            float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
+        } else if (nd->kind == N_LINE && nd->has_ep) {   /* [R 0x23A8E0] a band of +- width / 2, in its frame */
+            float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf }, hw = 0.5f * nd->lw;
             float x0 = fminf(nd->ep[0], nd->ep[2]), x1 = fmaxf(nd->ep[0], nd->ep[2]);
             float y0 = fminf(nd->ep[1], nd->ep[3]), y1 = fmaxf(nd->ep[1], nd->ep[3]);
-            if (x1 - x0 >= y1 - y0) { y0 -= 0.5f; y1 += 0.5f; } else { x0 -= 0.5f; x1 += 0.5f; }
+            if (x1 - x0 >= y1 - y0) { y0 -= hw; y1 += hw; } else { x0 -= hw; x1 += hw; }
             emit_quad(e, &df, x0, y0, x1, y1, 0, 0, 1, 1, c, NULL, 0);
         } else if (nd->kind == N_RECT)
             rect_emit(e, nd, &df, nf);
@@ -1983,7 +1993,8 @@ static void mc_keyboard_input(Shell *s, int ev)
             mc_key_add(s, key->text[0]);                 /* the key's own text */
         return;
     } else if (ev == EV_BACK) {
-        sound(s, "Cancel");                              /* [R: state 14]; back to the list [G] */
+        sound(s, "Cancel");                              /* [R: panel 1, result 0xE (0x340938); state 4 -> 3, the
+                                                          * list built again (0x343FE8, 0x343BD0)] */
         mc_open_list(s, m->purpose, m->buddy);
         return;
     } else
@@ -2025,7 +2036,7 @@ static void mc_list_input(Shell *s, int ev)
             mc_close(s);
             mc_finish_buddy(s, -1);
         } else
-            mc_message(s, MSG_WARN_CONTINUE);            /* [R 0x3439E8's texts; G: that a cancel leads there] */
+            mc_message(s, MSG_WARN_CONTINUE);            /* [R 0x3439E8's texts; the list's Back, 0x343DF8] */
     }
 }
 
@@ -2289,8 +2300,9 @@ static void am_next(Shell *s)
 }
 
 /* how long a movie that is not played lasts: shell_set_movie_time's, but in the attract mode after the idle time
- * (state 2) at least 5 s of black under "Press START", or Start could only ever land in ShortDelay, which ignores it [G:
- * a stand-in] */
+ * (state 2) at least 5 s of black under "Press START", or Start could only ever land in ShortDelay, which ignores it.
+ * Not the game's: there a movie that cannot play has Video.status() 3 at once (0x243130: no player at +0xEC), so the
+ * next frame goes on; a port convenience for a viewer that holds no movie */
 static float am_movie_time(const Shell *s) { return s->state == 2 && s->movie_time < 5.0f ? 5.0f : s->movie_time; }
 
 /* playVideo(event, name): Video.setVideo(name) and play; here the movie is named (SHELL_EVT_MOVIE) and "plays" for
@@ -3672,8 +3684,8 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
         h->initialized = 1;
         fix_buttons(r, "nb_select", "nb_back", "nb_flip", "nb_grow");
         for (int i = 0; i < 3; i++)
-            h->in_use[i] = -1;                           /* [G: the script leaves nMonstersInUse at 0 until the
-                                                          * first 512, which would mark George taken] */
+            h->in_use[i] = 0;                            /* [R] an int[3] starts {0, 0, 0} (TypePInt's 0x1CDA40), so
+                                                          * George is dark until the first 512's reset */
         h->state = h->sub = 0;
         h->cards = find(r, "cards");
         h->blowup = find(r, "blowup");
@@ -3995,8 +4007,6 @@ static void cs_event(Shell *s, int ev, int button, int pad, float dt)
         c->initialized = 1;
         fix_buttons(r, "nb_select", "nb_back", "nb_stats", "");
         show(find(r, "-.line.-"), 0);
-        /* the grey box "basic" (M 0x90) lies where the globe is drawn over it [G] */
-        show(find(r, "basic"), 0);
         c->jumped = 0;
         c->globe = find(r, "globe");                     /* setIdentity, setVisible(1) */
         node_identity(c->globe);
@@ -4110,14 +4120,14 @@ static void ifc_event(Shell *s, int which, int ev, int button, int pad, float dt
     }
 }
 
-/* GuiScreen.setFocus: the old one loses it (1024), the new one gains it (512) [G: the events' order] */
+/* GuiScreen.setFocus (0x238970) [R]: the old one loses it (1024, not when it is the new one), the slot is stored,
+ * then the new one gains it (512, even when it had it) */
 static void cr_focus(Shell *s, int which)
 {
-    if (which == s->focus)
-        return;
     int old = s->focus;
+    if (old != which)
+        ifc_event(s, old, EV_LOSE, 0, 0, 0);
     s->focus = which;
-    ifc_event(s, old, EV_LOSE, 0, 0, 0);
     ifc_event(s, which, EV_GAIN, 0, 0, 0);
 }
 
@@ -4518,7 +4528,7 @@ static void shape_lights(const Layout *L, const Node *nd, Shell3D *o)
     if (!ls)
         return;
     memcpy(o->ambient, ls->amb, sizeof o->ambient);
-    for (const Node *lt = ls->child; lt && o->nlights < 2; lt = lt->next) {
+    for (const Node *lt = ls->child; lt && o->nlights < 3; lt = lt->next) {   /* the renderer's 3 (0x25AEB0) */
         if (lt->fx != FX_LIGHT)
             continue;
         M34 w = node_world3(lt);
@@ -4663,6 +4673,7 @@ int shell_quads(const Shell *s, HudQuad *out, int max)
             h->u0 = q->u[0]; h->v0 = q->v[0]; h->u1 = q->u[2]; h->v1 = q->v[2];
         }
         memcpy(h->col, q->col, sizeof h->col);
+        h->additive = q->additive;
         h->b = q->b;
         h->tex = q->tex;
     }

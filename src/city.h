@@ -28,7 +28,7 @@ typedef struct {
     const SceneGuiMesh *meshes; int nmeshes;
     const FxQuad *fx; int nfx;
     int lit; float ambient[3]; int nlights;           /* the light set: each light a direction it travels */
-    float light_dir[2][3], light_diffuse[2][3], light_ambient[2][3];
+    float light_dir[3][3], light_diffuse[3][3], light_ambient[3][3];
 } SceneGui3D;
 
 typedef struct {                                     /* a skinned mesh's vertices, posed every frame */

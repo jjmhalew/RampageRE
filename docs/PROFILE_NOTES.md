@@ -270,10 +270,15 @@ The cheats are not in the saved block.
 
 ## The port (src/profile.c)
 - **Setup**:
-  - `profile_init`: zeros, the built-in ShellData rosters, then a new profile; the campaign; autosave on **[G: in the
-    game the popup's flag 4 starts clear and is set by setAllowSave, a successful load or create, or the card
-    watcher with a name held (0x2C3568, 0x34559C, 0x3454E0, 0x3459D8); the port's "on" opens the list on the first
-    MainMenu]**;
+  - `profile_init`: zeros, the built-in ShellData rosters, then a new profile; the campaign; autosave on, which
+    opens the list on the first MainMenu. The game's flag 4 [R] starts clear (.bss, no constructor store found) and
+    is set by setAllowSave(1) (0x2C3568; only Results.scr:358's Save button), a close(1) of loadProfile (flag 0x10)
+    in mode 3, 6 or 7 (0x34559C: a load picked from the list, or a save; a create closes in mode 5 and does not),
+    the card watcher in mode 1 with the status now 0 and a name held (0x3454E0), and saveProfile when the card id
+    changed and a name is held (0x3459D8, its entry 0x345950); cleared by setAllowSave(0) and warn-continue's Don't
+    Save / Continue (0x343B00). It gates getAllowSave (MainMenu.scr:209 loadProfile vs restoreProfile, Results'
+    Save button and its 3 s), saveProfile (clear: close(3), nothing written) and warn-continue (only with 4 set and
+    0x20 clear). Not ported: the port autosaves without a load and after a create, and never sets it after a load;
   - `profile_set_roster`: the rosters from the books.
 - **The shell**: `profile_create`, `profile_restore`, `profile_restore_checkpoint`.
 - **The game**:
@@ -295,7 +300,7 @@ The cheats are not in the saved block.
   - the victory shown;
   - `profile_city_flags`, `profile_start_block`, and `profile_city_available` (CitySelect's lock).
 
-## Not traced, or guessed [G]
+## Not traced, or guessed
 - The load checks the CRC and the file's data size, not the block's version or size (0x3445E0 … 0x3446B4) [R]; the
   port the same.
 - The time stamp (0x10D140) [R]: (u64) difftime(now, epoch) × 1000, the epoch mktime of 1 Jan 2000 (tm_year 2000

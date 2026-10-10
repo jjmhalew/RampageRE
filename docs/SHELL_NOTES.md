@@ -81,15 +81,28 @@ movies (`setFlags(1024)`). The main menu with the `TITLE_BASE` logo is the title
   [MOVIE_NOTES.md](MOVIE_NOTES.md)): `shell_movie_hold`, the picture in the `Video` quad by `shell_movie_clock`, and
   `shell_movie_end` at its end, so the shell goes on as at `Video.status()` 3.
 - A movie nobody holds lasts `shell_set_movie_time` seconds: 0 by default, so it is skipped at once. In state 2 it
-  lasts at least 5 s of black under "Press START" **[G: a stand-in]**. Without that, Start could only arrive during
-  ShortDelay, which ignores it.
+  lasts at least 5 s of black under "Press START", or Start could only arrive during ShortDelay, which ignores it.
+  That is the port's: in the game `Video.status()` (GuiQuad id 0x4A, 0x253270 -> 0x243130) answers 3 when the quad
+  has no player (+0xEC 0, as a failed `setVideo` 0x243370 leaves it), so the next frame goes on [R].
 - The demo game becomes `SHELL_EVT_ATTRACT_GAME` and is not played.
 
 ## The profile popup (SaveGame, MemoryCard.ifc) [R unless marked]
 
-**Boot check (BootCheck → `gShell.doBootCheck`, 0x306300):** once, in shell state 1. The port shows the autosave
-notice (`autosave_rect`, mcWarnAutosave, Continue) and the boot goes on once it is accepted. **[G: the memory card's
-own checks (no card, unformatted, corrupt) have nothing to check here.]**
+**Boot check (BootCheck → `gShell.doBootCheck`, 0x306300):** once, in shell state 1, with byte 0x4D5211 clear. It
+calls 0x345BC0(popup, 0x128): with flag 0x100 already set nothing (the check reads as done); else the interface,
+SaveIcon, request 3, the KB needed, op 12 and popup state 13 [R]. The popup's state is +0x2BC (update 0x342F30, table
+0x4358F0: 2 warn-continue, 3 list, 4 name entry, 5 check and write, 6 load, 7 save, 8 an error's answer, 9 format, 10
+no card, 11 confirm overwrite, 12 the boot card check, 13 the autosave notice, 15 delete; 14, no data, is never
+stored); `isBootCheckDone` (0x306338) is state 1 [R].
+- **State 13, the autosave notice, at every power-on** whatever the card holds: `autosave_rect` alone (0.25 s before
+  an answer), Cross only (or the attract mode's timeout, result 3), then state 12 [R].
+- **State 12, the card check** (0x3432E0): status 0 with saves, status 20 (unformatted; `mcUnformattedAtBoot` is never
+  used), or no saves and room enough: closed silently (close(1) in mode 12 sets only 0x100); no saves and no room:
+  mcNoSpace (Retry / Don't Save); any other status: mcNoCard ("At least %dKB") with Retry / Don't Save. Retry waits:
+  the card watcher (0x345100) starts state 12 again when the status changes; Don't Save goes to state 2, which with
+  flag 4 clear closes at once (close(3)) [R].
+- The port shows the notice and goes on once it is accepted: a writable host, status 0 [R]. Not ported: the no-room
+  case; no card and unformatted have no host meaning, and corruption is checked at the load (error 18).
 
 **Profile list (`gCommon.loadProfile` → 0x345700 with "create allowed", flag 0x10):**
 - When it opens:
@@ -128,10 +141,15 @@ own checks (no card, unformatted, corrupt) have nothing to check here.]**
   - Any other key adds its text, up to 15 characters.
   - Each change plays `Click`, and the caret moves to the text's width.
 - Back is state 14: sub-state 3, the list, built again (0x343FE8) [R].
-- A name already saved shows "The Profile name already exists." The game finds it in the save (sub-state 5,
-  0x344020) from the card's answer, error 24 (0x342380): Cancel and Overwrite for the list's request, else Retry,
-  Don't Save and Overwrite. **[G: the port checks the saved names at DONE and goes back to the keyboard; Overwrite
-  and the buttons' results were not traced.]**
+- A name already saved shows "The Profile name already exists." [R]: DONE does not check it (state 4 sub-state 6,
+  0x343F90: the text to +0x188, the card id to +0x2CC, state 5). State 5 shows CHECKING (a list request) or SAVING,
+  opens the file by name (sub-state 1, 0x3441D8; the directory is crc32 of the name), and a handle back (or error
+  18) with op ≠ 9 is error 24 (0x344398; answers 0x342BD0): for the list's request Cancel (Cross: state 3, the list
+  again, the name lost) and Overwrite (Back: state 11); for a save Retry (state 5 again), Don't Save (state 2) and
+  Overwrite (button0: state 11). State 11 (0x343868) asks "OVERWRITE FILE?" with NO (Cross: state 3 for the list,
+  5 for a save) and YES (Back: op 9, state 5, writing into the file). A list request's new-profile hook (+0x2A0 =
+  0x33F0F0) runs 0x33F630 on the copy first (0x344444), so the old file gets a fresh profile. **Not ported**: the
+  port checks the saved names at DONE, case-blind, and shows OK back to the keyboard.
 - The port's event: `SHELL_EVT_PROFILE_CREATE` with the name.
 - `shell_type` is not in the game: it types a character straight in.
 
@@ -280,8 +298,10 @@ The port reports the cheats as `SHELL_EVT_CHEATS`. What the flags do in the game
 - Button 1 zooms in to the big card, a 1 s fade. In the zoom, button 0 flips it.
 - Back returns.
 
-**[G]:** the script leaves `nMonstersInUse` at 0 until the first focus, which would mark George taken. The port starts
-it at −1.
+`nMonstersInUse` starts {0, 0, 0} [R]: an `int[3]`'s elements are made by the array resize (0x1C81A0, loop
+0x1C8300) through TypePInt's 0x1CDA40, a PInt of 0. So monster 0 (George) is taken in the 8192 init and again in the
+first 512's black pass before the reset to −1: George's card stays dark on the first visit, still selectable
+(`validSelection` runs after the reset). As here.
 
 ## The city select (CitySelect.scr) [R]
 
@@ -311,7 +331,10 @@ it at −1.
   `Node_<City>`) starts. Moving on stops the last city's ring, as does losing the focus.
 - **`updateDayNightGlobe`**: the light `lights` gets ambient = diffuse = 255 and specular (0, 55, 0) by day, 100 and
   (0, 5, 0) by night.
-- The grey box `basic` (M 0x90) under the globe stays hidden **[G]**.
+- The box `basic` (M 0x90, BASIC: a soft white glow on black, colour 0x494949, 260 × 228 at 105, 102; no script
+  touches it) is additive [R]: with M 0x80 the shader pick 0x17D100 takes descriptor 0x415940 / 0x415790 (ids 0x72 /
+  0x70), whose records (114 / 112) use GS state 0x17: ALPHA 0x48, Cs × As + Cd, TEST 0x5000D. So a faint grey sheen
+  over the globe; Pause's icons and ChallengeText's `icon1` (M 0x90) are additive too (`HudQuad.additive`).
 
 ## The loading screen (0x3485E0, Loading.scr) [R]
 
@@ -369,10 +392,13 @@ static. It is widened in four ways:
   effect on a node in that node's frame on the drawn model). The depth is cleared once a frame; the 2D quads write
   none: they go through the same camera at depth 1 and CitySelect's full-screen background is drawn before the
   globe at depth 10, which still shows (the GUI's begin, 0x231900, sets no depth state of its own) **[R from the
-  picture]**. The effect's size follows its frame's scale **[G]**: GuiEffect's draw (0x2376E0) hands the instance its
-  whole matrix, scale and all (+0x70 to method +0x6C, kept as is at ParticleSystemFx +0x2C, 0x1F1D60; CompositeFx
-  0x1EA1A0 keeps it and passes it on), but whether the billboards' sizes take that scale was not read. Every menu
-  effect's scale is 1 but the city ring's (0.971) and the card glow's (1.32), so only the glow could differ.
+  picture]**. The frame's scale reaches the particles' places, not their sizes [R]: GuiEffect's draw (0x2376E0)
+  hands the instance its whole matrix, scale and all (+0x70 to method +0x6C, kept as is at ParticleSystemFx +0x2C,
+  0x1F1D60; CompositeFx 0x1EA1A0 keeps it and passes it on; the emitter copies it, 0x1F831C; the spawn points go
+  through it, 0x2128C8 .. 0x2129D0). A billboard's axes are size × size_mul times the camera's rows (0x22233C .. 0x2223D8),
+  the matrix only on its place (0x222400 .. 0x222504); a streak's ends go through it, so its length scales, its width
+  (size × size_mul, 0x1F769C) not. Every menu effect's scale is 1 but the city ring's (0.971, billboards) and the
+  card glow's (1.32, streaks), as fx.c draws them.
 - **The 2D path:** an object outside every `<DD>` has its position in screen widths about the centre, x right and y
   down, and a `<DD>` inside it draws about (320, 240), moved there and scaled by it: the GUI camera at depth 1
   **[R]**. The 1 / (1 + z) of a deeper `<o>` is left out: no shell `<DD>` lies in one.
@@ -434,8 +460,11 @@ the rows, then the place; `<p>` the place; `<m>` multiplies the 3×3 as it is wh
 
 **Lights:** `<ls>`'s own `<A>` is the set's ambient (0x16E1F0). `<lt>` keeps diffuse (+0x158, default 128 grey),
 specular (+0x168) and ambient (+0x178); the colours read RRGGBBAA, as the script's night values are the file's. Its
-direction is row 2 of its full world (0x239D60), into the screen and to the right for CitySelect's **[G: the
-renderer's sign: the direction the light travels]**. `setAmbient` / `setDiffuse` / `setSpecular` go through
+direction is row 2 of its full world (0x239D60), into the screen and to the right for CitySelect's, the direction
+the light travels [R]: 0x16DF50 copies it to the renderer's light (+0x40, normalised by 0x259C10), 0x25AEB0 writes
+−d into the VU1 light matrix (neg.s at 0x25AFAC .. 0x25AFC4), and the lit program 0x37A2A0 takes max(0, N · (−d))
+(MAXx at 0x1A0). Up to three lights (0x25AEB0 / 0x25B200: i < 3). With +0x6C bit 0 the matrix is another object's
+(gp − 0x6CC4 → +0x240 → +0xEC), not ported. `setAmbient` / `setDiffuse` / `setSpecular` go through
 0x255390. Lights update when hidden.
 
 **GuiEffect `<e>`** (0x22E730: `auto`, then `edf`):
@@ -459,7 +488,7 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 **[R]**; it sets no depth test or write of its own. Gui2D's draw (0x2361E0) only sets its pixel view (0x2363F0 /
 0x22F780).
 
-## Not ported, or guessed [G]
+## Not ported, or guessed
 
 - **Not drawn:**
   - the emulators and the demo game (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md));
@@ -468,26 +497,27 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
   - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the
     card glow) names a sound, so fx.c's sound start never fires for them (traced through the main menu, MonsterSelect
     and CitySelect);
-  - the frame's scale on particle sizes (taken to scale them; it is not 1 only for the city ring and the card
-    glow) **[G]**;
   - the globe's brightness step at Greenwich, where its two halves meet: it stays with the lighting off, so it is in
     the halves' own art, not the port's lights.
-- **Popup:**
-  - the memory card's own states (checking, saving, errors, formatting);
-  - the list scrolling beyond six profiles (counted, not shown);
-  - the duplicate-name check;
-  - Back from the name entry.
-- **Bits and flags:**
-  - the `getButtons` bits for the held pad;
-  - flag 0x400 as blinking, at 1.25 Hz between 0.2 and 1;
-  - B = 5 for a rect without `<B>` (GuiRect constructor 0x245650 stores 5.0 at +0x180);
-  - `<sh>`'s colour order.
-- **Hidden or masked:** untextured 0xFFFFFE quads without M 0x200 are taken as masks and not drawn (the title boxes of
-  MonsterSelect and MonsterSheet).
-- **Show-profile:** the show-profile flag's life.
-- **Idle and focus:**
-  - which inputs reset the idle timer;
-  - the order of the focus events (old 1024, then new 512).
-- **Attract mode:** its 5 s stand-in per movie in state 2, and `startAttractGame`'s demo.
-- **Segments:** the layouts' segments 1, 2 and 7 (other languages or video modes); segment 0 is used.
+- **Popup** (traced above, not ported): the memory card's own states (CHECKING, SAVING, LOADING, the errors through
+  0x341DF0 and the table 0x435640, formatting; during an autosave, flag 4, only SaveIcon shows, 0x3447FC / 0x3440C4);
+  the list scrolling beyond six profiles (`mc_open_list` keeps the top at 0; the viewer has one profile); the
+  duplicate name's Cancel / Overwrite (above).
+- **Show-profile's life** [R]: bit 0x200 starts clear (.bss) and is set only at 0x34561C, on any close whose result is
+  not 3 (mode 12 sets 0x100 only), buddy loads too; nothing clears it. The port clears it on every close but the
+  notice's (`mc_close`), where the game keeps it through the result-3 closes, and a shell opened from the game starts
+  it at 0.
+- **Bits and flags** [R]: `getButtons` (0x16A180) sets bit i from the pad's button byte i + 4 (names 0x3F67C0): Up 1,
+  Down 2, Left 4, Right 8, Start 16, as shell.h; flag 0x400 is 0.6 .. 1 at 1 Hz (0x242950: 1 − (0.2 + 0.2 sin), read
+  by the text, quad, line, rect, slider and list draws); a rect without `<B>` is 5 (setBorderWidth 0x244410 from the
+  `B` tag 0x22A9E0; 12 rects use it); `<sh>` copies word 0 into OFont +0x18 (the .fdf's shadow colour, AABBGGRR) and
+  words 1, 2 to +0x12 / +0x13 (dx, dy) (0x229FF0) — that its leading 3 is a count is taken from `ep`.
+- **The white bars** [R]: untextured 0xFFFFFE quads without M 0x200 (the title boxes of MonsterSelect, 419, 48,
+  222 × 26 at fade 0.29, and MonsterSheet, 436, 41, 202 × 26) are drawn: neither the colour's handler (0x22C650 →
+  0x22B530) nor GuiQuad's draw (0x2439E0) tests that colour.
+- **Focus** [R]: setFocus (0x238970) sends the old one 1024 (not when it is the new one), stores the slot, then sends
+  the new one 512 even when it had it; as `cr_focus`. The idle timer's inputs are read (`shell_input_pad`).
+- **Attract mode:** its 5 s stand-in per movie in state 2 (above), and `startAttractGame`'s demo.
+- **Segments:** the layouts' segments 1, 2 and 7 (other languages or video modes); segment 0 is used. (The tag `se`,
+  0x22C160, is a GuiLine's texture, not a segment.)
 - **Engine calls:** `restoreCheckpoint` and `restoreProfile` are left to the viewer.
