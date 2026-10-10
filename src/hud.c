@@ -252,6 +252,7 @@ static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0,
     q->u0 = u0; q->v0 = v0; q->u1 = u1; q->v1 = v1;
     q->skew = e->skew;
     q->additive = e->additive;
+    q->corners = 0;
     memcpy(q->col, col, sizeof q->col);
     q->b = b;
     q->tex = tex;

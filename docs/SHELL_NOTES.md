@@ -408,8 +408,9 @@ static. It is widened in four ways:
 
 **Quads:**
 - `shell_quads_turned` gives four corners per picture.
-- `shell_quads` gives hud.h's `HudQuad`: each picture's bounds, with the texture coordinates of its corners. A turned
-  picture is drawn upright, and the 90° frost tiles come out transposed.
+- `shell_quads` gives hud.h's `HudQuad`: each picture's bounds, with the texture coordinates of its corners, and its
+  four corners themselves (`corners`), which the renderer draws: a turned picture keeps its turn, so MonsterSelect's
+  side frost tiles (turned 90°, `<x>`) fade inwards as the top and bottom rows do.
 
 **Pad events:**
 - Pad events go to the popup when it is up, else to the focused interface if `setupControllerTable` lets the pad
@@ -492,7 +493,7 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 
 - **Not drawn:**
   - the emulators and the demo game (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md));
-  - the turn of HudQuads;
+  - the turn of hud.c's quads (the shell's turn, above);
   - the main menu's two searchlights: `auto="false"`, and no script starts them **[R]**;
   - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the
     card glow) names a sound, so fx.c's sound start never fires for them (traced through the main menu, MonsterSelect

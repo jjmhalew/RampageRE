@@ -4640,8 +4640,8 @@ int shell_quads_turned(const Shell *s, ShellQuad *out, int max)
     return e.n;
 }
 
-/* the same as axis-aligned quads: each one's bounds, the texture coordinates of the corners nearest the bounds' top-left
- * and bottom-right (exact for the upright and mirrored pictures; a turned one is drawn upright) */
+/* the same as HudQuads: each one's bounds, the texture coordinates of the corners nearest the bounds' top-left and
+ * bottom-right, and its own four corners (drawn from them, so a turned picture keeps its turn) */
 int shell_quads(const Shell *s, HudQuad *out, int max)
 {
     if (!s || !out)
@@ -4672,6 +4672,11 @@ int shell_quads(const Shell *s, HudQuad *out, int max)
             h->skew = q->x[0] - q->x[3];
             h->u0 = q->u[0]; h->v0 = q->v[0]; h->u1 = q->u[2]; h->v1 = q->v[2];
         }
+        h->corners = 1;                              /* its own corners: a turned picture keeps its turn */
+        memcpy(h->cx, q->x, sizeof h->cx);
+        memcpy(h->cy, q->y, sizeof h->cy);
+        memcpy(h->cu, q->u, sizeof h->cu);
+        memcpy(h->cv, q->v, sizeof h->cv);
         memcpy(h->col, q->col, sizeof h->col);
         h->additive = q->additive;
         h->b = q->b;
