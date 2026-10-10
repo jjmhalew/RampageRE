@@ -52,6 +52,11 @@ static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
     return 1;
 }
 
+int climb_place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
+{
+    return place_ok(s, bi, pt, focus_x);
+}
+
 /* 0x2DD710: on a side in a spider state, the building of its row across the 10-unit alley that side looks onto */
 static const Building *across(const Mount *m, const Scene *s)
 {

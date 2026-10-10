@@ -13,6 +13,8 @@ rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit (offscreen: no window)
 rampage.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -4, up 1" --cam 10 -10 8 30 5 --shot s.png
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 2 --monster George --monster2 Lizzie   :: two on the keys
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 4 --bots 2 --play kingcity            :: two players, two bots
 ```
 `build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
 from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256. The disc
@@ -21,14 +23,20 @@ must have been extracted by `build.ps1` first (or pass the path to your own `RAM
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
 the monster's clips, G play or the free camera, F12 a screenshot, Esc quit. In play (the default with `--monster`)
-the keys are a pad: W A S D or the arrows the left stick, Space Cross (jump), J Square (punch), K Triangle (kick),
-L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter or Space take, Backspace
-back); the monster runs its own move graph and the game's camera follows it
+the keys are a pad: W A S D the left stick, the arrows the right stick (the head), Space Cross (jump), J Square
+(punch), K Triangle (kick), L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter
+or Space take, Backspace back); player 2 (`--players 2`) plays on the numeric keypad, Num Lock on: 8 4 2 6 (or 5)
+the left stick, 0 Cross, 7 Square, 9 Triangle, 1 Circle, 3 R2, / and * the right stick; the monster runs its own
+move graph and the game's camera follows it
 ([CAMERA.md](CAMERA.md)). `--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a
 `--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
 directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
 buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... drive it; `award Name` counts an object of
-that template for the block's challenge; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
+that template for the block's challenge; `p2` (`p1` .. `p4`): the words after it play that player's monster, the
+other players on keys idle meanwhile; `--walk S` is `right S`). `--players N` (1 .. 4) plays N monsters, the last
+`--bots B` of them the computer's; `--monster2 Name` .. `--monster4 Name` pick players 2 .. 4's monsters (without
+one: George, Lizzie, Ralph or Boosy, the first not taken). Players 3 and 4 and the bots are computer-driven
+(below, "Several monsters"); the front end (`--shell`) hands its players, bots and monsters over the same way. `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
 (its results screens). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
@@ -61,7 +69,8 @@ world). The fog is on (F toggles it, `--nofog` starts without).
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
-| `src/main.c` | the viewer: arguments, camera, keys |
+| `src/main.c` | the viewer: arguments, camera, keys; the monsters in play (`Mon`), their pads and their world |
+| `src/director.c` | the game flow's choreography: the AI's goals (playMove, walkTo, the bots' DestroyBuildings) and the camera modes (docs/FLOW_NOTES.md, MULTIPLAYER_NOTES.md) |
 
 The game lights its city at run time: texture × (ambient + Σ colour × N·L) from the light file
 ([FORMAT_BDP.md](FORMAT_BDP.md) "Lighting"), which is OpenGL's fixed-function lighting, so the light file's ambient
@@ -151,10 +160,24 @@ objects it meets: TakeImpact on both; another module's object or a building is t
 event, `impact_route`: a building is hit with radius Mass / 1000), and the street objects' blow and touch tests.
 `RAMPAGE_TRACE` prints the pushes, the trigger touches, what each shot hit, what each flight met and its bounces.
 
+**Several monsters** ([MULTIPLAYER_NOTES.md](MULTIPLAYER_NOTES.md)): main.c keeps each monster's own state in a
+`Mon` (`Viewer.mon[4]`, `nmon`; slot k is the scene's `Scene.mon[k]` with its own skeleton, clips, skin, head turn, arm
+and foot IK, the army's, the game's player k and the HUD `Hud<k>.ifc`), the world's in `Viewer`. Each frame every
+monster steps from its pad (`Mon.pad`: player 1's keys, player 2's, `--do`, or the computer's), then the world
+around them (people, buildings, street, army, vehicles, rail, parade, edibles, bosses, the game) sees them all; the
+modules' events go to the monster they name. The bots get the game's DestroyBuildings goal (director.c `DG_DESTROY`:
+the nearest standing building of the front row, mounted on a side, punched cell by cell, climbed, its roof stomped;
+with none left, the nearest monster), and so do players 3 and 4, who have no keys. Monsters' attacks hit each other
+(each attack once a victim, its damage and ReactionLevel, no points); a building's points go to the monster that hit it
+last; the camera frames every monster still in play (not a human whose streaker is gone, not one dropping in); a
+player off a building is kept within 30 of the players' middle x and below 70 (the camera's reach), the bots are
+not; the respawns, lives, King block winners and the results screens are game.c's per player. `RAMPAGE_TRACE` marks
+the other monsters' lines `[2]` .. `[4]`.
+
 ## Not there yet
-- the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
-- more than one player (the front end hands over up to four; the viewer plays player 1); the movies, the menus' 3D
-  globe and effects.
+- the revealed monster walking on (the viewer has no extra monster for it), Boosy's unlock (the cities' saved flags);
+- the roof stomp (`Monsters::damageRoof` → `hitBuildingRoof`): a bot on a roof stomps without effect until its 60 s
+  guard fells the building; grabbing another monster; the movies, the menus' 3D globe and effects.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),

@@ -89,7 +89,8 @@ enum {
     PE_WINDOW_CLOSE                                  /* closeWindow (0x30C3F0, WindowReEnter's end): the window at v
                                                       * shuts over 0.5 s (city.h scene_window_close_at) */
 };
-typedef struct { int type, who, on; const char *name, *node; float v[3], amount; } PeopleEvent;
+/* monster: the monster slot it is about (PE_MONSTER_*: the one whose blow it was; otherwise 0) */
+typedef struct { int type, who, on; const char *name, *node; float v[3], amount; int monster; } PeopleEvent;
 typedef struct { float health, energy, points; int priest; } PeopleEaten;
 
 /* the clip length the viewer knows: the clip anim (NULL: the shape's own RawAnim) of a look; 0 = none */
@@ -109,7 +110,7 @@ void people_set_droppable_rate(People *p, float rate);   /* the block's Droppabl
 /* a person as the block or a script creates it (ActorInstance|, createActor): its script's Construct */
 int people_add(People *p, Group tmpl, const float pos[3], float heading_deg);
 /* a window occupant (0x318650): at the window's bottom middle on the front (0x2BE660: the grid's min x + 5 x
- * column + the middle of the column's Outline, the front's y, the storey's height + the Outline's bottom) */
+ * column + the middle of its window's Openable, the front's y, the storey's height + the Openable's bottom) */
 int people_add_window(People *p, Group tmpl, const float at[3], int building, int storey, int column);
 /* Traffic::createCrowd: 4 .. 8 people of the given templates (the block's occupants' "<Name>Runner") around centre,
  * running at 10 to 50 below it; Traffic.bsf makes two, at (-14, 0.5) and (8, -3), when the first block activates */
@@ -172,7 +173,8 @@ void people_apply_eaten(const PeopleEaten *e, float *hp, float hp_max, float *en
 /* throwObject(0, ...): onThrow(monster, 0) -> smash -> smashObject (0x2B2F50); the clip's velocity is not used for
  * an actor (0x2D9DC0 gives it only to objects without flag 0x80000). monster_heading in degrees */
 void people_throw(People *p, int who, float monster_heading);
-/* an attack sphere reaching people (TakeDamage): how many it sent flying */
-int people_hit(People *p, const float centre[3], float radius, float monster_heading, const char *monster_move);
+/* an attack sphere of monster slot `monster` reaching people (TakeDamage): how many it sent flying */
+int people_hit(People *p, int monster, const float centre[3], float radius, float monster_heading,
+               const char *monster_move);
 
 #endif

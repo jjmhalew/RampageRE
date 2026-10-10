@@ -36,6 +36,7 @@ struct People {
     PeopleVisible visible;
     void *visible_ctx;
     int band_flee, band_sound;                       /* BandMember.bsf's globals: flee, bandSFXAllocated */
+    int hitter;                                      /* the monster slot whose blow is being dealt (people_hit) */
     /* the script objects that make people: Band.bsf (once, after 0.25 s) and RoyalGuardHut.bsf (pulsing each 1 s) */
     struct { int hut; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
     int nobj;
@@ -64,6 +65,7 @@ static void emit(People *p, int type, int who, const char *name, const char *nod
     e->node = node;
     e->on = on;
     e->amount = amount;
+    e->monster = p->hitter;
     if (v)
         memcpy(e->v, v, sizeof e->v);
 }
@@ -1667,9 +1669,10 @@ void people_throw(People *p, int who, float monster_heading)
     smash(p, q, monster_heading);                    /* onThrow(monster, 0) */
 }
 
-int people_hit(People *p, const float c[3], float radius, float monster_heading, const char *move)
+int people_hit(People *p, int monster, const float c[3], float radius, float monster_heading, const char *move)
 {
     int n = 0;
+    p->hitter = monster;
     for (int i = 0; i < p->n; i++) {
         Person *q = &p->v[i];
         if (q->phase != PP_SCRIPT)
@@ -1680,5 +1683,6 @@ int people_hit(People *p, const float c[3], float radius, float monster_heading,
         if (dx * dx + dy * dy + dz * dz <= rr * rr)
             n += take_damage(p, q, monster_heading, move, -1);
     }
+    p->hitter = 0;
     return n;
 }

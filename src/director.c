@@ -320,6 +320,673 @@ static int in_window(float a, float b, float prev, float time)
     return (time >= a && time < b) || (prev < a && time > b);
 }
 
+/* ================================================================ the bots: DestroyBuildings (goal type 2) */
+
+/* What the bot does, each frame, as 0x2F1A60 [R, docs/MULTIPLAYER_NOTES.md]: dead, it heads for the respawn; with a
+ * building it can still take (validate 0x2F15F0, else pickBuilding 0x2F0F60: the nearest standing one of the front
+ * row) it walks there, mounts it on a side (approachAndMount 0x2EFA90), punches the cell in front, climbs and hops to
+ * the next intact cell (moveToCell 0x2EF5D0), and on a roof punches down or butt-slams it (onRoof 0x2F0140); a
+ * 1-storey building it punches from the street. With no building left it goes for the nearest other monster
+ * (huntMonster 0x2F1730). It does not eat, nor seek out the army. Its own constants: none (no difficulty). */
+
+#define BOT_STUCK 60.0f                              /* +0x70 > 60: collapseBuilding(target) [R] */
+#define BOT_COOLDOWN 0.2f                            /* +0x64 (0x2EEBD0) [R] */
+#define BOT_AVOID_TIME 3.0f                          /* +0x6C (0x2EEBE0) [R] */
+
+static float bot_rand(DirBot *b)                     /* [G] an LCG for the game's lagged Fibonacci 0x106950 */
+{
+    b->seed = b->seed * 1664525u + 1013904223u;
+    return (float)(b->seed >> 8) / 16777216.0f;
+}
+
+static int bot_standing(const DirBuilding *b) { return b->state >= 1 && b->state <= 3; }
+
+static int name_is(const char *a, const char *b)     /* the same name, in any case */
+{
+    for (; *a && *b; a++, b++)
+        if ((*a | 32) != (*b | 32))
+            return 0;
+    return *a == *b;
+}
+
+/* the state of that name in the graph, -1 none */
+static int state_named(const MoveGraph *g, const char *name)
+{
+    for (int i = 0; i < g->n; i++)
+        if (g->states[i].name && name_is(g->states[i].name, name))
+            return i;
+    return -1;
+}
+
+int dir_ai_destroy(DirAI *ai, const MoveGraph *g, uint32_t seed)
+{
+    DirGoal *gl = add_goal(ai, DG_DESTROY, 0);
+    if (!gl)
+        return -1;
+    DirBot *b = &ai->bot;
+    memset(b, 0, sizeof *b);
+    b->target = b->avoid = -1;
+    b->side = 3;
+    b->seed = seed ? seed : 1;
+    b->st_front = state_named(g, "Ground_Transition_Front");   /* 0x2F1C10 [R] */
+    b->st_side_l = state_named(g, "Ground_Transition_Side_L");
+    b->st_side_r = state_named(g, "Ground_Transition_Side_R");
+    b->st_respawn = state_named(g, "Faceup_Idle_Respawn");
+    b->st_punch_down = state_named(g, "Ground_Punch_Down");
+    return (int)(gl - ai->q);
+}
+
+void dir_ai_on_hit(DirAI *ai, const float off[3])    /* +0x28 0x2EED40 [R] */
+{
+    memcpy(ai->bot.hit_off, off, sizeof ai->bot.hit_off);
+    ai->bot.use_hit = 1;
+}
+
+void dir_ai_on_mount(DirAI *ai, int b, int rail, int width)   /* +0x34 0x2EEC40 [R] */
+{
+    ai->bot.target = b;
+    ai->bot.side = rail == 0 ? 0 : rail == width ? 1 : 2;
+}
+
+/* the point in front of a side's middle the bot walks to (sidePoint 0x2EEF30): off = its half width, or 0 when it
+ * is on that side's half-space already [R] */
+static void side_point(const DirBotView *v, const DirBuilding *b, int side, float out[3])
+{
+    float hw = v->half_width;
+    out[2] = b->min[2];
+    if (side == 0) {
+        out[0] = b->min[0] - (v->pos[0] < b->min[0] ? 0 : hw);
+        out[1] = b->pos[1];
+    } else if (side == 1) {
+        out[0] = b->max[0] + (v->pos[0] > b->max[0] ? 0 : hw);
+        out[1] = b->pos[1];
+    } else {
+        out[0] = b->pos[0];
+        out[1] = b->min[1] - (v->pos[1] < b->min[1] ? 0 : hw);
+    }
+}
+
+/* the place on a side it mounts at (mountPoint 0x2EEDE0): the front-left corner, the front-right one, or the front's
+ * rail nearest the bot (1 .. width - 1), its height a storey up [G: the z] */
+static void mount_point(const DirBotView *v, const DirBuilding *b, int side, float out[3])
+{
+    out[1] = b->min[1];
+    out[2] = b->min[2] + 7.5f;
+    if (side == 0)
+        out[0] = b->min[0];
+    else if (side == 1)
+        out[0] = b->max[0];
+    else {
+        int rail = (int)floorf((v->pos[0] - b->min[0]) / 5 + 0.5f);
+        rail = rail < 1 ? 1 : rail > b->width - 1 ? b->width - 1 : rail;
+        out[0] = b->min[0] + 5 * (float)rail;
+    }
+}
+
+/* approachClear 0x2F1290: a box the bot's size, pushed out from the side, meets no other standing building [R] */
+static int approach_clear(const DirBotView *v, int bi, int side, const float pt[3])
+{
+    float hw = v->half_width, c[2] = { pt[0], pt[1] };
+    if (side == 0) c[0] -= 2 * hw;
+    else if (side == 1) c[0] += 2 * hw;
+    else c[1] -= 2 * hw;
+    for (int i = 0; i < v->nb; i++) {
+        const DirBuilding *o = &v->b[i];
+        if (i == bi || !bot_standing(o))
+            continue;
+        if (c[0] + hw > o->min[0] && c[0] - hw < o->max[0] && c[1] + hw > o->min[1] && c[1] - hw < o->max[1])
+            return 0;
+    }
+    return 1;
+}
+
+static int place_fine(const DirBotView *v, int bi, const float pt[3])
+{
+    int r = v->place ? v->place(v->ctx, bi, pt) : 1;
+    return r == 1 || r == -2 || r == -9;             /* (-9, the camera's reach, is not asked of an AI [R]) */
+}
+
+/* pickSide 0x2EF090: of the left, right and front, a side whose mount point is fine and clear and that no other
+ * monster on the building is on, the nearest; 3 none [R] */
+static int pick_side(const DirBotView *v, int bi)
+{
+    const DirBuilding *b = &v->b[bi];
+    int best = 3;
+    float bd = 1e30f;
+    for (int side = 0; side < 3; side++) {
+        float pt[3];
+        mount_point(v, b, side, pt);
+        if (!place_fine(v, bi, pt) || !approach_clear(v, bi, side, pt))
+            continue;
+        int taken = 0;
+        for (int k = 0; k < v->nm; k++)
+            if (k != v->self && v->m[k].mounted == bi) {
+                int r = v->m[k].rail, s = r == 0 ? 0 : r == b->width ? 1 : 2;
+                taken |= s == side;
+            }
+        if (taken)
+            continue;
+        float d = 0;
+        for (int a = 0; a < 3; a++)
+            d += (pt[a] - v->pos[a]) * (pt[a] - v->pos[a]);
+        if (d < bd) {
+            bd = d;
+            best = side;
+        }
+    }
+    return best;
+}
+
+/* pickBuilding 0x2F0F60: the nearest standing building of the frontmost row with a side to take; one another monster
+ * climbs, or the one it was knocked off (half the time), only when there is no other [R] */
+static void pick_building(DirBot *bt, const DirBotView *v)
+{
+    bt->target = -1;
+    bt->side = 3;
+    float best = 1e30f;
+    int best_row = 1 << 30;
+    for (int i = 0; i < v->nb; i++) {
+        const DirBuilding *b = &v->b[i];
+        if (!bot_standing(b))
+            continue;
+        if (b->row < best_row)
+            best = 1e30f;
+        else if (b->row > best_row)
+            continue;
+        float d = 0;
+        for (int a = 0; a < 3; a++)
+            d += (v->pos[a] - b->pos[a]) * (v->pos[a] - b->pos[a]);
+        if (d >= best)
+            continue;
+        int s = pick_side(v, i);
+        if (s == 3)
+            continue;
+        int climbed = 0;
+        for (int k = 0; k < v->nm; k++)
+            climbed |= k != v->self && v->m[k].mounted == i;
+        if (climbed) {
+            if (bt->target >= 0)
+                continue;
+            d = 1e6f;
+        }
+        if (i == bt->avoid && bot_rand(bt) <= 0.5f) {
+            if (bt->target >= 0)
+                continue;
+            d = 1e6f;
+        }
+        best = d;
+        bt->target = i;
+        bt->side = s;
+        bt->on_target = 0;
+        side_point(v, b, s, bt->walk);
+        best_row = b->row;
+    }
+}
+
+/* validate 0x2F15F0 [R] */
+static int bot_validate(const DirBot *bt, const DirBotView *v)
+{
+    if (bt->target < 0 || bt->target >= v->nb || !bot_standing(&v->b[bt->target]))
+        return 0;
+    if (v->mounted >= 0)
+        return 1;
+    if (bt->side == 3)
+        return 0;
+    float pt[3];
+    mount_point(v, &v->b[bt->target], bt->side, pt);
+    if (!place_fine(v, bt->target, pt) || !approach_clear(v, bt->target, bt->side, pt))
+        return 0;
+    int cand = -1, cm = v->can_mount ? v->can_mount(v->ctx, bt->side, &cand) : 1;
+    return cm != -5 && cm != -6;
+}
+
+static void bot_action(MoveRunner *r, const DirGraph *ag, int action, int again, MoveCall call, void *ctx);
+
+/* 0x2F2970 by state: the next state on the way there, else action 15 [R] */
+static void bot_go_state(MoveRunner *r, const DirGraph *ag, int state, MoveCall call, void *ctx)
+{
+    if (state >= 0 && ag->hop && r->state < ag->n && state < ag->n && ag->hop[r->state * ag->n + state] != 0xFF)
+        ai_pick(r, ag, -1, ag->hop[r->state * ag->n + state], call, ctx);
+    else
+        ai_pick(r, ag, DA_KEEP, -1, call, ctx);
+}
+
+/* walk 0x2EDB40 (pt, mode: 0 walk, 1 jump towards it; bld: the building it is after, -1 none): the stick towards
+ * the point, kept off other buildings and other monsters, and the action [R; the front-corner rule not ported] */
+static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, const float pt[3], int mode,
+                     int bld, MoveCall call, void *ctx)
+{
+    float dx = pt[0] - v->pos[0], dy = pt[1] - v->pos[1], l2 = dx * dx + dy * dy;
+    float st[2] = { 1, 0 };
+    if (l2 > 1e-6f) {
+        float l = 1 / sqrtf(l2);
+        st[0] = dx * l;
+        st[1] = dy * l;
+    }
+    if (mode == 1) {
+        ai->stick[0] = st[0];
+        ai->stick[1] = st[1];
+        bot_action(r, ag, DA_JUMP, 0, call, ctx);
+        return;
+    }
+    if (bld >= 0) {
+        /* a building other than bld between it and the point (the ray 0x2ED990, IsBuilding): out into the street, or
+         * along it when it is that far out already */
+        for (int i = 0; i < v->nb; i++) {
+            const DirBuilding *b = &v->b[i];
+            if (i == bld || b->state == 0)
+                continue;
+            int hit = 0;
+            for (int k = 1; k <= 8 && !hit; k++) {   /* [G] the ray sampled */
+                float x = v->pos[0] + dx * (float)k / 8, y = v->pos[1] + dy * (float)k / 8;
+                hit = x > b->min[0] && x < b->max[0] && y > b->min[1] && y < b->max[1];
+            }
+            if (hit) {
+                if (v->pos[1] < -5)
+                    st[1] = 0;
+                else {
+                    st[0] = 0;
+                    st[1] = -1;
+                }
+                break;
+            }
+        }
+        /* the other monsters (not human): punch one standing on its spot, step past one in the way in depth */
+        float rme = v->half_width;
+        for (int k = 0; k < v->nm; k++) {
+            const DirMonster *o = &v->m[k];
+            if (k == v->self || o->human)
+                continue;
+            float px = pt[0] - o->pos[0], py = pt[1] - o->pos[1];
+            float ex = v->pos[0] - pt[0], ey = v->pos[1] - pt[1];
+            float ro = o->radius;
+            if (px * px + py * py < 2.25f * rme * rme && ex * ex + ey * ey < 2.25f * (rme + ro) * (rme + ro)) {
+                ai->stick[0] = st[0];
+                ai->stick[1] = st[1];
+                bot_action(r, ag, DA_ATTACK, 1, call, ctx);
+                return;
+            }
+            float mx = o->pos[0] - v->pos[0], my = o->pos[1] - v->pos[1];
+            if (0.75f * sqrtf(mx * mx + my * my) < rme + ro) {
+                if (!o->ai || v->pos[1] < o->pos[1] || o->mounted >= 0)
+                    st[1] -= 1;
+                else
+                    st[1] += 1;
+                float l = sqrtf(st[0] * st[0] + st[1] * st[1]);
+                if (l > 1e-6f) {
+                    st[0] /= l;
+                    st[1] /= l;
+                }
+            }
+        }
+    }
+    ai->stick[0] = st[0];
+    ai->stick[1] = st[1];
+    if (mode == 0)
+        ai_pick(r, ag, DA_WALK, -1, call, ctx);
+}
+
+/* pickByAction(a, a2, a3) 0x2F2630: with again (1, 1) a new pick even when the pick leads to that action already, so
+ * attacks and hops repeat [R] */
+static void bot_action(MoveRunner *r, const DirGraph *ag, int action, int again, MoveCall call, void *ctx)
+{
+    if (again && r->chosen >= 0) {
+        const MoveTrans *t = &r->g->states[r->state].trans[r->chosen];
+        if (!r->sw_window[r->chosen] && ag->action && t->target >= 0 && t->target < ag->n &&
+            ag->action[t->target] == action)
+            r->chosen = -1;                          /* not switched yet: picked anew */
+    }
+    ai_pick(r, ag, action, -1, call, ctx);
+}
+
+static int bot_facing(const DirBotView *v, float ax, float ay) { return v->fwd[0] * ax + v->fwd[1] * ay >= 0.95f; }
+static int bot_in_air(const DirBotView *v) { return v->mode == 1 || v->mode == 2; }
+
+/* the state of a front cell (storey of the standing ones, column), 3 when there is none (destroyed) */
+static int bot_cell(const DirBotView *v, int b, int storey, int col)
+{
+    int s = v->cell ? v->cell(v->ctx, b, storey, col) : -1;
+    return s < 0 ? 3 : s;
+}
+
+/* the cell it is at: the last hit's point (0x2BB7B0, at least 6.02 up, on the front), else its mount's [R; the
+ * mount's column taken as the rail's left one when mirrored, its right one else [G]] */
+static void bot_update_cell(DirBot *bt, const DirBotView *v)
+{
+    const DirBuilding *b = &v->b[bt->target];
+    if (bt->use_hit) {
+        float x = v->pos[0] + bt->hit_off[0], z = v->pos[2] + bt->hit_off[2];
+        if (z < b->min[2] + 6.02f)
+            z = b->min[2] + 6.02f;
+        bt->cur_col = (int)floorf((x - b->min[0]) / 5);
+        bt->cur_storey = (int)floorf((z - b->min[2] - 6) / 3);
+    } else {
+        bt->cur_storey = v->storey;
+        bt->cur_col = v->rail - (v->mirror ? 1 : 0);
+    }
+    if (bt->cur_col < 0) bt->cur_col = 0;
+    if (bt->cur_col > b->width - 1) bt->cur_col = b->width - 1;
+    if (bt->cur_storey < 0) bt->cur_storey = 0;
+}
+
+/* the nearest intact cell of this storey from column c that way (distLeft 0x2EF450 / distRight 0x2EF2B0): how many
+ * columns away, width + 1 when none or another monster is on that rail [R] */
+static int bot_dist(const DirBotView *v, int bi, int storey, int c, int dir)
+{
+    const DirBuilding *b = &v->b[bi];
+    for (int k = c + dir, n = 1; k >= 0 && k < b->width; k += dir, n++) {
+        if (bot_cell(v, bi, storey, k) >= 3)
+            continue;
+        for (int m = 0; m < v->nm; m++)
+            if (m != v->self && v->m[m].mounted == bi && (v->m[m].rail == k || v->m[m].rail == k + 1))
+                return b->width + 1;
+        return n;
+    }
+    return b->width + 1;
+}
+
+/* climb up towards a cell above (canClimb(+1, 0)): 5 mantle, -2 an obstacle (it lets go of this building) [R] */
+static void bot_climb_up(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, MoveCall call, void *ctx)
+{
+    int c = v->can_climb ? v->can_climb(v->ctx, 1, 0) : 2;
+    if (c == 5)
+        bot_action(r, ag, DA_MANTLE, 1, call, ctx);
+    else if (c == -2) {
+        dir_ai_avoid(ai, ai->bot.target, v);
+        bot_action(r, ag, DA_JUMP, 0, call, ctx);
+    } else
+        bot_action(r, ag, DA_CLIMB_UP, 0, call, ctx);
+}
+
+/* moveToCell 0x2EF5D0: up, down, or along the face to the target cell; hops go to its right, or its left when
+ * mirrored, so the other way it first mirrors [R] */
+static void bot_move_to_cell(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, MoveCall call,
+                             void *ctx)
+{
+    DirBot *bt = &ai->bot;
+    if (bt->cur_storey < bt->cell_storey) {
+        bot_climb_up(ai, ag, r, v, call, ctx);
+        return;
+    }
+    if (bt->cur_storey > bt->cell_storey) {
+        bot_action(r, ag, DA_CLIMB_DOWN, 0, call, ctx);
+        return;
+    }
+    int mirrored = v->mirror || v->mirror_queued;
+    if (bt->cell_col < bt->cur_col) {                /* to its left */
+        if (!mirrored) {
+            bot_action(r, ag, DA_MIRROR, 0, call, ctx);
+            return;
+        }
+        int c = v->can_climb ? v->can_climb(v->ctx, 0, -1) : -7;
+        if (c == 3 || c == 4)
+            bot_action(r, ag, DA_HOP, 1, call, ctx);
+        else if (v->mirror) {
+            bt->cell_storey = v->b[bt->target].storeys;
+            bot_climb_up(ai, ag, r, v, call, ctx);
+        } else
+            ai_pick(r, ag, DA_KEEP, -1, call, ctx);
+        return;
+    }
+    if (bt->cell_col > bt->cur_col) {                /* to its right */
+        if (mirrored) {
+            bot_action(r, ag, DA_MIRROR, 0, call, ctx);
+            return;
+        }
+        int c = v->can_climb ? v->can_climb(v->ctx, 0, 1) : -7;
+        if (c == 3 || c == 4)
+            bot_action(r, ag, DA_HOP, 1, call, ctx);
+        else {
+            bt->cell_storey = v->b[bt->target].storeys;
+            bot_climb_up(ai, ag, r, v, call, ctx);
+        }
+        return;
+    }
+    bot_climb_up(ai, ag, r, v, call, ctx);
+}
+
+/* punching from the street (a 1-storey building, or something in the way of the mount): the nearest front column
+ * with an intact ground cell (frontPoint 0x2EF8F0) [R] */
+static void bot_street_punch(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, MoveCall call,
+                             void *ctx)
+{
+    DirBot *bt = &ai->bot;
+    const DirBuilding *b = &v->b[bt->target];
+    bt->side = 2;
+    int best = -1;
+    float bd = 1e30f;
+    for (int c = 1; c < b->width; c++)
+        if (bot_cell(v, bt->target, 0, c) < 3 || bot_cell(v, bt->target, 0, c - 1) < 3) {
+            float x = b->min[0] + 5 * (float)c, d = fabsf(x - v->pos[0]);
+            if (d < bd) {
+                bd = d;
+                best = c;
+            }
+        }
+    float pt[3] = { best >= 0 ? b->min[0] + 5 * (float)best : b->pos[0], b->min[1] - v->half_width, 0 };
+    memcpy(bt->walk, pt, sizeof pt);
+    float dx = pt[0] - v->pos[0], dy = pt[1] - v->pos[1];
+    if (dx * dx + dy * dy <= v->half_width * v->half_width) {
+        if (!bot_facing(v, 0, 1))
+            bot_walk(ai, ag, r, v, (float[3]){ pt[0], b->min[1], 0 }, 0, bt->target, call, ctx);
+        else
+            bot_action(r, ag, DA_ATTACK, 1, call, ctx);
+    } else
+        bot_walk(ai, ag, r, v, pt, 0, bt->target, call, ctx);
+}
+
+/* approachAndMount 0x2EFA90 [R] */
+static void bot_approach(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, MoveCall call, void *ctx)
+{
+    DirBot *bt = &ai->bot;
+    const DirBuilding *b = &v->b[bt->target];
+    bt->side = pick_side(v, bt->target);
+    if (bt->side == 3) {
+        bt->target = -1;
+        ai_pick(r, ag, DA_IDLE, -1, call, ctx);
+        return;
+    }
+    side_point(v, b, bt->side, bt->walk);
+    float mp[3];
+    mount_point(v, b, bt->side, mp);
+    static const int FACE[3] = { 0, 1, 2 };          /* climb.h's FACE_LEFT, FACE_RIGHT, FACE_FRONT */
+    int cand = -1, cm = v->can_mount ? v->can_mount(v->ctx, FACE[bt->side], &cand) : -7;
+    int place = place_fine(v, bt->target, mp) ? 1 : -5;
+    if (cm == 1 && cand == bt->target) {
+        int air = bot_in_air(v);
+        if (bt->side == 2) {
+            if (!bot_facing(v, 0, 1) || air) bot_walk(ai, ag, r, v, mp, 0, bt->target, call, ctx);
+            else bot_go_state(r, ag, bt->st_front, call, ctx);
+        } else if (bt->side == 0) {
+            if (!bot_facing(v, 1, 0) || air) bot_walk(ai, ag, r, v, bt->walk, 0, bt->target, call, ctx);
+            else bot_go_state(r, ag, v->mirror ? bt->st_side_r : bt->st_side_l, call, ctx);
+        } else {
+            if (!bot_facing(v, -1, 0) || air) bot_walk(ai, ag, r, v, bt->walk, 0, bt->target, call, ctx);
+            else bot_go_state(r, ag, v->mirror ? bt->st_side_l : bt->st_side_r, call, ctx);
+        }
+    } else if (place == -5 || cm == -5 || cm == -6) {
+        bt->target = -1;
+        ai_pick(r, ag, DA_IDLE, -1, call, ctx);
+    } else if (cm == -2 || cm == -3) {
+        bot_street_punch(ai, ag, r, v, call, ctx);
+    } else {
+        /* [G] the walk point beside the face reached and still no mount (canMount looks a little ahead): on to the
+         * mount point itself */
+        float dx = bt->walk[0] - v->pos[0], dy = bt->walk[1] - v->pos[1];
+        const float *to = dx * dx + dy * dy < 1 ? mp : bt->walk;
+        bot_walk(ai, ag, r, v, to, bot_in_air(v) ? 1 : 0, bt->target, call, ctx);
+    }
+}
+
+/* onRoof 0x2F0140 (u the building under it) [R] */
+static void bot_on_roof(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, int u, MoveCall call,
+                        void *ctx)
+{
+    DirBot *bt = &ai->bot;
+    const DirBuilding *b = &v->b[u];
+    float c[3] = { b->pos[0], (b->min[1] + b->max[1]) / 2, b->max[2] };
+    if (b->state >= 4) {                             /* falling: off it */
+        if (bt->target >= 0 && bt->target != u) {
+            const DirBuilding *t = &v->b[bt->target];
+            float to[3] = { t->pos[0], (t->min[1] + t->max[1]) / 2, t->max[2] };
+            float dx = to[0] - v->pos[0], dy = to[1] - v->pos[1], l = sqrtf(dx * dx + dy * dy);
+            int toward = l > 1e-6f && (v->fwd[0] * dx + v->fwd[1] * dy) / l >= 0.9f;
+            bot_walk(ai, ag, r, v, to, toward ? 1 : 0, toward ? -1 : u, call, ctx);
+        } else
+            bot_action(r, ag, DA_JUMP, 0, call, ctx);
+        return;
+    }
+    float dx = c[0] - v->pos[0], dy = c[1] - v->pos[1], d2 = dx * dx + dy * dy, hw = v->half_width;
+    if (!v->smash) {
+        if (d2 <= hw * hw)
+            bot_go_state(r, ag, bt->st_punch_down, call, ctx);
+        else
+            bot_walk(ai, ag, r, v, c, 0, -1, call, ctx);
+    } else if (bot_in_air(v)) {
+        if (d2 > 2.25f * hw * hw)
+            bot_walk(ai, ag, r, v, c, 1, -1, call, ctx);
+        else
+            bot_action(r, ag, DA_ATTACK, 0, call, ctx);
+    } else
+        bot_action(r, ag, DA_JUMP, 0, call, ctx);
+}
+
+/* withTarget 0x2F07F0 [R] */
+static void bot_with_target(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, float dt, MoveCall call,
+                            void *ctx)
+{
+    DirBot *bt = &ai->bot;
+    const DirBuilding *b = &v->b[bt->target];
+    bt->on_target += dt;
+    if (bt->on_target > BOT_STUCK && v->collapse) {  /* stuck on it for a minute: it falls */
+        v->collapse(v->ctx, bt->target);
+        bt->on_target = 0;
+    }
+    if (v->mounted >= 0) {
+        if (b->state >= 4) {
+            bot_action(r, ag, DA_JUMP, 0, call, ctx);
+            return;
+        }
+        bot_update_cell(bt, v);
+        if ((bt->cooldown <= 0 || bt->cur_storey == bt->cell_storey) && bt->cur_storey < b->storeys &&
+            bot_cell(v, bt->target, bt->cur_storey, bt->cur_col) < 3) {
+            bt->have_cell = 0;
+            bot_action(r, ag, DA_ATTACK, 1, call, ctx);   /* the cell in front */
+            return;
+        }
+        if (!bt->have_cell || bt->cell_storey >= b->storeys ||
+            bot_cell(v, bt->target, bt->cell_storey, bt->cell_col) >= 3) {
+            int s = bt->cur_storey, c = bt->cur_col, found = 0;
+            if (!(b->width < 3 && v->rail == 1)) {
+                int dl = bot_dist(v, bt->target, s, c, -1), dr = bot_dist(v, bt->target, s, c, 1);
+                if (dl < dr && dl <= b->width) {
+                    bt->cell_col = c - dl;
+                    bt->cell_storey = dl > 1 && s < b->storeys - 1 ? s + 1 : s;
+                    found = 1;
+                } else if (dr <= b->width && !(dl == dr && dl >= 2)) {
+                    bt->cell_col = c + dr;
+                    bt->cell_storey = dr > 1 && s < b->storeys - 1 ? s + 1 : s;
+                    found = 1;
+                }
+            }
+            for (int up = s + 1; !found && up < b->storeys; up++)   /* the first intact cell above */
+                if (bot_cell(v, bt->target, up, c) < 3) {
+                    bt->cell_col = c;
+                    bt->cell_storey = up;
+                    found = 1;
+                }
+            if (!found) {                            /* none: onto the roof */
+                bt->cell_col = c;
+                bt->cell_storey = b->storeys;
+            }
+            bt->have_cell = 1;
+        }
+        bot_move_to_cell(ai, ag, r, v, call, ctx);
+        return;
+    }
+    if (v->under >= 0 && v->b[v->under].state != 0) {
+        bot_on_roof(ai, ag, r, v, v->under, call, ctx);
+        return;
+    }
+    bt->use_hit = bt->have_cell = 0;
+    if (b->storeys >= 2 && bt->target != bt->avoid)
+        bot_approach(ai, ag, r, v, call, ctx);
+    else
+        bot_street_punch(ai, ag, r, v, call, ctx);
+}
+
+/* huntMonster 0x2F1730: the nearest other monster (its HP not asked: the game tests its own [R]) */
+static void bot_hunt(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, MoveCall call, void *ctx)
+{
+    int best = -1;
+    float bd = 1e30f;
+    for (int k = 0; k < v->nm; k++) {
+        if (k == v->self)
+            continue;
+        float dx = v->m[k].pos[0] - v->pos[0], dy = v->m[k].pos[1] - v->pos[1], d = dx * dx + dy * dy;
+        if (d < bd) {
+            bd = d;
+            best = k;
+        }
+    }
+    if (best < 0) {
+        ai_pick(r, ag, DA_IDLE, -1, call, ctx);
+        return;
+    }
+    const DirMonster *o = &v->m[best];
+    float dx = o->pos[0] - v->pos[0], dy = o->pos[1] - v->pos[1], l = sqrtf(bd);
+    if (bd >= 225)
+        bot_walk(ai, ag, r, v, o->pos, 0, o->mounted, call, ctx);
+    else if (o->mounted >= 0 && o->mounted < v->nb && v->pos[1] > v->b[o->mounted].min[1] - 10) {
+        float back[3] = { v->pos[0], v->pos[1] - 10, v->pos[2] };   /* under a climber: back off */
+        bot_walk(ai, ag, r, v, back, 0, o->mounted, call, ctx);
+    } else if (l > 1e-6f && (v->fwd[0] * dx + v->fwd[1] * dy) / l < 0.95f)
+        bot_walk(ai, ag, r, v, o->pos, 0, o->mounted, call, ctx);
+    else
+        bot_action(r, ag, DA_ATTACK, 1, call, ctx);
+}
+
+/* +0x30 0x2EEBE0: knocked off building b (or an obstacle in its way): 3 s of avoiding it, the walk to its front */
+void dir_ai_avoid(DirAI *ai, int b, const DirBotView *view)
+{
+    DirBot *bt = &ai->bot;
+    bt->avoid = b;
+    bt->avoid_time = BOT_AVOID_TIME;
+    bt->side = 2;
+    if (view && b >= 0 && b < view->nb)
+        side_point(view, &view->b[b], 2, bt->walk);
+    bt->target = -1;
+    bt->have_cell = bt->use_hit = 0;
+}
+
+/* DestroyBuildings::update 0x2F1A60: never over [R] */
+static int destroy_update(DirAI *ai, const DirGraph *ag, MoveRunner *r, float dt, MoveCall call, void *ctx)
+{
+    DirBot *bt = &ai->bot;
+    const DirBotView *v = ai->view;
+    if (!v)
+        return 1;
+    if (bt->avoid_time > 0 && (bt->avoid_time -= dt) <= 0)
+        bt->avoid = -1;
+    bt->cooldown = bt->cooldown > dt ? bt->cooldown - dt : 0;
+    if (v->hp <= 0) {                                /* down: towards the respawn */
+        bot_go_state(r, ag, bt->st_respawn, call, ctx);
+        return 1;
+    }
+    if (!bot_validate(bt, v)) {
+        bt->use_hit = bt->have_cell = 0;
+        pick_building(bt, v);
+    }
+    if (bt->target >= 0)
+        (v->mounted < 0 || v->mounted == bt->target) ? bot_with_target(ai, ag, r, v, dt, call, ctx)
+                                                     : bot_action(r, ag, DA_JUMP, 0, call, ctx);
+    else if (v->mounted >= 0)
+        bot_action(r, ag, DA_JUMP, 0, call, ctx);
+    else
+        bot_hunt(ai, ag, r, v, call, ctx);
+    return 1;
+}
+
 int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, MoveCall call, void *ctx)
 {
     ai->done = 0;
@@ -349,6 +1016,7 @@ int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3]
         DirGoal *gl = &ai->q[0];
         ai->current = 1;
         running = gl->type == DG_WALK_TO ? walk_update(ai, gl, ag, r, pos, call, ctx)
+                : gl->type == DG_DESTROY ? destroy_update(ai, ag, r, dt, call, ctx)
                                          : play_update(ai, gl, ag, r, call, ctx);
         if (!running) {
             memmove(&ai->q[0], &ai->q[1], sizeof *ai->q * (size_t)(ai->n - 1));

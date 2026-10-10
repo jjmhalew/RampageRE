@@ -1713,6 +1713,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         float lo[3] = { cx - width * CELL / 2, cy - depth * CELL / 2, 0 };
         float hi[3] = { cx + width * CELL / 2, cy + depth * CELL / 2, GROUND_FLOOR + STOREY * (float)nst + 1.5f };
         building_init(&sb->b, lo, hi, width, depth, nst);
+        sb->hitter = 0;
         sb->b.row = (int)group_num(inst, "Row", 0);
         sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
         sb->b.seed = *count;
@@ -2111,6 +2112,8 @@ static void light_buildings(Scene *s)
 
 static void pose_instance(Scene *s, Instance *in, double t)
 {
+    int mk = scene_monster_slot(s, (int)(in - s->instances));
+    const SceneMonster *sm = mk >= 0 ? &s->mon[mk] : NULL;
     float w = in->held && in->blend_left > 0 && in->blend_time > 0 ? in->blend_left / in->blend_time : 0;
     for (uint32_t i = 0; i < in->tree.n; i++) {
         TreeNode *nd = &in->tree.nodes[i];
@@ -2143,16 +2146,16 @@ static void pose_instance(Scene *s, Instance *in, double t)
             local = mat_mul(mat_trs_z(0, 0, 0, -in->root_turn), local);
         int p = nd->parent;
         in->node[i] = p >= 0 && (uint32_t)p < i ? mat_mul(in->node[p], local) : local;
-        if ((int)(in - s->instances) == s->monster && (s->look_yaw != 0 || s->look_pitch != 0)) {
-            if ((int)i == s->look_neck) {            /* model x Rz(yaw) (row vectors): about up, at the neck */
-                Mat4 r = mat_trs_z(0, 0, 0, s->look_yaw * 57.2957795f), m = in->node[i];
+        if (sm && (sm->look_yaw != 0 || sm->look_pitch != 0)) {
+            if ((int)i == sm->look_neck) {           /* model x Rz(yaw) (row vectors): about up, at the neck */
+                Mat4 r = mat_trs_z(0, 0, 0, sm->look_yaw * 57.2957795f), m = in->node[i];
                 float t[3] = { m.m[12], m.m[13], m.m[14] };
                 m.m[12] = m.m[13] = m.m[14] = 0;
                 m = mat_mul(r, m);
                 m.m[12] = t[0]; m.m[13] = t[1]; m.m[14] = t[2];
                 in->node[i] = m;
-            } else if ((int)i == s->look_head)       /* Rz(-pitch) x model (row vectors): about its own z */
-                in->node[i] = mat_mul(in->node[i], mat_trs_z(0, 0, 0, -s->look_pitch * 57.2957795f));
+            } else if ((int)i == sm->look_head)      /* Rz(-pitch) x model (row vectors): about its own z */
+                in->node[i] = mat_mul(in->node[i], mat_trs_z(0, 0, 0, -sm->look_pitch * 57.2957795f));
         }
     }
 }
@@ -2261,7 +2264,7 @@ static Mat4 reflect_x(Mat4 k)
 /* the monster's hands, posed: kept as the clips have them, then the arm IK (StdIKPairAnimator at monster +0x2588:
  * chains for Bip01 L Hand and Bip01 R Hand, 0x2F9720). Mirrored, a hand as drawn is the other side's node reflected,
  * so the IK works on that one with the target reflected. */
-static void monster_ik(Scene *s, Instance *in)
+static void monster_ik(SceneMonster *s, Instance *in)
 {
     if (!s->ik_ready) {
         s->ik_ready = 1;
@@ -2317,11 +2320,25 @@ static void monster_ik(Scene *s, Instance *in)
         ik_feet(in->node, &in->tree, in->mirrored, s->feet);
 }
 
-int scene_monster_node(const Scene *s, const char *name, Mat4 *world)
+int scene_monster_slot(const Scene *s, int inst)
 {
-    if (s->monster < 0)
+    for (int k = 0; inst >= 0 && k < s->nmon; k++)
+        if (s->mon[k].inst == inst)
+            return k;
+    return -1;
+}
+
+/* monster slot k's instance, NULL none */
+static Instance *mon_inst(const Scene *s, int k)
+{
+    return k >= 0 && k < s->nmon && s->mon[k].inst >= 0 ? &s->instances[s->mon[k].inst] : NULL;
+}
+
+int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world)
+{
+    const Instance *in = mon_inst(s, k);
+    if (!in)
         return -1;
-    const Instance *in = &s->instances[s->monster];
     for (uint32_t i = 0; i < in->tree.n; i++)
         if (ends_with(in->tree.nodes[i].name, name)) {
             int m = in->mirrored ? in->tree.nodes[i].mirror : (int)i;
@@ -2333,22 +2350,24 @@ int scene_monster_node(const Scene *s, const char *name, Mat4 *world)
     return -1;
 }
 
-int scene_monster_hand(const Scene *s, int hand, Mat4 *world)
+int scene_monster_hand(const Scene *s, int k, int hand, Mat4 *world)
 {
-    if (s->monster < 0 || hand < 0 || hand > 1 || !s->ik_ready || s->ik_chain[hand][2] < 0)
+    const Instance *in = mon_inst(s, k);
+    if (!in || hand < 0 || hand > 1 || !s->mon[k].ik_ready || s->mon[k].ik_chain[hand][2] < 0)
         return -1;
-    *world = mat_mul(s->instances[s->monster].base, s->ik_anim[hand]);
+    *world = mat_mul(in->base, s->mon[k].ik_anim[hand]);
     return 0;
 }
 
-int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach)
+int scene_monster_shoulder(const Scene *s, int k, int hand, float at[3], float *reach)
 {
-    if (s->monster < 0 || hand < 0 || hand > 1 || !s->ik_ready || s->ik_chain[hand][2] < 0)
+    const Instance *in = mon_inst(s, k);
+    if (!in || hand < 0 || hand > 1 || !s->mon[k].ik_ready || s->mon[k].ik_chain[hand][2] < 0)
         return -1;
-    const float *m = s->instances[s->monster].base.m, *p = s->ik_shoulder[hand];
-    for (int k = 0; k < 3; k++)
-        at[k] = m[k] * p[0] + m[4 + k] * p[1] + m[8 + k] * p[2] + m[12 + k];
-    *reach = s->ik_reach[hand];
+    const float *m = in->base.m, *p = s->mon[k].ik_shoulder[hand];
+    for (int j = 0; j < 3; j++)
+        at[j] = m[j] * p[0] + m[4 + j] * p[1] + m[8 + j] * p[2] + m[12 + j];
+    *reach = s->mon[k].ik_reach[hand];
     return 0;
 }
 
@@ -2365,14 +2384,15 @@ static void update(Scene *s, double t, int all)
         Instance *in = &s->instances[i];
         if (in->tree.n && (all || in->has_clip || in->dynamic)) {   /* a model made later is posed too */
             pose_instance(s, in, t);
-            if ((int)i == s->monster)
-                monster_ik(s, in);
+            int mk = scene_monster_slot(s, (int)i);
+            if (mk >= 0)
+                monster_ik(&s->mon[mk], in);
         }
     }
     for (uint32_t i = 0; i < s->nitems; i++) {
         DrawItem *it = &s->items[i];
         Instance *in = &s->instances[it->instance];
-        if (!all && !in->has_clip && in->vehicle < 0 && !in->dynamic && (int)(in - s->instances) != s->monster)
+        if (!all && !in->has_clip && in->vehicle < 0 && !in->dynamic && scene_monster_slot(s, it->instance) < 0)
             continue;
         if (it->skin) {
             skin_item(s, in, it);
@@ -2391,7 +2411,8 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
 {
     memset(s, 0, sizeof *s);
     s->city = &c->bundle;
-    s->monster = -1;
+    for (int k = 0; k < SCENE_MONSTERS; k++)
+        s->mon[k].inst = -1;
     s->sky = -1;
     s->ground_inst = -1;
     s->placing_building = -1;
@@ -2575,7 +2596,7 @@ static Bundle *own_bundle(const Vol *vol, Scene *s, const char *file)
 {
     uint32_t size;
     uint8_t *data = vol_read(vol, file, &size);
-    if (!data || s->nown == 4)
+    if (!data || s->nown == (int)(sizeof s->own / sizeof *s->own))
         return free(data), NULL;
     Bundle *b = calloc(1, sizeof *b);
     if (bdp_load(b, data, size) != 0) {
@@ -2602,6 +2623,9 @@ static Skin *new_skin(const Mesh *m)
 int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x, float y, float deg)
 {
     char file[96];
+    if (s->nmon >= SCENE_MONSTERS)
+        return -1;
+    SceneMonster *sm = &s->mon[s->nmon];
     snprintf(file, sizeof file, "%s.cmp", monster);
     Bundle *mb = own_bundle(c->vol, s, file);
     snprintf(file, sizeof file, "%s_anims.cmp", monster);
@@ -2644,9 +2668,9 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
     }
     if (pick && clip_read(pick, &in->clip) == 0) {
         in->has_clip = 1;
-        s->monster_clip = bdp_name(ab, pick->name);
-        if (!strncmp(s->monster_clip, "000", 3))
-            s->monster_clip += 3;
+        sm->clip = bdp_name(ab, pick->name);
+        if (!strncmp(sm->clip, "000", 3))
+            sm->clip += 3;
     }
     ClothParticle *cloth = NULL;
     uint32_t ncloth = 0;
@@ -2719,24 +2743,25 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
         push_item(s, scene_add_mesh(s, m, mb), id, -1, sk);
     }
     free(cloth);
-    s->monster = id;
-    s->look_neck = s->look_head = -1;                /* MD +0xA14: two bones, the neck yaws and the head pitches */
+    sm->inst = id;
+    sm->look_neck = sm->look_head = -1;              /* MD +0xA14: two bones, the neck yaws and the head pitches */
     for (uint32_t i = 0; i < in->tree.n; i++) {
-        if (ends_with(in->tree.nodes[i].name, "Bip01 Neck")) s->look_neck = (int)i;
-        if (ends_with(in->tree.nodes[i].name, "Bip01 Head")) s->look_head = (int)i;
+        if (ends_with(in->tree.nodes[i].name, "Bip01 Neck")) sm->look_neck = (int)i;
+        if (ends_with(in->tree.nodes[i].name, "Bip01 Head")) sm->look_head = (int)i;
     }
-    s->monster_anims = ab;
-    s->monster_bundle = mb;
+    sm->anims = ab;
+    sm->bundle = mb;
+    s->nmon++;
     update(s, 0, 1);
-    return 0;
+    return s->nmon - 1;
 }
 
-int scene_monster_clip(Scene *s, const char *suffix, float *speed)
+int scene_monster_clip(Scene *s, int k, const char *suffix, float *speed)
 {
-    if (s->monster < 0 || !s->monster_anims)
+    Instance *in = mon_inst(s, k);
+    if (!in || !s->mon[k].anims)
         return -1;
-    Instance *in = &s->instances[s->monster];
-    const Bundle *ab = s->monster_anims;
+    const Bundle *ab = s->mon[k].anims;
     for (uint32_t i = 0; i < ab->nentries; i++) {
         const BdpEntry *e = &ab->entries[i];
         if (e->type != ET_ANIM || e->size < 0x44 || rd32(e->data + 0x20) != 2 || rd32(e->data + 0x2C) != in->tree.n)
@@ -2757,7 +2782,7 @@ int scene_monster_clip(Scene *s, const char *suffix, float *speed)
             clip_free(&in->clip);
         in->clip = clip;
         in->has_clip = 1;
-        s->monster_clip = n;
+        s->mon[k].clip = n;
         if (speed) {                                 /* the root's travel over one loop */
             float a[3] = { 0, 0, 0 }, b[3] = { 0, 0, 0 }, q[4];
             clip_pose(&clip, 0, 0, a, q);
@@ -2769,12 +2794,12 @@ int scene_monster_clip(Scene *s, const char *suffix, float *speed)
     return -1;
 }
 
-int scene_monster_play(Scene *s, const char *clip)
+int scene_monster_play(Scene *s, int k, const char *clip)
 {
-    if (s->monster < 0 || !s->monster_anims || !clip)
+    Instance *in = mon_inst(s, k);
+    if (!in || !s->mon[k].anims || !clip)
         return -1;
-    Instance *in = &s->instances[s->monster];
-    const Bundle *ab = s->monster_anims;
+    const Bundle *ab = s->mon[k].anims;
     for (uint32_t i = 0; i < ab->nentries; i++) {
         const BdpEntry *e = &ab->entries[i];
         if (e->type != ET_ANIM)
@@ -2791,7 +2816,7 @@ int scene_monster_play(Scene *s, const char *clip)
             clip_free(&in->clip);
         in->clip = c;
         in->has_clip = 1;
-        s->monster_clip = n;
+        s->mon[k].clip = n;
         return 0;
     }
     return -1;
@@ -2811,12 +2836,12 @@ static void mark_subtree(const Tree *t, int root, uint8_t *mask)
             mask[i] = 1;
 }
 
-int scene_monster_face(Scene *s, const char *clip, int head)
+int scene_monster_face(Scene *s, int k, const char *clip, int head)
 {
-    if (s->monster < 0 || !s->monster_anims || !clip)
+    Instance *in = mon_inst(s, k);
+    if (!in || !s->mon[k].anims || !clip)
         return -1;
-    Instance *in = &s->instances[s->monster];
-    const Bundle *ab = s->monster_anims;
+    const Bundle *ab = s->mon[k].anims;
     const BdpEntry *e = NULL;
     for (uint32_t i = 0; i < ab->nentries && !e; i++) {
         const char *n = bdp_name(ab, ab->entries[i].name);
@@ -2847,7 +2872,7 @@ int scene_monster_face(Scene *s, const char *clip, int head)
     static const char *const WIDE[] = { "Eyegore_Skeleton", "Cal_skeleton", "Venus_skeleton", "Natilie_skeleton",
                                         "Jill_skeleton" };
     int wide = 0;
-    const Bundle *mb = s->monster_bundle;
+    const Bundle *mb = s->mon[k].bundle;
     for (uint32_t i = 0; mb && i < mb->nentries; i++)
         if (mb->entries[i].type == ET_TREE)
             for (size_t k = 0; k < sizeof WIDE / sizeof *WIDE; k++)
@@ -2938,6 +2963,12 @@ static void building_place(Scene *s, SceneBuilding *sb)
     }
 }
 
+/* the move state of the monster that hit the building last (MultiFloor's key in its Scoring) */
+static const char *hitter_move(const Scene *s, const SceneBuilding *sb)
+{
+    return sb->hitter >= 0 && sb->hitter < s->nmon ? s->mon[sb->hitter].move : NULL;
+}
+
 void scene_buildings_update(Scene *s, float dt)
 {
     s->water_acc += dt;                              /* the water, a game frame at a time (0x336DC0) */
@@ -2981,7 +3012,7 @@ void scene_buildings_update(Scene *s, float dt)
                 if (s->army && sb->b.state == BUILDING_STANDING) {   /* a cell hit: Scoring.cell[state] */
                     float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
                                     sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls };
-                    army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_CELL, st, s->monster_move,
+                    army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_CELL, st, hitter_move(s, sb),
                                         sb->b.width, sb->b.n, NULL, 0, at);
                 }
                 const char *name = st == 1 ? sb->fx_glass : st == 2 ? sb->fx_wall_small : sb->fx_wall_large;
@@ -2993,7 +3024,7 @@ void scene_buildings_update(Scene *s, float dt)
             int k = sb->b.collapse;
             if (s->army && sb->b.state == BUILDING_FLOOR_FALLING) {
                 float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
-                army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_FLOOR, 0, s->monster_move,
+                army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_FLOOR, 0, hitter_move(s, sb),
                                     sb->b.width, sb->b.n, NULL, 0, at);
             }
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
@@ -3011,7 +3042,7 @@ void scene_buildings_update(Scene *s, float dt)
                 fronts[nf++] = ci >= 0 ? sb->b.cell[top][ci].state : 0;
             }
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
-            army_score_building(s->army, 0, (int)i, sb->props, ARMY_SCORE_BUILDING, 0, s->monster_move,
+            army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_BUILDING, 0, hitter_move(s, sb),
                                 sb->b.width, sb->b.n, fronts, nf, at);
         }
         if (s->traffic && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING)
@@ -3051,11 +3082,11 @@ void scene_buildings_update(Scene *s, float dt)
     }
 }
 
-void scene_monster_blend(Scene *s, float seconds)
+void scene_monster_blend(Scene *s, int k, float seconds)
 {
-    if (s->monster < 0)
+    Instance *in = mon_inst(s, k);
+    if (!in)
         return;
-    Instance *in = &s->instances[s->monster];
     if (!in->pose || !in->held || !in->has_clip || !(seconds > 0)) {
         in->blend_left = 0;
         return;
@@ -3064,20 +3095,25 @@ void scene_monster_blend(Scene *s, float seconds)
     in->blend_left = in->blend_time = seconds;
 }
 
-void scene_monster_blend_step(Scene *s, float dt)
+void scene_cloth_step(Scene *s, float dt)
 {
     s->cloth_dt += dt;                               /* for the cloth, at the next posing */
-    if (s->monster >= 0 && s->instances[s->monster].blend_left > 0)
-        s->instances[s->monster].blend_left -= dt;
-    if (s->monster >= 0 && s->instances[s->monster].face_blend_left > 0)
-        s->instances[s->monster].face_blend_left -= dt;
 }
 
-void scene_monster_face_blend(Scene *s, float seconds)
+void scene_monster_blend_step(Scene *s, int k, float dt)
 {
-    if (s->monster < 0)
+    Instance *in = mon_inst(s, k);
+    if (in && in->blend_left > 0)
+        in->blend_left -= dt;
+    if (in && in->face_blend_left > 0)
+        in->face_blend_left -= dt;
+}
+
+void scene_monster_face_blend(Scene *s, int k, float seconds)
+{
+    Instance *in = mon_inst(s, k);
+    if (!in)
         return;
-    Instance *in = &s->instances[s->monster];
     if (!in->pose || !(seconds > 0)) {
         in->face_blend_left = 0;
         return;
@@ -3088,11 +3124,11 @@ void scene_monster_face_blend(Scene *s, float seconds)
     in->face_blend_left = in->face_blend_time = seconds;
 }
 
-int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
+int scene_monster_root(const Scene *s, int k, double seconds, float t[3], float q[4])
 {
-    if (s->monster < 0)
+    const Instance *in = mon_inst(s, k);
+    if (!in)
         return -1;
-    const Instance *in = &s->instances[s->monster];
     int found = -1;
     for (uint32_t i = 0; i < in->tree.n; i++) {      /* the first root the clip moves, else the first root */
         const TreeNode *nd = &in->tree.nodes[i];
@@ -3112,17 +3148,18 @@ int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4])
     return 0;
 }
 
-void scene_monster_place(Scene *s, float x, float y, float z, float deg)
+void scene_monster_place(Scene *s, int k, float x, float y, float z, float deg)
 {
-    if (s->monster >= 0)
-        s->instances[s->monster].base = mat_trs_z(x, y, z, deg);
+    Instance *in = mon_inst(s, k);
+    if (in)
+        in->base = mat_trs_z(x, y, z, deg);
 }
 
-void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn)
+void scene_monster_root_motion(Scene *s, int k, int axes, const float hold[3], float turn)
 {
-    if (s->monster < 0)
+    Instance *in = mon_inst(s, k);
+    if (!in)
         return;
-    Instance *in = &s->instances[s->monster];
     in->still_root = axes;
     memcpy(in->root_hold, hold, sizeof in->root_hold);
     in->root_turn = turn;

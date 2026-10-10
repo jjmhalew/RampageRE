@@ -422,7 +422,9 @@ static float begin_block_ni(Game *g, float last)     /* BeginBlockNI: the HUD, t
         setup_ni(g, 0.25f);
         for (int i = 0; i < np(g); i++) {
             emit(g, GE_RESET, i);
-            emit(g, GE_AI, i)->a = i >= np(g) - g->cfg.num_bots;   /* the bots also destroyBuildings [G: not ported] */
+            GameEvent *e = emit(g, GE_AI, i);
+            e->a = i >= np(g) - g->cfg.num_bots;
+            e->b = e->a;                             /* the bots also destroyBuildings (b = 1: the host's DG_DESTROY) */
         }
         emit(g, GE_HUD, -1)->a = 1;
         emit(g, GE_GUI, -1)->name = "ChallengeText";

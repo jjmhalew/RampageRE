@@ -114,7 +114,7 @@ enum {
                         * yet (GE_AI_ACTIVATE). The block just left lies 41 towards -y now [G: the manager's slots] */
     GE_RESET,          /* monster slot: resetMonsterState + clearAllGoals; a = 1: also put it at pos facing f */
     GE_PLACE,          /* monster slot: setPosition pos (a = 1: pos is added to where it is); no reset, its facing kept */
-    GE_AI,             /* monster slot: setIsAI(a) */
+    GE_AI,             /* monster slot: setIsAI(a); b = 1: and destroyBuildings (a bot in BeginBlockNI) */
     GE_MOVE,           /* monster slot plays the move `name` (playMove); a = 1: tell game_move_done(slot) when it ends
                         * (Levels::moveComplete), the NI waits for it */
     GE_WALK,           /* monster slot: walkTo(pos, radius f), then addWayPoint(v, f) (f: the arrival radius,

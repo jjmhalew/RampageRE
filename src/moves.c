@@ -74,6 +74,9 @@ int moves_read(const Bundle *b, MoveGraph *g)
                     ev->value |= 1u << part;
             }
             ev->p[0] = rd32(d + o + 0x14) & 6 ? 1.0f : 0.0f;
+            ev->aflags = rd32(d + o + 0x14);
+            ev->victims = rd32(d + o + 0x18);
+            ev->level = (int32_t)rd32(d + o + 0x24);
             for (int j = 1; j < 4; j++)
                 ev->p[j] = rdf(d + o + 0x28 + 4 * j);
         } else {

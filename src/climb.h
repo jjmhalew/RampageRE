@@ -36,6 +36,8 @@ typedef struct {                                     /* what the climbing code a
 } Climber;
 
 int climb_can_mount(Mount *m, const Scene *s, const Climber *c, int side, float zoff);   /* 1 = yes, else -2 .. -9 */
+/* the check of a place on building bi (0x2DDC40): 1 fine, else -2 .. -9 (the bots' mount points) */
+int climb_place_ok(const Scene *s, int bi, const float pt[3], float focus_x);
 /* spider: canSpiderClimb, the top is the lower of the two buildings either side of the alley */
 int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, int dh, int spider);
 int climb_can_transfer(Mount *m, const Scene *s, const Climber *c, int right);   /* 1 = yes, else -7, -2 .. -9 */

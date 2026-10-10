@@ -94,6 +94,7 @@ typedef struct {                                      /* a building's cells and 
     uint8_t seen[BUILDING_STOREYS][BUILDING_CELLS];   /* each cell's state when its effects were last played */
     int seen_collapse, seen_state;
     Group props;                                      /* its template (DefBuildingProps' Scoring, ...) */
+    int hitter;                                       /* the monster slot that hit it last (its Scoring's points) */
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
     Group inst;                                       /* its BuildingInstance| (EdibleInstance| rows, ...) */
@@ -112,9 +113,31 @@ typedef struct {                                      /* a building's cells and 
 } SceneBuilding;
 
 struct IkFeet;
+/* a monster in the scene: the game has up to four (the players and the bots), each with its own skeleton, clips,
+ * head turn, arm IK and foot IK; Scene.mon[k] is monster slot k */
+#define SCENE_MONSTERS 4
+typedef struct {
+    int inst;                                         /* its instance, -1 = none */
+    const char *clip;                                 /* the name of the clip it plays */
+    const Bundle *anims;                              /* <Monster>_anims.cmp */
+    const Bundle *bundle;                             /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
+    const char *move;                                 /* its move state's name now (the buildings' Scoring) */
+    /* its head turn (MonsterHeadAnimator, 0x2FBF90): the neck yaws about the model's up, the head pitches about its
+     * own z; its bones, -1 none */
+    float look_yaw, look_pitch; int look_neck, look_head;
+    /* its arm IK (ik.c), per hand (0 left, 1 right, as drawn): its share, where the hand goes (model space, as drawn:
+     * rotation 3 x 3 column-major), the chain (upper arm, forearm, hand; -1 none), and the hand as the clips posed it
+     * before the IK (model space, as drawn) */
+    float ik_w[2], ik_pos[2][3], ik_rot[2][9];
+    int ik_chain[2][3], ik_ready;
+    Mat4 ik_anim[2];
+    float ik_shoulder[2][3], ik_reach[2];             /* the upper arm's place (model space, as drawn), the arm's length */
+    struct IkFeet *feet;                              /* its foot IK (ik.c ik_feet), NULL none */
+} SceneMonster;
+
 typedef struct {
     const Bundle *city;
-    Bundle *own[4]; int nown;                         /* bundles loaded for this scene (a monster and its clips) */
+    Bundle *own[2 * SCENE_MONSTERS]; int nown;        /* bundles loaded for this scene (the monsters and their clips) */
     SceneMesh *meshes; uint32_t nmeshes, meshes_cap;
     int32_t *mesh_of_entry;                           /* per city bundle entry: its SceneMesh, -1 = not loaded */
     Instance *instances; uint32_t ninstances, instances_cap;
@@ -141,12 +164,10 @@ typedef struct {
     float cloth_dt;                                   /* play time not yet simulated by the cloths */
     float cloth_time;                                 /* the flags' wind clock */
     const char *music;                                /* the block's Music (a .mic stream, sound.c) */
-    /* the monster's head turn (MonsterHeadAnimator, 0x2FBF90): the neck yaws about the model's up, the head pitches
-     * about its own z; its bones, -1 none */
-    float look_yaw, look_pitch; int look_neck, look_head;
     Group block;                                      /* the block's BlockDef (its AIDef, ...) */
-    /* the army (army.c, driven by main): its units' looks are posed with the people's; the buildings' damage scores */
-    Army *army; const char *monster_move;
+    /* the army (army.c, driven by main): its units' looks are posed with the people's; the buildings' damage scores
+     * (for the monster that hit the building last, SceneBuilding.hitter) */
+    Army *army;
     /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
      * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
     People *folk; struct City *owner;
@@ -180,23 +201,12 @@ typedef struct {
     int placing_block;                                /* placing the block's own objects (not those behind) */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
-    int monster;                                      /* instance of the monster, -1 = none */
-    const char *monster_clip;                         /* the name of the clip it plays */
-    const Bundle *monster_anims;
-    const Bundle *monster_bundle;                     /* <Monster>.cmp: its meshes, skeleton and MONSTER_DATA */
-    float spheres[64][4]; int nspheres;               /* drawn over the scene as wire spheres: centre, radius */
+    SceneMonster mon[SCENE_MONSTERS]; int nmon;      /* the monsters, slot 0 .. nmon - 1 (city_monster adds one) */
+    float spheres[256][4]; int nspheres;              /* drawn over the scene as wire spheres: centre, radius */
     SceneBuilding *buildings; uint32_t nbuildings;
     /* the next two blocks of the city's BlockList, drawn behind this one at y + 41 and y + 82 (the block manager
      * 0x4D4E80's slots 1 and 2, 0x302AF0): their buildings are scenery, out of the play */
     SceneBuilding *scenery; uint32_t nscenery;
-    /* the monster's arm IK (ik.c), per hand (0 left, 1 right, as drawn): its share, where the hand goes (model space,
-     * as drawn: rotation 3 x 3 column-major), the chain (upper arm, forearm, hand; -1 none), and the hand as the
-     * clips posed it before the IK (model space, as drawn) */
-    float ik_w[2], ik_pos[2][3], ik_rot[2][9];
-    int ik_chain[2][3], ik_ready;
-    Mat4 ik_anim[2];
-    float ik_shoulder[2][3], ik_reach[2];             /* the upper arm's place (model space, as drawn), the arm's length */
-    struct IkFeet *feet;                             /* the monster's foot IK (ik.c ik_feet), NULL none */
 } Scene;
 
 typedef struct City City;
@@ -204,25 +214,27 @@ City *city_open(const Vol *vol, const char *name);   /* NULL if the city's bundl
 void city_close(City *c);
 uint32_t city_blocks(City *c, const char **names, uint32_t max);   /* the block list, without repeats */
 int city_build(City *c, const char *block, int night, Scene *s);    /* 0 = ok */
-/* a monster in the street at (x, y), turned deg about Z, playing its clip number `clip` (-1: its idle) */
+/* a monster in the street at (x, y), turned deg about Z, playing its clip number `clip` (-1: its idle), in the next
+ * slot (Scene.mon[Scene.nmon]); its slot, -1 = not made. The scene_monster_* functions take the slot k */
 int city_monster(City *c, Scene *s, const char *monster, int clip, float x, float y, float deg);
 void scene_update(Scene *s, double t);               /* pose everything that moves at time t (seconds) */
 /* the monster plays the clip whose name ends in suffix ("_WALK2", "_IDLE"); 0 = ok. *speed: how fast its root
  * travels in that clip (units per second), for moving it by hand */
-int scene_monster_clip(Scene *s, const char *suffix, float *speed);
-void scene_monster_place(Scene *s, float x, float y, float z, float deg);
+int scene_monster_clip(Scene *s, int k, const char *suffix, float *speed);
+void scene_monster_place(Scene *s, int k, float x, float y, float z, float deg);
 /* the root's axes held (bit 0 x, 1 y, 2 z) at hold, and turn degrees about Z taken out of it: the motion the
  * monster itself makes */
-void scene_monster_root_motion(Scene *s, int axes, const float hold[3], float turn);
-int scene_monster_play(Scene *s, const char *clip);
+void scene_monster_root_motion(Scene *s, int k, int axes, const float hold[3], float turn);
+int scene_monster_play(Scene *s, int k, const char *clip);
+int scene_monster_slot(const Scene *s, int inst);  /* the monster slot whose instance inst is, -1 none */
 /* the face layer plays clip (head: Bip01 Head itself too), at face_t 0 .. 1 (Instance.face_t); 0 = ok */
-int scene_monster_face(Scene *s, const char *clip, int head);
+int scene_monster_face(Scene *s, int k, const char *clip, int head);
 /* the face bones blend over seconds from where they are now (a face clip starting, 0x2FF910) */
-void scene_monster_face_blend(Scene *s, float seconds);
+void scene_monster_face_blend(Scene *s, int k, float seconds);
 /* the monster's hand (0 left, 1 right, as drawn) in the world, as the clips posed it (before the IK); 0 = ok */
-int scene_monster_hand(const Scene *s, int hand, Mat4 *world);
+int scene_monster_hand(const Scene *s, int k, int hand, Mat4 *world);
 /* where that arm's shoulder (upper arm) is in the world, as posed, and how far the arm reaches; 0 = ok */
-int scene_monster_shoulder(const Scene *s, int hand, float at[3], float *reach);
+int scene_monster_shoulder(const Scene *s, int k, int hand, float at[3], float *reach);
 /* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
  * ones, flag 4, nor obstacles, flag 2); how many */
 int scene_adornments_hit(Scene *s, const float centre[3], float radius);
@@ -243,7 +255,7 @@ Group city_template(City *c, const char *name);     /* an object template by nam
 float city_clip_seconds(City *c, const char *anim, const char *shape);
 void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]);   /* an effect to start */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
-int scene_monster_node(const Scene *s, const char *name, Mat4 *world);
+int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world);
 /* the window occupants (0x318650): every SpawnRate seconds (0.75) one comes to a random free slot of a building in
  * view; the slots are the block's windows, a FillRate share of them, each with an occupant picked by Frequency */
 void scene_people_spawn(Scene *s, float dt);
@@ -262,10 +274,11 @@ int scene_people_boxes(const Scene *s, PeopleBox *out, int max);
 void scene_buildings_update(Scene *s, float dt);
 /* the next clip blends in over `seconds` from the pose the monster has now, as the game's animation player does
  * (0x2FFA00): call before scene_monster_play; scene_monster_blend_step counts it down */
-void scene_monster_blend(Scene *s, float seconds);
-void scene_monster_blend_step(Scene *s, float dt);  /* the clip of that name (any case, as MONSTER_DATA names it) */
+void scene_monster_blend(Scene *s, int k, float seconds);
+void scene_monster_blend_step(Scene *s, int k, float dt);   /* the clip of that name (any case, as MONSTER_DATA names it) */
+void scene_cloth_step(Scene *s, float dt);          /* play time for the cloths, simulated at the next posing */
 /* the root node's translation and rotation in the monster's clip at `seconds`; 0 = ok */
-int scene_monster_root(const Scene *s, double seconds, float t[3], float q[4]);
+int scene_monster_root(const Scene *s, int k, double seconds, float t[3], float q[4]);
 int city_camera(City *c, Group *two_tilts);
 /* a group of a property book by the book's name ("Objects1_Props", "Weapons": <name>.bdp in the Vol) */
 Group city_book_group(City *c, const char *book, const char *name);

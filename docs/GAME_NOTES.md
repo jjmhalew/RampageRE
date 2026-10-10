@@ -246,7 +246,7 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
 
 - **[G]** The challenges (ChallengeDef, `ChallengeStatus`, the "Clock" challenge 0x346780, city flag 4), the monster
   reveal (`startReveal`, flag 8, unlocking Boosy), the profile save, the pause.
-- **[G]** The bots' `destroyBuildings` AI. The cheat flags 0x10000 and 0x20000 (0x324930: skip a block).
+- The bots' `destroyBuildings` AI is director.c's (MULTIPLAYER_NOTES.md). **[G]** The cheat flags 0x10000 and 0x20000 (0x324930: skip a block).
 - **[G]** The world's coordinate shift between blocks: the host decides how it draws the block left behind.
   `findPointInRubble` is the host's (GE_RUBBLE_FX).
 - **[G]** `NewYork::BossResultsNI` and any other non-Levels script: they go to the host's `script` callback, falling

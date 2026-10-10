@@ -15,6 +15,9 @@
  *     Script 0x4D5D60) and the script camera (RScriptCam, vtable 0x44B3D0: activate 0x312100, update 0x311750 ->
  *     0x311820, the ScriptCamera bindings 0x2A6E30);
  *   - Monsters::startRage's camera (Monsters.scr: the script camera on the monster, cut, back after 1.5 s over 0.5 s).
+ *   - the bots' DestroyBuildings goal (type 2, vtable 0x44AE60, its update 0x2F1A60; docs/MULTIPLAYER_NOTES.md): the
+ *     nearest standing building of the front row, mounted on a side, punched cell by cell, climbed, its roof
+ *     stomped; with none left the nearest other monster.
  *
  * Engine-agnostic: nothing here draws or plays. Positions are the game's (z up, the street at z = 0, the camera at -y).
  * The monster side drives the move graph runner of moves.h in place of moves_step while the monster is AI; the camera
@@ -49,7 +52,54 @@ void dir_graph_free(DirGraph *ag);
 /* 0x2F2B90: the target can be reached from the state through usable transitions (or clip ends) */
 int dir_graph_reachable(const DirGraph *ag, const MoveGraph *g, int from, int to, MoveCall call, void *ctx);
 
-enum { DG_PLAY_MOVE = 0, DG_WALK_TO = 1 };            /* the goal types (0x2ED810) */
+enum { DG_PLAY_MOVE = 0, DG_WALK_TO = 1, DG_DESTROY = 2 };   /* the goal types (0x2ED810) */
+
+/* ---- the bots' goal: DestroyBuildings (Monster binding 157 destroyBuildings, 0x2AC2B0: goal type 2, vtable 0x44AE60,
+ * its update 0x2F1A60; docs/MULTIPLAYER_NOTES.md). What it sees of the world each frame, the host's to fill: */
+typedef struct {
+    float min[3], max[3];    /* its box (building +0x1DC, +0x1E8) */
+    float pos[3];            /* its place (+0x2C: the middle of its foot here [G]) */
+    int state;               /* +0x14C: 1 .. 3 standing, 4 and up falling, 0 gone (building.h BUILDING_*) */
+    int row, width, storeys; /* +0x10C, +0x1C8, the storeys standing (+0x1D0) */
+} DirBuilding;
+typedef struct {
+    float pos[3];
+    int mounted, rail;       /* the building it is on (+0xC640, -1 none) and its rail there */
+    int human;               /* it became human (+0xAB4) */
+    int ai;                  /* +0x108 */
+    float radius;            /* MONSTER_DATA +0x188 x its scale: here its half width [G] */
+} DirMonster;
+typedef struct {
+    /* the bot itself */
+    float pos[3], fwd[2];    /* its place and its forward axis, flat */
+    int mirror, mirror_queued;
+    int mode;                /* +0xAD8 (1, 2: in the air) */
+    int mounted, rail, storey;   /* its building's face: the building (-1 none), the rail and storey there */
+    int smash;               /* JUMP SMASH (upgrade flag 8) or the rage: the butt slam on a roof */
+    float hp, half_width;    /* +0xA4C; MONSTER_DATA +0x198 x its scale */
+    int self;                /* its slot in m */
+    const DirBuilding *b; int nb;
+    const DirMonster *m; int nm;
+    int under;               /* the building under its body (0x2D6150), -1 none */
+    void *ctx;
+    int (*cell)(void *ctx, int b, int storey, int column);   /* a front cell's damage state 0 .. 3, -1 none */
+    int (*can_mount)(void *ctx, int side, int *building);     /* canMount(side, 0) (FACE_* sides), its candidate */
+    int (*can_climb)(void *ctx, int dv, int dh);              /* canClimb: its raw answer (climb.c) */
+    int (*place)(void *ctx, int b, const float pt[3]);        /* the place check 0x2DDC40 at a point of building b */
+    void (*collapse)(void *ctx, int b);                       /* collapseBuilding (the 60 s guard) */
+} DirBotView;
+typedef struct {
+    int target, side;        /* +0x20 the building (-1 none), +0x28 its side: 0 left, 1 right, 2 front, 3 none */
+    float walk[3];           /* +0x2C the walk point */
+    int use_hit; float hit_off[3];   /* +0x38, +0x3C: the last hit's point less the monster's place */
+    int have_cell, cell_storey, cell_col;   /* +0x48 .. +0x54: the front cell it is after */
+    int cur_storey, cur_col; /* +0x5C, +0x60 */
+    float cooldown;          /* +0x64 */
+    int avoid; float avoid_time;   /* +0x68, +0x6C: a building it was knocked off */
+    float on_target;         /* +0x70: seconds on this target */
+    uint32_t seed;           /* rand01 (0x106950 on gWorld +0x82C) [G: an LCG] */
+    int st_front, st_side_l, st_side_r, st_respawn, st_punch_down;   /* +0x74 .. +0x84: the states it goes to */
+} DirBot;
 #define DIR_GOALS 8
 #define DIR_WAYPOINTS 8
 typedef struct {
@@ -68,6 +118,8 @@ typedef struct {
     int force;               /* a state forced (0x2D9710: the start list at +0x110), taken next frame; -1 none */
     float stick[2];          /* out: the stick (+0xC) in world x, y, length 1 while walking, else 0 */
     int done;                /* out: goals with notify that ended this frame (Levels::moveComplete) */
+    DirBot bot;              /* the DestroyBuildings goal's own (one per monster) */
+    const DirBotView *view;  /* in: what a DestroyBuildings goal sees this frame (the host's), NULL none */
 } DirAI;
 
 void dir_ai_init(DirAI *ai);
@@ -80,6 +132,15 @@ int dir_ai_play_move(DirAI *ai, int state, int notify);
 int dir_ai_walk_to(DirAI *ai, const float pos[3], float radius, int notify);
 /* WalkToGoal.addWayPoint(pos, radius) (0x2F2020) on the goal walk_to returned */
 void dir_ai_add_waypoint(DirAI *ai, int goal, const float pos[3], float radius);
+/* Monster.destroyBuildings (binding 157): the DestroyBuildings goal, which never ends (a bot in BeginBlockNI). The
+ * states it goes to are looked up in g (0x2F1C10). Returns its index, -1 when the queue is full */
+int dir_ai_destroy(DirAI *ai, const MoveGraph *g, uint32_t seed);
+/* what the monster tells the goal (MonsterAI's forwarders 0x2ED680 .., only while it is AI): a hit on a building's
+ * face at pt (hitBuildingPt, x in its frame mirrored as it plays), mounted on building b at rail (mountBuilding),
+ * knocked off building b (avoid) */
+void dir_ai_on_hit(DirAI *ai, const float off[3]);
+void dir_ai_on_mount(DirAI *ai, int b, int rail, int width);
+void dir_ai_avoid(DirAI *ai, int b, const DirBotView *view);
 
 /* One frame of an AI monster (setIsAI(1)) in place of moves_step: the windows (0x2EBFE0), the goals (0x2EE430) and
  * their picks, the switch. pos: the monster's root position. call answers the transitions' script checks (as for

@@ -187,5 +187,5 @@ it and are pulled onto it, so the fires sit about 8 from the centre, at z ≈ �
   object's facing. The script camera's callback (`setCallback`), `setFovTarg`, `enableInertia`, `setPosParms` … are
   not bound (the struct has their fields).
 - **[G]** Obstacle avoidance of the walk (0x2EDB40 with its fourth argument: other monsters), the destroy-buildings
-  goal (type 2, the bots), the global 0x4D6A9A.
+  goal (type 2, the bots: now ported, MULTIPLAYER_NOTES.md), the global 0x4D6A9A.
 - **[G]** A play-move goal whose state is unknown ends at once (the game's would never begin).

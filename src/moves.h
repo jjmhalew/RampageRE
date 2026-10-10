@@ -36,6 +36,9 @@ typedef struct {                                     /* a timed event of the sta
     float p[4]; uint32_t value;                      /* 21: its four arguments; 7: the mode; 0: the body
                                                         parts (bits), p[0] 1 arms / 0 disarms them, p[1..3] its
                                                         floats at +0x2C (5 a punch, 20 the kick), +0x30, +0x34 */
+    uint32_t aflags, victims; int level;             /* 0: its flags (+0x14: 2 victims in front, 4 behind), the
+                                                        monsters it may hit (+0x18: bits 0 .. 3 the slots, 4 objects)
+                                                        and its ReactionLevel (+0x24) (0x2E35D0) */
 } MoveEvent;
 typedef struct {
     const char *name, *clip;                         /* the clip by name, as in the anims bundle (any case) */
