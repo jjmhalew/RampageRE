@@ -33,6 +33,8 @@
 #include "footstep.h"
 #include "challenge.h"
 #include "reveal.h"
+#include "profile.h"
+#include <time.h>
 #include "boss.h"
 #include "streetobj.h"
 #include "parade.h"
@@ -140,6 +142,8 @@ typedef struct {
                                                       * roster's flags stand for the profile's, from 0 */
     RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
     Rubble rubble;                                   /* findPointInRubble's slots: the block left's buildings */
+    Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
+    const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */             /* the Options page's volumes, 1 = as the game; the music now */              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
@@ -148,6 +152,7 @@ typedef struct {
 
 static int water_at(const Viewer *v, float x, float y);
 static void challenge_stats(Viewer *v, const char *name, int points);
+static void power_from_profile(Viewer *v);
 static void upgrade_touch(Viewer *v, const float centre[3], float radius);
 static void street_step(Viewer *v, float dt);
 static float water_surface(const Water *w);
@@ -350,6 +355,7 @@ static void start_moves(Viewer *v)
         v->hp = (float)atof(getenv("RAMPAGE_HP"));
     v->energy = 0;
     edible_power_init(&v->power);
+    power_from_profile(v);
     memset(v->shakes, 0, sizeof v->shakes);
     for (int i = 0; i < 64; i++) v->last_collapse[i] = -1;
     v->mount.at.building = v->mount.cand.building = -1;
@@ -724,6 +730,8 @@ static void build(Viewer *v)
                 rubble_seed(&v->rubble, 1);
             }
             int pm = reveal_roster_find(&v->roster, v->monsters[v->monster]);   /* 0x3236F0: the city's monster */
+            for (int i = 0; i < v->roster.n; i++)    /* the roster's flags are the profile's (ShellData's order) */
+                v->roster.flags[i] = profile_monster_flags(&v->prof, 0, i);
             int rm = reveal_load(&v->reveal, world_data(v), (v->play_type ? v->play_type : GP_CAMPAIGN) == GP_CAMPAIGN,
                                  1, &pm, &v->roster);
             v->ntubes = 0;
@@ -752,6 +760,8 @@ static void build(Viewer *v)
             if (v->hud) {
                 hud_set(v->hud, v->hp, 200, v->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
                 hud_set_project(v->hud, hud_project, v);
+                hud_set_settings(v->hud, profile_sound_volume(&v->prof), profile_music_volume(&v->prof),
+                                 profile_rumble(&v->prof));
                 hud_add_bundle(v->hud, v->scene.city);   /* <City>.loc: the block names, the challenge texts */
                 hud_results_auto(v->hud, v->unattended ? 2.0f : 0);
             }
@@ -1879,6 +1889,15 @@ static void game_step(Viewer *v, float dt)
                     r.par_score = game_par_score(v->game);
                     r.city_flags = game_city_flags(v->game) | (v->challenges_lost ? 0 : CITY_FLAG_CHALLENGES);
                     r.monster_revealed = reveal_was_revealed(&v->reveal);
+                    if (e->a == GR_SCREEN_RESULTS && r.play_type == GP_CAMPAIGN) {   /* Results.bsf: updateProfile,
+                                                      * saveProfile (1.5 s in) */
+                        profile_block_won(&v->prof, r.city_flags | PC_AVAILABLE, r.city_score, game_block(v->game, NULL),
+                                          r.city_destroyed);
+                        profile_update(&v->prof);
+                        if (v->prof_write && v->prof_path &&
+                            profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000) < 0)
+                            printf("could not write the profile %s\n", v->prof_path);
+                    }
                     hud_results(v->hud, e->a, &r);
                 }
                 break;
@@ -1893,6 +1912,7 @@ static void game_step(Viewer *v, float dt)
                 v->streaker = -1;
                 if (e->a == 1) {
                     edible_power_init(&v->power);
+                    power_from_profile(v);
                     v->energy = 0;
                 }
                 break;
@@ -1910,6 +1930,10 @@ static void hud_frame(Viewer *v, int after)
     if (!after || !v->hud)
         return;
     int r = hud_result(v->hud);
+    if (r == GR_CONTINUE && v->game && game_state(v->game) == GS_GAME_OVER) {   /* back to the checkpoint */
+        profile_restore_checkpoint(&v->prof);
+        profile_new_city(&v->prof);
+    }
     if (r == GR_CONTINUE && v->game && game_state(v->game) == GS_GAME_OVER && reveal_was_revealed(&v->reveal))
         reveal_continue(&v->reveal);                 /* 0x323450: the tube comes back */
     if (r && v->game)
@@ -1925,6 +1949,9 @@ static void hud_frame(Viewer *v, int after)
         break;
     case HUD_PAUSE_SETTINGS:                         /* the profile's volumes (0 .. 0.75: the game's full one) */
         hud_settings(v->hud, &sv, &mv, &rumble);
+        profile_set_sound_volume(&v->prof, sv);      /* written with the next Results */
+        profile_set_music_volume(&v->prof, mv);
+        profile_set_rumble(&v->prof, rumble, 1);
         v->sfx_vol = sv / 0.75f;
         v->music_vol = v->music_now = mv / 0.75f;
         sound_volume(v->sfx_vol, v->music_now);
@@ -1939,6 +1966,9 @@ static void hud_frame(Viewer *v, int after)
         case HUD_CALL_SFX_VOLUME: v->sfx_vol = calls[i].value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
         case HUD_CALL_SAVE_SETTINGS:
             hud_settings(v->hud, &sv, &mv, &rumble);
+            profile_set_sound_volume(&v->prof, sv);
+            profile_set_music_volume(&v->prof, mv);
+            profile_set_rumble(&v->prof, rumble, 1);
             v->sfx_vol = sv / 0.75f;
             v->music_vol = v->music_now = mv / 0.75f;
             sound_volume(v->sfx_vol, v->music_now);
@@ -2052,6 +2082,8 @@ static void edible_step(Viewer *v, float dt)
                 break;
             case EE_REVEAL: {                        /* the cryotube: gWorld.startReveal, "<monster> Unlocked" */
                 int slot, i = reveal_start(&v->reveal, 1, &v->roster, &slot);
+                if (i >= 0)                          /* unlocked: the profile's monster flags */
+                    profile_set_monster_flags(&v->prof, 0, i, v->roster.flags[i]);
                 if (v->hud && i >= 0)
                     hud_banner_reveal(v->hud, v->roster.name[i]);
                 if (getenv("RAMPAGE_TRACE"))
@@ -3180,8 +3212,22 @@ static void upgrade_touch(Viewer *v, const float centre[3], float radius)
         hud_banner_text(v->hud, v->challenge.up.text, v->challenge.up.colour, 1, "v_upgrade");
     }
     v->power.abilities |= mv;
+    int pm = profile_find_monster(&v->prof, v->monsters[v->monster]);
+    if (pm >= 0)                                     /* aquireUpgrade: into the profile's monster flags */
+        profile_set_monster_flags(&v->prof, 0, pm, profile_monster_flags(&v->prof, 0, pm) | mv);
     if (getenv("RAMPAGE_TRACE"))
         printf("  upgrade taken: %s\n", challenge_upgrade_move(mv));
+}
+
+/* gCommon.getMonsterFlags: the moves the profile has for the monster (a new one: none; cheat 011235 all four) */
+static void power_from_profile(Viewer *v)
+{
+    int pm = v->monster >= 0 ? profile_find_monster(&v->prof, v->monsters[v->monster]) : -1;
+    if (pm < 0)
+        return;                                      /* not in the roster: edible.c's all four */
+    v->power.abilities = profile_moves(&v->prof, 0, pm);
+    v->power.cheats = profile_cheat_flags(&v->prof);
+    v->upgrades[v->monster & 63] = profile_monster_flags(&v->prof, 0, pm) & 0xF;
 }
 
 /* Start: the Pause menu (WorldGuiDriver::process, event 128) */
@@ -3341,6 +3387,8 @@ int main(int argc, char **argv)
     int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0;
     float view[5] = { 0 };
     v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
+    int newprofile = 0;
+    const char *cheat = NULL;
     double shot_time = 0;
     const char *script = NULL;
     char walk_script[48];
@@ -3358,6 +3406,9 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--nofog") == 0) v.fog = -1;
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
+        else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
+        else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) v.prof_path = argv[++i];
+        else if (strcmp(argv[i], "--cheat") == 0 && i + 1 < argc) cheat = argv[++i];
         else if (strcmp(argv[i], "--play") == 0 && i + 1 < argc) {   /* campaign, kingcity, kingworld, timed */
             const char *m = argv[++i];
             v.play_type = !_stricmp(m, "kingcity") ? GP_KING_CITY : !_stricmp(m, "kingworld") ? GP_KING_WORLD :
@@ -3427,6 +3478,19 @@ int main(int argc, char **argv)
     v.night = night;
     v.mx = 0; v.my = -18; v.heading = 180;          /* in the street, facing the camera */
     v.show_hits = 1;
+    profile_init(&v.prof);                           /* the profile: rampage_profile.bin (a --shot run: a new one,
+                                                      * not written, unless --profile names one) */
+    v.prof_write = !shot || v.prof_path;
+    if (!v.prof_path)
+        v.prof_path = "rampage_profile.bin";
+    if (!newprofile && v.prof_write && profile_read(&v.prof, v.prof_path) > 0)
+        printf("profile %s\n", v.prof_path);
+    profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
+    if (cheat && !profile_cheat_code(&v.prof, cheat))
+        printf("no cheat %s\n", cheat);
+    v.sfx_vol = profile_sound_volume(&v.prof) / 0.75f;
+    v.music_vol = v.music_now = profile_music_volume(&v.prof) / 0.75f;
+    sound_volume(v.sfx_vol, v.music_now);
     v.nmonsters = monster_names(&v.vol, v.monsters, 64);
     v.monster = -1;
     v.clip = clip;

@@ -29,7 +29,10 @@ back); the monster runs its own move graph and the game's camera follows it
 directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
 buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... drive it; `award Name` counts an object of
 that template for the block's challenge; `--walk S` is `right S`). `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
-(its results screens). The console prints
+(its results screens). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
+`rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
+nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
+upgrade challenges teach; `--cheat 011235` gives every move. The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
@@ -134,11 +137,11 @@ x ±75 and y −30.
 ## Not there yet
 - the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
 - the game's collision world (every module has its stand-in), PushOutMonsters, TakeImpact's callers;
-- more than one player, the front end and the profile (saving, the moves locked until an upgrade).
+- more than one player, the front end.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
-the bosses (boss.c), the cryotube's monster reveal and the rubble's points (reveal.c), the trains, cable cars and freighters (rail.c,
+the profile (profile.c), the bosses (boss.c), the cryotube's monster reveal and the rubble's points (reveal.c), the trains, cable cars and freighters (rail.c,
 [RAIL_NOTES.md](RAIL_NOTES.md)), the parade balloons, bikers and food carts (parade.c, [PARADE_NOTES.md](PARADE_NOTES.md)),
 the street and roof objects (streetobj.c, [STREETOBJ_NOTES.md](STREETOBJ_NOTES.md)), the buildings' light and
 neighbours' shadows (building.c, city.c, [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
