@@ -92,9 +92,17 @@ else 0.
   is within MaxFiringRange. `FireOnceCommited` latches the fire.
 - **Actors:** they fire while `enableWeapon(1)` is on and `setWeaponTarget` is set.
 
-[G] The rates are taken as radians per second. Actors and people aim straight at the monster's middle, or lob shots
-that fall (the lower ballistic angle). The weapon node comes from the host's `node_world` callback when it knows it,
-and from the unit's place otherwise.
+The cluster (0x299640) [R]: RotationRate and ElevationRate are radians a second as read (the step 0x29BA50 is rate ×
+the frame's dt; the angles wrap at 0x298E70 / 0x298F40). The defaults: ElevationRate 0.5, ElevationRange ±40°,
+RotationRange ±360°; a negative or missing Range keeps the default, and `Elevation/RotationMin/MaxRange` (degrees)
+set each end on its own (the HT turret's −10 … 90). It is on target when the turn is within π/50 and the pitch
+within π/100, or when `RequiresRotation/ElevationClearToFire` is 0; a step that close lands on the target.
+
+The aim [R 0x293050]: actors (0x30EC10) and clusters aim straight at the target lifted by ½ × 9.81 × Gravity ×
+(L / V)² (L the straight distance, V the Velocity; no lift without gravity). A monster's target point (its vtable
++0x1C, 0x2DB030) is 6 above its feet [R]; its x and y are taken as its place [G: offsets added by 0x2E6000 were not
+traced]. The weapon node comes from the host's `node_world` callback when it knows it, and from the unit's place
+otherwise.
 
 **A shot** (RProjectile; init 0x2944F0, update 0x293120, step 0x294300) [R]:
 - **Launch:** speed = Velocity × InitialVelocityPercent. Its look is the `FireEffect` (`Tank_Projectile`,
@@ -110,7 +118,9 @@ and from the unit's place otherwise.
   exclude mask (+0x138) | 8, the nearest. The masks come from the record (0x2953E0: include 4, exclude 0), changed by
   0x33B770: `DamageType` 8 meets only buildings (0x2000), Blunt (4, counted as 0) buildings and monsters (0x2040).
   A hit on the shot's own unit (+0xC4) is no hit at all (0x293CD8). The monsters are their collision spheres, flagged
-  0x40; a ray that starts inside a box meets nothing [G]. What the shot hits that is not a monster only stops it: its
+  0x40; a ray that starts inside a box meets it at t = 0 (0x280780 → 0x100420: the face of least depth, ties to z
+  then y, on the start's side), inside a sphere too (0x100900: away from its centre), so a shot whose step starts
+  inside its own unit is blind for that step [R]. What the shot hits that is not a monster only stops it: its
   impact on such an object (0x292D20) is not ported.
 
 **A beam** (0x295750) [R]:
@@ -118,8 +128,11 @@ and from the unit's place otherwise.
   include −1 and exclude 8 (+ the fire's own, 0 here), its owner flagged 8 around the cast (0x2957E0).
 - On the beam's first touch it deals `ImpactDamage`. After that it deals `DamagePerSec` × dt per frame, if that is
   above 0.
-- [G] The beam's reach is its stream effect's, which is not read. It is taken as growing at Velocity per second up to
-  MaxFiringRange.
+- The beam's reach is its stream effect's (0x295750: the ray's maxt is 0x226950's head − tail, then the effect is cut
+  at the hit, 0x226DF0) [R]. The stream (0x226CC0) grows its head by its speed (+0x1C) × dt up to its length
+  (+0x20); its tail stays at 0 until its cycle runs out or it is shut down, then follows at the same speed [R]. Here
+  it grows at Velocity per second up to MaxFiringRange [G: the descriptor's +0x50 / +0x54 were not tied to the
+  effect file's keys].
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.
@@ -152,7 +165,8 @@ at 0.
 **Tanks** (`Vehicle_Attack.bsf`, pulse 1/15 s):
 - **Arrival** [R]: from x = ±100, y = −7.5, along a LineMover at 12.
 - **The AttackMover** [R] (init 0x314B40, update 0x313F80) takes over once the tank is on screen
-  (`isSphereVisible`; [G] the view's x range, `army_set_view`):
+  (`isSphereVisible`: gWorld id 0x40 → 0x16C0A0 on the camera, a six-plane frustum test [R]; here the view's x range,
+  `army_set_view` [G]):
   - **Target:** the monster ahead nearest along x. It is the weapons' target too.
   - **Distance:** by dx² alone. Beyond `ApproachRange` (20) the tank speeds up at 8/s to `Velocity` (8) after a 2 s
     wait. Inside `FleeRange` (15) it backs off. In between it brakes.
@@ -176,7 +190,9 @@ at 0.
 - **Wingman:** with `FriendChance` (from the AIInstance) a wingman is made and follows the leader's states
   (`stopFlight`).
 - **Death:** `HitPoints` hits make it fall on a SphereMover. At z ≤ 4 it explodes (`HitEffect0`, `ExplodeEffect`).
-- [G] The spline is taken as straight runs, facing the way the helicopter goes.
+- The spline is the SplineMover's (0x33ACA0, BOSS_NOTES.md: a Kochanek-Bartels curve whose place d grows by the
+  velocity in the points' own d units, answering 2 every frame past its end) [R]; here it is taken as straight runs,
+  facing the way the helicopter goes [G: boss.c's spline not reused yet].
 
 **Trucks and police cars** (`CombatTruck.bsf`) [R]:
 - **Arrival:** they come from x = ±100 to 8 past the nearest monster (within ±40), at 20.
@@ -203,7 +219,8 @@ at 0.
   `WindowFiring<RM|RU|MU|LU|LM|LD|MD|RD>`. Each firing reloads the weapon, with a 2 … 4 s gap between reloads.
   After 5 s, a 50 % chance makes them go back in.
 - **Hits:** they have no TakeDamage, so attacks pass them by.
-- [G] `getMonsterDirection` is taken as the eighth of the way to the monster in the front's plane.
+- `getMonsterDirection` (Actor id 0x3F → 0x2B2850) [R]: of the player monsters, the nearest (d² < 1e5); the eighth of
+  the way to it 3 above its feet, in the front's plane (atan2(dz, dx), dy unused).
 
 **StationaryAttackObject** (the pirate ship) [R]:
 - **Aim:** it aims at a point that locks onto the monster after 0.55 s still (+`TargetOffsetZ`) and re-picks when
@@ -215,7 +232,9 @@ at 0.
 - **Path:** across at 20, at `Height` (from the AIInstance; 42 by default), at y = 5 (row 0) or 15 (row 1).
 - **Bombing:** `Carpet` bombers drop every pulse (1 s). `Targeted` ones drop when within 4.8 along x.
 - **Death:** one hit makes it fall (addStats type 2).
-- [G] `reloadWeapon` is taken as refilling the ammo.
+- `reloadWeapon` (Actor id 0x3D; the AttackObject's id 0x3A takes cluster and weapon, −1 all) is the weapon's vtable
+  +0x80 (0x296F70) [R]: ammo = Ammo (0 stays 0), the countdown at least ChargeTime + FiringOffset, the charge effect
+  restarted (not here). `setWeaponAmmo` (+0x84, 0x296F50) is ammo = min(n, Ammo).
 
 ## Droppables
 `Droppable.bsf` [R], `army_drop` for people.c's `PE_DROP`:
@@ -226,8 +245,10 @@ at 0.
 - **On the ground:** the `GroundEffect`, and it is gone.
 - **On the monster:** when the monster takes it (within 2.5 along x) it plays `HitEffect` and `HitMonsterSound`,
   calls `setReaction(19)` (an overhead hit), and is gone. No damage.
-- [G] The game calls this TakeDamage from its collision, which was not read. Here it fires when the object touches
-  the monster's spheres, or when an attack reaches it.
+- The game calls this TakeDamage from the monster's object test (0x2E22B0) [R]: a droppable has neither 0x8000 nor
+  0x2040, so every frame a monster's sphere touches its shape it is TakeDamage(type 0 and the attack's damage when the
+  sphere is armed, else type 1 and 2.0). Here it fires when the object touches the monster's spheres, or when an
+  attack reaches it; its shape is a 0.5 sphere at its place [G: the game's 0x28FD70 shape].
 
 ## Scoring
 **The records** [R] (`Player.addPoints` 0x33F530): each player's record holds `points[7]` and `kills[7]`. The
@@ -275,17 +296,19 @@ Floating = 100
   - when a droppable meets the monster;
   - the units' shapes for the monster's attacks (actors: a sphere of `CollisionRadius` 2; objects: the host's model
     box, else 4 × 6 × 3). In the collision world a unit has its shape by 0x28FD70 (`collide_shape_pick`:
-    CollisionBox, CollisionRadius, AutoCollisionBox, else the model's bounding sphere [G: the box's]).
+    CollisionBox, CollisionRadius, AutoCollisionBox, else the sphere the model keeps (0x184CB0, stored apart from
+    its box, 0x184940) [R]; here the box's bounding sphere [G].
 - **Movers:** the SplineMover's curve and the HeldObjectMover's axis turn (the unit takes the hand's matrix). A flight
   (`mv.kind` 2: a wreck knocked away, a smashed actor, a thrown vehicle, a falling bomber) is the game's
   SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) with the template's `Gravity` (DefObjectProps 35,
   else 9.81), `Mass`, `Restitution`, `SlidingFriction`, `InertiaSolidity` and the shape's radius; it has no rest
-  (it rolls on until the script ends it). OnHitGround is sent once a frame it touches [G: the game's every sub-step;
-  the trucks' and bombers' are the same either way], TakeImpact on both what it meets (0x287430: Bomber.bsf's is
-  its onHitGround; another module's object through `AE_IMPACT`). [G] Its spin: the tilt and facing rates about the
-  unit's x, y and the world's z; the facing follows the mover's x axis, the tilt stays.
-- **The weapon system:** the turret's rate units, the aim of actors and people, `reloadWeapon`, and the weapon node
-  without the host's `node_world`. Both the projectile's wobble (definition flag 8) and its spread (record flag 8)
+  (it rolls on until the script ends it). OnHitGround is sent once a frame it touches; the game sends it every
+  sub-step (0x28E440, COLLIDE_NOTES.md) [R], the same here: the truck's only sets state 6 and the bomber's is
+  guarded. TakeImpact on both what it meets (0x287430: Bomber.bsf's is its onHitGround; another module's object
+  through `AE_IMPACT`). Its spin: smashObject (0x2B2F50) hands its rates to setRotation (0x28DD80) as they are, an
+  angular velocity about a world axis (Bomber's setRotation(π/4, 0, 0): π/4 a second about world x) [R]; the facing
+  follows the mover's x axis, the tilt stays.
+- **The weapon system:** the weapon node without the host's `node_world`; the monster's target point's x and y. Both the projectile's wobble (definition flag 8) and its spread (record flag 8)
   come from flags no book sets.
 - **Other:** `isSphereVisible` and the camera's place (`army_set_view`), the AttackObject hit wobble (+0x18C), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).

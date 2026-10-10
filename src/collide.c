@@ -243,7 +243,9 @@ int collide_obj_sphere(const CollideObj *o, const float c[3], float r, float nor
     return 1;
 }
 
-/* 0x280780 (box) and the sphere's ray, in the object's frame: the entry, a ray starting inside meets nothing [G] */
+/* 0x280780 -> 0x100420 (box) and 0x100900 (sphere), in the object's frame: the entry; a ray starting inside meets it
+ * at t = 0 [R] (the box: the face of least depth, ties to z then y, on the start's side; the sphere: away from its
+ * centre) */
 int collide_obj_ray(const CollideObj *o, const float start[3], const float dir[3], float maxt, float *t, float normal[3])
 {
     float s[3], d[3], ln[3] = { 0, 0, 0 };
@@ -254,7 +256,18 @@ int collide_obj_ray(const CollideObj *o, const float start[3], const float dir[3
     float tt;
     if (o->shape.type == COLLIDE_SPHERE) {
         float a = dot3(d, d), b = dot3(s, d), c = dot3(s, s) - o->shape.radius * o->shape.radius;
-        if (a <= 0 || c <= 0)
+        if (c <= 0) {                                /* inside */
+            float l = sqrtf(dot3(s, s));
+            *t = 0;
+            if (l > 1e-6f)
+                for (int k = 0; k < 3; k++)
+                    ln[k] = s[k] / l;
+            else
+                ln[2] = 1;
+            to_world_dir(o->m, ln, normal);
+            return 1;
+        }
+        if (a <= 0)
             return 0;
         float disc = b * b - a * c;
         if (disc < 0)
@@ -265,6 +278,23 @@ int collide_obj_ray(const CollideObj *o, const float start[3], const float dir[3
         for (int k = 0; k < 3; k++)
             ln[k] = (s[k] + d[k] * tt) / o->shape.radius;
     } else {
+        int inside = 1, best = 2;
+        float depth = BIG;
+        for (int k = 2; k >= 0; k--) {               /* z first: ties go to z, then y */
+            float dk = o->shape.half[k] - fabsf(s[k]);
+            if (dk < 0)
+                inside = 0;
+            else if (dk < depth) {
+                depth = dk;
+                best = k;
+            }
+        }
+        if (inside) {
+            *t = 0;
+            ln[best] = s[best] < 0 ? -1.0f : 1.0f;
+            to_world_dir(o->m, ln, normal);
+            return 1;
+        }
         float t0 = -BIG, t1 = BIG;
         int ax = -1;
         for (int k = 0; k < 3; k++) {

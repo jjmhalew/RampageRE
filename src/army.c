@@ -34,6 +34,7 @@ typedef struct { float step, sum; int skip; } Chain; /* a building's +0x194, +0x
 
 struct Army {
     ArmyHost host;
+    int attack[ARMY_MONSTERS];                       /* per monster: its attack's number (army_arm) */
     ArmyUnit *u; int n, cap;
     ArmyShot shot[MAX_SHOTS]; int nshots, next_shot;
     ArmyEvent ev[MAX_EVENTS]; int nev, next_fx;
@@ -230,7 +231,16 @@ static int nearest_monster(const Army *a, const float pos[3])   /* getNearestMon
     return best;
 }
 
-static void monster_centre(const ArmyMonster *m, float c[3])   /* [G] where a shot aims: the box's middle */
+/* where a weapon aims: the monster's target point (its vtable +0x1C, 0x2DB030): 6 above its feet [R]; x and y its
+ * place [G: the offsets 0x2E6000 / +0xBD54 adds were not traced] */
+static void monster_target(const ArmyMonster *m, float c[3])
+{
+    c[0] = m->pos[0];
+    c[1] = m->pos[1];
+    c[2] = m->pos[2] + 6;
+}
+
+static void monster_centre(const ArmyMonster *m, float c[3])   /* [G] a shot's homing: the box's middle */
 {
     if (m->box_max[2] > m->box_min[2])
         for (int k = 0; k < 3; k++)
@@ -409,10 +419,19 @@ static void unit_weapons(Army *a, ArmyUnit *u)
             for (uint32_t i = 0; i < nw && u->nw < ARMY_WEAPONS; i++)
                 if (weapon_make(a, &u->w[u->nw], record_group(cl, wr[i]))) {
                     ArmyWeapon *w = &u->w[u->nw++];
-                    w->rot_range = group_num(cl, "RotationRange", 0) * PI / 180;
+                    /* [R 0x299640] the rates as read (radians a second); the ranges in degrees: Range r gives
+                     * -r .. r (negative or missing: the default, turn +-360, pitch +-40), Min / MaxRange each end */
+                    float rr = group_num(cl, "RotationRange", -1), er = group_num(cl, "ElevationRange", -1);
+                    w->rot_range = (rr >= 0 ? rr : 360) * PI / 180;
+                    w->elev_range = (er >= 0 ? er : 40) * PI / 180;
+                    w->rot_min = group_num(cl, "RotationMinRange", -w->rot_range * 180 / PI) * PI / 180;
+                    w->rot_max = group_num(cl, "RotationMaxRange", w->rot_range * 180 / PI) * PI / 180;
+                    w->elev_min = group_num(cl, "ElevationMinRange", -w->elev_range * 180 / PI) * PI / 180;
+                    w->elev_max = group_num(cl, "ElevationMaxRange", w->elev_range * 180 / PI) * PI / 180;
                     w->rot_rate = group_num(cl, "RotationRate", 1);
-                    w->elev_range = group_num(cl, "ElevationRange", 0) * PI / 180;
-                    w->elev_rate = group_num(cl, "ElevationRate", 1);
+                    w->elev_rate = group_num(cl, "ElevationRate", 0.5f);
+                    w->clear_rot = group_num(cl, "RequiresRotationClearToFire", 1) != 0;
+                    w->clear_elev = group_num(cl, "RequiresElevationClearToFire", 1) != 0;
                 }
         }
         return;
@@ -728,27 +747,16 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
     }
 }
 
-/* [G] a ballistic aim: the lower launch angle that carries a shot of speed v and gravity g from p to t, else 45 */
+/* [R 0x293050] the aim of a shot that falls: at the target lifted by 1/2 g (L / V)^2 (L the straight distance, V the
+ * Velocity, g = 9.81 x Gravity; no lift without gravity), straight from p (actors 0x30EC10 and clusters 0x29ADE0) */
 static void lob(const float p[3], const float t[3], float v, float g, float dir[3])
 {
-    float dx = t[0] - p[0], dy = t[1] - p[1], h = t[2] - p[2], d = sqrtf(dx * dx + dy * dy);
-    if (d < 1e-3f || v <= 0) {
-        dir[0] = dx;
-        dir[1] = dy;
-        dir[2] = h;
-        norm3(dir);
-        return;
-    }
-    float ang;
-    if (g <= 0)
-        ang = atan2f(h, d);
-    else {
-        float disc = v * v * v * v - g * (g * d * d + 2 * h * v * v);
-        ang = disc >= 0 ? atanf((v * v - sqrtf(disc)) / (g * d)) : PI / 4;
-    }
-    dir[0] = dx / d * cosf(ang);
-    dir[1] = dy / d * cosf(ang);
-    dir[2] = sinf(ang);
+    float d[3] = { t[0] - p[0], t[1] - p[1], t[2] - p[2] };
+    float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (g > 0 && v > 0)
+        d[2] += 0.5f * g * (l / v) * (l / v);
+    memcpy(dir, d, sizeof d);
+    norm3(dir);
 }
 
 /* where a unit's weapon fires from and which way: the WeaponNode as drawn when the host knows it, along the
@@ -799,20 +807,22 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
         while (want_yaw > PI) want_yaw -= 2 * PI;
         while (want_yaw < -PI) want_yaw += 2 * PI;
         float want_pitch = asinf(clampf(aim[2], -1, 1));
-        /* [R] 0x298E70 / 0x298F40: each kept within -Range .. +Range (0x299750: degrees x pi / 180) */
-        if (w->rot_range > 0 && w->rot_range < PI)
-            want_yaw = clampf(want_yaw, -w->rot_range, w->rot_range);
-        if (w->elev_range > 0)
-            want_pitch = clampf(want_pitch, -w->elev_range, w->elev_range);
+        /* [R] 0x298E70 / 0x298F40: each kept within its ends (0x299640: degrees x pi / 180) */
+        if (w->rot_max - w->rot_min < 2 * PI - 1e-3f)
+            want_yaw = clampf(want_yaw, w->rot_min, w->rot_max);
+        want_pitch = clampf(want_pitch, w->elev_min, w->elev_max);
+        /* [R 0x29BA50] a step of rate x dt, onto the target once it is that close; on target when the turn is
+         * within pi / 50 and the pitch within pi / 100, or when the cluster does not require it */
         float sy = w->rot_rate * dt, sp = w->elev_rate * dt;
         w->yaw += clampf(want_yaw - w->yaw, -sy, sy);
         w->pitch += clampf(want_pitch - w->pitch, -sp, sp);
-        on = fabsf(want_yaw - w->yaw) < 0.05f && fabsf(want_pitch - w->pitch) < 0.05f;
+        on = (!w->clear_rot || fabsf(want_yaw - w->yaw) <= PI / 50) &&
+             (!w->clear_elev || fabsf(want_pitch - w->pitch) < PI / 100);
     }
     float h = u->facing + w->yaw;
     float f[3] = { -sinf(h) * cosf(w->pitch), cosf(h) * cosf(w->pitch), sinf(w->pitch) };
     memcpy(dir, f, sizeof f);
-    if (have_node && !w->rot_range && !w->elev_range) {
+    if (have_node && !w->rot_rate && !w->elev_rate) {
         for (int k = 0; k < 3; k++)
             dir[k] = node[4 * w->axis + k] * (w->axis_neg ? -1.0f : 1.0f);
     }
@@ -828,7 +838,7 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
         memcpy(tp, point, sizeof tp);
         has = 1;
     } else if (u->target >= 0 && u->target < a->nm) {
-        monster_centre(&a->m[u->target], tp);
+        monster_target(&a->m[u->target], tp);
         has = 1;
     }
     for (int i = 0; i < u->nw; i++) {
@@ -846,16 +856,23 @@ static void weapons_enable(ArmyUnit *u, int on)      /* enableWeapons / enableWe
     for (int i = 0; i < u->nw; i++)
         u->w[i].on = on;
 }
-/* setWeaponAmmo(n, -, index) [G: the binding's body (AttackObject id 0x3A) not read: the weapon's ammo] */
+/* setWeaponAmmo(n, -, index): the weapon's vtable +0x84 (0x296F50): ammo = min(n, Ammo) [R] */
 static void weapon_ammo(ArmyUnit *u, int n, int index)
 {
     if (index >= 0 && index < u->nw)
-        u->w[index].ammo = n;
+        u->w[index].ammo = n < u->w[index].ammo_max ? n : u->w[index].ammo_max;
 }
-static void weapons_reload(ArmyUnit *u)              /* reloadWeapon [G: ammo back to Ammo] */
+/* reloadWeapon: the weapon's vtable +0x80 (0x296F70) [R]: ammo = Ammo (0 stays 0), the countdown at least ChargeTime +
+ * FiringOffset (the charge effect restarted, not here) */
+static void weapons_reload(ArmyUnit *u)
 {
-    for (int i = 0; i < u->nw; i++)
-        u->w[i].ammo = u->w[i].ammo_max > 0 ? u->w[i].ammo_max : 1;
+    for (int i = 0; i < u->nw; i++) {
+        ArmyWeapon *w = &u->w[i];
+        float t = w->charge_time + w->firing_offset;
+        w->ammo = w->ammo_max;
+        if (w->timer < t)
+            w->timer = t;
+    }
 }
 
 /* ---------------------------------------------------------------- the score (gCommon.addStats, 0x2C51A0) */
@@ -1292,10 +1309,7 @@ static int sphere_step(Army *a, ArmyUnit *u, float dt)
             r = sh.radius > 0.05f ? sh.radius : 1;
         collide_mover_init(&u->cm, r, tnum(u, "Gravity", 9.81f), tnum(u, "Mass", 1), tnum(u, "Restitution", 0.8f),
                            tnum(u, "SlidingFriction", 0.4f), tnum(u, "InertiaSolidity", 1));
-        float w[3];
-        for (int k = 0; k < 3; k++)
-            w[k] = u->world[k] * u->spin[0] + u->world[4 + k] * u->spin[1] + (k == 2 ? u->spin[2] : 0);
-        collide_mover_spin(&u->cm, w);
+        collide_mover_spin(&u->cm, u->spin);         /* [R 0x2B2F50 -> 0x28DD80] the rates as given: a world axis */
         collide_matrix_from16(u->cmat, u->world);
         u->cm_on = 1;
     }
@@ -2304,11 +2318,12 @@ static void window_init(Army *a, ArmyUnit *u)        /* Construct */
     start_anim(a, u, tstr(u, "DefaultAnim") ? tstr(u, "DefaultAnim") : "WindowEmerge", 0);
 }
 
-/* getMonsterDirection: [G] (the Actor binding 0x3F, not read) the eighth of the way to the monster's middle seen
- * from the window, counter-clockwise from the right in the front's plane: RM, RU, MU, LU, LM, LD, MD, RD */
+/* getMonsterDirection (the Actor binding 0x3F -> 0x2B2850) [R]: the eighth of the way to the monster 3 above its feet
+ * seen from the window, counter-clockwise from the right in the front's plane (dy unused): RM, RU, MU, LU, LM, LD, MD,
+ * RD */
 static int monster_direction(const ArmyUnit *u, const float mp[3])
 {
-    float dx = mp[0] - u->pos[0], dz = mp[2] + 4.25f - u->pos[2];
+    float dx = mp[0] - u->pos[0], dz = mp[2] + 3 - u->pos[2];
     int i = (int)floorf(atan2f(dz, dx) / (PI / 4) + 0.5f);
     return ((i % 8) + 8) % 8;
 }
@@ -3173,8 +3188,8 @@ static void persons_update(Army *a, float dt)
         int m = g->monster >= 0 && g->monster < a->nm ? g->monster : -1;
         float from[3] = { g->world[12], g->world[13], g->world[14] + 1.5f }, tp[3] = { 0, 0, 0 }, dir[3];
         if (m >= 0)
-            monster_centre(&a->m[m], tp);
-        lob(from, tp, g->w.velocity, 9.81f * g->w.gravity, dir);   /* [G] the throw's aim: see weapon_aim */
+            monster_target(&a->m[m], tp);
+        lob(from, tp, g->w.velocity, 9.81f * g->w.gravity, dir);   /* the throw's aim: see weapon_aim */
         weapon_tick(a, NULL, &g->w, m >= 0 && dist3(from, tp) <= g->w.range, from, dir, m, dt);
     }
 }
@@ -3239,6 +3254,14 @@ static int unit_touched(const Army *a, const ArmyUnit *u, const float c[3], floa
 }
 
 /* TakeDamage(monster, amount, type, direction) of each unit an armed attack sphere reaches */
+void army_arm(Army *a, int monster)                  /* a monster's new attack: its hit list emptied (0x2E33A0) */
+{
+    if (monster >= 0 && monster < ARMY_MONSTERS)
+        a->attack[monster]++;
+}
+
+/* [R 0x2E22B0] an armed sphere: TakeDamage(monster, the attack's damage, 0); every unit but a droppable has
+ * OnlyHitWithEffNodes (0x8000, set by its script) and goes on the attack's hit list, one blow an attack */
 int army_hit(Army *a, int monster, const float centre[3], float radius, float amount)
 {
     if (monster < 0 || monster >= a->nm)
@@ -3248,6 +3271,11 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
         ArmyUnit *u = &a->u[i];
         if (u->phase != AU_ALIVE || !unit_touched(a, u, centre, radius))
             continue;
+        if (u->kind != AK_DROP && monster < ARMY_MONSTERS) {
+            if (u->hit_attack[monster] == a->attack[monster])
+                continue;
+            u->hit_attack[monster] = a->attack[monster];
+        }
         float dir[3] = { u->pos[0] - a->m[monster].pos[0], u->pos[1] - a->m[monster].pos[1],
                          u->pos[2] - a->m[monster].pos[2] };
         norm3(dir);

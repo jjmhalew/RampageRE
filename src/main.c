@@ -1331,6 +1331,8 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             streetobj_arm(v->sobj);
         if (e->p[0] != 0 && v->boss)
             boss_arm(v->boss, mo->slot);
+        if (e->p[0] != 0 && v->army)
+            army_arm(v->army, mo->slot);
         if (e->p[0] != 0) {                          /* its record, for the other monsters (0x2E35D0) */
             mo->atk.damage = e->p[1];
             mo->atk.knock = e->p[2];
@@ -1891,8 +1893,8 @@ static void hit_spheres(Mon *mo)
             c[r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
         c[3] = sh->radius;
         scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
-        if (v->army)                                 /* and the army's units (20 a blow [G]) */
-            army_hit(v->army, mo->slot, c, c[3], 20);
+        if (v->army)                                 /* and the army's units: the attack's damage, once an attack */
+            army_hit(v->army, mo->slot, c, c[3], mo->atk.damage);
         if (v->veh)                                  /* and the vehicles and rockets */
             vehicle_hit(v->veh, mo->slot, c, c[3], 20);
         if (v->rail)                                 /* and the trains, cable cars and freighters */
