@@ -1214,7 +1214,7 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             float h = nd->has_d ? nd->d[1] : nd->has_tex ? nd->tex.h : 0;
             float x0 = nd->Q & 2 ? -0.5f * w : 0, y0 = nd->Q & 4 ? -0.5f * h : 0;
             float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
-            /* M 0x200 (Results' 0x310 boxes at the title's ends): a mask, not drawn [G]; F 0x20 (the challenge
+            /* M 0x200 (Results' 0x310 boxes at the title's ends): the depth-only shader, no colour [R]; F 0x20 (the challenge
              * icons): drawn only with a picture [G] */
             int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
             float vs = nd->has_tex ? nd->tex.vs : 1, v0 = nd->flip_y ? vs : 0, v1 = nd->flip_y ? 0 : vs;
@@ -2404,12 +2404,16 @@ static void results_start(Hud *h, Screen *s)
     s->left_x = 62.0f;
     s->right_x = 503.0f;
     s->title_w = text_w(&h->gui, s->title1);
-    /* the title's mask boxes (M 0x310 at x -3 .. 62 and 503 ..) cut it to 62 .. 503 [G] */
-    Node *gg = layout_find(root, "gGoal");
-    if (gg) {
-        gg->clip = 1;
-        gg->clip_x0 = s->left_x;
-        gg->clip_x1 = s->right_x;
+    /* the title's M 0x310 boxes at x -3 .. 62 and 503 .. do not cut it [R]: they write depth only, 0.001 behind the
+     * glyphs (0x25B4D4's bias), which test GEQUAL and pass over them (SCREENS_NOTES.md) */
+    {                                                    /* the PS2's screen ends at 0 and 640: the viewer's wider
+                                                          * frame would show the title running on past them */
+        Node *gg = layout_find(root, "gGoal");
+        if (gg) {
+            gg->clip = 1;
+            gg->clip_x0 = 0;
+            gg->clip_x1 = 640;
+        }
     }
     char msg[MAX_TEXT];
     if (s->last_block && r->buildings != 0 && s->results_text[0]) {
@@ -3008,11 +3012,11 @@ static void kr_title(Hud *h, Screen *s, const char *text)
     s->left_x = 62.0f;
     s->right_x = 503.0f;
     s->title_w = text_w(&h->gui, s->title1);
-    Node *gg = layout_find(root, "gGoal");
+    Node *gg = layout_find(root, "gGoal");              /* the title runs on to the screen's edges (results_start) */
     if (gg) {
         gg->clip = 1;
-        gg->clip_x0 = s->left_x;
-        gg->clip_x1 = s->right_x;
+        gg->clip_x0 = 0;
+        gg->clip_x1 = 640;
     }
     res_marquee(h, s, text);
     if (s->title1 && s->title2) {

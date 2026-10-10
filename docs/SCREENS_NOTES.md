@@ -79,12 +79,16 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
   Monster / Quit fade in at 2.05, 2.15, 2.25 (+3 s when saving is allowed). `Slot_Jackpot` plays from the start.
 - **Scrolling title** (from 1.5 s): the block's name `format(localize("Results_CompletlyDestroyed"),
   localize(getBlockName(0)))` ("Downtown - COMPLETELY DESTROYED"), or, on the city's last block with buildings left,
-  the block's `ResultsNIText`; two copies 150 apart move left at 150 a second between x 62 and 503 (the layout's
-  `M 0x310` boxes, a depth-only shader, are not drawn [R] and are taken to mask the ends [G]: the box's shader is
-  0x17D100's depth-only one (TEST 0x52001, ZB_ONLY) drawn with a bias of -0.001 off the projection's [3][2]
-  (0x17C180 .. 0x17C19C -> 0x25B410 / 0x25B4D4), the glyphs depth-tested GEQUAL (OFont +0x5C 0x10, 0x1B6590; code
-  0x14 -> ZTST GEQUAL, 0x25AD08), Z = 16777210 - 16777205 z_ndc (0x25B500 ..): read so, the box lies behind the
-  title's plane and would not cut it; the 2D camera's z and the depth range in force were not traced);
+  the block's `ResultsNIText`; two copies 150 apart move left at 150 a second, wrapping between x 62 and 503. The
+  layout's `M 0x310` boxes at the ends do **not** cut the title [R]: the box's shader is 0x17D100's depth-only one
+  (TEST 0x52001: ATST NEVER, AFAIL ZB_ONLY, no colour; M 0x10 depth test, 0x100 depth write, 0x200 the depth-only
+  shader and the bias) drawn with proj[3][2] −= −0.001 (0x17C180 .. 0x17C19C → 0x25B4D4): z_ndc + 0.001, farther.
+  The GUI's camera (Gui +0x24C, 0x100AD0) is orthographic, near 0 far 1000, the depth range 0 .. 1 in every viewport
+  setter (0x16BA78, 0x16B8B0 → 0x25BAF0), Z = 16777210 − 16777205 z_ndc (0x25B500 ..): the glyphs at layout z 0 get
+  16777210, the boxes about 16760433, and the glyphs test GEQUAL (OFont +0x5C 0x10 by default, 0x1B72E8; 0x1B6590)
+  without writing depth, so they pass over the boxes; a clear (0x231900) or none changes nothing. The port draws
+  the title unclipped (but at the PS2 screen's edges, x 0 and 640, which the viewer's wider frame would
+  pass);
   "Live" blinks every 0.5 s.
 - **Count-up** (from 1.5 s): the lines destruction, people, vehicles, bonus, time bonus, challenge — the point
   categories 0..5 summed over the players — appear one by one, each counting from 0 in 0.5 s, the total with them
