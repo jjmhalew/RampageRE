@@ -4728,7 +4728,7 @@ static void shell_start_game(Viewer *v)
 }
 
 /* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,
- * letters and digits into the name entry, F2 Start + Cross held for the cheat entry), its time, its answers */
+ * letters and digits into the name entry, F2 L2 + R2 held for the cheat entry), its time, its answers */
 static void shell_frame(Viewer *v, const Window *w, float dt)
 {
     static const struct { int key, ev, button; } KEYS[] = {
@@ -4752,7 +4752,7 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
                                                     KEYS[k].key == VK_RETURN || KEYS[k].key == VK_BACK)))
             shell_input(v->shell, KEYS[k].ev, KEYS[k].button);
     int held = (w->keys[VK_LEFT] ? SHELL_HELD_LEFT : 0) | (w->keys[VK_RIGHT] ? SHELL_HELD_RIGHT : 0) |
-               (w->keys[VK_F2] ? SHELL_HELD_START | SHELL_HELD_CROSS : 0);
+               (w->keys[VK_F2] ? SHELL_HELD_L2 | SHELL_HELD_R2 : 0);
     shell_pad_held(v->shell, 0, held);
     shell_update(v->shell, dt);
     gui3d_step(v, dt);

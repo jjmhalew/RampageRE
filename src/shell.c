@@ -1780,7 +1780,7 @@ static void mc_open_list(Shell *s, int purpose, int buddy)
     }
     if (m->pl_id)
         set_text(m->pl_id, buddy > 0 ? (buddy == 1 ? "P2:" : buddy == 2 ? "P3:" : "P4:") : "P1:");
-    list_select(m->list, 0);                             /* [G: the selection a load starts with] */
+    list_select(m->list, m->nentries > 0 ? 1 : 0);       /* [R 0x3415EC: 0x23E480(list, count > 0)] the first profile */
     if (m->list) m->list->top = 0;
     mc_list_update(s);
 }
@@ -1814,6 +1814,10 @@ static void mc_open_keyboard(Shell *s)
 
 static void mc_close(Shell *s)
 {
+    /* [R 0x345540] a close with a result other than 3 (the attract mode's interrupt) sets 0x300 (show-profile off,
+     * boot done), or only 0x100 for the boot's check (op 12): the autosave notice */
+    if (!(s->mc.mode == MC_MESSAGE && s->mc.msg == MSG_AUTOSAVE))
+        s->show_profile = 0;
     s->mc.mode = MC_OFF;
     if (s->mc.L)
         show(s->mc.L->root, 0);
@@ -2726,8 +2730,8 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
     } else if (ev == EV_FRAME) {
         fader_update(&m->fd, dt);
         mm_icons(s, dt);
-        /* updateCheatActivation: Start and Cross held together, nothing else, no popup */
-        if (m->state == 0 && s->mc.mode == MC_OFF && s->held_buttons == (SHELL_HELD_START | SHELL_HELD_CROSS)) {
+        /* updateCheatActivation: L2 and R2 held together, nothing else, no popup */
+        if (m->state == 0 && s->mc.mode == MC_OFF && s->held_buttons == (SHELL_HELD_L2 | SHELL_HELD_R2)) {
             fader_go(&m->fd, m->icons, -1);
             fader_go(&m->fd, m->cheat, 1);
             mm_reset_cheat(s);
@@ -4095,23 +4099,39 @@ static void cr_open(Shell *s)
     cr_focus(s, active);
 }
 
-/* the idle timer (0x308710 / 0x308390): 120 s without the pad in the menus -> the attract mode */
+/* the idle timer (0x308710 / 0x308390): 120 s without the pad in the menus -> the attract mode [R]. It holds at 120
+ * in states 6 and 7, in the campaign while the monster is to be chosen or the city is destroyed and not quit, and in
+ * state 1 unless the memory card popup is up; a cheat movie set (setCheatFlagsI(16, n): 0x4D7E6C >= 0) runs it out at
+ * once (0x3087D8). With the popup up it is not reset: at 0 an interruptible popup (the boot's list, before a profile
+ * is chosen) is closed and the attract mode starts (0x341790, 0x345540(popup, 3)), any other waits at 0 */
 static void idle_update(Shell *s, float dt)
 {
     if (!s->cr_on || s->ld.on || s->vi.on || s->state == 2 || s->state == 4)
         return;
-    if (s->mc.mode != MC_OFF || s->focus == IF_OPTIONS) {
+    int popup = s->mc.mode != MC_OFF;
+    if (s->state == 6 || s->state == 7 || (s->state == 1 && !popup) || s->focus == IF_OPTIONS ||
+        (s->gs.play_type == 2 && (s->choose_monster || (s->city_destroyed && !s->quitting)))) {
         s->idle = IDLE_SECONDS;
         return;
     }
+    if (s->cheat_param_video >= 0)
+        s->idle = 0;
     s->idle -= dt;
     if (s->idle > 0)
         return;
+    if (popup) {
+        s->idle = 0;
+        if (s->mc.mode == MC_KEYBOARD || s->mc.purpose != MCP_BOOT || !s->show_profile)
+            return;                                      /* only the boot's choice is interrupted */
+        s->mc.mode = MC_OFF;                             /* result 3: show-profile stays */
+        if (s->mc.L)
+            show(s->mc.L->root, 0);
+    }
     s->idle = IDLE_SECONDS;
     s->city_destroyed = s->quitting = s->choose_monster = 0;
     s->state = 2;
     s->attract_state = -1;
-    if (s->cheat_param_video >= 0 && (s->cheats & 16)) {
+    if (s->cheat_param_video >= 0) {
         s->attract_state = 128 + s->cheat_param_video;
         s->cheat_param_video = -1;
     }
@@ -4277,7 +4297,10 @@ void shell_input_pad(Shell *s, int ev, int button, int pad)
 {
     if (!s)
         return;
-    s->idle = IDLE_SECONDS;                              /* [G: any pad input, 0x33D740] */
+    /* [R] the timer is reset (0x308240: gShell+0x18 = 120) by input the GUI takes: the screen's (0x2C5AD0, for a pad
+     * the controller table allows, 0x2C5E60) or the popup's (0x2328B0) */
+    if (s->mc.mode != MC_OFF || pad_allowed(s, pad))
+        s->idle = IDLE_SECONDS;
     if (s->ld.on)
         return;
     if (s->vi.on) {

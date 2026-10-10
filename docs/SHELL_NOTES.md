@@ -45,10 +45,19 @@ Addresses are in `RAMPAGE.ELF`.
     a destroyed city, else MainMenu.
 - **Interfaces and focus:** all six interfaces are loaded at once. ObjectFader fades them (2 a second), and
   `showInterface` fades the focused one out, the target in, and moves the focus.
-- **Idle timer (+0x18):** it starts at 120 s and counts down. It is reset while Options has the focus or the popup is
-  up [R 0x308390]. When it runs out (outside state 4) the shell clears the quit, choose and destroyed flags, sets
-  state 2 and attract state −1, and shows AttractMode. The cheat video (0x4D7E6C ≥ 0) makes it 0x80 + the video. Any
-  pad input resets it [G: 0x33D740 taken to be that].
+- **Idle timer (+0x18):** it starts at 120 s and counts down (0x308710 / 0x308390) [R]:
+  - It holds at 120 in states 6 and 7, in state 1 unless the memory card popup is up, while Options has the focus,
+    and in the campaign while the monster is to be chosen or the city is destroyed and not quit.
+  - A cheat video set (`setCheatFlagsI(16, n)`, 0x4D7E6C ≥ 0) puts it to 0 (0x3087D8), so the movie starts on the
+    next frame; the attract state is then 0x80 + the video.
+  - When it runs out (outside state 4) the shell clears the quit, choose and destroyed flags, sets state 2 and
+    attract state −1, and shows AttractMode. With the popup up it asks 0x341790 first: an interruptible popup (the
+    boot's list, before a profile is chosen) is closed with result 3 and the attract mode starts; any other popup
+    waits at 0.
+  - It is reset (0x308240) by input the GUI takes: the screen's (RGuiScreen 0x2C5AD0, from GuiManager::input
+    0x22F7A0, for a pad the controller table allows: 0x2C5E60) or the popup's (0x2328B0). The script's
+    `resetAttractTimer` (0x306B78) is called only by AttractMode.scr. 0x33D740 is not pad input: it is the cheat flag
+    0x10000 (cheat 082864), with which 0x307920 runs a soak test of fake GUI presses and the timer stays at 120.
 
 ## The attract mode, title and movies (AttractMode.scr) [R]
 
@@ -86,7 +95,9 @@ own checks (no card, unformatted, corrupt) have nothing to check here.]**
 - When it opens:
   - from Back on the main menu ("Profiles");
   - from the main menu's focus while `gShell.getShowProfile()` (0x4D7FF8 & 0x200) and `getAllowSave()` hold.
-    **[G: the port sets show-profile at the boot and clears it once a profile is chosen, created or declined.]**
+    `getShowProfile` (0x30697C) is `!(0x4D7FF8 & 0x200)`, clear in .bss, so it shows at the boot. Only the popup's
+    close (0x345540) sets the bit: any result but 3 (the attract mode's interrupt) sets 0x300, the boot's check
+    (op 12, the autosave notice) only 0x100 (boot done) [R].
 - Contents (0x341250): item 0 "Create New Profile", then the saved profiles. The layout has six items; copies of item 0
   make more. The "loc" (card slot) child stays hidden.
 - Display (0x340B40):
@@ -102,8 +113,8 @@ own checks (no card, unformatted, corrupt) have nothing to check here.]**
 
 **Warn-continue message (0x3439E8):**
 - Text: "WARNING: No Profile" or "Autosave Turned Off", with Continue / Don't Save and Back.
-- Continue gives `SHELL_EVT_PROFILE_NONE` (nothing is saved) and Back returns to the list. **[G: that the list's
-  cancel leads there.]**
+- Continue gives `SHELL_EVT_PROFILE_NONE` (nothing is saved) and Back returns to the list. The list's cancel leads
+  there: its panel state 9 goes to 0x343DF8, sub-state 2 [R].
 
 **Name entry (0x340980, 0x340320):**
 - `keyboard`: `profile_id`, `profile_name` with a blinking caret, and rows `row0`..`row3` of 11, 11, 10 and 11 keys.
@@ -116,8 +127,11 @@ own checks (no card, unformatted, corrupt) have nothing to check here.]**
   - SPACE adds a space, but not as the first character.
   - Any other key adds its text, up to 15 characters.
   - Each change plays `Click`, and the caret moves to the text's width.
-- Back is state 14. The port goes back to the list **[G]**.
-- A name already saved shows "The Profile name already exists." **[G: when it is checked.]**
+- Back is state 14: sub-state 3, the list, built again (0x343FE8) [R].
+- A name already saved shows "The Profile name already exists." The game finds it in the save (sub-state 5,
+  0x344020) from the card's answer, error 24 (0x342380): Cancel and Overwrite for the list's request, else Retry,
+  Don't Save and Overwrite. **[G: the port checks the saved names at DONE and goes back to the keyboard; Overwrite
+  and the buttons' results were not traced.]**
 - The port's event: `SHELL_EVT_PROFILE_CREATE` with the name.
 - `shell_type` is not in the game: it types a character straight in.
 
@@ -146,7 +160,9 @@ own checks (no card, unformatted, corrupt) have nothing to check here.]**
   - `setupControllerTable(-1)`;
   - `MonsterSelect::setupFromMainMenu`.
 - With two or more in another mode, the box `NumBots` asks for "Human: n / Computer: m". Its title is
-  `MainMenu_<n>Player`. Its list items all stand at one place, so only the selected one is drawn **[G]**.
+  `MainMenu_<n>Player`. Its list box (81 × 46) is a scrolling window (0x23BF10: the items from the top index that
+  fit its height, each its font height + `sp`; the update keeps the selection in view), and one LEMIESZ36 item fits,
+  so only the selected one shows [R; where each item's y is placed was not read].
 
 **Back:** state 0 calls `loadProfile`. In the boxes it goes one box back.
 
@@ -158,8 +174,11 @@ English version only. Cross starts `gShell.startEmulator(n)` after 0.25 s:
 - The port gives `SHELL_EVT_EMULATOR` and returns to the menu.
 
 **Cheat entry:**
-- It opens when pad 0 holds exactly Start + Cross (`getButtons() == 128 | 64`). **[G: the getButtons bits:
-  `SHELL_HELD_*`.]**
+- It opens when pad 0 holds exactly L2 + R2 (`getButtons() == 128 | 64`) [R]. getButtons (0x16A180) sets a bit per
+  held logical button in the order of the names at 0x3F67C0: Up 1, Down 2, Left 4, Right 8, Start 16, Back 32,
+  RTrigger 64, LTrigger 128, RShoulder 256, LShoulder 512, A 1024, B 2048, X 4096, Y 8192, then W, Z and the thumbs;
+  the PS2 pack (0x1A5220, table 0x3B18B0) maps Select to Back, L2 / R2 to the triggers, L1 / R1 to the shoulders,
+  Cross A, Circle B, Square X, Triangle Y. The viewer's F2 holds L2 + R2.
 - The `CheatMenu` box has six digits. Left and right choose a digit; up and down change it. Each digit's monster
   picture changes with it.
 - Cross checks the code. Back plays `Cheat_back`.
@@ -369,7 +388,9 @@ static. It is widened in four ways:
 **Pad events:**
 - Pad events go to the popup when it is up, else to the focused interface if `setupControllerTable` lets the pad
   talk.
-- The frame event goes to the focused interface only **[G; R in effect: Options runs MainMenu's fader itself]**.
+- The frame event goes to the focused interface only [R]: the tree update (0x2415E0) stacks each interface, and
+  GuiObject's update (0x2416C0) sends 0x800 only without F 0x80 and while the stack's top is the screen's focused
+  interface (GuiManager vtbl +0x30, 0x231440).
 
 ## The GUI's 3D objects [R]
 
@@ -407,7 +428,7 @@ the rows, then the place; `<p>` the place; `<m>` multiplies the 3×3 as it is wh
 - `setLookAt(p)` (0x38, 0x257868 → 0x101330(p.z, p.x, p.y)) replaces the 3×3, no scale, with
   Ry(p.y) · Rx(p.x) · Rz(p.z) in the GUI's axes: a GlobeLocation (lat, lon, 0) turns the globe about the screen's
   vertical (the model's pole) by the longitude, then tilts it about the screen's x by the latitude. Every city comes
-  out on the centre line, a few degrees above the middle **[G: the latitudes hand-tuned]**. `getLookAt` (0x37,
+  out on the centre line, a few degrees above the middle (so the cities' GlobeLocations fit this turn). `getLookAt` (0x37,
   0x101220) inverts it.
 
 **Lights:** `<ls>`'s own `<A>` is the set's ambient (0x16E1F0). `<lt>` keeps diffuse (+0x158, default 128 grey),
@@ -452,7 +473,6 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
     the halves' own art, not the port's lights.
 - **Popup:**
   - the memory card's own states (checking, saving, errors, formatting);
-  - how the selection starts (item 0);
   - the list scrolling beyond six profiles (counted, not shown);
   - the duplicate-name check;
   - Back from the name entry.
