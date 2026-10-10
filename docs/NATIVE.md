@@ -197,8 +197,13 @@ the city gets flag 8, and when every city's saved flags (the profile's record, t
 Boosy's flags get 0x80 (profile.c `profile_reveal_boosy`, [PROFILE_NOTES.md](PROFILE_NOTES.md)); the city's end
 also unlocks him with Philbert and Eyegore (`profile_update`).
 
+**The front end's 3D** ([SHELL_NOTES.md](SHELL_NOTES.md) "The GUI's 3D objects"): CitySelect's globe turns to each
+city with its ring on it, lit for day or night; the main menu's fires, MonsterSelect's lava lamp and the cards' glow
+play, through the game's GUI camera, each in its place among the screen's pictures.
+
 ## Not there yet
-- the menus' 3D globe and effects.
+- the arcade emulators and the demo game, skipped (SHELL_NOTES.md); the memory card's own popup states; the [G] marks
+  in the notes.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),

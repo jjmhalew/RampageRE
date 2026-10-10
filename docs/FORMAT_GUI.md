@@ -33,7 +33,7 @@ box (GuiListBox), `X` child interface. Properties:
 | `n` (attribute) | name (`findObject`) |
 | `p` | position x [y [z]] in the parent's frame **[R]** |
 | `m` | scale of the object's frame. It also scales the children **[R/G: the health and rage frames (104 and 90.25 wide at m 0.8) both end at x 136.2; a 100-wide slider fits inside the 104-wide frame only when scaled]**. Scripts call `setScale` |
-| `z` | depth. The 0.5 under the bars puts their black backing behind them **[G: a larger z is drawn first]** |
+| `z` | the object's fade (+0x5C, the handler 0x22C450 of `fade`): it multiplies the fade of the object and its children, and at 0.01 or less nothing of it is drawn (0x2418A4) **[R]**. The bars' black backing (0.5) is half faded over the bar's frame; Rage's `Head` (0) is never seen |
 | `d` | size. When `d` is absent, a quad takes the used size of its texture |
 | `b` | texture (bitmap) name |
 | `c` | colour `0xRRGGBBAA`. It multiplies the texture **[R: Hud.scr's rageColor (1, 0.5, 0.25) = maskColor 0xFF8040FF]** |
@@ -131,9 +131,9 @@ OFontData loader 0x1B7CD0, read **[R]**. Field-by-field layout is in `tools/gui.
   - PointsBanner spacing is 2.
 
 ## Not traced
-- The direction of `z` (taken as larger = further back), the letters of `j`/`o`, and `F` 0x1 (taken as hidden), 0x20
-  (an icon quad: drawn only with a picture), 0x4.
-- Whether the PS2 sorts GUI sprites by depth at all (here: within each interface, interfaces in load order).
+- The letters of `j`/`o`, and `F` 0x20 (an icon quad: drawn only with a picture). `F` 0x1 is hidden and 0x4 is never
+  tested **[R: SHELL_NOTES.md "The GUI's 3D objects"]**.
+- The GUI draws each interface in tree order, the object, then its children, without a sort **[R 0x241770]**.
 - The game's word wrap (OFont +0x8), the slant (0 in every font), Shift-JIS glyphs and the special glyph images
   (OFont +0x25C: the `.loc` texts' `\v1.25Controller_Back\v` pictures, drawn here as a square the cell's height times
   the number).

@@ -30,6 +30,12 @@ void fx_world_free(FxWorld *w);
  * fx_on_shake callback. */
 int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale);
 void fx_stop(FxWorld *w, int id);       /* shut down: emitters stop, live particles finish (a looping fire, ...) */
+void fx_kill(FxWorld *w, int id);       /* gone at once: its emitters and particles (a GuiEffect given another edf) */
+/* an effect in a whole frame: R its axes in the world (rows x, y, z, unit length), not made upright; fx_place moves it
+ * and turns its emitters with it (an effect on the turning globe of the front end). The particles keep their places
+ * relative to the origin, in world axes, as with fx_move */
+int fx_spawn_frame(FxWorld *w, const char *effect_name, const float pos[3], const float R[3][3], float scale);
+void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3]);
 int fx_alive(const FxWorld *w, int id);
 /* an effect that follows something (an army unit's, a shot's look): its origin moves, and with it the particles it
  * keeps relative to it [G: the game's attached effects move their emitter; a shot's trail is not left behind] */
@@ -67,6 +73,7 @@ typedef struct {
  * game's list order, 0x211970; it does not sort by depth); returns the count (at most max). XForm particles are not
  * in it: they are meshes (fx_meshes). */
 int fx_quads(const FxWorld *w, FxQuad *out, int max);
+int fx_quads_of(const FxWorld *w, int id, FxQuad *out, int max);   /* the same for one effect */
 
 /* ---- XForm particles: tumbling meshes (debris: soda cans, bean cans, girders, the Midway letters, smoke stack rings).
  * Their shapes (shapes.name) are models of the bundles: a ".pwk" model (type 16) "<name>.pwk" and its meshes, the type-0

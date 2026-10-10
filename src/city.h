@@ -21,6 +21,16 @@ typedef struct { float m[16]; } Mat4;
 
 typedef struct { Mesh mesh; const Bundle *b; } SceneMesh;   /* a mesh entry of bundle b, or a generated facade */
 
+/* the front end's 3D layers (shell.h shell_3d): the k-th is drawn where the k-th HudQuad with tex HUD_TEX_3D stands,
+ * through the GUI camera; meshes depth tested against the layers before them (the 2D quads write no depth) */
+typedef struct { const SceneMesh *mesh; Mat4 world; } SceneGuiMesh;
+typedef struct {
+    const SceneGuiMesh *meshes; int nmeshes;
+    const FxQuad *fx; int nfx;
+    int lit; float ambient[3]; int nlights;           /* the light set: each light a direction it travels */
+    float light_dir[2][3], light_diffuse[2][3], light_ambient[2][3];
+} SceneGui3D;
+
 typedef struct {                                     /* a skinned mesh's vertices, posed every frame */
     uint8_t (*bones)[4]; float (*weights)[4];         /* per vertex of all parts, in part order */
     float *pos, *nrm;                                 /* the posed vertices */
@@ -180,6 +190,7 @@ typedef struct {
     const FxMesh *fxm; int nfxm;                     /* the effects' mesh debris (XForm particles) */
     const SceneMesh (*fx_shapes)[8]; const int *fx_nshapes;   /* their meshes, by fx_shape_* */
     const HudQuad *hud; int nhud;                     /* the HUD and the floating scores, over everything (hud.c) */
+    const SceneGui3D *gui3d; int ngui3d;              /* the HUD's 3D layers (the front end's globe and effects) */
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
     /* a slot: its front cell (template storey, column), the Openable it opens (LRPos, +0xC), its occupant's kind */

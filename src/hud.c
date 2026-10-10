@@ -561,7 +561,7 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         if (strcmp(which, "highlight") == 0) parse_floats(text, nd->hl_d, 2);
         else { parse_floats(text, nd->d, 2); nd->has_d = 1; }
     } else if (strcmp(tag, "m") == 0) nd->m = strtof(text, NULL);
-    else if (strcmp(tag, "z") == 0) nd->z = strtof(text, NULL);
+    else if (strcmp(tag, "z") == 0) nd->fade = strtof(text, NULL);   /* [R 0x22C450: z is the fade (+0x5C)] */
     else if (strcmp(tag, "F") == 0) nd->F = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "Q") == 0) nd->Q = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "M") == 0) nd->M = (unsigned)strtoul(text, NULL, 0);
@@ -1064,8 +1064,8 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
     }
 }
 
-/* one interface's quads: back to front by depth, the larger z behind [G: the bars' black backing has z 0.5 and must
- * lie under the bar], in the layout's order otherwise */
+/* one interface's quads, in the layout's order [R 0x241770: self, then the children, no sort; the bars' black backing
+ * (z 0.5: half faded) lies over the bar's frame and under its slider] */
 static int emit_layout(HudQuad *out, int max, const Gui *g, const Layout *L)
 {
     if (!L || max <= 0)
@@ -1073,18 +1073,6 @@ static int emit_layout(HudQuad *out, int max, const Gui *g, const Layout *L)
     float z[MAX_SORT];
     Emit e = { out, z, 0, max < MAX_SORT ? max : MAX_SORT, 0, 0, 0 };
     layout_emit(&e, g, L->root, 0, 0, 1, 0, 1);
-    for (int i = 1; i < e.n; i++) {                      /* stable insertion sort, z descending */
-        HudQuad q = e.q[i];
-        float k = z[i];
-        int j = i - 1;
-        while (j >= 0 && z[j] < k) {
-            e.q[j + 1] = e.q[j];
-            z[j + 1] = z[j];
-            j--;
-        }
-        e.q[j + 1] = q;
-        z[j + 1] = k;
-    }
     return e.n;
 }
 
@@ -1601,8 +1589,7 @@ static Rage *rage_load(Hud *h)
     r->head = layout_find(r->L->root, "Head");
     if (r->head) {
         r->head->m = 4.0f;                               /* goHead.setScale(4.0) */
-        /* [G] nothing in Rage.scr hides the head (HUD_GEORGE_HEAD, whatever the monster), yet it would cover the
-         * screen's middle at 160 x 248; taken as not drawn */
+        /* nothing in Rage.scr shows the head: its <z> 0 is its fade, so it is never seen [R 0x22C450] */
         r->head->visible = 0;
     }
     r->rage->fade = 0;

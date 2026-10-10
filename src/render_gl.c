@@ -491,7 +491,9 @@ static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
 
 /* the HUD's quads (hud.c): the GUI's 640 x 480 screen at the window's height, centred (its 4:3 kept), in order, no
  * depth, alpha blended */
-static void draw_hud(Renderer *r, const Scene *s, float aspect)
+static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam);
+
+static void hud_state(float aspect)
 {
     float half = HUD_SCREEN_H / 2 * aspect;
     glMatrixMode(GL_PROJECTION);
@@ -503,10 +505,80 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect)
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_FOG);
     glDisable(GL_ALPHA_TEST);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+/* a 3D layer of the front end through the GUI camera (shell.h): eye (0, -1, 0) looking along +y, z up, a vertical field
+ * of view of 2 atan(0.375), near 1, far 10000 [R 0x227AD0]; its models lit by their light set, its particles over them
+ * [G: the GUI's depth state was not traced; the 2D quads are taken to write none] */
+static void draw_gui3d(Renderer *r, const SceneGui3D *l, float aspect, double t)
+{
+    Camera cam = { { 0, -1, 0 }, 1.5707963f, 0, 41.1120914f, 0, { { 0 } } };
+    perspective(cam.fov_deg, aspect, 1, 10000);
+    look(&cam);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.5f);
+    glColor4f(1, 1, 1, 1);
+    if (l->nmeshes) {
+        if (l->lit) {
+            glEnable(GL_LIGHTING);
+            float amb[4] = { l->ambient[0], l->ambient[1], l->ambient[2], 1 };
+            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
+            for (int i = 0; i < 4; i++) {
+                if (i >= l->nlights) {
+                    glDisable(GL_LIGHT0 + i);
+                    continue;
+                }
+                const float *d = l->light_dir[i];
+                float to_light[4] = { -d[0], -d[1], -d[2], 0 }, zero[4] = { 0, 0, 0, 1 };
+                float dif[4] = { l->light_diffuse[i][0], l->light_diffuse[i][1], l->light_diffuse[i][2], 1 };
+                float la[4] = { l->light_ambient[i][0], l->light_ambient[i][1], l->light_ambient[i][2], 1 };
+                glLightfv(GL_LIGHT0 + i, GL_POSITION, to_light);
+                glLightfv(GL_LIGHT0 + i, GL_DIFFUSE, dif);
+                glLightfv(GL_LIGHT0 + i, GL_AMBIENT, la);
+                glLightfv(GL_LIGHT0 + i, GL_SPECULAR, zero);
+                glEnable(GL_LIGHT0 + i);
+            }
+        } else
+            glDisable(GL_LIGHTING);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        for (int i = 0; i < l->nmeshes; i++) {
+            glPushMatrix();
+            glMultMatrixf(l->meshes[i].world.m);
+            draw_mesh(r, l->meshes[i].mesh, NULL, t);
+            glPopMatrix();
+        }
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisableClientState(GL_COLOR_ARRAY);
+        glDisable(GL_LIGHTING);
+    }
+    glDisable(GL_CULL_FACE);
+    if (l->nfx)
+        draw_fx(r, l->fx, l->nfx, &cam);
+    hud_state(aspect);
+}
+
+static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
+{
+    hud_state(aspect);
+    if (s->ngui3d)
+        glClear(GL_DEPTH_BUFFER_BIT);
+    int layer = 0;
     for (int i = 0; i < s->nhud; i++) {
         const HudQuad *q = &s->hud[i];
+        if (!q->b && q->tex == HUD_TEX_3D) {
+            if (layer < s->ngui3d)
+                draw_gui3d(r, &s->gui3d[layer], aspect, t);
+            layer++;
+            continue;
+        }
         GLuint id = q->b ? texture(r, q->b, q->tex) : q->tex == HUD_TEX_VIDEO ? video_texture(r) : 0;
         if (q->b && !id)
             continue;
@@ -587,9 +659,8 @@ static void draw_shadows(Renderer *r, int pass)
     glPopAttrib();
 }
 
-static void draw_fx(Renderer *r, const Camera *cam)
+static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam)
 {
-    const Scene *s = r->scene;
     float M[16];
     glGetFloatv(GL_MODELVIEW_MATRIX, M);
     float right[3] = { M[0], M[4], M[8] }, up[3] = { M[1], M[5], M[9] };
@@ -599,8 +670,8 @@ static void draw_fx(Renderer *r, const Camera *cam)
     glAlphaFunc(GL_GREATER, 0.004f);
     float fog_col[4], black[4] = { 0, 0, 0, 0 };
     glGetFloatv(GL_FOG_COLOR, fog_col);
-    for (int i = 0; i < s->nfx; i++) {
-        const FxQuad *q = &s->fx[i];
+    for (int i = 0; i < nfx; i++) {
+        const FxQuad *q = &fx[i];
         GLuint id = q->b ? texture(r, q->b, q->tex) : 0;
         if (id) {
             glEnable(GL_TEXTURE_2D);
@@ -779,7 +850,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_COLOR_ARRAY);
     glDisable(GL_CULL_FACE);
     if (s->nfx)                                            /* the effects' particles, over the world */
-        draw_fx(r, cam);
+        draw_fx(r, s->fx, s->nfx, cam);
     if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
@@ -804,5 +875,5 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         glColor3f(1, 1, 1);
     }
     if (s->nhud)
-        draw_hud(r, s, w->height ? (float)w->width / w->height : 4.0f / 3);
+        draw_hud(r, s, w->height ? (float)w->width / w->height : 4.0f / 3, t);
 }

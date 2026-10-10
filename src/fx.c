@@ -1418,6 +1418,14 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     return slot | f->gen << 8;
 }
 
+int fx_spawn_frame(FxWorld *w, const char *effect_name, const float pos[3], const float R[3][3], float scale)
+{
+    int id = fx_spawn(w, effect_name, pos, NULL, scale);
+    if (id >= 0 && R)
+        fx_place(w, id, pos, R);
+    return id;
+}
+
 static Fx *fx_of(const FxWorld *w, int id)
 {
     if (!w || id < 0 || (id & 0xFF) >= MAX_FX)
@@ -1439,6 +1447,45 @@ void fx_move(FxWorld *w, int id, const float pos[3])
         for (int k = 0; k < 2; k++)
             if (w->em[i].used && w->em[i].fx == slot && w->em[i].sound[k])
                 w->sound(w->sound_ctx, FXS_MOVE, NULL, pos, w->em[i].sound[k]);
+}
+
+void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3])
+{
+    Fx *f = fx_of(w, id);
+    if (!f)
+        return;
+    fx_move(w, id, pos);
+    if (!R)
+        return;
+    memcpy(f->R, R, sizeof f->R);
+    int slot = (int)(f - w->fx);
+    for (int i = 0; i < MAX_EMITS; i++) {              /* its emitters' axes, but for the world-axis and random ones */
+        Emit *e = &w->em[i];
+        if (e->used && e->fx == slot && !(e->d->eflags & (EF_WORLDMATRIX | EF_RANDOMXF)))
+            memcpy(e->R, R, sizeof e->R);
+    }
+}
+
+void fx_kill(FxWorld *w, int id)
+{
+    Fx *f = fx_of(w, id);
+    if (!f)
+        return;
+    int slot = (int)(f - w->fx);
+    for (int i = 0; i < MAX_EMITS; i++) {
+        Emit *e = &w->em[i];
+        if (!e->used || e->fx != slot)
+            continue;
+        emit_sounds_stop(w, e);
+        for (int p = e->head, next; p >= 0; p = next) {
+            next = w->p[p].next;
+            part_free(w, p);
+        }
+        e->head = -1;
+        e->used = 0;
+    }
+    f->nemit = 0;
+    f->used = 0;
 }
 
 /* 0x1F7CD0: an emitter shuts down: it stops making particles; +EndOfLifeUponShutdown ends the live ones */
@@ -1497,7 +1544,7 @@ static float blend(int mode, float v, float e)              /* the emitter colou
     return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-int fx_quads(const FxWorld *w, FxQuad *out, int max)
+static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
 {
     if (!w)
         return 0;
@@ -1505,7 +1552,7 @@ int fx_quads(const FxWorld *w, FxQuad *out, int max)
     int n = 0;
     for (int ei = 0; ei < MAX_EMITS; ei++) {
         const Emit *e = &w->em[ei];
-        if (!e->used)
+        if (!e->used || (slot >= 0 && e->fx != slot))
             continue;
         const Fx *f = &w->fx[e->fx];
         const EmDef *d = e->d;
@@ -1578,6 +1625,14 @@ int fx_quads(const FxWorld *w, FxQuad *out, int max)
         }
     }
     return n;
+}
+
+int fx_quads(const FxWorld *w, FxQuad *out, int max) { return quads_of(w, -1, out, max); }
+
+int fx_quads_of(const FxWorld *w, int id, FxQuad *out, int max)
+{
+    const Fx *f = fx_of(w, id);
+    return f ? quads_of(w, (int)(f - w->fx), out, max) : 0;
 }
 
 /* ---------------------------------------------------------------- XForm particles (0x21B330, 0x21DC20) */

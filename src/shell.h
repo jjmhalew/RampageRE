@@ -11,8 +11,9 @@
  * says it plays it (shell_movie_hold), gives its picture to the Video quad (shell_movie_picture, the HudQuad's tex
  * HUD_TEX_VIDEO) by shell_movie_clock's time and ends it (shell_movie_end). One nobody holds lasts
  * shell_set_movie_time's seconds of black (0: skipped at once). The arcade emulators (DESI/JARVOS.ELF, M1.ELF) are
- * skipped (SHELL_EVT_EMULATOR). The 3D parts of the interfaces (CitySelect's globe, the .edf particle effects: the main menu's
- * fires and searchlights, the cards' glow, the lava lamp) are not drawn.
+ * skipped (SHELL_EVT_EMULATOR). The 3D parts of the interfaces (CitySelect's globe and its cities' rings, the .edf
+ * particle effects: the main menu's fires, the cards' glow, the lava lamp) are the viewer's to draw: shell_3d() lists
+ * them, each where a HudQuad with tex HUD_TEX_3D stands in shell_quads(), with its world in the GUI camera's.
  *
  * Use: shell_open() with the volume, how the shell starts (the boot, or back from a game) and the profile as the viewer
  * knows it; every frame shell_input*() for the pad, shell_update(dt), shell_events() for what it asks of the viewer
@@ -166,5 +167,33 @@ typedef struct {
     uint32_t tex;
 } ShellQuad;
 int shell_quads(const Shell *s, HudQuad *out, int max);
+
+/* ---- the 3D objects: GuiShape (<s>, a model) and GuiEffect (<e>, an .edf). They are drawn through the GUI camera: eye
+ * at (0, -1, 0) of its world looking along +y, z up, a vertical field of view of 2 atan(0.375) (41.1 degrees), near 1,
+ * far 10000 [R 0x227AD0]. A shape draws its whole model (each mesh on its node of the model's tree, at the rest pose)
+ * at world x its node's place, lit by its light set (or unlit); an effect plays its .edf with its frame at world (the
+ * effect's x, y, z axes; on a shape's node: that node's frame x the shape's world). An effect that is running is
+ * started when it is not playing and kept where it is; one stopping is shut down (its particles play out, still
+ * kept where it is); when it is over, the viewer says so (shell_effect_ended). A new gen: another edf (the old one is
+ * gone at once). Effects not drawn now (layer -1) run on unseen, where they were. */
+enum { SHELL_3D_SHAPE, SHELL_3D_EFFECT };
+typedef struct {
+    int kind;
+    const void *key;                /* the object, while its interface is loaded */
+    int layer;                      /* its HUD_TEX_3D quad: the layer-th of shell_quads(); -1 not drawn now */
+    const char *name;               /* the model ("CITYSELECT_GLOBE.PWK") or the .edf ("MAP_HIGHLIGHT.EDF") */
+    const Bundle *b;                /* the bundle of its interface, where they are */
+    float world[16];                /* column-major, world = m (x, y, z, 1); the model's or the effect's axes */
+    int parent;                     /* an effect on a shape's node: the shape's index here, and the node; -1 / NULL */
+    const char *attach;
+    int running, stopping, gen;     /* an effect: playing; stopped, playing out (shut it down once) */
+    int lit;                        /* a shape: its light set (ambient, up to two lights, each a direction it travels) */
+    float ambient[3]; int nlights;
+    float light_dir[2][3], light_diffuse[2][3], light_ambient[2][3], light_specular[2][3];
+} Shell3D;
+/* the 3D objects in their markers' order, then the effects that run unseen; marks the drawn effects drawn (an effect
+ * starts on the first update after it was drawn once [R 0x237590]) */
+int shell_3d(Shell *s, Shell3D *out, int max);
+void shell_effect_ended(Shell *s, const void *key);
 int shell_quads_turned(const Shell *s, ShellQuad *out, int max);
 #endif

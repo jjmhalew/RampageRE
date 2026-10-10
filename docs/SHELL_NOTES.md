@@ -284,9 +284,15 @@ it at −1.
   - the start block is the cheat's block, else 0 outside the campaign, else `Profile.getStartBlock(city)`.
 - Back returns to MonsterSelect, after `setupFromMainMenu`.
 
-**Not drawn:**
-- The globe (`CITYSELECT_GLOBE.PWK`, turned to `GlobeLocation`), its light and the cities' ring effects. They are 3D.
-- The grey box `basic` (M 0x90) under the globe, hidden with it **[G]**.
+**The globe** (the GuiShape `globe`, `CITYSELECT_GLOBE.PWK`; "The GUI's 3D objects" below):
+- At the start, `setIdentity` and shown. Each selection takes the city's `GlobeLocation` (degrees: latitude,
+  longitude, 0) as `lookAtTarget` in radians, and `moveDir` is the unit step from the `lookAt` there.
+- **`updateGlobe`**, every frame: `lookAt` moves 0.05 along `moveDir` while that brings it nearer, and `setLookAt` turns
+  the globe. Within 0.5 of the target, the city's ring (`fx_<City>`, `MAP_HIGHLIGHT.EDF` on the globe's node
+  `Node_<City>`) starts. Moving on stops the last city's ring, as does losing the focus.
+- **`updateDayNightGlobe`**: the light `lights` gets ambient = diffuse = 255 and specular (0, 55, 0) by day, 100 and
+  (0, 5, 0) by night.
+- The grey box `basic` (M 0x90) under the globe stays hidden **[G]**.
 
 ## The loading screen (0x3485E0, Loading.scr) [R]
 
@@ -333,17 +339,22 @@ These decide the first interface, as above.
 static. It is widened in four ways:
 - **Affine frames:** each object's frame is a full 2D affine map. `<x>` turns and mirrors draw, as do `yaw` and
   `setScaleX`.
-- **Non-drawing objects:** effects, shapes, lights and child interfaces are objects that draw nothing. The scripts
-  find them by name. hud.c's reader gave the properties of an `<e>` to its parent, such as MainMenu's fires' `<x>` to
-  the interface.
-- **3D objects:** an object outside every `<DD>` has its position in screen widths about the centre, x right and y
-  down. A `<DD>` inside it draws about (320, 240), moved there and scaled by it. **[G: the GUI camera is not traced.
-  It fits:]**
-  - with four players, the card offsets −0.325 / −0.108 / 0.108 / 0.325 put the cards 139 px apart, as their
-    `playerId` texts are;
-  - with two players, the 0.025 down puts the card's top at the masks' edge, 117.
-- **No depth sort:** the shell's layouts draw in tree order. Sorting by `<z>` would put the frost border under the
-  background and the "P2" stamps under their cards.
+- **3D objects:** shapes (`<s>`) and effects (`<e>`) put a quad with tex `HUD_TEX_3D` where they stand in the tree, and
+  `shell_3d` lists them in that order: the shape's model, or the effect's edf, with its world in the GUI camera's
+  (each object's full 3×3 and place, `<m>`, `setIdentity`, `setLookAt`, the `<DD>`s' pixels in GUI units), a shape's
+  light set, an effect's state. Light sets, lights and child interfaces draw nothing. The scripts find all of them by
+  name. hud.c's reader gave the properties of an `<e>` to its parent, such as MainMenu's fires' `<x>` to the interface.
+- **The viewer draws them** (main.c `gui3d_step`, `gui3d_layers`; render_gl.c `draw_gui3d`): at each marker the GUI
+  camera, the shape's model from its interface's bundle (each mesh on its node at the rest pose), lit by its set, and
+  the effect's particles (fx.c over that bundle and fx.bdp, `fx_spawn_frame` / `fx_place` in the effect's frame, an
+  effect on a node in that node's frame on the drawn model). The depth is cleared once a frame; the 2D quads write
+  none **[G]**. The effect's size follows its frame's scale **[G]**.
+- **The 2D path:** an object outside every `<DD>` has its position in screen widths about the centre, x right and y
+  down, and a `<DD>` inside it draws about (320, 240), moved there and scaled by it: the GUI camera at depth 1
+  **[R]**. The 1 / (1 + z) of a deeper `<o>` is left out: no shell `<DD>` lies in one.
+- **No depth sort:** the layouts draw in tree order **[R 0x241770]**. `<z>` is the fade **[R 0x22C450]**:
+  MonsterSelect's title (0.388) and frost border (0.58) are partly see-through, MonsterSheet's `blowup` (0) starts
+  unseen.
 
 **Quads:**
 - `shell_quads_turned` gives four corners per picture.
@@ -355,12 +366,76 @@ static. It is widened in four ways:
   talk.
 - The frame event goes to the focused interface only **[G; R in effect: Options runs MainMenu's fader itself]**.
 
+## The GUI's 3D objects [R]
+
+What the front end's GuiShapes, lights and GuiEffects do. Classes (type at +0x64): GuiObject 0x447930 (0), GuiShape
+0x447AC0 (3, ctor 0x2489E0), GuiEffect 0x447670 (4, 0x237B30), GuiLightSet 0x447730 (9), GuiLight 0x447790 (0xA),
+Gui2D 0x447590 (0xB), GuiCamera 0x447610 (0xC); GuiCamController 0x447300 (0x227DA0) with GuiFixedCam 0x447330 (the
+default), GuiFreeCam 0x447350 and GuiTrackCam 0x447310. The tag handlers: 20-byte records at 0x3B3240, the handler of
+tag i at 0x3B28A0 + 16 i + 8; short and long names share them (`la`/`lighting` 0x22BDC0, `k`/`attach` 0x22BF20,
+`E`/`eflags` 0x22B1B0, `x`/`xform` 0x22DEC0, `z`/`fade` 0x22C450). Children are appended in XML order (0x242540).
+
+**The camera** (0x227AD0, GuiFixedCam 0x227F80): the GUI draws through the GuiCamera's view (controller +0x158,
+0x2319DC).
+- Vertical field of view 0.71808 rad: tan(fov / 2) = 0.375. Near 1, far 10000. The aspect is the viewport's times the
+  float at 0x4CB54C **[not traced; 4:3 taken]**.
+- The eye at (0, −1, 0) looking at the origin, z up.
+- Each interface's frame is followed by rows (1, 0, 0), (0, 0, −1), (0, 1, 0) (+0x78, ctor 0x239230): GUI (x, y, z)
+  is the world's (x, z, −y). A GUI point lands at px = 320 + 640 x / (1 + z), py = 240 + 640 y / (1 + z).
+- A top-level `<DD>` maps its pixels to (X / 640 − 0.5, Y / 640 − 0.375, 0) (0x2363F0): the screen at depth 1. `<a>`
+  bit 0 on a `<DD>` gives a pixel view of its own; no shell layout has one.
+- Checked: the four players' card glows fall on their cards to a pixel; the globe's `<o>` at (0, 0, 9), m 0.971 is
+  at the screen's middle at depth 10, about 220 px across its radius, inside its 474-px shadow.
+
+**Frames:** 3×3 rows (row vectors) at +0x08, the place at +0x2C; the world is local × parent's (0x23FF70). `<x>` is
+the rows, then the place; `<p>` the place; `<m>` multiplies the 3×3 as it is when read.
+
+**GuiShape `<s>`** (0x22E4F0: `m`/`mesh` the model, `s`/`skeleton`; load 0x2480E0):
+- It draws its whole model (0x246A10): with a node tree of the model's name, each part on its node, posed by the
+  model's own animation (the globe's is one key).
+- Its draw matrix turns the model's axes into the GUI's (0x240790: rows r0, r2, −r1): model x right, y into the
+  screen, z up on screen. With the interface's matrix, a model under identity frames is drawn in its own axes.
+- `<la>` names a light set found earlier in the interface; it becomes the renderer's lights (0x2394B0), and without one
+  the lights are off (0x16E320). Shapes ignore the fade.
+- `setIdentity` (method 0x2B, 0x2573F0): the 3×3 is the identity, the place kept.
+- `setLookAt(p)` (0x38, 0x257868 → 0x101330(p.z, p.x, p.y)) replaces the 3×3, no scale, with
+  Ry(p.y) · Rx(p.x) · Rz(p.z) in the GUI's axes: a GlobeLocation (lat, lon, 0) turns the globe about the screen's
+  vertical (the model's pole) by the longitude, then tilts it about the screen's x by the latitude. Every city comes
+  out on the centre line, a few degrees above the middle **[G: the latitudes hand-tuned]**. `getLookAt` (0x37,
+  0x101220) inverts it.
+
+**Lights:** `<ls>`'s own `<A>` is the set's ambient (0x16E1F0). `<lt>` keeps diffuse (+0x158, default 128 grey),
+specular (+0x168) and ambient (+0x178); the colours read RRGGBBAA, as the script's night values are the file's. Its
+direction is row 2 of its full world (0x239D60), into the screen and to the right for CitySelect's **[G: the
+renderer's sign: the direction the light travels]**. `setAmbient` / `setDiffuse` / `setSpecular` go through
+0x255390. Lights update when hidden.
+
+**GuiEffect `<e>`** (0x22E730: `auto`, then `edf`):
+- Its flags (+0xB4): 0x1 manual (`auto="false"`, `<E>` 0x1), 0x2 its matrix pushed in the update, 0x200 running,
+  0x400 to start, 0x800 to stop. `<E>` replaces them.
+- `setEffect` (0x2377E0) makes the instance on the game's effect manager (0x48A340 via 0x208220: the same
+  ParticleSystemFx / CompositeFx as fx.c), owned by the GuiEffect and not in the world's list; it is to start unless
+  manual.
+- The update (0x237590): one to start that was drawn once starts; one to stop stops emitting; a running one advances,
+  and is no longer running when its instance is finished. The draw (0x2376E0) places the instance at its draw matrix
+  (the shapes' axis turn too) and draws it while it runs. A hidden effect is never drawn, so it never starts.
+- `startEffect` (0x237550) starts an idle one; `stopEffect` (0x237520) stops a pending or running one, whose particles
+  play out.
+- `<k>` names a node of the parent shape (0x2400F0); the effect then sits in that node's frame on the drawn model
+  (0x247280, 0x24D8C0), turning with the globe.
+
+**Drawing:** each screen draws its interfaces in order, each in tree order (0x241770): an object with F & 0x201, or
+fade × z ≤ 0.01, is skipped; F 0x40 draws its children alone. F 0x1 is hidden, 0x80 no frame event, 0x100 an update
+after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears the screen and switches to its view
+**[G: its depth state]**.
+
 ## Not ported, or guessed [G]
 
 - **Not drawn:**
   - the emulators and the demo game (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md));
-  - the 3D globe and the .edf effects: fires, searchlights, card glow, lava lamp, city rings;
-  - the turn of HudQuads.
+  - the turn of HudQuads;
+  - the main menu's two searchlights: `auto="false"`, and no script starts them **[R]**;
+  - the GUI effects' sounds, and the `<o>` scale on particle sizes (taken to scale them) **[G]**.
 - **Popup:**
   - the memory card's own states (checking, saving, errors, formatting);
   - how the selection starts (item 0);

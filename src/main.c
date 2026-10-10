@@ -197,6 +197,8 @@ typedef struct Viewer {
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
     int prof_on_card;                                /* its file exists (the shell's profile list) */
     Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
+    struct GuiDraw *gd;                              /* its 3D objects: models, effects, this frame's layers */
+    char elf_path[512];                              /* RAMPAGE.ELF beside the VOL (fx.c's words) */
     Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
     ShellGame last_game;                             /* the shell's last choices (back from a game) */
@@ -4270,6 +4272,266 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
         snprintf(sp->profiles[0], sizeof sp->profiles[0], "%s", v->prof.block.name[0] ? v->prof.block.name : "Profile");
 }
 
+/* ---- the front end's 3D objects (shell_3d): each shape's model from its interface's bundle, every mesh on its node at
+ * the rest pose (the RawAnim of the model's name: the globe's is one key); each effect played by fx.c over that bundle
+ * (then fx.bdp), one FxWorld per bundle, the GuiEffect's instance its own [R 0x2377E0: not in the world's list] */
+typedef struct {
+    const Bundle *b; char name[40];
+    Tree tree; Mat4 *node;
+    SceneMesh mesh[24]; int mesh_node[24], nmesh;
+} GuiModel;
+typedef struct { const Bundle *b; FxLib *lib; FxWorld *w; } GuiFxLib;
+typedef struct { const void *key; int gen, lib, fx, started, stopped; } GuiFx;
+#define GUI_ITEMS 64
+typedef struct GuiDraw {
+    GuiModel model[4]; int nmodel;
+    GuiFxLib lib[4]; int nlib;
+    GuiFx fx[48]; int nfx;
+    Shell3D item[GUI_ITEMS]; int nitem;
+    SceneGui3D layer[GUI_ITEMS]; SceneGuiMesh mesh[256]; FxQuad quad[6144];
+} GuiDraw;
+
+static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+
+static GuiModel *gui_model(GuiDraw *g, const Bundle *b, const char *file)
+{
+    char key[40];
+    snprintf(key, sizeof key, "%s", file ? file : "");
+    size_t n = strlen(key);
+    if (n > 4 && !_stricmp(key + n - 4, ".pwk"))
+        key[n - 4] = 0;
+    for (int i = 0; i < g->nmodel; i++)
+        if (g->model[i].b == b && !_stricmp(g->model[i].name, key))
+            return &g->model[i];
+    if (!b || !key[0] || g->nmodel >= 4)
+        return NULL;
+    GuiModel *m = &g->model[g->nmodel++];
+    memset(m, 0, sizeof *m);
+    m->b = b;
+    snprintf(m->name, sizeof m->name, "%s", key);
+    const BdpEntry *te = NULL, *raw = NULL;
+    for (uint32_t i = 0; i < b->nentries; i++) {
+        const BdpEntry *e = &b->entries[i];
+        if (e->type == ET_TREE && !_stricmp(bdp_name(b, e->name), key))
+            te = e;
+        else if (e->type == ET_ANIM && e->size >= 0x44 && le32(e->data + 0x20) == 1 &&
+                 !_stricmp(bdp_name(b, (uint32_t)(e->data[0x28] | e->data[0x29] << 8)), key))
+            raw = e;                                 /* its RawAnim: the rest pose */
+    }
+    if (te && tree_read(b, te, raw, &m->tree) == 0 && m->tree.n) {
+        m->node = calloc(m->tree.n, sizeof *m->node);
+        for (uint32_t i = 0; m->node && i < m->tree.n; i++) {
+            const TreeNode *nd = &m->tree.nodes[i];
+            Mat4 local = mat_tq(nd->t, nd->q);
+            m->node[i] = nd->parent >= 0 && (uint32_t)nd->parent < i ? mat_mul(m->node[nd->parent], local) : local;
+        }
+    }
+    for (uint32_t i = 0; i < b->nentries && m->nmesh < 24; i++) {   /* <model>|<object> on the node <object> */
+        const BdpEntry *e = &b->entries[i];
+        const char *en = bdp_name(b, e->name);
+        size_t kl = strlen(key);
+        if (e->type != ET_MESH || _strnicmp(en, key, kl) || en[kl] != '|')
+            continue;
+        SceneMesh *sm = &m->mesh[m->nmesh];
+        memset(sm, 0, sizeof *sm);
+        if (mesh_read(e, &sm->mesh) != 0)
+            continue;
+        sm->b = b;
+        m->mesh_node[m->nmesh] = -1;
+        for (uint32_t k = 0; m->node && k < m->tree.n; k++)
+            if (!_stricmp(m->tree.nodes[k].name, en + kl + 1))
+                m->mesh_node[m->nmesh] = (int)k;
+        m->nmesh++;
+    }
+    return m;
+}
+
+static int gui_lib(Viewer *v, GuiDraw *g, const Bundle *b)
+{
+    for (int i = 0; i < g->nlib; i++)
+        if (g->lib[i].b == b)
+            return g->lib[i].w ? i : -1;
+    if (!b || g->nlib >= 4)
+        return -1;
+    GuiFxLib *l = &g->lib[g->nlib];
+    const Bundle *bl[2] = { b, &v->fx_bundle };
+    l->b = b;
+    l->lib = v->elf_path[0] ? fx_open(v->elf_path, bl, v->have_fx_bundle ? 2 : 1) : NULL;
+    l->w = l->lib ? fx_world(l->lib) : NULL;
+    return l->w ? g->nlib++ : (g->nlib++, -1);
+}
+
+static void gui3d_free(Viewer *v)
+{
+    GuiDraw *g = v->gd;
+    if (!g)
+        return;
+    for (int i = 0; i < g->nmodel; i++) {
+        for (int k = 0; k < g->model[i].nmesh; k++)
+            mesh_free(&g->model[i].mesh[k].mesh);
+        tree_free(&g->model[i].tree);
+        free(g->model[i].node);
+    }
+    for (int i = 0; i < g->nlib; i++) {
+        fx_world_free(g->lib[i].w);
+        fx_close(g->lib[i].lib);
+    }
+    free(g);
+    v->gd = NULL;
+}
+
+/* where an effect is: its world, or on its shape's node (the node's frame x the shape's world) */
+static Mat4 gui_effect_world(GuiDraw *g, const Shell3D *it)
+{
+    Mat4 w;
+    memcpy(w.m, it->world, sizeof w.m);
+    if (it->attach && it->parent >= 0 && it->parent < g->nitem) {
+        const Shell3D *sh = &g->item[it->parent];
+        GuiModel *m = gui_model(g, sh->b, sh->name);
+        for (uint32_t k = 0; m && m->node && k < m->tree.n; k++)
+            if (!_stricmp(m->tree.nodes[k].name, it->attach)) {
+                Mat4 sw;
+                memcpy(sw.m, sh->world, sizeof sw.m);
+                w = mat_mul(sw, m->node[k]);
+                break;
+            }
+    }
+    return w;
+}
+
+/* the effects follow their GuiEffects: one running is started (once) and kept where it is drawn, one that stops
+ * running is shut down, one whose edf ended says so; then every effect world steps */
+static void gui3d_step(Viewer *v, float dt)
+{
+    if (!v->shell)
+        return;
+    if (!v->gd && !(v->gd = calloc(1, sizeof *v->gd)))
+        return;
+    GuiDraw *g = v->gd;
+    g->nitem = shell_3d(v->shell, g->item, GUI_ITEMS);
+    for (int i = 0; i < g->nitem; i++) {
+        const Shell3D *it = &g->item[i];
+        if (it->kind != SHELL_3D_EFFECT)
+            continue;
+        GuiFx *x = NULL;
+        for (int k = 0; k < g->nfx && !x; k++)
+            if (g->fx[k].key == it->key)
+                x = &g->fx[k];
+        if (!x) {
+            if (g->nfx >= 48)
+                continue;
+            x = &g->fx[g->nfx++];
+            memset(x, 0, sizeof *x);
+            x->key = it->key;
+            x->gen = it->gen;
+            x->fx = -1;
+            x->lib = gui_lib(v, g, it->b);
+        }
+        FxWorld *w = x->lib >= 0 ? g->lib[x->lib].w : NULL;
+        if (!w)
+            continue;
+        if (x->gen != it->gen) {                     /* setEffect: the old one is freed */
+            fx_kill(w, x->fx);
+            x->fx = -1;
+            x->started = 0;
+            x->gen = it->gen;
+        }
+        Mat4 m = gui_effect_world(g, it);
+        float pos[3] = { m.m[12], m.m[13], m.m[14] }, R[3][3], scale = 0;
+        for (int r = 0; r < 3; r++) {
+            float l = sqrtf(m.m[4 * r] * m.m[4 * r] + m.m[4 * r + 1] * m.m[4 * r + 1] + m.m[4 * r + 2] * m.m[4 * r + 2]);
+            if (r == 0) scale = l;
+            for (int c = 0; c < 3; c++)
+                R[r][c] = l > 0 ? m.m[4 * r + c] / l : (r == c);
+        }
+        if (it->running) {
+            if (!x->started) {                       /* [G: the frame's scale scales the effect] */
+                x->fx = fx_spawn_frame(w, it->name, pos, R, scale > 0 ? scale : 1);
+                x->started = 1;
+                x->stopped = 0;
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  gui effect %s at %.2f %.2f %.2f%s\n", it->name, pos[0], pos[1], pos[2],
+                           x->fx < 0 ? ": none" : "");
+                if (x->fx < 0)
+                    shell_effect_ended(v->shell, it->key);
+            } else if (fx_alive(w, x->fx)) {
+                if (it->stopping && !x->stopped) {   /* stopEffect: its particles play out */
+                    fx_stop(w, x->fx);
+                    x->stopped = 1;
+                }
+                if (it->layer >= 0)
+                    fx_place(w, x->fx, pos, R);
+            } else {                                 /* it is over */
+                shell_effect_ended(v->shell, it->key);
+                x->started = 0;
+                x->fx = -1;
+            }
+        } else if (x->started) {
+            fx_kill(w, x->fx);
+            x->fx = -1;
+            x->started = 0;
+        }
+    }
+    for (int i = 0; i < g->nlib; i++)
+        fx_update(g->lib[i].w, dt, -1e9f);
+}
+
+/* this frame's 3D layers for the renderer, one per HUD_TEX_3D quad */
+static void gui3d_layers(Viewer *v, Scene *s)
+{
+    s->gui3d = NULL;
+    s->ngui3d = 0;
+    if (!v->shell)
+        return;
+    if (!v->gd && !(v->gd = calloc(1, sizeof *v->gd)))
+        return;
+    GuiDraw *g = v->gd;
+    g->nitem = shell_3d(v->shell, g->item, GUI_ITEMS);
+    int nl = 0, nm = 0, nq = 0;
+    for (int i = 0; i < g->nitem; i++) {
+        const Shell3D *it = &g->item[i];
+        if (it->layer < 0)
+            continue;
+        while (nl <= it->layer && nl < GUI_ITEMS)
+            memset(&g->layer[nl++], 0, sizeof g->layer[0]);
+        if (it->layer >= GUI_ITEMS)
+            continue;
+        SceneGui3D *l = &g->layer[it->layer];
+        if (it->kind == SHELL_3D_SHAPE) {
+            GuiModel *m = gui_model(g, it->b, it->name);
+            l->meshes = &g->mesh[nm];
+            for (int k = 0; m && k < m->nmesh && nm < 256; k++) {
+                Mat4 w;
+                memcpy(w.m, it->world, sizeof w.m);
+                if (m->mesh_node[k] >= 0)
+                    w = mat_mul(w, m->node[m->mesh_node[k]]);
+                g->mesh[nm].mesh = &m->mesh[k];
+                g->mesh[nm++].world = w;
+                l->nmeshes++;
+            }
+            l->lit = it->lit;
+            memcpy(l->ambient, it->ambient, sizeof l->ambient);
+            l->nlights = it->nlights;
+            memcpy(l->light_dir, it->light_dir, sizeof l->light_dir);
+            memcpy(l->light_diffuse, it->light_diffuse, sizeof l->light_diffuse);
+            memcpy(l->light_ambient, it->light_ambient, sizeof l->light_ambient);
+        } else {
+            for (int k = 0; k < g->nfx; k++) {
+                const GuiFx *x = &g->fx[k];
+                if (x->key != it->key || x->lib < 0)
+                    continue;
+                l->fx = &g->quad[nq];
+                FxWorld *w = g->lib[x->lib].w;
+                if (x->fx >= 0)
+                    nq += fx_quads_of(w, x->fx, g->quad + nq, 6144 - nq);
+                l->nfx = (int)(&g->quad[nq] - l->fx);
+            }
+        }
+    }
+    s->gui3d = g->layer;
+    s->ngui3d = nl;
+}
+
 static void shell_enter(Viewer *v, const ShellStart *st)
 {
     ShellProfile sp;
@@ -4456,6 +4718,7 @@ static void shell_start_game(Viewer *v)
     v->play = have_monster(v);
     v->last_game = *g;
     movie_stop(v);
+    gui3d_free(v);
     shell_close(v->shell);
     v->shell = NULL;
     v->exit_game = 0;
@@ -4490,6 +4753,7 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
                (w->keys[VK_F2] ? SHELL_HELD_START | SHELL_HELD_CROSS : 0);
     shell_pad_held(v->shell, 0, held);
     shell_update(v->shell, dt);
+    gui3d_step(v, dt);
     if (shell_answer(v))
         v->shell_go = 1;                             /* after this frame: the loading screen is drawn once */
 }
@@ -4515,6 +4779,7 @@ static const char *shell_script(Viewer *v, const char *script)
         if (!_stricmp(word, "wait"))
             for (int f = 0, frames = (int)(atof(arg) * 60 + 0.5); f < frames && !v->shell_go; f++) {
                 shell_update(v->shell, 1.0f / 60);
+                gui3d_step(v, 1.0f / 60);
                 if (shell_answer(v))
                     v->shell_go = 1;
             }
@@ -4531,6 +4796,7 @@ static const char *shell_script(Viewer *v, const char *script)
             for (const char *c = arg; *c; c++)
                 shell_type(v->shell, toupper((unsigned char)*c));
         shell_update(v->shell, 1.0f / 60);
+        gui3d_step(v, 1.0f / 60);
         if (shell_answer(v))
             v->shell_go = 1;
     }
@@ -4659,6 +4925,7 @@ int main(int argc, char **argv)
             if (fwd > slash) slash = fwd;
             snprintf(slash ? slash + 1 : elf, sizeof elf - (size_t)(slash ? slash + 1 - elf : 0), "RAMPAGE.ELF");
             const Bundle *bl[1] = { &v.fx_bundle };
+            snprintf(v.elf_path, sizeof v.elf_path, "%s", elf);
             v.have_fx_bundle = 1;
             v.fxlib = fx_open(elf, bl, 1);
             v.fxw = v.fxlib ? fx_world(v.fxlib) : NULL;
@@ -4770,6 +5037,7 @@ int main(int argc, char **argv)
             static HudQuad sq[4096];
             v.shell_scene->hud = sq;
             v.shell_scene->nhud = shell_quads(v.shell, sq, 4096);
+            gui3d_layers(&v, v.shell_scene);
             Camera none = { { 0, 0, 0 }, 0, 0, 60 };
             sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
             rnd_frame(v.rnd, &w, &none, now - start, 0);

@@ -37,8 +37,7 @@ code or the files, **[G]** a guess or a stand-in.
   - then for `hold` s: the copies hidden, the text at fade 1, shaking at (320 + 3 cos 2a, 240 + 2 sin 3a),
     a = 2π · the hold's progress.
   - then 0.5 s: its fade falls from ½ to 0; then the interface unloads itself.
-- **[G]** The `Head` quad is never hidden by the script, but it would put George's head (whatever the monster) at 4×
-  in the middle of the screen: it is not drawn.
+- The `Head` quad is never shown by the script: its `<z>` 0 is its fade (0x22C450), so it is never seen **[R]**.
 - The monster reveal (`Cryotube.scr`): `"#" + format(localize("MonsterRevealed"), localize(getMonsterName(i)))`,
   colour (220, 0, 0), scale 0.5, sound `V_Monster_Reveal_Seq`.
 

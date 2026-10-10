@@ -25,6 +25,8 @@
 #define HUD_SCREEN_W 640.0f
 #define HUD_SCREEN_H 480.0f
 #define HUD_TEX_VIDEO 0xFFFFFFFFu   /* HudQuad.tex with no bundle: the movie's picture (rnd_video) */
+#define HUD_TEX_3D 0xFFFFFFFEu      /* HudQuad.tex with no bundle: the next 3D layer is drawn here (the shell's globe and
+                                     * effects, shell_3d; its corners mean nothing) */
 
 /* gCommon.getPlayType() as the scripts test it [R Hud.scr, ChallengeStatus.scr, KingCityResults.scr] (game.h GP_*) */
 enum {

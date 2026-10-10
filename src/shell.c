@@ -12,9 +12,9 @@
  *
  * The GUI core (fonts, texts, the .ifc reader, rects, list boxes, the fader) is hud.c's, copied and widened here (hud.c
  * keeps it static): each object's frame is a full 2D affine map instead of a position and a uniform scale, so turned
- * and mirrored objects (<x>), GuiObject.yaw and setScaleX draw as the game has them; the effects, shapes and lights of
- * the layouts are objects that draw nothing (the scripts find them by name); and objects outside a 2D root (<DD>) are
- * the GUI's 3D objects, whose positions are in screen widths (below). Unchanged from hud.c otherwise: if hud.c's core
+ * and mirrored objects (<x>), GuiObject.yaw and setScaleX draw as the game has them; the shapes and effects of the
+ * layouts are listed for the viewer to draw in 3D (shell_3d), their lights with them (the scripts find all of them by
+ * name); and objects outside a 2D root (<DD>) are the GUI's 3D objects, whose positions are in screen widths (below). Unchanged from hud.c otherwise: if hud.c's core
  * moves into a module of its own one day, this copy can go. */
 #include <math.h>
 #include <stdio.h>
@@ -230,7 +230,12 @@ static Frame fr_mul(const Frame *local, const Frame *parent)
     return g;
 }
 
-typedef struct { ShellQuad *q; int n, max; } Emit;
+typedef struct {
+    ShellQuad *q; int n, max;
+    const struct Node **d3; const void **l3; int n3, max3;   /* the 3D objects in the order of their markers, and their
+                                                      * layouts (shell_3d) */
+    const void *layout;                              /* the layout being emitted */
+} Emit;
 
 /* a picture: the rectangle (x0, y0) .. (x1, y1) of frame f with the texture's (u0, v0) .. (u1, v1) on it */
 static void emit_quad(Emit *e, const Frame *f, float x0, float y0, float x1, float y1, float u0, float v0, float u1,
@@ -428,7 +433,7 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
 
 /* ---------------------------------------------------------------- the layout tree (.ifc) */
 /* N_FX: the layouts' effects (<e>), shapes (<s>), light sets (<ls>, <lt>) and child interfaces (<X>): objects the
- * scripts find (GuiEffect, GuiShape, GuiLight) that draw nothing here */
+ * scripts find (GuiEffect, GuiShape, GuiLight); the shapes and effects are drawn by the viewer (shell_3d) */
 enum { N_GROUP, N_2D, N_QUAD, N_TEXT, N_SLIDER, N_RECT, N_LIST, N_LINE, N_FX };
 typedef struct Node {
     int kind;
@@ -460,6 +465,17 @@ typedef struct Node {
     float ep[4]; int has_ep;
     int visible;
     int video;                  /* the Video quad: the movie's picture when there is one */
+    /* the 3D objects (N_FX): what they are, their files and their state */
+    int fx;                     /* FX_EFFECT <e>, FX_SHAPE <s>, FX_LIGHTSET <ls>, FX_LIGHT <lt>; 0 the rest */
+    char res[40];               /* the shape's model (m=, "CITYSELECT_GLOBE.PWK"), the effect's edf= */
+    char attach[32];            /* <k>: the parent shape's node the effect sits on */
+    char lights[32];            /* <la>: the light set of the interface that lights it */
+    float r3[9], m3; int r3_own;   /* its own 3x3 by rows (<x>, setIdentity, setLookAt) and the <m> after it; 0: the
+                                 * 2D frame's turn and m */
+    unsigned eflags;            /* GuiEffect +0xB4 (FXE_*) */
+    int drawn, gen;             /* draws since its effect was set (+0xAC); setEffect's count */
+    float amb[4], dif[4], spec[4];   /* <ls> A, <lt> A D S (RRGGBBAA) */
+    float w3[16];               /* its world when it was last drawn (shell_3d) */
     float fade;
     struct Node *parent, *child, *next;
 } Node;
@@ -468,7 +484,14 @@ typedef struct {
     Node *nodes;
     int n, cap;
     Node *root;
+    const Bundle *b;            /* the bundle it is from (its 3D objects' files) */
 } Layout;
+
+/* GuiEffect's flags (+0xB4) [R 0x237520 .. 0x2377E0]: 1 started by the script alone (auto="false", <E> 0x1), 0x200
+ * running (until its instance is finished, a stopped one too), 0x400 to start (on the first update after it was
+ * drawn), 0x800 to stop; FXE_SHUT (the port's): it was stopped and plays out */
+enum { FXE_MANUAL = 0x1, FXE_RUN = 0x200, FXE_START = 0x400, FXE_STOP = 0x800, FXE_SHUT = 0x1000 };
+enum { FX_OTHER, FX_EFFECT, FX_SHAPE, FX_LIGHTSET, FX_LIGHT };
 
 typedef struct { const char *p, *end; } Xml;
 typedef struct { char k[16], v[64]; } Attr;
@@ -541,7 +564,18 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
     else if (strcmp(tag, "d") == 0) {
         if (strcmp(which, "highlight") == 0) parse_floats(text, nd->hl_d, 2);
         else { parse_floats(text, nd->d, 2); nd->has_d = 1; }
-    } else if (strcmp(tag, "m") == 0) nd->m = strtof(text, NULL);
+    } else if (strcmp(tag, "m") == 0) {
+        nd->m = strtof(text, NULL);
+        if (nd->r3_own) nd->m3 *= nd->m;                 /* [R 0x22DDF0: the 3x3 as it is, times m] */
+    } else if (strcmp(tag, "z") == 0)                    /* [R 0x22C450: z is the fade (+0x5C), not a depth] */
+        nd->fade = strtof(text, NULL);
+    else if (nd->kind == N_FX && strcmp(tag, "k") == 0) snprintf(nd->attach, sizeof nd->attach, "%s", text);
+    else if (nd->kind == N_FX && strcmp(tag, "la") == 0) snprintf(nd->lights, sizeof nd->lights, "%s", text);
+    else if (nd->kind == N_FX && strcmp(tag, "E") == 0)  /* [R 0x22B1B0: replaces +0xB4] */
+        nd->eflags = (unsigned)strtoul(text, NULL, 0);
+    else if (nd->kind == N_FX && strcmp(tag, "A") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->amb);
+    else if (nd->kind == N_FX && strcmp(tag, "D") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->dif);
+    else if (nd->kind == N_FX && strcmp(tag, "S") == 0) col_rgba((uint32_t)strtoul(text, NULL, 0), nd->spec);
     else if (strcmp(tag, "F") == 0) nd->F = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "Q") == 0) nd->Q = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "M") == 0) nd->M = (unsigned)strtoul(text, NULL, 0);
@@ -617,6 +651,9 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         float x[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
         parse_floats(text, x, 12);
         memcpy(nd->p, x + 9, sizeof nd->p);
+        memcpy(nd->r3, x, sizeof nd->r3);                /* [R 0x22DEC0: rows, then the place] */
+        nd->r3_own = 1;
+        nd->m3 = 1;
         float m = sqrtf(x[0] * x[0] + x[1] * x[1]);
         if (m <= 0) m = 1;
         nd->m = m;
@@ -669,7 +706,30 @@ static Node *node_new(Layout *L, int kind)
     nd->sel = -1;
     nd->visible = 1;
     nd->fade = 1;
+    nd->r3[0] = nd->r3[4] = nd->r3[8] = 1;
+    nd->m3 = 1;
+    nd->amb[3] = nd->spec[3] = 1;
+    for (int i = 0; i < 3; i++) nd->dif[i] = 128.0f / 255.0f;   /* [R 0x239E90: a light's diffuse 128 grey] */
+    nd->dif[3] = 1;
     return nd;
+}
+
+/* the attributes of <s> (0x22E4F0: m / M / mesh the model) and <e> (0x22E730: auto, then edf = setEffect, which sets
+ * "to start" unless it is manual) [R] */
+static void fx_attrs(Node *nd, const char *tag, const Attr *at, int na)
+{
+    nd->fx = !strcmp(tag, "e") ? FX_EFFECT : !strcmp(tag, "s") ? FX_SHAPE : !strcmp(tag, "ls") ? FX_LIGHTSET :
+             !strcmp(tag, "lt") ? FX_LIGHT : FX_OTHER;
+    for (int i = 0; i < na; i++) {
+        if (nd->fx == FX_SHAPE && (!strcmp(at[i].k, "m") || !strcmp(at[i].k, "M") || !strcmp(at[i].k, "mesh")))
+            snprintf(nd->res, sizeof nd->res, "%s", at[i].v);
+        else if (nd->fx == FX_EFFECT && !strcmp(at[i].k, "auto"))
+            nd->eflags = strcmp(at[i].v, "true") ? nd->eflags | FXE_MANUAL : nd->eflags & ~FXE_MANUAL;
+        else if (nd->fx == FX_EFFECT && !strcmp(at[i].k, "edf"))
+            snprintf(nd->res, sizeof nd->res, "%s", at[i].v);
+    }
+    if (nd->fx == FX_EFFECT && nd->res[0] && !(nd->eflags & FXE_MANUAL))
+        nd->eflags |= FXE_START;
 }
 
 static void node_attach(Node *nd, Node *parent)
@@ -727,6 +787,8 @@ static int xml_element(Gui *g, Layout *L, Xml *x, Node *parent)
             na++;
         }
     }
+    if (nd && nd->kind == N_FX)
+        fx_attrs(nd, tag, at, na);
     if (nd)
         node_attach(nd, parent);
     if (*x->p == '/') {
@@ -794,6 +856,7 @@ static Layout *layout_load(Gui *g, const Bundle *b, const char *name, int extra)
     if (!L)
         return NULL;
     L->cap = elements / 2 + 8 + extra;
+    L->b = b;
     L->nodes = calloc((size_t)L->cap, sizeof *L->nodes);
     if (!L->nodes) {
         free(L);
@@ -1072,6 +1135,154 @@ static Frame unit_to_pixels(const Frame *u)
     return p;
 }
 
+/* ---- the 3D objects. Frames are row vectors (p' = p r + t) and a world is local x parent's [R 0x23FF70], up to the
+ * interface (its own frame left out, as in layout_emit). The GUI camera [R 0x227AD0, 0x227F80]: eye (0, -1, 0) looking
+ * along +y, z up, a vertical field of view with tan(fov / 2) = 0.375, near 1, far 10000; each interface's frame is
+ * followed by rows (1, 0, 0), (0, 0, -1), (0, 1, 0) [R 0x239230 +0x78]: GUI (x, y, z) is the world's (x, z, -y), so a
+ * GUI point is at px = 320 + 640 x / (1 + z), py = 240 + 640 y / (1 + z). A top-level <DD> maps its pixels to
+ * (X / 640 - 0.5, Y / 640 - 0.375, 0) [R 0x2363F0], the screen at depth 1. */
+typedef struct { float r[9], t[3]; } M34;
+
+static M34 m34_mul(const M34 *a, const M34 *b)          /* a, then b */
+{
+    M34 o;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++)
+            o.r[3 * i + j] = a->r[3 * i] * b->r[j] + a->r[3 * i + 1] * b->r[3 + j] + a->r[3 * i + 2] * b->r[6 + j];
+        o.t[i] = a->t[0] * b->r[i] + a->t[1] * b->r[3 + i] + a->t[2] * b->r[6 + i] + b->t[i];
+    }
+    return o;
+}
+
+static int in_2d(const Node *nd)                        /* below a <DD> */
+{
+    for (const Node *p = nd ? nd->parent : NULL; p; p = p->parent)
+        if (p->kind == N_2D)
+            return 1;
+    return 0;
+}
+
+static M34 node_local3(const Node *nd)
+{
+    M34 l = { { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, { 0, 0, 0 } };
+    int pix = in_2d(nd);
+    if (nd->r3_own && !pix) {
+        for (int i = 0; i < 9; i++)
+            l.r[i] = nd->r3[i] * nd->m3;
+        for (int i = 0; i < 3; i++)
+            l.r[i] *= nd->sx;
+    } else {
+        Frame f = node_local(nd);
+        l.r[0] = f.a; l.r[1] = f.b; l.r[3] = f.c; l.r[4] = f.d;
+        l.r[8] = pix ? 1 : nd->m;
+    }
+    l.t[0] = nd->p[0]; l.t[1] = nd->p[1]; l.t[2] = pix ? 0 : nd->p[2];
+    if (nd->kind == N_2D && !pix) {                      /* its pixels into the GUI's units */
+        M34 dd = { { 1 / 640.0f, 0, 0, 0, 1 / 640.0f, 0, 0, 0, 1 / 640.0f }, { -0.5f, -0.375f, 0 } };
+        l = m34_mul(&l, &dd);
+    }
+    return l;
+}
+
+static M34 node_world3(const Node *nd)
+{
+    M34 w = node_local3(nd);
+    for (const Node *p = nd->parent; p && p->parent; p = p->parent) {
+        M34 l = node_local3(p);
+        w = m34_mul(&w, &l);
+    }
+    return w;
+}
+
+/* a shape's or an effect's draw matrix [R 0x240790: rows (r0, r2, -r1), the model's z up on screen] and the GUI to the
+ * world: column-major, world = m (x, y, z, 1) */
+static void gui_to_world(const M34 *g, float m[16])
+{
+    const float *r0 = g->r, *r1 = g->r + 3, *r2 = g->r + 6;
+    float rows[3][3] = { { r0[0], r0[2], -r0[1] }, { r2[0], r2[2], -r2[1] }, { -r1[0], -r1[2], r1[1] } };
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++)
+            m[4 * i + j] = rows[i][j];
+        m[4 * i + 3] = 0;
+    }
+    m[12] = g->t[0]; m[13] = g->t[2]; m[14] = -g->t[1]; m[15] = 1;
+}
+
+/* GuiObject.setIdentity (0x2573F0): the 3x3 is the identity, the place kept */
+static void node_identity(Node *nd)
+{
+    if (!nd)
+        return;
+    memset(nd->r3, 0, sizeof nd->r3);
+    nd->r3[0] = nd->r3[4] = nd->r3[8] = 1;
+    nd->r3_own = 1;
+    nd->m3 = 1;
+}
+
+/* GuiObject.setLookAt(p) (0x257868 -> 0x101330(a = p.z, b = p.x, c = p.y)): the 3x3 becomes Ry(p.y) Rx(p.x) Rz(p.z)
+ * (a vector turned about y first), the place kept, no scale [R] */
+static void node_look_at(Node *nd, const float p[3])
+{
+    if (!nd)
+        return;
+    float a = p[2], b = p[0], c = p[1];
+    float ca = cosf(a), sa = sinf(a), cb = cosf(b), sb = sinf(b), cc = cosf(c), sc = sinf(c);
+    float r[9] = { ca * cc - sa * sb * sc, sa * cc + ca * sb * sc, -cb * sc,
+                   -sa * cb, ca * cb, sb,
+                   ca * sc + sa * sb * cc, sa * sc - ca * sb * cc, cb * cc };
+    memcpy(nd->r3, r, sizeof r);
+    nd->r3_own = 1;
+    nd->m3 = 1;
+}
+
+/* GuiEffect.startEffect (0x237550): an idle one starts at its next update; stopEffect (0x237520): a pending or running
+ * one stops, its particles play out; setEffect (0x2377E0): another edf, started unless it is manual [R] */
+static void effect_start(Node *nd)
+{
+    if (nd && nd->fx == FX_EFFECT && !(nd->eflags & (FXE_START | FXE_RUN))) {
+        nd->eflags |= FXE_START;
+        nd->eflags &= ~FXE_STOP;
+    }
+}
+static void effect_stop(Node *nd)
+{
+    if (nd && nd->fx == FX_EFFECT && (nd->eflags & (FXE_START | FXE_RUN))) {
+        nd->eflags &= ~FXE_START;
+        nd->eflags |= FXE_STOP;
+    }
+}
+static void effect_set(Node *nd, const char *edf)
+{
+    if (!nd || nd->fx != FX_EFFECT)
+        return;
+    snprintf(nd->res, sizeof nd->res, "%s", edf ? edf : "");
+    nd->eflags &= ~(unsigned)(FXE_RUN | FXE_START | FXE_STOP | FXE_SHUT);
+    nd->drawn = 0;
+    nd->gen++;
+    if (nd->res[0] && !(nd->eflags & FXE_MANUAL))
+        nd->eflags |= FXE_START;
+}
+
+/* the effects' update (0x237590): one to start that was drawn starts, one to stop stops emitting and runs until its
+ * particles are gone (shell_effect_ended); it runs for hidden ones too (the update walk 0x2415E0 does not look at
+ * visibility) [R] */
+static void effects_update(Layout *L)
+{
+    for (int i = 0; L && i < L->n; i++) {
+        Node *nd = &L->nodes[i];
+        if (nd->fx != FX_EFFECT)
+            continue;
+        if ((nd->eflags & FXE_START) && nd->drawn > 0) {
+            nd->eflags &= ~FXE_START;
+            nd->eflags |= FXE_RUN;
+        } else if (nd->eflags & FXE_STOP) {
+            nd->eflags &= ~(unsigned)FXE_STOP;
+            if (nd->eflags & FXE_RUN)
+                nd->eflags |= FXE_SHUT;
+        }
+    }
+}
+
 /* blinking (object flag 0x400: setFlags(1024) on "Press START", the caret, MonsterSheet's selection) [G: the rate] */
 static float blink(const Gui *g) { return 0.6f + 0.4f * cosf(2.0f * SH_PI * 1.25f * g->time); }
 
@@ -1091,7 +1302,7 @@ static int list_stacked(const Node *l)
 static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, int in2d, float fade, const Node *only)
 {
     for (; nd; nd = nd->next) {
-        if (!nd->visible || nd->kind == N_FX || (only && nd != only))
+        if (!nd->visible || (nd->kind == N_FX && nd->fx != FX_SHAPE && nd->fx != FX_EFFECT) || (only && nd != only))
             continue;
         Frame local = node_local(nd), f;
         int c2d = in2d;
@@ -1104,6 +1315,21 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
         float nf = fade * nd->fade;
         if (nd->F & 0x400)
             nf *= blink(g);
+        if (nd->kind == N_FX) {                          /* a shape or an effect: its 3D layer here, in tree order
+                                                          * [R 0x241770: no sort; fade x z <= 0.01 is not drawn] */
+            if (nf > 0.01f && nd->res[0]) {
+                static const float white[4] = { 1, 1, 1, 1 };
+                int at = e->n;
+                if (!e->d3 || e->n3 < e->max3)
+                    emit_quad(e, &f, 0, 0, 0, 0, 0, 0, 0, 0, white, NULL, HUD_TEX_3D);
+                if (e->n > at && e->d3) {
+                    e->d3[e->n3] = nd;
+                    e->l3[e->n3++] = e->layout;
+                }
+            }
+            layout_emit(e, g, nd->child, &f, c2d, nf, NULL);
+            continue;
+        }
         Frame df = in2d || nd->kind == N_2D ? f : unit_to_pixels(&f);   /* a 3D object's own picture [G] */
         if (nd->kind == N_QUAD) {
             float w = nd->has_d ? nd->d[0] : nd->has_tex ? nd->tex.w : 0;
@@ -1169,6 +1395,7 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
  * were drawn first, as hud.c takes it] */
 static void emit_layout(Emit *e, const Gui *g, const Layout *L)
 {
+    e->layout = L;
     if (L && L->root && L->root->visible)
         layout_emit(e, g, L->root->child, &FR_ID, 0, L->root->fade, NULL);
 }
@@ -1279,8 +1506,9 @@ typedef struct {
 
 typedef struct {
     Node *city_bar, *city_rect, *arrow_l, *arrow_r, *time_text, *stats, *select_btn, *stats_btn, *news;
-    int initialized, index, left, locked, night, jumped, stats_visible, flash_city, cheat_block;
-    float flash;
+    Node *globe, *rings[SHELL_CITIES];                   /* guiGlobe, cityRings (fx_<city>) */
+    int initialized, index, left, locked, night, jumped, stats_visible, flash_city, cheat_block, ring_on;
+    float flash, look[3], target[3], dir[3];             /* lookAt, lookAtTarget, moveDir (radians) */
     char msg_key[48];
     Faders fd;
 } CitySel;
@@ -2732,6 +2960,8 @@ static void ms_card_face(Shell *s, const char *name, int p)
     char t[64];
     snprintf(t, sizeof t, "Card_base_%d", p);
     set_tex(&s->gui, base, t);
+    snprintf(t, sizeof t, "card_glow_%d.edf", p);       /* cardEffect.setEffect */
+    effect_set(fx, t);
     snprintf(t, sizeof t, "%s_Body", name);
     set_tex(&s->gui, head, t);
     node_localize(&s->gui, find(card, "name"), name);
@@ -2777,7 +3007,8 @@ static void ms_flip(Shell *s, int p)                   /* flipCard */
 {
     MsPlayer *pl = &s->ms.pl[p];
     pl->spin_amount = 0;
-    if (pl->spin == 0 || pl->spin >= 6) {               /* card_effect.stopEffect() */
+    if (pl->spin == 0 || pl->spin >= 6) {
+        effect_stop(find(pl->base, "card_effect"));
         pl->spin = 1;
         pl->spin_amount = 1;
     } else if (pl->spin == 3) {
@@ -2808,7 +3039,9 @@ static void spin_step(int *spin, float *amount, Node *base, float scale_base, fl
     } else if (*spin == 2 || *spin == 5) {
         *amount += dt / 0.125f;
         if (*amount >= 1.0f) {
-            ms_sides(base, *spin == 5);                  /* 5: card_effect.startEffect() */
+            ms_sides(base, *spin == 5);
+            if (*spin == 5)
+                effect_start(find(base, "card_effect"));
             (*spin)++;
             *amount = 1.0f;
         }
@@ -3457,7 +3690,11 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
         } else if (ev == EV_BUTTON && button == 0) {
             sound(s, "Click");
             h->spin_amount = 0;                          /* flipCard */
-            if (h->spin == 0 || h->spin >= 6) { h->spin = 1; h->spin_amount = 1; }
+            if (h->spin == 0 || h->spin >= 6) {
+                effect_stop(find(h->blowup, "card_effect"));
+                h->spin = 1;
+                h->spin_amount = 1;
+            }
             else if (h->spin == 3) { h->spin = 4; h->spin_amount = 1; }
         } else if (ev == EV_BUTTON && button == 1) {
             sound(s, "Click");
@@ -3487,12 +3724,47 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
     }
 }
 
-/* ---------------------------------------------------------------- CitySelect.scr [R; the globe (a 3D shape) and the
- * cities' ring effects are not drawn] */
+/* ---------------------------------------------------------------- CitySelect.scr [R] */
 static void cs_day_night_globe(Shell *s)               /* updateDayNightGlobe: the globe's light, and the text */
 {
     CitySel *c = &s->cs;
+    Node *l = find(ifc_root(s, IF_CITYSELECT), "lights");
+    if (l) {
+        float v = c->night ? 100.0f / 255.0f : 1.0f, g = (c->night ? 5.0f : 55.0f) / 255.0f;
+        for (int i = 0; i < 3; i++)
+            l->amb[i] = l->dif[i] = v;
+        l->spec[0] = l->spec[2] = 0;
+        l->spec[1] = g;
+    }
     node_localize(&s->gui, c->time_text, c->night ? "CitySelect_TOD_Night" : "CitySelect_TOD_Day");
+}
+
+/* updateGlobe(dt): lookAt goes 0.05 (radians) a frame along moveDir while that brings it nearer to the city's; within
+ * 0.5 of it, the city's ring starts */
+static void cs_globe(Shell *s, float dt)
+{
+    CitySel *c = &s->cs;
+    float d[3], len = 0;
+    for (int i = 0; i < 3; i++) {
+        d[i] = c->look[i] - c->target[i];
+        len += d[i] * d[i];
+    }
+    len = sqrtf(len);
+    if (len <= 0.01f && dt != 0.0f)
+        return;
+    float la[3], l2 = 0;
+    for (int i = 0; i < 3; i++) {
+        la[i] = c->look[i] + c->dir[i] * 0.05f;
+        l2 += (la[i] - c->target[i]) * (la[i] - c->target[i]);
+    }
+    if (sqrtf(l2) < len) {
+        memcpy(c->look, la, sizeof la);
+        node_look_at(c->globe, c->look);
+    }
+    if (!c->ring_on && len <= 0.5f) {
+        c->ring_on = 1;
+        effect_start(c->rings[c->index]);
+    }
 }
 
 static void cs_day_night(Shell *s, int toggle)         /* updateDayNight */
@@ -3525,6 +3797,7 @@ static void cs_cheat_text(Shell *s)                    /* updateCheatText */
 static void cs_selection(Shell *s, int dir)            /* updateSelection */
 {
     CitySel *c = &s->cs;
+    int prev = c->index;
     int i = c->index + dir;
     if (i < 0) i = 0;
     if (i > SHELL_CITIES - 1) i = SHELL_CITIES - 1;
@@ -3538,7 +3811,22 @@ static void cs_selection(Shell *s, int dir)            /* updateSelection */
         show(c->arrow_r, c->left < 3);
         for (int k = 0; k < SHELL_CITIES; k++)
             show(child_at(c->city_bar, k), k >= c->left && k < c->left + 4);
-        /* the globe turns to CityData.City<i>.GlobeLocation: not drawn */
+        /* the globe turns to CityData.City<i>.GlobeLocation (degrees: lat, lon, 0), from where it is now */
+        Group gl = group_sub(city_group(s, i), "GlobeLocation");
+        Record loc[3];
+        int nl = gl.at ? (int)group_items(gl, loc, 3) : 0;
+        float len = 0;
+        for (int k = 0; k < 3; k++) {
+            c->target[k] = k < nl ? record_num(loc[k]) * SH_PI / 180.0f : 0;
+            c->dir[k] = c->target[k] - c->look[k];
+            len += c->dir[k] * c->dir[k];
+        }
+        len = sqrtf(len);
+        for (int k = 0; k < 3 && len > 0; k++)
+            c->dir[k] /= len;
+        if (dir != 0)
+            effect_stop(c->rings[prev]);
+        c->ring_on = 0;
         int flags = s->prof.city_flags[i];
         if (s->cheats & 2) flags |= 128;
         float yellow[4], grey[4];
@@ -3583,6 +3871,9 @@ static void cs_gain(Shell *s, int pad)                 /* gainFocus */
         for (int i = 0; i < SHELL_CITIES; i++) {
             Node *city = find(c->city_bar, city_name(s, i));
             if (!city) continue;
+            char ring[48];
+            snprintf(ring, sizeof ring, "fx_%s", city_name(s, i));
+            c->rings[i] = find(ifc_root(s, IF_CITYSELECT), ring);
             Node *stars = find(city, "stars");
             int flags = s->prof.city_flags[i];
             if (s->cheats & 2) {
@@ -3606,6 +3897,9 @@ static void cs_gain(Shell *s, int pad)                 /* gainFocus */
         show(child_at(tod, 0), !campaign);
         show(child_at(tod, 1), !campaign);
         cs_selection(s, 0);
+        memcpy(c->look, c->target, sizeof c->look);      /* lookAt = lookAtTarget at once */
+        node_look_at(c->globe, c->look);
+        cs_globe(s, 0);
         if (campaign)
             for (int i = 0; i < SHELL_CITIES; i++)
                 show(find(child_at(c->city_bar, i), "night"), (int)group_num(city_group(s, i), "CampaignNight", 0));
@@ -3624,9 +3918,14 @@ static void cs_event(Shell *s, int ev, int button, int pad, float dt)
         c->initialized = 1;
         fix_buttons(r, "nb_select", "nb_back", "nb_stats", "");
         show(find(r, "-.line.-"), 0);
-        /* the grey box "basic" (M 0x90) lies where the globe is drawn over it [G]: the globe is not drawn here */
+        /* the grey box "basic" (M 0x90) lies where the globe is drawn over it [G] */
         show(find(r, "basic"), 0);
         c->jumped = 0;
+        c->globe = find(r, "globe");                     /* setIdentity, setVisible(1) */
+        node_identity(c->globe);
+        show(c->globe, 1);
+        memset(c->look, 0, sizeof c->look);
+        c->ring_on = 0;
         c->select_btn = find(r, "nb_select");
         c->stats_btn = find(r, "nb_stats");
         c->news = find(r, "movingtext");
@@ -3654,10 +3953,14 @@ static void cs_event(Shell *s, int ev, int button, int pad, float dt)
         set_text(c->time_text, keep);
         set_pos(c->time_text, 180.0f - (nw > dw ? nw : dw), 115.0f, 0);
     } else if (ev == EV_LOSE) {
-        if (c->initialized == 2) c->initialized = 1;     /* loseFocus: the ring effect stops */
+        if (c->initialized == 2) {                       /* loseFocus: the ring effect stops */
+            effect_stop(c->rings[c->index]);
+            c->initialized = 1;
+        }
     } else if (ev == EV_GAIN)
         cs_gain(s, pad);
     else if (ev == EV_FRAME) {
+        cs_globe(s, dt);
         fader_update(&c->fd, dt);
         c->flash -= dt;
         if (c->flash <= 0) {
@@ -4051,6 +4354,10 @@ void shell_update(Shell *s, float dt)
         idle_update(s, dt);
     }
     loading_update(s, dt);
+    for (int i = 0; i < IF_COUNT; i++)
+        effects_update(s->ifc[i]);
+    effects_update(s->mc.L);
+    effects_update(s->ld.L);
 }
 
 int shell_events(Shell *s, ShellEvent *out, int max)
@@ -4087,11 +4394,131 @@ const char *shell_focus(const Shell *s)
 
 /* the interfaces back to front: the ControlRoom's six in its layout's order, the profile popup over them (its own
  * screen), the loading screen over everything, or the Victory screen alone */
+static void emit_all(const Shell *s, Emit *e)
+{
+    if (s->vi.on) {
+        emit_layout(e, &s->gui, s->vi.L);
+        return;
+    }
+    if (!s->ld.on || !s->ld.L || s->ld.intro < 3 || get_fade(s->ld.fill) < 1.0f)   /* hidden under the loading */
+        for (int i = 0; i < IF_COUNT; i++)
+            emit_layout(e, &s->gui, s->ifc[i]);
+    if (s->mc.mode != MC_OFF)
+        emit_layout(e, &s->gui, s->mc.L);
+    if (s->ld.on)
+        emit_layout(e, &s->gui, s->ld.L);
+}
+
+/* a shape's light set: <la>'s <ls> of the interface (0x22BDC0 finds it by name) [R]; a light's direction is row 2 of
+ * its world (0x239D60), in the world's axes */
+static void shape_lights(const Layout *L, const Node *nd, Shell3D *o)
+{
+    const Node *ls = NULL;
+    for (int i = 0; L && nd->lights[0] && i < L->n && !ls; i++)
+        if (L->nodes[i].fx == FX_LIGHTSET && !strcmp(L->nodes[i].name, nd->lights))
+            ls = &L->nodes[i];
+    o->lit = ls != NULL;                                 /* none: the lights off (0x16E320) */
+    if (!ls)
+        return;
+    memcpy(o->ambient, ls->amb, sizeof o->ambient);
+    for (const Node *lt = ls->child; lt && o->nlights < 2; lt = lt->next) {
+        if (lt->fx != FX_LIGHT)
+            continue;
+        M34 w = node_world3(lt);
+        float d[3] = { w.r[6], w.r[8], -w.r[7] }, l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        for (int k = 0; k < 3; k++) {
+            o->light_dir[o->nlights][k] = l > 0 ? d[k] / l : 0;
+            o->light_diffuse[o->nlights][k] = lt->dif[k];
+            o->light_ambient[o->nlights][k] = lt->amb[k];
+            o->light_specular[o->nlights][k] = lt->spec[k];
+        }
+        o->nlights++;
+    }
+}
+
+int shell_3d(Shell *s, Shell3D *out, int max)
+{
+    if (!s || !out || max <= 0)
+        return 0;
+    const Node *d3[64];
+    const void *l3[64];
+    Emit e = { s->quads, 0, MAX_QUADS, d3, l3, 0, max < 64 ? max : 64, NULL };
+    emit_all(s, &e);
+    int n = 0;
+    for (int k = 0; k < e.n3; k++) {
+        Node *nd = (Node *)d3[k];
+        const Layout *L = l3[k];
+        Shell3D *o = &out[n++];
+        memset(o, 0, sizeof *o);
+        o->kind = nd->fx == FX_SHAPE ? SHELL_3D_SHAPE : SHELL_3D_EFFECT;
+        o->key = nd;
+        o->layer = k;
+        o->name = nd->res;
+        o->b = L ? L->b : NULL;
+        o->parent = -1;
+        M34 w = node_world3(nd);
+        if (nd->attach[0] && nd->parent && nd->parent->fx == FX_SHAPE)
+            for (int j = 0; j < n - 1; j++)
+                if (out[j].key == nd->parent) {          /* on the shape's node: there (0x2400F0, 0x24D8C0) */
+                    o->parent = j;
+                    o->attach = nd->attach;
+                    M34 l = node_local3(nd), pw = node_world3(nd->parent);
+                    w = m34_mul(&l, &pw);                /* [G: its own frame taken in the node's] */
+                }
+        gui_to_world(&w, o->world);
+        memcpy(nd->w3, o->world, sizeof nd->w3);
+        if (o->kind == SHELL_3D_SHAPE)
+            shape_lights(L, nd, o);
+        else
+            nd->drawn++;
+        o->running = (nd->eflags & FXE_RUN) != 0;
+        o->stopping = (nd->eflags & FXE_SHUT) != 0;
+        o->gen = nd->gen;
+    }
+    Layout *all[IF_COUNT + 3];                           /* the effects not drawn now: they run on, unseen */
+    int na = 0;
+    for (int i = 0; i < IF_COUNT; i++) all[na++] = s->ifc[i];
+    all[na++] = s->mc.L;
+    all[na++] = s->ld.L;
+    all[na++] = s->vi.L;
+    for (int i = 0; i < na && n < max; i++)
+        for (int j = 0; all[i] && j < all[i]->n && n < max; j++) {
+            Node *nd = &all[i]->nodes[j];
+            if (nd->fx != FX_EFFECT || !nd->res[0] || !(nd->eflags & (FXE_RUN | FXE_STOP)))
+                continue;
+            int seen = 0;
+            for (int k = 0; k < e.n3 && !seen; k++)
+                seen = d3[k] == nd;
+            if (seen)
+                continue;
+            Shell3D *o = &out[n++];
+            memset(o, 0, sizeof *o);
+            o->kind = SHELL_3D_EFFECT;
+            o->key = nd;
+            o->layer = -1;
+            o->name = nd->res;
+            o->b = all[i]->b;
+            o->parent = -1;
+            memcpy(o->world, nd->w3, sizeof o->world);
+            o->running = (nd->eflags & FXE_RUN) != 0;
+            o->stopping = (nd->eflags & FXE_SHUT) != 0;
+            o->gen = nd->gen;
+        }
+    return n;
+}
+
+void shell_effect_ended(Shell *s, const void *key)
+{
+    Node *nd = (Node *)key;
+    if (s && nd && nd->fx == FX_EFFECT)
+        nd->eflags &= ~(unsigned)(FXE_RUN | FXE_SHUT);
+}
+
 int shell_quads_turned(const Shell *s, ShellQuad *out, int max)
 {
     if (!s || !out || max <= 0)
         return 0;
-    Emit e = { out, 0, max };
+    Emit e = { out, 0, max, NULL, NULL, 0, 0, NULL };
     if (s->vi.on) {
         emit_layout(&e, &s->gui, s->vi.L);
         return e.n;
