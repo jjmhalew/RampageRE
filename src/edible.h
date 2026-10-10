@@ -116,7 +116,6 @@ typedef struct {
 
 Edibles *edible_new(const EdibleHost *host);
 void edible_free(Edibles *e);
-void edible_seed(Edibles *e, uint32_t seed);         /* the random numbers' stand-in (0x106950) */
 void edible_clear(Edibles *e);                       /* every kind, slot and edible gone (a new block) */
 
 /* 0x31A540 / 0x318B40: the block's (BlockDef) Edibles group: its FillRate and kinds; returns the kinds */

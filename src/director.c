@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "director.h"
+#include "wrand.h"
 
 #define DIR_PI 3.14159265f
 
@@ -333,35 +334,14 @@ static int in_window(float a, float b, float prev, float time)
 #define BOT_COOLDOWN 0.2f                            /* +0x64 (0x2EEBD0) [R] */
 #define BOT_AVOID_TIME 3.0f                          /* +0x6C (0x2EEBE0) [R] */
 
-/* rand01 [R]: the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C): v = t[i] + t[j], i on (16
- * wraps to 0), t[j] = v, j on; as a float v x 2^-32 (0x2F113C). Seeded (0x1069C0) i = 12, j = 0, t[0] = 0, t[k] =
- * the Park-Miller run from the seed | 1, t[6] |= 1. The world's other users of it are not ported */
-static struct { uint32_t i, j, t[17]; } lagfib = { 12, 0, { 0 } };
-
-void dir_ai_seed(uint32_t seed)
-{
-    uint32_t x = seed;
-    lagfib.i = 12;
-    lagfib.j = 0;
-    lagfib.t[0] = 0;
-    for (int k = 1; k < 17; k++) {
-        uint64_t y = (uint64_t)x * 16807u;
-        y = (y & 0x7FFFFFFFu) + (y >> 31);
-        y = (y & 0x7FFFFFFFu) + (y >> 31);
-        x = y == 0x7FFFFFFFu ? 0 : (uint32_t)y;
-        lagfib.t[k] = x | 1;
-    }
-    lagfib.t[6] |= 1;
-}
+/* rand01 [R]: the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, wrand.c, shared with the
+ * edibles and the smashes), as a float v x 2^-32 (0x2F113C); seeded (0x1069C0) at the world's reset */
+void dir_ai_seed(uint32_t seed) { wrand_seed_lf(seed); }
 
 static float bot_rand(DirBot *b)
 {
     (void)b;
-    uint32_t v = lagfib.t[lagfib.i] + lagfib.t[lagfib.j];
-    lagfib.i = lagfib.i == 16 ? 0 : lagfib.i + 1;
-    lagfib.t[lagfib.j] = v;
-    lagfib.j = lagfib.j == 16 ? 0 : lagfib.j + 1;
-    return (float)v * 2.3283064e-10f;
+    return (float)wrand_lf() * 2.3283064e-10f;
 }
 
 static int bot_standing(const DirBuilding *b) { return b->state >= 1 && b->state <= 3; }

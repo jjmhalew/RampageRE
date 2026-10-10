@@ -104,7 +104,6 @@ void people_set_templates(People *p, PeopleFindTemplate find, void *ctx);
 /* gWorld.isSphereVisible(pos, r): the streakers leave once out of view; unset, everything counts as visible */
 typedef int (*PeopleVisible)(void *ctx, const float pos[3], float radius);
 void people_set_visible(People *p, PeopleVisible visible, void *ctx);
-void people_seed(People *p, uint32_t seed);          /* gWorld.frand()'s stand-in */
 void people_set_droppable_rate(People *p, float rate);   /* the block's DroppableDef rate (getDroppableRate) */
 
 /* a person as the block or a script creates it (ActorInstance|, createActor): its script's Construct */

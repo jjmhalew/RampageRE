@@ -360,7 +360,6 @@ falling back one loses its barriers too.
   - `adjustZRot` (taken as adding to the turn);
   - getFacing().z read back in (−π, π];
   - the numGenerators global and the play values (taken as starting again per block);
-  - `gWorld.frand` (an LCG).
 - **Not ported:**
   - the movement sounds (`MovementSound`: `Tank Treads`, `Copter Loop`: native, not in the scripts);
   - the bosses' `OscillationScale`;

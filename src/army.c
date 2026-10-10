@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "army.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
@@ -38,7 +39,6 @@ struct Army {
     ArmyUnit *u; int n, cap;
     ArmyShot shot[MAX_SHOTS]; int nshots, next_shot;
     ArmyEvent ev[MAX_EVENTS]; int nev, next_fx;
-    uint32_t rng;
     Spawner sp[MAX_SPAWN]; int nsp, active;
     const char *saved_name;                          /* gAIMgr +0x54 */
     /* Swat.bsf's globals, per GroupIndex */
@@ -58,10 +58,11 @@ struct Army {
 
 /* ---------------------------------------------------------------- small things */
 
-static float frand(Army *a)                          /* [G] gWorld.frand(): [0, 1), not the game's Park-Miller (0x106BD0) */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(Army *a)
 {
-    a->rng = a->rng * 1664525u + 1013904223u;
-    return (float)(a->rng >> 8) / 16777216.0f;
+    (void)a;
+    return wrand_frand();
 }
 
 static int same_text(const char *x, const char *y)   /* any case, as the game compares names (0x32C9C8) */
@@ -3110,7 +3111,6 @@ Army *army_new(const ArmyHost *host)
     a->cap = MAX_UNITS;
     if (host)
         a->host = *host;
-    a->rng = 12345;
     a->view[0] = -45;                                /* [G] what the camera sees of the street, along x */
     a->view[1] = 45;
     a->fallback_ts = a->fire_ts = a->move_ts = -3;   /* [R] the scripts' sfx_*PrevTS = -3 */
@@ -3126,7 +3126,6 @@ void army_free(Army *a)
     free(a);
 }
 
-void army_seed(Army *a, uint32_t seed) { a->rng = seed ? seed : 1; }
 void army_set_view(Army *a, float xmin, float xmax) { a->view[0] = xmin; a->view[1] = xmax; }
 
 void army_set_collide(Army *a, CollideWorld *w) { a->cw = w; }

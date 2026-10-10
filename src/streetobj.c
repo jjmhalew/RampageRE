@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "streetobj.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
@@ -46,10 +47,11 @@ static int same_text(const char *x, const char *y)   /* any case, as the game co
     return *x == *y;
 }
 
-static float frand(StreetObjs *s)                    /* [G] gWorld.frand(): [0, 1), not the game's Park-Miller */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(StreetObjs *s)
 {
-    s->seed = s->seed * 1103515245u + 12345u;
-    return (float)((s->seed >> 8) & 0xFFFFFF) / 16777216.0f;
+    (void)s;
+    return wrand_frand();
 }
 
 static float len3(const float a[3]) { return sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); }
@@ -727,12 +729,10 @@ StreetObjs *streetobj_new(const StreetHost *host)
         return NULL;
     if (host)
         s->host = *host;
-    s->seed = 0x5EED5u;
     s->attack = 1;
     return s;
 }
 void streetobj_free(StreetObjs *s) { free(s); }
-void streetobj_seed(StreetObjs *s, uint32_t seed) { s->seed = seed; }
 
 int streetobj_kind_of(Group tmpl)
 {

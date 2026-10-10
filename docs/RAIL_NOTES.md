@@ -246,9 +246,8 @@ time, MaxOccurances (5) in all. The freighter has the AIInstance as its instance
 starting at a random share; at its end it starts again from that side. No block places `Train1`.
 
 ## Not traced (stand-ins in rail.c)
-- **Random numbers and time:** an LCG of its own (the game's is Park-Miller 0x106BD0); the scripts at the world's
-  fixed step, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
-- **The SphereMover:** the meeting of two flying objects (collide.c takes the other as static).
+- **Random numbers and time:** `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]; the scripts at the world's fixed
+  step, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
 - **The contacts:** the game's are the monster's (0x2E22B0): its spheres against the object's shape (0x280470); an
   unarmed one gives TakeDamage(monster, 2.0, Collision (1)) every frame to an object without OnlyHitWithEffNodes, an
   armed one the attack's damage, type 0 (Concussive), the sphere search ending at the first blow [R]. Here a monster's

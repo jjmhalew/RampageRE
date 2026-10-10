@@ -118,7 +118,6 @@ typedef struct {
 
 StreetObjs *streetobj_new(const StreetHost *host);
 void streetobj_free(StreetObjs *s);
-void streetobj_seed(StreetObjs *s, uint32_t seed);   /* gWorld.frand()'s stand-in */
 /* SK_STREET or SK_ROOF by the template's Script|ScriptName, -1 for any other (and for the MonsterUpgrade, whose
  * StreetObject.bsf part is challenge.c's) */
 int streetobj_kind_of(Group tmpl);

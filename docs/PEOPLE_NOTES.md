@@ -191,7 +191,7 @@ This works on an actor, or on an object of class 0x4D0720.
   `Restitution` 0.8 unless the template sets them. People do not set them.
 
 ## Not traced (stand-ins in people.c)
-- **Random numbers**: the exact `frand` sequence (an LCG stands in; the game's is Park-Miller on gWorld +0x828).
+- **Random numbers**: `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R].
   `getTimeStep` is the world's step, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
 - **The physics mover's collision response**: a vertical bounce with restitution 0.8 on z = 0 stands in.
 - **Blending and the hit test**:

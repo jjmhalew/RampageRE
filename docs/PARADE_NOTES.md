@@ -182,7 +182,7 @@ template's name is what the challenge counts (0x346780).
   once [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`. The carts and balloons are PushOutMonsters: the
   monster is pushed out of them (collide_monster).
 - **Pulses** [R]: setPulseDelay only sets the delay; the count runs on (0x309BA4, the Actor's 0x30CEA0).
-  `getTimeStep` is gWorld +4, the world's fixed step: 1/30 (RWorld's init 0x2B7800; FLOW_NOTES.md) [R]; `frand` is Park-Miller (0x106BD0) [R], here a generator of its own.
+  `getTimeStep` is gWorld +4, the world's fixed step: 1/30 (RWorld's init 0x2B7800; FLOW_NOTES.md) [R]; `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R].
 - **The world's state 6** for the chains: the Actor's destructor tests state 6 and a current block ≥ 0 (0x30DFC0)
   [R]; the port takes it as always true. gAIMgr's clock is reset at the block's load (0x334C40) and runs only while
   it is activated (BeginBlockNI, 0x333D48) [R]: `parade_activate`.

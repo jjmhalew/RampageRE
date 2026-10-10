@@ -373,7 +373,8 @@ at the first block's end.
    - let `edible_power_answer` answer the ability checks.
 
 ## Not traced (stand-ins in edible.c)
-- **Random numbers:** `rand()` (0x106950) and 0x106BD0; an LCG stands in.
+- **Random numbers:** `rand()` is the lagged Fibonacci 0x106950 on the world's gWorld +0x82C (shared with the bots'
+  rand01, seeded from GameStatus seed[1]; wrand.c) [R].
 - **Lifetime:** that the actor plays its `Default` record, so the 30 s lifetime comes from its `Duration`. The Actor's
   init (0x30D280) starts only a `DefaultAnim`.
 - **Movers:**

@@ -211,7 +211,7 @@ leans away, held while the monster stays within 7.
   end of its call (the rest of the call still runs, as the chimney's fallOff after DeleteOnHit).
 - The building's shake on an attached object is not added to its matrix (the viewer's building objects sway with
   their building through `building_place` until they move on their own).
-- `gWorld.frand`: an LCG. FollowEffects follow the object's place (and node), not its turn.
+- `gWorld.frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]. FollowEffects follow the object's place (and node), not its turn.
 - The objects are in the frame's collision world (`streetobj_collide_add`: tag `COLLIDE_TAG(COLLIDE_OWN_STREET, i)`,
   flags 4 and their own): the PushOutMonsters ones (the gongs, the chimneys) push the monster out (collide_monster),
   a flying object's TakeImpact reaches them. The pick-up of the Pickupable parked cars (`streetobj_pickup` /

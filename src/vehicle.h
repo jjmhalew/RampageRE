@@ -126,7 +126,6 @@ typedef struct { int type, id, obj, monster, level; const char *name; float v[3]
 
 Vehicles *vehicle_new(const VehicleHost *host);
 void vehicle_free(Vehicles *v);
-void vehicle_seed(Vehicles *v, uint32_t seed);       /* gWorld.frand()'s stand-in */
 void vehicle_bind_army(Vehicles *v, Army *army);     /* addStats through army_add_stats (NULL: VE_STATS only) */
 
 /* ---- the traffic (gAIMgr) */

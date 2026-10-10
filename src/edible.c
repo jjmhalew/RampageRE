@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "edible.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define MAX_EVENTS 256
@@ -23,15 +24,15 @@ struct Edibles {
     EdibleEvent ev[MAX_EVENTS]; int nev, next_fx;
     float fill;                                      /* the Edibles' FillRate (f20 in 0x3196F0) */
     float freq_sum;                                  /* [R] +0x28: the edible kinds' Frequency summed */
-    uint32_t rng;
 };
 
 /* ---------------------------------------------------------------- small things */
 
-static uint32_t rnd(Edibles *e)                      /* [G] 0x106950's stand-in: an LCG */
+/* rand(): the lagged Fibonacci 0x106950 on the world's gWorld +0x82C (wrand.c) [R] */
+static uint32_t rnd(Edibles *e)
 {
-    e->rng = e->rng * 1664525u + 1013904223u;
-    return e->rng;
+    (void)e;
+    return wrand_lf();
 }
 
 static int same_text(const char *x, const char *y)   /* any case, as the game compares names (0x32C9C8) */
@@ -154,7 +155,6 @@ Edibles *edible_new(const EdibleHost *host)
         return NULL;
     if (host)
         e->host = *host;
-    e->rng = 0x2545F491u;
     return e;
 }
 
@@ -168,7 +168,6 @@ void edible_free(Edibles *e)
     free(e);
 }
 
-void edible_seed(Edibles *e, uint32_t seed) { e->rng = seed; }
 
 void edible_clear(Edibles *e)
 {

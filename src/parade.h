@@ -119,7 +119,6 @@ typedef struct { int type, obj, monster, level; const char *name; Group tmpl; fl
 
 Parade *parade_new(const ParadeHost *host);
 void parade_free(Parade *p);
-void parade_seed(Parade *p, uint32_t seed);          /* gWorld.frand()'s stand-in */
 void parade_clear(Parade *p);                        /* every object gone, nothing waiting */
 
 /* 1 when an object with this Script|ScriptName is this module's (ParadeBalloon.bsf, Biker.bsf, Bike.bsf,

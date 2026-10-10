@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "boss.h"
+#include "wrand.h"
 
 #define PI 3.1415927f
 #define DELETE_ME (4 | 8 | 16)                       /* [R] what a script handler returns to have its object deleted */
@@ -147,7 +148,6 @@ struct Boss {
     int n;
     BossEvent ev[MAX_EVENTS];
     int nev, next_fx;
-    uint32_t rng;
     Spawner sp[MAX_SPAWN];
     int nsp, active;
     Trigger trig[MAX_TRIG];
@@ -171,15 +171,17 @@ struct Boss {
 
 /* ---------------------------------------------------------------- small things */
 
-static float frand(Boss *b)                          /* [G] gWorld.frand(): [0, 1), not Park-Miller (0x106BD0) */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(Boss *b)
 {
-    b->rng = b->rng * 1664525u + 1013904223u;
-    return (float)(b->rng >> 8) / 16777216.0f;
+    (void)b;
+    return wrand_frand();
 }
-static int irand(Boss *b)                            /* gWorld.rand() */
+/* gWorld.rand() (0x279F58): (Park-Miller >> 8) & 0xFFFF on the same state [R] */
+static int irand(Boss *b)
 {
-    b->rng = b->rng * 1664525u + 1013904223u;
-    return (int)(b->rng >> 9);
+    (void)b;
+    return wrand_rand();
 }
 
 static int same_text(const char *x, const char *y)   /* any case, as the game compares names (0x32C9C8) */
@@ -3520,14 +3522,12 @@ Boss *boss_new(const BossHost *host)
         return NULL;
     if (host)
         b->host = *host;
-    b->rng = 4321;
     b->main = -1;
     b->view[0] = -45;                                /* [G] what the camera sees of the street, along x (army.c) */
     b->view[1] = 45;
     return b;
 }
 void boss_free(Boss *b) { free(b); }
-void boss_seed(Boss *b, uint32_t seed) { b->rng = seed ? seed : 1; }
 void boss_set_view(Boss *b, float xmin, float xmax) { b->view[0] = xmin; b->view[1] = xmax; }
 void boss_set_city_destroyed(Boss *b, int on) { b->city_destroyed = on != 0; }
 void boss_activate(Boss *b, int on) { b->active = on != 0; }

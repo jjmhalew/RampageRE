@@ -290,7 +290,7 @@ Floating = 100
 `army_score_building` keeps the chain per building.
 
 ## Not traced (stand-ins in army.c)
-- **Random numbers:** the sequence (an LCG stands in for Park-Miller 0x106BD0); the frame step is the world's, 1/30
+- **Random numbers:** `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]; the frame step is the world's, 1/30
   (0x2B7800) [R].
 - **The collision world** (collide.c, the frame's world the viewer builds, `army_set_collide` /
   `army_collide_add`): the shots' and beams' rays and the flights are the game's. Left:

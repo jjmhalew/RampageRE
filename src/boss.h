@@ -155,7 +155,6 @@ typedef struct {
 
 Boss *boss_new(const BossHost *host);
 void boss_free(Boss *b);
-void boss_seed(Boss *b, uint32_t seed);              /* gWorld.frand()'s stand-in */
 /* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
 void boss_set_view(Boss *b, float xmin, float xmax);
 /* gCommon.isCityDestroyed (0x4D7E4F): set once the city's last block is finished; the bosses then leave */

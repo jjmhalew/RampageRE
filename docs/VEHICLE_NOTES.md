@@ -202,9 +202,8 @@ reports every award with its template name, so the viewer can count challenge go
 | a rocket started | 0 (destruction) | 100 |
 
 ## Not traced (stand-ins in vehicle.c)
-- **Random numbers and time:** an LCG for both of the game's generators. The scripts run at the world's fixed
-  step, gWorld.getTimeStep, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
-- **Pulses:** `setPulseDelay` is taken to restart the count from the call.
+- **Random numbers and time:** `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]. The scripts run at the world's
+  fixed step, gWorld.getTimeStep, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
 - **The SphereMover** is the game's SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) in the frame's
   collision world (`vehicle_set_collide`, `vehicle_collide_add`): the template's `Gravity` (35 from
   DefObjectProps), `Mass` (12000 for the cars), `Restitution` (0.2), `SlidingFriction` (0.3), `InertiaSolidity`,
@@ -214,7 +213,7 @@ reports every award with its template name, so the viewer can count challenge go
   There is no rest: it rolls on. The smash's spin is its turn rates as an angular velocity about a world axis
   (smashObject 0x2B2F50 → setRotation 0x28DD80) [R]; the sphere is centred on the car's place, which is its base, so
   a car on the street rests one radius up; the mover leaves the monsters out (their spheres are type 3, met by
-  nothing: 0x27FD70) [R]. The meeting of two flying objects takes the other as static (collide.c).
+  nothing: 0x27FD70) [R]. Two flying objects meeting exchange an impulse (0x285E90, collide.c `exchange`).
 - **The shape** in the world: 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox with
   the model's box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres) [R]; here
   the union of its meshes' header spheres, city.c `city_shape_sphere`), read once. The traffic is PushOutMonsters: the

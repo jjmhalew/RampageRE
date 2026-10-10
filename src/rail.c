@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "rail.h"
+#include "wrand.h"
 
 #define SPI 3.1415927f                               /* the scripts' own pi */
 #define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
@@ -26,7 +27,7 @@ struct Rail {
     Army *army;
     RailObj o[MAX_OBJS]; int n;
     RailEvent ev[MAX_EVENTS]; int nev, next_fx, next_sfx;
-    uint32_t rng, next_uid;
+    uint32_t next_uid;
     Spawner sp[MAX_SPAWN]; int nsp, active;
     /* the scripts' globals */
     int et_given_left, et_given_right;               /* ElevatedTrain.bsf hasGivenStatsLeftGroup / RightGroup */
@@ -41,10 +42,11 @@ struct Rail {
 
 /* ---------------------------------------------------------------- small things */
 
-static float frand(Rail *r)                          /* [G] gWorld.frand(): [0, 1), not the game's Park-Miller (0x106BD0) */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(Rail *r)
 {
-    r->rng = r->rng * 1664525u + 1013904223u;
-    return (float)(r->rng >> 8) / 16777216.0f;
+    (void)r;
+    return wrand_frand();
 }
 
 static int same_text(const char *x, const char *y)   /* any case, as the game compares names (0x32C9C8) */
@@ -2322,14 +2324,12 @@ Rail *rail_new(const RailHost *host)
         return NULL;
     if (host)
         r->host = *host;
-    r->rng = 0x7A11C0DEu;
     r->next_fx = 1;
     r->next_sfx = 1;
     return r;
 }
 
 void rail_free(Rail *r) { free(r); }
-void rail_seed(Rail *r, uint32_t seed) { r->rng = seed; }
 void rail_bind_army(Rail *r, Army *army) { r->army = army; }
 
 void rail_clear(Rail *r)

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "parade.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
@@ -21,7 +22,6 @@ struct Parade {
     ParadeObj o[MAX_OBJS];
     int n;
     int gone_age[MAX_OBJS];                          /* frames since a slot went (a slot is reused after 2 s) */
-    uint32_t rng;
     ParadeEvent ev[MAX_EVENTS];
     int nev;
     struct { Group inst; float left; } pend[MAX_PENDING];   /* gAIMgr's delayed instances (0x334A20) */
@@ -37,10 +37,11 @@ struct Parade {
 
 /* ---------------------------------------------------------------- small things */
 
-static float frand(Parade *p)                        /* [G] gWorld.frand(): [0, 1), not the game's sequence */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(Parade *p)
 {
-    p->rng = p->rng * 1664525u + 1013904223u;
-    return (float)(p->rng >> 8) / 16777216.0f;
+    (void)p;
+    return wrand_frand();
 }
 
 static const char *tstr(const ParadeObj *o, const char *key) { return o->tmpl.at ? group_str(o->tmpl, key) : NULL; }
@@ -1234,12 +1235,10 @@ Parade *parade_new(const ParadeHost *host)
         return NULL;
     if (host)
         p->host = *host;
-    p->rng = 0x9A3ADE5u;
     return p;
 }
 
 void parade_free(Parade *p) { free(p); }
-void parade_seed(Parade *p, uint32_t seed) { p->rng = seed; }
 
 void parade_clear(Parade *p)
 {

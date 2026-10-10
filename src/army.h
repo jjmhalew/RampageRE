@@ -176,7 +176,6 @@ Army *army_new(const ArmyHost *host);
 int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group);
 void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target, float dt);
 void army_free(Army *a);
-void army_seed(Army *a, uint32_t seed);              /* gWorld.frand()'s stand-in */
 /* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
 void army_set_view(Army *a, float xmin, float xmax);
 

@@ -203,8 +203,8 @@ Stand-ins and gaps:
   0x2E7F70; cleared only by a clip event no monster has, 0x2E7CC0, or the binding `setInterruptabe` (id 88,
   0x2AB258), which no script calls [R]: always set in play), and held / holder, only ever cleared.
 - The bots' rand01 is the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, seeded by 0x1069C0 from
-  GameStatus seed[1] at the world's reset) [R]; the world's other users of it are not ported, so the sequence
-  differs. The mount point is at the street, z 0, and min x − 5 on a front under 2 wide (0x2EEDE0) [R]. The
+  GameStatus seed[1] at the world's reset) [R], shared with the edibles' rand() (wrand.c); its other users in the
+  game (smashObject's 0x2B4390 among them) do not draw from it here. The mount point is at the street, z 0, and min x − 5 on a front under 2 wide (0x2EEDE0) [R]. The
   building's +0x2C is the middle of its foot (0x2BC920: LeftEdgeXPos + 2.5 Width, 2.5 Depth + BackRowOffset, 0) [R].
   The ray (0x2ED990) runs from the bot along the flat way to the point without end, against the buildings (include
   0x2000): a first building other than bld sends it out into the street and walks at once [R]. The cooldown +0x64 is

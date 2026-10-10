@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "vehicle.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
@@ -35,7 +36,6 @@ struct Vehicles {
     Army *army;
     VehObj o[MAX_OBJS]; int n;
     VehicleEvent ev[MAX_EVENTS]; int nev, next_fx;
-    uint32_t rng;
     TrafficSlot slot[SLOTS]; int nslots;             /* gAIMgr +4 (records), +C (their count) */
     int filled;                                      /* gAIMgr +0x50 bit 2: the first fill is done */
     int block_vehicles;                              /* gp - 0x6C78: vehicles of slot 0 */
@@ -48,10 +48,11 @@ struct Vehicles {
 
 /* ---------------------------------------------------------------- small things */
 
-static float frand(Vehicles *v)                      /* [G] gWorld.frand(): [0, 1), not the game's Park-Miller (0x106BD0) */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(Vehicles *v)
 {
-    v->rng = v->rng * 1664525u + 1013904223u;
-    return (float)(v->rng >> 8) / 16777216.0f;
+    (void)v;
+    return wrand_frand();
 }
 
 static int same_text(const char *x, const char *y)   /* any case, as the game compares names (0x32C9C8) */
@@ -1590,13 +1591,11 @@ Vehicles *vehicle_new(const VehicleHost *host)
         return NULL;
     if (host)
         v->host = *host;
-    v->rng = 0x5EED1234u;
     v->next_fx = 1;
     return v;
 }
 
 void vehicle_free(Vehicles *v) { free(v); }
-void vehicle_seed(Vehicles *v, uint32_t seed) { v->rng = seed; }
 void vehicle_bind_army(Vehicles *v, Army *army) { v->army = army; }
 
 void vehicle_clear(Vehicles *v)

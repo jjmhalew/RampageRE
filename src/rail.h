@@ -133,7 +133,6 @@ typedef struct { int type, id, obj, monster, level; const char *name; float v[3]
 
 Rail *rail_new(const RailHost *host);
 void rail_free(Rail *r);
-void rail_seed(Rail *r, uint32_t seed);              /* gWorld.frand()'s stand-in */
 void rail_bind_army(Rail *r, Army *army);            /* addStats through army_add_stats (NULL: RE_STATS only) */
 
 /* a template's Script|ScriptName is one of ours (no Rail needed: for the block loader's and army.c's hand-over) */

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "game.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define MAX_EVENTS 256
@@ -78,7 +79,6 @@ struct Game {
     int boss_finished;                               /* the city script's bIsBossBlockFinished */
     int centre_down, ny_watch, ny_moved;             /* NewYork::BossResultsNI: the centre building, the watch */
     int left;                                        /* GE_EXIT given: the world is being left, nothing runs */
-    uint32_t rng;
     GameEvent ev[MAX_EVENTS]; int nev;
 };
 
@@ -86,16 +86,12 @@ static void step(Game *g);
 
 /* ---------------------------------------------------------------- helpers */
 
-/* gWorld.frand (TypeWorldScriptInterface 0x17 -> 0x106BD0) [R]: Park-Miller on gWorld +0x828, s = 16807 s mod
- * (2^31 - 1) (2^31 - 1 itself becomes 0), answered as s / 2^31. The game's state is shared by every script and
- * findPointInRubble; here the flow's scripts have their own */
+/* gWorld.frand (TypeWorldScriptInterface 0x17 -> 0x106BD0) [R]: Park-Miller on gWorld +0x828, answered as s / 2^31;
+ * the one state every script and findPointInRubble share (wrand.c) */
 static float frand(Game *g)
 {
-    uint64_t x = (uint64_t)g->rng * 16807u;
-    x = (x & 0x7FFFFFFFu) + (x >> 31);
-    x = (x & 0x7FFFFFFFu) + (x >> 31);
-    g->rng = x == 0x7FFFFFFFu ? 0 : (uint32_t)x;
-    return (float)g->rng * (1.0f / 2147483648.0f);
+    (void)g;
+    return wrand_frand();
 }
 
 static GameEvent *emit(Game *g, int type, int slot)
@@ -1046,7 +1042,7 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
         g->cfg.num_bots = 0;
     if (g->cfg.num_cities <= 0)
         g->cfg.num_cities = 7;
-    g->rng = g->cfg.seed ? g->cfg.seed : 0x2545F491u;
+    wrand_seed_pm(g->cfg.seed ? g->cfg.seed : 0x2545F491u);   /* RWorld's reset: GameStatus seed[0] */
     g->start_block = g->cfg.start_block;
     g->king_block = g->king_city = g->king_world = g->first_place = g->second_place = -1;
     g->results_screen = -1;
@@ -1150,7 +1146,7 @@ void game_auto_results(Game *g, float seconds) { if (g) g->auto_results = second
 void game_restart_shell(Game *g) { if (g) set_state(g, GS_EXIT); }
 void game_add_points(Game *g, int slot, int cat, int amount) { if (g) add_points(g, slot, cat, amount); }
 
-uint32_t *game_rng(Game *g) { return g ? &g->rng : NULL; }
+uint32_t *game_rng(Game *g) { return g ? wrand_pm_state() : NULL; }
 float game_frand(Game *g) { return g ? frand(g) : 0; }
 
 void game_set_boss_finished(Game *g, int centre_down)

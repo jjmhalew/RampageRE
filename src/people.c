@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "people.h"
+#include "wrand.h"
 
 #define PI 3.14159265f
 #define DEG (180.0f / PI)
@@ -23,7 +24,6 @@ struct People {
     int n, cap;
     PeopleClipSeconds clip_seconds;
     void *ctx;
-    uint32_t rng;
     float droppable_rate;
     const PeopleMonster *m;                          /* this frame's monsters */
     int nm;
@@ -44,10 +44,11 @@ struct People {
 
 /* ---------------------------------------------------------------- small things */
 
-static float frand(People *p)                        /* [G] gWorld.frand(): [0, 1), not the game's sequence */
+/* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
+static float frand(People *p)
 {
-    p->rng = p->rng * 1664525u + 1013904223u;
-    return (float)(p->rng >> 8) / 16777216.0f;
+    (void)p;
+    return wrand_frand();
 }
 
 static const char *tstr(const Person *q, const char *key) { return q->tmpl.at ? group_str(q->tmpl, key) : NULL; }
@@ -1127,7 +1128,6 @@ People *people_new(PeopleClipSeconds clip_seconds, void *ctx)
         return NULL;
     p->clip_seconds = clip_seconds;
     p->ctx = ctx;
-    p->rng = 12345;
     p->droppable_rate = 0.5f;                        /* the blocks' DroppableDef rate */
     return p;
 }
@@ -1140,7 +1140,6 @@ void people_free(People *p)
     }
 }
 
-void people_seed(People *p, uint32_t seed) { p->rng = seed; }
 void people_set_droppable_rate(People *p, float rate) { p->droppable_rate = rate; }
 
 int people_add(People *p, Group tmpl, const float pos[3], float heading_deg)
