@@ -97,13 +97,16 @@ typedef struct {
     int city_index;                                  /* ShellData CityData.City<n>: 0 LasVegas .. 6 NewYork */
     int num_cities;                                  /* 7 (CityData City0 .. City6) */
     int start_block;                                 /* GameStatus +0x210 (0: the city's BlockStart) */
-    uint32_t seed;                                   /* gWorld.frand's stand-in */
+    uint32_t seed;                                   /* gWorld +0x828: GameStatus seed[0] (RWorld reset 0x2B74D0) */
+    uint32_t cheats;                                 /* gCommon.getCheatFlags (0x4D7E68): 0x10000 | 0x20000 skip a
+                                                      * block (0x324930) */
 } GameConfig;
 
 /* ---- what the module is told each frame */
 typedef struct {
     float hp[GAME_PLAYERS];                          /* each monster's hit points (+0xA4C): 0 or less = defeated */
     int buildings;                                   /* gWorld.getCurrentBuildingCount(): standing, not falling */
+    int centre_down;                                 /* New York: the building at (0, 10, 1) is falling or destroyed */
 } GameInput;
 
 /* ---- what happened (events) */
@@ -111,7 +114,7 @@ enum {
     GE_STATE,          /* the world entered state a (GS_*) */
     GE_BLOCK,          /* activateNextBlock: block a of the BlockList (name its BlockDef name) becomes the current
                         * one; build it (BlockDef|<name>), load its AIDef (army_load_block) but do not activate the AI
-                        * yet (GE_AI_ACTIVATE). The block just left lies 41 towards -y now [G: the manager's slots] */
+                        * yet (GE_AI_ACTIVATE). The block just left lies 41 towards -y now (0x302AF0) */
     GE_RESET,          /* monster slot: resetMonsterState + clearAllGoals; a = 1: also put it at pos facing f */
     GE_PLACE,          /* monster slot: setPosition pos (a = 1: pos is added to where it is); no reset, its facing kept */
     GE_AI,             /* monster slot: setIsAI(a); b = 1: and destroyBuildings (a bot in BeginBlockNI) */

@@ -95,7 +95,14 @@ All of them call `SetupNI(0.25)` on their first call: they run every 0.25 s.
 The blocks of a city lie one behind the other, 41 apart along y: (5 × 2 + 5 × 2) + (5 × 2 × 2 + 1) in the scripts.
 activateNextBlock already happened when the results play, so the block just won lies at −41: its rubble around
 (0, −21), its street around −46. That is where the winner poses, and the end-of-block walk leads from there to the new
-street at −5.2. **[G]**: the block manager's slots are not read.
+street at −5.2. The block manager lays them out again at each activation (0x302800, 0x302AF0) [R]: the new current
+block's slot (+0x120) at y 0, the next (+0x1B0) at 41 (0x302F0C), the one after (+0x1C0) at 82 (0x303044); a
+building at x = LeftEdgeXPos + 2.5 × Width, y = 5 + its slot's offset (+ BackRowOffset on the back row; 0x305EDC). The
+block left behind only gets its rubble (0x303C90(mgr + 0x18, block, 1)): each BuildingInstance with LeftEdgeXPos in
+−50 … 50 its template's RubbleShape at y −36 (5 − 41), and its GroundShape at (0, −41, 0) (0x303BB0). There is no
+coordinate shift: the game's places stay block-relative. The port keeps the old scene and moves the game's places
+by `block_shift`, which looks the same, but buildings left standing after a time-up stay standing here, where the
+game shows only rubble.
 
 ## When a block is won
 
@@ -159,7 +166,8 @@ next block.
   - **Place**: if the streaker still exists, the monster takes its place and turn and the streaker is deleted. If the
     streaker is gone (deleted once out of view) or no longer on its LineMover (it was smashed and is flying), the
     monster drops in instead. It falls at the point where the camera's look, flattened onto the ground, meets
-    y = −10, at the height where a plane of the camera (its +0x7C; **[G]** the view's top) crosses that point. It
+    y = −10, at the height where the view's top plane crosses that point (gWorld +0x660 + 0x7C is the frustum's
+    fourth side plane, 0x16D150: y = +w in view space; 0x2D3510 takes z there, 0 when |n.z| ≤ 0.001) [R]. It
     faces −y, is in the air (mode 1), and plays `Jump_Butt_Slam_fall`.
   - **Then**: scale 1, HP to the most (MONSTER_DATA +0x138), human cleared, flag 0x20 set.
 - **cancelRespawn** (0x2D36A0) runs at every block's end (0x2DCB40) and on a continue. A monster that is down or
@@ -245,15 +253,18 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
 
 ## What the port does not have
 
-- **[G]** The challenges (ChallengeDef, `ChallengeStatus`, the "Clock" challenge 0x346780, city flag 4), the monster
-  reveal (`startReveal`, flag 8, unlocking Boosy), the profile save, the pause.
-- The bots' `destroyBuildings` AI is director.c's (MULTIPLAYER_NOTES.md). **[G]** The cheat flags 0x10000 and 0x20000 (0x324930: skip a block).
-- **[G]** The world's coordinate shift between blocks: the host decides how it draws the block left behind.
-  `findPointInRubble` is the host's (GE_RUBBLE_FX).
-- **[G]** `NewYork::BossResultsNI` and any other non-Levels script: they go to the host's `script` callback, falling
-  back to Levels.bsf's version.
-- **[G]** `gWorld.frand` is an LCG.
-- **[G]** The respawn's drop height is a guess at the camera plane.
+- Elsewhere: the challenges (challenge.c), the monster reveal and Boosy (reveal.c), the profile save (profile.c),
+  the pause (hud.c, PAUSE_NOTES.md), findPointInRubble (reveal.c, GE_RUBBLE_FX).
+- The bots' `destroyBuildings` AI is director.c's (MULTIPLAYER_NOTES.md).
+- Cheat 874098 (flags 0x10000 | 0x20000): 0x324930 wins a block at once while it is not the last [R]. 0x10000 alone
+  also seeds gWorld +0x828 / +0x82C from GameStatus at each activateNextBlock (0x2B65B4); not ported.
+- `NewYork::BossResultsNI` is ported from NewYork.scr: the monsters taunt on the Empire State's roof until the
+  centre building falls (flag 1), or Levels' ResultsNI (flag 2). Any other non-Levels script goes to the host's
+  `script` callback, falling back to Levels.bsf's version.
+- `gWorld.frand` is Park-Miller (0x106BD0 on gWorld +0x828, seeded from GameStatus seed[0] at the world's reset,
+  0x2B74D0) [R]; the game's state is shared by every script, the port's modules each keep their own.
+- **[G]** What becomes of the block left behind's moving objects (0x2B6640 only re-attaches script objects to
+  buildings, 0x309E20).
 - The results screens are not drawn here: `src/hud.c` has them (hud_results; docs/SCREENS_NOTES.md), fed by these
   queries (game_points, game_kills, game_king, game_blocks_won, game_cities_won, game_blocks_to_win,
   game_cities_to_win, game_city_index, game_clock, game_clock_limit, game_block_name, game_city_destroyed ...).

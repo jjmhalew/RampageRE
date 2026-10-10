@@ -988,7 +988,8 @@ static void build(Viewer *v)
                 printf("reveal: %s%s\n", rm >= 0 ? v->roster.name[rm] : "-", v->extra >= 0 ? " (shown)" : "");
             GameConfig gc = { v->play_type ? v->play_type : GP_CAMPAIGN, v->nmon, v->num_bots,
                               campaign_index(CITIES[v->city_index]), 7,
-                              city_block_index(v->city, v->blocks[v->block]), 1 };
+                              city_block_index(v->city, v->blocks[v->block]), v->prof.current.seed[0],
+                              v->prof.cheats };
             v->game = game_new(&gh, &gc);
             v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
@@ -2287,9 +2288,13 @@ static void game_step(Viewer *v, float dt)
     memset(&in, 0, sizeof in);
     for (int k = 0; k < v->nmon && k < GAME_PLAYERS; k++)
         in.hp[k] = v->mon[k].hp;
-    for (uint32_t i = 0; i < v->scene.nbuildings; i++)
-        in.buildings += v->scene.buildings[i].b.state == BUILDING_STANDING ||
-                        v->scene.buildings[i].b.state == BUILDING_FLOOR_FALLING;
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+        const Building *bb = &v->scene.buildings[i].b;
+        in.buildings += bb->state == BUILDING_STANDING || bb->state == BUILDING_FLOOR_FALLING;
+        float cy = 10 + v->block_shift;              /* NewYork.scr's centre (0, 10, 1), in the scene */
+        if (bb->min[0] <= 0 && bb->max[0] >= 0 && bb->min[1] <= cy && bb->max[1] >= cy)
+            in.centre_down = bb->state != BUILDING_STANDING && bb->state != BUILDING_FLOOR_FALLING;   /* (0, 10, 1) */
+    }
     game_update(v->game, dt, &in);
     GameEvent ev[32];
     int ne;

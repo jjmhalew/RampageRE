@@ -23,6 +23,7 @@ enum {
     FN_IS_BLOCK_FINISHED,                            /* Levels::IsBlockFinished */
     FN_BOSS_FINISHED,                                /* <City>::isBossBlockFinished (Las Vegas .. San Francisco) */
     FN_NY_BOSS_FINISHED,                             /* NewYork::isBossBlockFinished */
+    FN_NY_BOSS_RESULTS,                              /* NewYork::BossResultsNI */
     FN_HOST                                          /* another script: the host's, falling back to `fallback` */
 };
 
@@ -75,6 +76,7 @@ struct Game {
     int human[GAME_PLAYERS];                         /* +0xAB4: it became human (a streaker) */
     int buildings;
     int boss_finished;                               /* the city script's bIsBossBlockFinished */
+    int centre_down, ny_watch, ny_moved;             /* NewYork::BossResultsNI: the centre building, the watch */
     int left;                                        /* GE_EXIT given: the world is being left, nothing runs */
     uint32_t rng;
     GameEvent ev[MAX_EVENTS]; int nev;
@@ -84,10 +86,16 @@ static void step(Game *g);
 
 /* ---------------------------------------------------------------- helpers */
 
-static float frand(Game *g)                          /* gWorld.frand: 0 .. 1 [G: the game's generator not read] */
+/* gWorld.frand (TypeWorldScriptInterface 0x17 -> 0x106BD0) [R]: Park-Miller on gWorld +0x828, s = 16807 s mod
+ * (2^31 - 1) (2^31 - 1 itself becomes 0), answered as s / 2^31. The game's state is shared by every script and
+ * findPointInRubble; here the flow's scripts have their own */
+static float frand(Game *g)
 {
-    g->rng = g->rng * 1664525u + 1013904223u;
-    return (float)(g->rng >> 8) / 16777216.0f;
+    uint64_t x = (uint64_t)g->rng * 16807u;
+    x = (x & 0x7FFFFFFFu) + (x >> 31);
+    x = (x & 0x7FFFFFFFu) + (x >> 31);
+    g->rng = x == 0x7FFFFFFFu ? 0 : (uint32_t)x;
+    return (float)g->rng * (1.0f / 2147483648.0f);
 }
 
 static GameEvent *emit(Game *g, int type, int slot)
@@ -504,6 +512,68 @@ static float results_ni(Game *g, float last)         /* ResultsNI: the winners p
     return g->ni_frequency;
 }
 
+/* NewYork::BossResultsNI [R NewYork.scr]: with the blimp beaten (flag 1) the monsters taunt on the Empire State's
+ * roof, watched from the air, until the centre building falls; with the buildings gone (flag 2) Levels' ResultsNI.
+ * It never ends by itself */
+static float ny_boss_results_ni(Game *g, float last)
+{
+    if (g->boss_finished == 2)
+        return results_ni(g, last);
+    static const float AT[2][2] = { { 3, 15 }, { -3, 15 } }, FACE[2] = { -0.75f * PI, 0.75f * PI };
+    g->ni_time += last;
+    if (last == 0) {
+        setup_ni(g, 0.25f);
+        script_camera(g, 4, -55, 78, -3, 10, 57);
+        int two = np(g) >= 2;
+        for (int i = 0; i < (two ? 2 : 1); i++) {
+            GameEvent *e = emit(g, GE_RESET, i);
+            e->a = 1;
+            e->pos[0] = two ? AT[i][0] : 0;
+            e->pos[1] = two ? AT[i][1] : 18;
+            e->pos[2] = 61.5f;
+            e->f = two ? FACE[i] : PI;
+            emit(g, GE_AI, i)->a = 1;
+        }
+        emit(g, GE_HUD, -1)->a = 0;
+        for (int i = 0; i < np(g); i++) {
+            g->ni_move_step[i] = (int)(frand(g) * 15.0f);
+            if (i == 0)
+                play_move(g, 0, "Ground_Taunt");
+            else
+                g->ni_move_done[i] = 1;
+        }
+        g->ny_watch = 1;
+        g->ny_moved = 0;
+    }
+    if (!g->ny_moved && g->ni_time >= 1.25f) {       /* the camera comes in */
+        GameEvent *e = emit(g, GE_CAMERA, -1);
+        e->name = "Script";
+        e->pos[0] = -2.61f; e->pos[1] = -13.75f; e->pos[2] = 74.4f;
+        e->v[0] = -3.08f; e->v[1] = 11.93f; e->v[2] = 66.46f;
+        g->ny_moved = 1;
+    }
+    for (int i = 0; i < np(g); i++)                  /* now and then a taunt, a grab or a punch at the roof */
+        if (g->ni_move_done[i] && --g->ni_move_step[i] <= 0) {
+            g->ni_move_step[i] = (int)(frand(g) * 60.0f);
+            static const char *const moves[] = { "Ground_Taunt", "Ground_Grab_Down", "Ground_Punch_Down" };
+            play_move(g, i, moves[(int)(frand(g) * 3.0f) % 3]);
+        }
+    if (g->ny_watch) {
+        int two = np(g) >= 2;
+        for (int i = 0; i < (two ? 2 : 1); i++) {    /* held on the roof */
+            GameEvent *e = emit(g, GE_PLACE, i);
+            e->pos[0] = two ? AT[i][0] : 0;
+            e->pos[1] = 18;
+            e->pos[2] = 61.5f;
+        }
+        if (g->centre_down) {                        /* the centre building goes: the usual view */
+            camera(g, "TwoTilts", 1.5f);
+            g->ny_watch = 0;
+        }
+    }
+    return g->ni_frequency;
+}
+
 static float skip_results_ni(Game *g, float last)    /* SkipResultsNI: no pose; the monsters keep their place */
 {
     g->ni_time += last;
@@ -592,6 +662,7 @@ static float call_ni(Game *g, int fn, int fallback, const char *name, float last
     case FN_BEGIN_LEVEL: case FN_CONTINUE_LEVEL: return begin_level_ni(g, last);
     case FN_BEGIN_BLOCK: return begin_block_ni(g, last);
     case FN_RESULTS: return results_ni(g, last);
+    case FN_NY_BOSS_RESULTS: return ny_boss_results_ni(g, last);
     case FN_SKIP_RESULTS: return skip_results_ni(g, last);
     case FN_END_BLOCK: return end_block_ni(g, last);
     case FN_END_LEVEL: case FN_END_WORLD: return taunt_ni(g, last);
@@ -633,7 +704,9 @@ static int resolve(Game *g, const char *key, int prev, char *name, size_t size)
     }
     if (!colon || strncmp(s, "Levels::", 8) == 0)
         return levels_fn(fn);                        /* no city script has functions of Levels.bsf's names [R] */
-    return FN_HOST;                                  /* e.g. NewYork::BossResultsNI */
+    if (same(s, "NewYork::BossResultsNI"))
+        return FN_NY_BOSS_RESULTS;
+    return FN_HOST;
 }
 
 static void start_ni(Game *g, const char *key, int prev)   /* the entries' "NI" start: +0x10, +0xC = 0, +0x8 = 0 */
@@ -681,7 +754,7 @@ static void block_won(Game *g)
     if (g->cfg.play_type == GP_CAMPAIGN) {
         for (int i = 0; i < np(g); i++)              /* the time bonus, shared */
             add_points(g, i, GPT_TIME_BONUS, g->time_bonus / np(g));
-        /* the "Clock" challenge is told the seconds left (0x346780 on 0x4D5050) [G: the challenges are not ported] */
+        /* the "Clock" challenge is told the seconds left (0x346780 on 0x4D5050): the host's challenge_block_won */
     } else if (g->cfg.play_type == GP_TIMED_RUN)
         g->clock_limit = clock_left(g);              /* what is left goes on to the next block */
     clock_reset(g);
@@ -927,7 +1000,8 @@ static void step(Game *g)
                 g->game_over = 1;
             emit(g, GE_TIME_UP, -1)->a = over;
             adv = 1;
-        }
+        } else if ((g->cfg.cheats & 0x10000u) && (g->cfg.cheats & 0x20000u) && g->cur < g->last)
+            adv = 1;                                 /* [R 0x324930] cheat 874098: the block is won at once */
         if (!g->game_over && g->cfg.play_type == GP_CAMPAIGN) {   /* game over: fewer lives than monsters down */
             int dead = 0;
             for (int i = 0; i < np(g); i++)
@@ -1046,6 +1120,7 @@ void game_update(Game *g, float dt, const GameInput *in)
         for (int i = 0; i < np(g); i++)
             g->hp[i] = in->hp[i];
         g->buildings = in->buildings;
+        g->centre_down = in->centre_down;
     }
     if (g->results_screen >= 0 && g->auto_results > 0 && g->result == GR_NONE) {
         g->results_age += dt;
