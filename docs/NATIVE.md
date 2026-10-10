@@ -41,8 +41,9 @@ one: George, Lizzie, Ralph or Boosy, the first not taken). Players 3 and 4 and t
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
 upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
-autosave notice, the profile popup (one profile, its file; letters and digits type the name, Enter is DONE), the
-main menu, players, monster select, city select, the loading screen, then the game it chose; the Pause menu's Quit
+autosave notice, the movies (the logos and the intro, Start or Enter skips them once a profile exists; the
+Victory movie and the credits after the campaign), the profile popup (one profile, its file; letters and digits type
+the name, Enter is DONE), the main menu, players, monster select, city select, the loading screen, then the game it chose; the Pause menu's Quit
 goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
 square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
 `menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), and the words left once a game
@@ -179,13 +180,14 @@ the other monsters' lines `[2]` .. `[4]`.
 
 ## Not there yet
 - the revealed monster walking on (the viewer has no extra monster for it), Boosy's unlock (the cities' saved flags);
-- grabbing another monster; the movies, the menus' 3D globe and effects.
+- grabbing another monster; the menus' 3D globe and effects.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
 the profile (profile.c), the bosses (boss.c), the cryotube's monster reveal and the rubble's points (reveal.c), the trains, cable cars and freighters (rail.c,
 [RAIL_NOTES.md](RAIL_NOTES.md)), the parade balloons, bikers and food carts (parade.c, [PARADE_NOTES.md](PARADE_NOTES.md)),
-the street and roof objects (streetobj.c, [STREETOBJ_NOTES.md](STREETOBJ_NOTES.md)), the buildings' light and
+the street and roof objects (streetobj.c, [STREETOBJ_NOTES.md](STREETOBJ_NOTES.md)), the movies (movie.c, MPEG-2 and
+their ADPCM sound decoded by hand, [MOVIE_NOTES.md](MOVIE_NOTES.md)), the buildings' light and
 neighbours' shadows (building.c, city.c, [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
 choreography and camera modes (director.c), the block challenges and their upgrades (challenge.c,
 [CHALLENGE_NOTES.md](CHALLENGE_NOTES.md)), the Pause menu (hud.c, [PAUSE_NOTES.md](PAUSE_NOTES.md)), the face queue, head turn and friction (look.c), shadows (shadow.c),

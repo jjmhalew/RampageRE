@@ -50,6 +50,9 @@ void music_stop(float fade_out);
 int  music_playing(void);
 
 void sound_volume(float sfx, float music);   /* the viewer's own gains [G], 1 = as the game */
+/* a stream the mixer pulls (a movie's sound, movie.c): pull(ctx, out, frames) fills stereo 48 kHz frames; at the
+ * music's gain [G]. NULL stops it. */
+void sound_stream(int (*pull)(void *ctx, int16_t *out, int frames), void *ctx);
 /* [R] op 0D multiplies the instance's volume byte (group 0's 0x6A to start) by op[1] / 128 and keeps the low 8 bits;
  * a byte of 128 or more is an SPU volume of 0x4000 or more, which the SPU2 plays phase-inverted and quieter. On (the
  * default) does as the game; off keeps such volumes at 127 [G], to compare by ear. */

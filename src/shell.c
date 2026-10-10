@@ -74,6 +74,7 @@ typedef struct {
     int nfonts;
     int lang;
     float time;                 /* seconds since shell_open: the pulses */
+    int video_pic;              /* the Video quads show the movie's picture (shell_movie_picture) */
 } Gui;
 
 static int tex_find(const Gui *g, const char *name, TexRef *out)
@@ -458,6 +459,7 @@ typedef struct Node {
     int sel, pulse, top;        /* list box: the selection, setHighlightPulse, the first item shown */
     float ep[4]; int has_ep;
     int visible;
+    int video;                  /* the Video quad: the movie's picture when there is one */
     float fade;
     struct Node *parent, *child, *next;
 } Node;
@@ -1111,7 +1113,10 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             /* M 0x200 (the 0x310 boxes): a mask, not drawn [G hud.c]; an untextured 0xFFFFFE quad without it (the
              * title boxes of MonsterSelect and MonsterSheet) is the same mask colour: not drawn either [G] */
             int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex) && !(nd->white_mask && !nd->has_tex);
-            if (drawn && w > 0 && h > 0)
+            if (nd->video && g->video_pic && w > 0 && h > 0) {   /* Video.setVideo: the movie's picture */
+                float wc[4] = { 1, 1, 1, c[3] };
+                emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, 1, 1, wc, NULL, HUD_TEX_VIDEO);
+            } else if (drawn && w > 0 && h > 0)
                 emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, nd->has_tex ? nd->tex.us : 1,
                           nd->has_tex ? nd->tex.vs : 1, c, nd->has_tex ? nd->tex.b : NULL,
                           nd->has_tex ? nd->tex.name : 0);
@@ -1337,6 +1342,7 @@ struct Shell {
     /* gShell (0x4D51F0) */
     int state, attract_state, boot_completed, show_profile;
     float idle, movie_time;
+    float movie_clock;                                   /* seconds since the playing movie started */
     /* gCommon */
     int choose_monster, city_destroyed, quitting, ctrl_mask, platform, region;
     uint32_t cheats;
@@ -1930,6 +1936,7 @@ static void victory_next(Shell *s)
     if (v->video_n == 1 || v->video_n == 2) {
         event(s, SHELL_EVT_MOVIE, v->video_n == 1 ? "Victory" : "Credits", 0, 0);   /* setVictoryShown on the first */
         v->movie_on = 1;
+        s->movie_clock = 0;
         v->movie_left = s->movie_time;
     } else {                                             /* exitVictory: state 3, the shell package again */
         v->on = 0;
@@ -1992,6 +1999,7 @@ static void am_video(Shell *s, int ev, const char *name)
         else {
             event(s, SHELL_EVT_MOVIE, name, 0, 0);
             a->movie_on = 1;
+            s->movie_clock = 0;
             a->movie_left = am_movie_time(s);
         }
     } else if (ev == EV_LOSE)
@@ -2114,6 +2122,7 @@ static int am_state(Shell *s, int st, int ev)
                                 (c == 3 && s->region == 0) || c == 10 ? "ballers" : "credits";
                 event(s, SHELL_EVT_MOVIE, v, 0, 0);
                 a->movie_on = 1;
+                s->movie_clock = 0;
                 a->movie_left = am_movie_time(s);
                 show(a->press, c != 10);
             }
@@ -2150,6 +2159,7 @@ static void am_event(Shell *s, int ev, int pad, float dt)
     if (ev == EV_INIT) {
         a->video = find(r, "Video");
         if (a->video) col_set(a->video->col, 0, 0, 0, 1);
+        if (a->video) a->video->video = 1;
         a->press = find(r, "PressStart");
         a->state = s->attract_state;
         if (a->state > 0 && (a->state & 128)) {
@@ -2171,6 +2181,8 @@ static void am_event(Shell *s, int ev, int pad, float dt)
         am_send(s, EV_START);
     else if (ev == EV_FRAME) {
         a->elapsed += dt;
+        if (a->movie_on)
+            s->movie_clock += dt;
         if (a->movie_on && (a->movie_left -= dt) <= 0)
             a->movie_on = 0;
         am_send(s, EV_FRAME);
@@ -3887,6 +3899,7 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
                 s->vi.L = layout_load(&s->gui, &s->b_vshell, "Victory.ifc", 0);
                 s->vi.video = s->vi.L ? find(s->vi.L->root, "Video") : NULL;
                 if (s->vi.video) col_set(s->vi.video->col, 0, 0, 0, 1);
+                if (s->vi.video) s->vi.video->video = 1;
                 Node *ps = s->vi.L ? find(s->vi.L->root, "PressStart") : NULL;
                 if (ps) ps->F |= 0x400;
             }
@@ -3932,6 +3945,30 @@ void shell_set_profile(Shell *s, const ShellProfile *p)
 }
 
 void shell_set_movie_time(Shell *s, float seconds) { if (s) s->movie_time = seconds > 0 ? seconds : 0; }
+
+/* the playing movie's time left (Victory's or the attract mode's), NULL none */
+static float *movie_left(Shell *s)
+{
+    if (s->vi.on)
+        return s->vi.movie_on ? &s->vi.movie_left : NULL;
+    return s->am.movie_on ? &s->am.movie_left : NULL;
+}
+
+void shell_movie_hold(Shell *s)
+{
+    float *left = s ? movie_left(s) : NULL;
+    if (left) *left = 1e30f;
+}
+
+void shell_movie_end(Shell *s)
+{
+    float *left = s ? movie_left(s) : NULL;
+    if (left) *left = 0;
+}
+
+float shell_movie_clock(const Shell *s) { return s && movie_left((Shell *)s) ? s->movie_clock : -1; }
+
+void shell_movie_picture(Shell *s, int on) { if (s) s->gui.video_pic = on; }
 
 void shell_input_pad(Shell *s, int ev, int button, int pad)
 {
@@ -3997,6 +4034,8 @@ void shell_update(Shell *s, float dt)
     if (dt < 0) dt = 0;
     s->gui.time += dt;
     if (s->vi.on) {
+        if (s->vi.movie_on)
+            s->movie_clock += dt;
         if (s->vi.movie_on && (s->vi.movie_left -= dt) <= 0) {
             s->vi.movie_on = 0;
             victory_next(s);

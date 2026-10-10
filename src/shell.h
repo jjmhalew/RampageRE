@@ -7,9 +7,11 @@
  * and the gShell / gCommon / GameStatus bindings they call. docs/SHELL_NOTES.md has the details ([R] read in the code
  * or the files, [G] a guess or a stand-in).
  *
- * The movies (.pss) are not played: where one would play, an event SHELL_EVT_MOVIE names it and the shell goes on
- * after shell_set_movie_time's seconds (0: at once). The arcade emulators (DESI/JARVOS.ELF, M1.ELF) are skipped the same way
- * (SHELL_EVT_EMULATOR). The 3D parts of the interfaces (CitySelect's globe, the .edf particle effects: the main menu's
+ * The movies (.pss) are the viewer's to play (movie.c): where one plays, an event SHELL_EVT_MOVIE names it; the viewer
+ * says it plays it (shell_movie_hold), gives its picture to the Video quad (shell_movie_picture, the HudQuad's tex
+ * HUD_TEX_VIDEO) by shell_movie_clock's time and ends it (shell_movie_end). One nobody holds lasts
+ * shell_set_movie_time's seconds of black (0: skipped at once). The arcade emulators (DESI/JARVOS.ELF, M1.ELF) are
+ * skipped (SHELL_EVT_EMULATOR). The 3D parts of the interfaces (CitySelect's globe, the .edf particle effects: the main menu's
  * fires and searchlights, the cards' glow, the lava lamp) are not drawn.
  *
  * Use: shell_open() with the volume, how the shell starts (the boot, or back from a game) and the profile as the viewer
@@ -93,6 +95,11 @@ void shell_close(Shell *s);
 void shell_set_profile(Shell *s, const ShellProfile *p);
 /* seconds a movie "plays" (a black screen) where the game would play a .pss; 0 (default): skipped at once */
 void shell_set_movie_time(Shell *s, float seconds);
+/* the movie SHELL_EVT_MOVIE named is played: it lasts until shell_movie_end (or the pad skips it) */
+void shell_movie_hold(Shell *s);
+void shell_movie_end(Shell *s);              /* it is over (Video.status() 3): the shell goes on */
+float shell_movie_clock(const Shell *s);     /* seconds since the playing movie started, -1 none (ended, skipped) */
+void shell_movie_picture(Shell *s, int on);  /* the Video quad shows the movie's picture (1) or black (0) */
 
 /* the pad, as GuiEvent ids: hud.h HUD_EV_* (2 right, 4 left, 8 up, 16 down, 32 back, 64 accept, 128 start, 256 a
  * button). The buttons [R the scripts' use and the layouts' pictures]: 0 = CONTROLLER_B0 (square: the main menu's

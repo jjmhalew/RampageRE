@@ -68,10 +68,12 @@ Addresses are in `RAMPAGE.ELF`.
 movies (`setFlags(1024)`). The main menu with the `TITLE_BASE` logo is the title.
 
 **The port:**
-- Each movie becomes `SHELL_EVT_MOVIE` with its name and lasts `shell_set_movie_time` seconds: 0 by default, so it is
-  skipped at once.
-- In state 2 a movie lasts at least 5 s of black under "Press START" **[G: a stand-in]**. Without that, Start could
-  only arrive during ShortDelay, which ignores it.
+- Each movie becomes `SHELL_EVT_MOVIE` with its name. The viewer plays it (movie.c,
+  [MOVIE_NOTES.md](MOVIE_NOTES.md)): `shell_movie_hold`, the picture in the `Video` quad by `shell_movie_clock`, and
+  `shell_movie_end` at its end, so the shell goes on as at `Video.status()` 3.
+- A movie nobody holds lasts `shell_set_movie_time` seconds: 0 by default, so it is skipped at once. In state 2 it
+  lasts at least 5 s of black under "Press START" **[G: a stand-in]**. Without that, Start could only arrive during
+  ShortDelay, which ignores it.
 - The demo game becomes `SHELL_EVT_ATTRACT_GAME` and is not played.
 
 ## The profile popup (SaveGame, MemoryCard.ifc) [R unless marked]
@@ -356,7 +358,7 @@ static. It is widened in four ways:
 ## Not ported, or guessed [G]
 
 - **Not drawn:**
-  - the movies, the emulators and the demo game;
+  - the emulators and the demo game (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md));
   - the 3D globe and the .edf effects: fires, searchlights, card glow, lava lamp, city rings;
   - the turn of HudQuads.
 - **Popup:**

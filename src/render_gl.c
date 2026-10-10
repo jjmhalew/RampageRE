@@ -161,6 +161,8 @@ struct Renderer {
     BundleTex cache[16]; int ncache;
     Ifl ifl[32]; int nifl;
     uint32_t drawn;
+    const uint8_t *video; int video_w, video_h, video_new;   /* rnd_video */
+    GLuint video_tex;
 };
 
 Renderer *rnd_create(void) { return calloc(1, sizeof(Renderer)); }
@@ -188,7 +190,38 @@ void rnd_free(Renderer *r)
     if (!r)
         return;
     drop_textures(r);
+    if (r->video_tex)
+        glDeleteTextures(1, &r->video_tex);
     free(r);
+}
+
+void rnd_video(Renderer *r, const uint8_t *rgba, int w, int h)
+{
+    r->video = rgba;
+    r->video_w = w;
+    r->video_h = h;
+    r->video_new = 1;
+}
+
+/* the movie's texture, uploaded when it changed */
+static GLuint video_texture(Renderer *r)
+{
+    if (!r->video)
+        return 0;
+    if (!r->video_tex) {
+        glGenTextures(1, &r->video_tex);
+        glBindTexture(GL_TEXTURE_2D, r->video_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+        r->video_new = 1;
+    }
+    glBindTexture(GL_TEXTURE_2D, r->video_tex);
+    if (r->video_new)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, r->video_w, r->video_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, r->video);
+    r->video_new = 0;
+    return r->video_tex;
 }
 
 uint32_t rnd_triangles(const Renderer *r) { return r->drawn; }
@@ -474,15 +507,17 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     for (int i = 0; i < s->nhud; i++) {
         const HudQuad *q = &s->hud[i];
-        GLuint id = q->b ? texture(r, q->b, q->tex) : 0;
+        GLuint id = q->b ? texture(r, q->b, q->tex) : q->tex == HUD_TEX_VIDEO ? video_texture(r) : 0;
         if (q->b && !id)
             continue;
+        static const float black[4] = { 0, 0, 0, 1 };
+        const float *col = !q->b && q->tex == HUD_TEX_VIDEO && !id ? black : q->col;   /* no picture: black */
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
         } else
             glDisable(GL_TEXTURE_2D);
-        glColor4fv(q->col);
+        glColor4fv(col);
         glBegin(GL_QUADS);
         glTexCoord2f(q->u0, q->v0); glVertex2f(q->x0, q->y0);
         glTexCoord2f(q->u1, q->v0); glVertex2f(q->x1, q->y0);

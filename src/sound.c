@@ -128,6 +128,8 @@ static struct {
     int wrap;                            /* 1: op 0D's volume wraps as the game's does */
     int manual_mix;
     float pending;                       /* seconds of audio to move on by when nothing pulls */
+    int (*pull)(void *ctx, int16_t *out, int frames);   /* sound_stream */
+    void *pull_ctx;
 } S;
 
 /* ---- PS-ADPCM ([R] the SPU's format: 16-byte frames, shift | filter << 4, flags, 28 nibbles) */
@@ -883,6 +885,18 @@ static void mix_block(float *out, int frames)
                 m->at++;
         }
     }
+    if (S.pull) {                        /* a movie's sound */
+        static int16_t st[2 * 1024];
+        S.pull(S.pull_ctx, st, frames);
+        for (int i = 0; i < 2 * frames; i++)
+            out[i] += st[i] * S.music_gain;
+    }
+}
+
+void sound_stream(int (*pull)(void *ctx, int16_t *out, int frames), void *ctx)
+{
+    S.pull = pull;
+    S.pull_ctx = ctx;
 }
 
 int sound_mix(int16_t *out, int frames)

@@ -35,6 +35,7 @@
 #include "reveal.h"
 #include "profile.h"
 #include "shell.h"
+#include "movie.h"
 #include <ctype.h>
 #include <time.h>
 #include "boss.h"
@@ -191,6 +192,7 @@ typedef struct Viewer {
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
     int prof_on_card;                                /* its file exists (the shell's profile list) */
     Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
+    Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
     ShellGame last_game;                             /* the shell's last choices (back from a game) */
     const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
@@ -4123,6 +4125,61 @@ static void shell_enter(Viewer *v, const ShellStart *st)
         rnd_scene(v->rnd, v->shell_scene);           /* (the texture cache is keyed by the bundles: anew) */
 }
 
+/* the movie's sound, pulled by the mixer */
+static int movie_pull(void *ctx, int16_t *out, int frames) { return movie_audio(ctx, out, frames); }
+
+static void movie_stop(Viewer *v)
+{
+    if (!v->movie)
+        return;
+    sound_stream(NULL, NULL);
+    rnd_video(v->rnd, NULL, 0, 0);
+    movie_close(v->movie);
+    v->movie = NULL;
+    if (v->shell)
+        shell_movie_picture(v->shell, 0);
+}
+
+/* SHELL_EVT_MOVIE: playVideo(name), name.pss from the Vol (the NTSC ones) */
+static void movie_start(Viewer *v, const char *name)
+{
+    movie_stop(v);
+    v->movie = movie_open(&v->vol, name);
+    if (!v->movie) {
+        printf("no movie %s\n", name);
+        return;
+    }
+    shell_movie_hold(v->shell);
+    sound_stream(movie_pull, v->movie);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  movie %s\n", name);
+}
+
+/* the movie at the shell's time: its picture to the Video quad; at its end the shell goes on; skipped: stopped */
+static void movie_step(Viewer *v)
+{
+    if (!v->movie)
+        return;
+    float t = v->shell ? shell_movie_clock(v->shell) : -1;
+    if (t < 0) {
+        movie_stop(v);
+        return;
+    }
+    int w, h, changed;
+    const uint8_t *pic = movie_video(v->movie, t, &changed);
+    movie_size(v->movie, &w, &h);
+    if (pic) {
+        if (changed)
+            rnd_video(v->rnd, pic, w, h);
+        shell_movie_picture(v->shell, 1);
+    }
+    if (movie_done(v->movie, t)) {
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  movie over: %d pictures\n", movie_pictures(v->movie));
+        shell_movie_end(v->shell);
+    }
+}
+
 /* what the shell asked for since the last call; 1 when a game is to start */
 static int shell_answer(Viewer *v)
 {
@@ -4180,9 +4237,11 @@ static int shell_answer(Viewer *v)
             case SHELL_EVT_BUDDY_PROFILE: shell_buddy_profile(v->shell, -1); break;   /* no second profile here */
             case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
             case SHELL_EVT_START: start = 1; break;
-            default: break;                          /* the movies, the emulators, the demo game: skipped */
+            case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
+            default: break;                          /* the emulators, the demo game: skipped */
             }
         }
+    movie_step(v);
     return start;
 }
 
@@ -4236,6 +4295,7 @@ static void shell_start_game(Viewer *v)
     v->clip = -1;
     v->play = have_monster(v);
     v->last_game = *g;
+    movie_stop(v);
     shell_close(v->shell);
     v->shell = NULL;
     v->exit_game = 0;

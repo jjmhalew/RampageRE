@@ -32,6 +32,9 @@ Renderer *rnd_create(void);
 void rnd_scene(Renderer *r, const Scene *s);       /* drops the textures of the scene before */
 void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fog);
 void rnd_free(Renderer *r);
+/* the movie's picture (RGBA, w x h, the first row on top) for the HudQuads with tex HUD_TEX_VIDEO; it is read at
+ * the next rnd_frame, so it stays valid until then; NULL: none (the quads stay black) */
+void rnd_video(Renderer *r, const uint8_t *rgba, int w, int h);
 uint32_t rnd_triangles(const Renderer *r);          /* drawn in the last frame */
 int shot_png(const char *path, int width, int height);   /* the back buffer to a PNG (shot.c) */
 
