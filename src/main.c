@@ -848,6 +848,7 @@ static void build(Viewer *v)
             int n = parade_load_block(v->parade, v->scene.block);
             if (getenv("RAMPAGE_TRACE"))
                 printf("parade: %d objects\n", n);
+            parade_activate(v->parade, !v->game);    /* the game's BeginBlockNI activates it (GE_AI_ACTIVATE) */
         }
     }
     v->scene.parade = v->parade;
@@ -2398,7 +2399,10 @@ static void game_step(Viewer *v, float dt)
                 else if (e->a == 1)
                     game_move_done(v->game, e->slot);
                 break;
-            case GE_AI_ACTIVATE: if (v->army) army_activate(v->army, 1); break;
+            case GE_AI_ACTIVATE:
+                if (v->army) army_activate(v->army, 1);
+                parade_activate(v->parade, 1);
+                break;
             case GE_HUD:                             /* every player's HUD */
                 for (int k = 0; k < v->nmon; k++)
                     if (v->mon[k].hud)

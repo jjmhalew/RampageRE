@@ -17,6 +17,7 @@
 
 struct Parade {
     ParadeHost host;
+    int active;                                      /* gAIMgr activated (bit 8, 0x2A6208): its delays run */
     ParadeObj o[MAX_OBJS];
     int n;
     int gone_age[MAX_OBJS];                          /* frames since a slot went (a slot is reused after 2 s) */
@@ -111,7 +112,8 @@ static int nearest_monster(const Parade *p, const float pos[3])   /* getNearestM
     return best;
 }
 
-/* the world matrix (column-major) of a place turned by setFacing (x, y, z): R = Rz(z) Ry(y) Rx(x) [G, as army.c] */
+/* the world matrix (column-major) of a place turned by setFacing (x, y, z): R = Rz(z) Rx(x) Ry(y) [R 0x277E78 ->
+ * 0x101330(m, z, x, y)] */
 static void update_world(ParadeObj *o)
 {
     if (o->sphere.on && o->cm_on) {                  /* flying: its mover's matrix */
@@ -120,9 +122,9 @@ static void update_world(ParadeObj *o)
     }
     float ax = o->rot[0], ay = o->rot[1], h = o->rot[2];
     float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
-    float r[9] = { ch * cy, sh * cy, -sy,
-                   ch * sy * sx - sh * cx, sh * sy * sx + ch * cx, cy * sx,
-                   ch * sy * cx + sh * sx, sh * sy * cx - ch * sx, cy * cx };
+    float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,   /* Rz(h) Rx(ax) Ry(ay) */
+                   -sh * cx, ch * cx, sx,
+                   ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
     for (int c = 0; c < 3; c++) {
         for (int k = 0; k < 3; k++)
             o->world[4 * c + k] = r[3 * c + k];
@@ -187,11 +189,11 @@ static void slerp(const float a[4], const float b0[4], float f, float out[4])
         out[k] *= len;
 }
 
-/* setPulseDelay: [G] the next pulse is that far from now; [R] below 0.01 there are none (0x309BA0 skips the count) */
+/* setPulseDelay (ScriptObject 0x2AA2A0, Actor 0x2A94C8) [R]: only the delay; the count runs on. Below 0.01 there are
+ * no pulses (0x309BA0 skips the count) */
 static void set_pulse(ParadeObj *o, float delay)
 {
     o->pulse_delay = delay;
-    o->pulse_time = 0;
 }
 
 /* ---------------------------------------------------------------- the actor's anim (0x30AAD0) */
@@ -388,11 +390,7 @@ static int sphere_step(Parade *p, ParadeObj *o, float dt)
         collide_mover_init(&o->cm, r, tnum(o, "Gravity", 9.81f), tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
                            tnum(o, "SlidingFriction", 0.4f), tnum(o, "InertiaSolidity", 1));
         update_world(o);                             /* from where it is, turned as it is */
-        float w[3];
-        for (int k = 0; k < 3; k++)
-            w[k] = o->world[k] * o->sphere.spin[0] + o->world[4 + k] * o->sphere.spin[1] +
-                   o->world[8 + k] * o->sphere.spin[2];
-        collide_mover_spin(&o->cm, w);
+        collide_mover_spin(&o->cm, o->sphere.spin);  /* [R 0x28DD80] the rates as given: about a world axis */
         collide_matrix_from16(o->cmat, o->world);
         o->cm_on = 1;
     }
@@ -596,21 +594,6 @@ static int balloon_damage(Parade *p, ParadeObj *o, int m)
     return 1;
 }
 
-/* the balloon's box (AutoCollisionBox): the model's bounds, else [G] its ShadowRect and 3 up and down */
-static void balloon_box(const Parade *p, const ParadeObj *o, float lo[3], float hi[3])
-{
-    if (o->shape && p->host.shape_box && p->host.shape_box(p->host.ctx, o->shape, lo, hi))
-        return;
-    lo[0] = -5; lo[1] = -2; lo[2] = -3;
-    hi[0] = 4.5f; hi[1] = 2; hi[2] = 3;
-    Group sr = group_sub(group_sub(o->tmpl, "ShadowData"), "ShadowRect");
-    Record r[4];
-    if (sr.at && group_items(sr, r, 4) == 4) {
-        lo[0] = record_num(r[0]); lo[1] = record_num(r[1]);
-        hi[0] = record_num(r[2]); hi[1] = record_num(r[3]);
-    }
-}
-
 /* ---------------------------------------------------------------- Biker.bsf and Bike.bsf */
 
 static void bike_hit(Parade *p, ParadeObj *b)        /* Bike.bsf eventMonsterHit: the nearest monster smashes it */
@@ -768,14 +751,14 @@ static void biker_anim_done(Parade *p, ParadeObj *o)   /* onAnimComplete [R] */
         start_anim(p, o, "PickedUp", 0);
 }
 
-/* TakeDamage(monster) [R], not while flying from a throw (state 5): smashed, then this.actor.onPickup() ([G] its
- * script's onPickup, so state 2 and no pulses: it lands and lies there), PickedUp, and its bike is smashed too */
+/* TakeDamage(monster) [R], not while flying from a throw (state 5): smashed (state 5), then this.actor.onPickup(), the
+ * Actor native (id 0x44 -> 0x30C5E0(actor, 0)): its AmbientEffect and ChallengeEffect stopped, nothing else; then
+ * PickedUp, and its bike is smashed too. It flies in state 5: deleted when it lands, or when flyingDuration is up */
 static int biker_damage(Parade *p, ParadeObj *o, int m)
 {
     if (!monster(p, m) || o->state == 5)
         return 0;
     biker_smash(p, o, m);
-    biker_pickup(p, o);
     start_anim(p, o, "PickedUp", 0);
     if (alive(p, o->partner) && p->o[o->partner].kind == PAK_BIKE)
         bike_hit(p, &p->o[o->partner]);
@@ -984,8 +967,8 @@ void parade_update(Parade *p, float dt, const ArmyMonster *m, int nm, float came
             e->monster = p->fart[i].monster;
             p->fart[i--] = p->fart[--p->nfart];
         }
-    for (int i = 0; i < p->npend; i++)               /* gAIMgr: a SpawnDelay instance made, then onWalkIn [R] */
-        if ((p->pend[i].left -= dt) <= 0) {
+    for (int i = 0; p->active && i < p->npend; i++)   /* gAIMgr: a SpawnDelay instance made, then onWalkIn [R]; */
+        if ((p->pend[i].left -= dt) <= 0) {          /* its clock runs only while it is activated (0x333D48) */
             Group g = p->pend[i].inst;
             p->pend[i--] = p->pend[--p->npend];
             make_biker(p, g, 1);
@@ -1083,24 +1066,17 @@ int parade_hit(Parade *p, int monster_i, const float c[3], float radius, int blo
         ParadeObj *o = &p->o[i];
         if (o->phase == PAP_GONE || o->phase == PAP_HELD || o->last_blow == blow)
             continue;
-        int touched = 0;
-        if (o->kind == PAK_BALLOON) {                /* [G] the sphere against its box, in its own frame */
-            float lo[3], hi[3], d[3] = { c[0] - o->pos[0], c[1] - o->pos[1], c[2] - o->pos[2] }, l[3], q = 0;
-            balloon_box(p, o, lo, hi);
-            for (int k = 0; k < 3; k++)
-                l[k] = o->world[4 * k] * d[0] + o->world[4 * k + 1] * d[1] + o->world[4 * k + 2] * d[2];
-            for (int k = 0; k < 3; k++) {
-                float e = l[k] < lo[k] ? lo[k] - l[k] : l[k] > hi[k] ? l[k] - hi[k] : 0;
-                q += e * e;
-            }
-            touched = q <= radius * radius;
-        } else if (o->kind == PAK_BIKER || (o->kind == PAK_CART && o->phase == PAP_ALIVE)) {
-            /* [G] CollisionRadius about its place (DefActorProps 2, a person's 1 up; the carts 3 and 2.5) */
-            float rr = tnum(o, "CollisionRadius", 2) + radius, up = o->kind == PAK_BIKER ? 1.0f : 0.0f;
-            float dx = o->pos[0] - c[0], dy = o->pos[1] - c[1], dz = o->pos[2] + up - c[2];
-            touched = dx * dx + dy * dy + dz * dz <= rr * rr;
-        }
-        if (!touched)
+        if (o->kind != PAK_BALLOON && o->kind != PAK_BIKER && !(o->kind == PAK_CART && o->phase == PAP_ALIVE))
+            continue;
+        /* [R 0x2E2598] the monster's sphere against the object's own shape (0x28FD70: obj_shape) with 0x280470 */
+        CollideObj co;
+        float nrm[3], pt[3], push[3];
+        memset(&co, 0, sizeof co);
+        obj_shape(p, o, &co.shape);
+        collide_matrix_from16(co.m, o->world);
+        co.flags = COLLIDE_F_WORLD;
+        co.building = -1;
+        if (!collide_obj_sphere(&co, c, radius, nrm, pt, push))
             continue;
         int took = 0;
         if (o->kind == PAK_BALLOON)
@@ -1272,6 +1248,7 @@ void parade_clear(Parade *p)
 }
 
 void parade_set_collide(Parade *p, CollideWorld *w) { p->cw = w; }
+void parade_activate(Parade *p, int on) { if (p) p->active = on; }
 
 void parade_collide_add(Parade *p, CollideWorld *w)
 {

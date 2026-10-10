@@ -149,6 +149,7 @@ int parade_events(Parade *p, ParadeEvent *out, int max);   /* takes the events s
  * TakeDamage. blow: the caller's number for the attack (it changes when an attack is armed again); [G] an object
  * takes one TakeDamage per blow. How many it hit */
 int parade_hit(Parade *p, int monster, const float centre[3], float radius, int blow);
+void parade_activate(Parade *p, int on);   /* gAIMgr.activate: the SpawnDelays run only while it is on */
 /* doGrabObject's search: Pickupable, not held, in front of root, nearest within radius of hand; -1 none */
 int parade_nearest_pickup(const Parade *p, const float hand[3], const float root[3], const float forward[3],
                           float radius);

@@ -54,7 +54,7 @@ becomes 8 off, more than 5 in y becomes 3, more than 2.5 in z becomes 1. A LineM
 
 **rotateBalloon** [R], every frame: the wobble's scale (1 at rest) falls by 4 a second while above 1; the clock t
 grows by the frame's step; facing = (π/3 + 0.0625 s sin 2t, 0.0625 s cos 3t, −π/2). The models face −y, so with
-R = Rz Ry Rx it flies on its face, head first towards −x [G: the order of setFacing's angles].
+R = Rz Rx Ry (setFacing: 0x277E78 → 0x101330(m, z, x, y)) [R] it flies on its face, head first towards −x.
 
 **onMoverCallback(2)** [R]: states 1, 2 and 8 move on; 4 (knocked) goes back to its start at 4 (state 8); 9
 deletes it.
@@ -96,10 +96,10 @@ The bike deletes itself at the end of its line (`Bike.bsf onMoverCallback`, any 
 **onAnimComplete** [R]: in states 4 and 1 `Ride` again, in state 2 `PickedUp` again.
 
 **TakeDamage(monster)** [R], not in state 5: `smash` (smashObject, `FlyingSound` `V_Man_Falling`, state 5), then
-`this.actor.onPickup()` (taken as its script's onPickup [G]: state 2, `PickedUp`, no pulses, `Voice`
-`V_Biker_grabbed`), `PickedUp`, and its bike's `eventMonsterHit`: the nearest monster smashes the bike, which is
-deleted 1.5 s later (counted down by its 1 s pulses). In state 2 nothing deletes the biker: it flies, lands and
-lies there, still Pickupable.
+`this.actor.onPickup()`, the Actor native (id 0x44 → 0x30C5E0(actor, 0)): it stops its AmbientEffect and
+ChallengeEffect (the NPC_Target marker), nothing else [R]; then `PickedUp`, and its bike's `eventMonsterHit`: the
+nearest monster smashes the bike, which is deleted 1.5 s later (counted down by its 1 s pulses). The biker stays in
+state 5: OnHitGround deletes it when it lands, or its pulses once flyingDuration is up.
 
 **The hold** [R] (0x2DA310, then its onPickup): `PickedUp` (the `Biker_Held` model), no pulses, `Voice`. The bike
 rides on alone to the end of its line.
@@ -125,8 +125,9 @@ there is none. Node 1 at rest [R, the stands' RawAnims]: `Point01` (0, 0.417, 4.
 stand, the stand deleted.
 
 **onThrow(monster, eaten)** [R]: `HitEffect` (`Debris_Generic`) on it. Eaten: `Monsters::timedDoFart` 2 s later
-(always) and `gCommon.addStats(food, slot, 0)` (Health 30, 50 points into category 0, the `HotdogCart1` goal); [G]
-the engine takes it away as an eaten actor. Not eaten: smashObject, this.flags 2, no longer Pickupable, pulsing
+(always) and `gCommon.addStats(food, slot, 0)` (Health 30, 50 points into category 0, the `HotdogCart1` goal); the
+engine takes it away: throwObject (0x2D9DC0) gives an object with flag 0x80000 no throw, and an eaten one
+requestDelete (vtable +0x58, 0x2DA2A0) [R]. Not eaten: smashObject, this.flags 2, no longer Pickupable, pulsing
 every 0.25 s, and `gCommon.addPoints(slot, 0, Points)`: 50 points without the challenge's count. `Reaction`
 (`Burp`, HotdogCart1) is not read by this script.
 
@@ -161,27 +162,31 @@ template's name is what the challenge counts (0x346780).
   addPoints, the fart, the biker's weapon on and off, removals.
 
 ## Not traced / guessed
-- **[G] One TakeDamage per blow.** The sender (0x28FBB0 / 0x30C1C0) has no guard, and who calls it per frame (the
-  monster's attack against objects) was not traced. The port lets each armed attack (`blow`, counted by the caller)
-  take one hit point of a balloon, so five blows pop one.
-- **[G] The hit tests**: a balloon's box (`AutoCollisionBox`: the model's bounds, turned with it; without them its
-  ShadowRect and ±3 in z), a biker's `CollisionRadius` (2) 1 up, a cart's food's `CollisionRadius` (3, 2.5) about its
-  place.
-- **[G] setFacing's order** (Rz Ry Rx, as army.c and boss.c take it) decides which way the balloons lean.
-- **[G] `this.actor.onPickup()`** in Biker.bsf's TakeDamage is taken as the script's own onPickup (as people.c).
+- **One TakeDamage per blow** [R]: the monster's object test (0x2E22B0) puts an OnlyHitWithEffNodes (0x8000) object
+  on the attack's hit list (0x2E33A0, emptied when an attack is armed); the balloons, bikers and carts all have it,
+  and unarmed spheres do nothing to them. The port lets each armed attack (`blow`, counted by the caller) take one
+  hit point of a balloon, so five blows pop one.
+- **The hit tests** [R 0x2E2598]: the monster's sphere against the object's own shape (0x28FD70, `obj_shape`) with
+  0x280470 (`collide_obj_sphere`).
 - **The SpherePhysicsMover** is the game's (collide.c `collide_mover_step`, 0x28E440) in the frame's collision world
   (`parade_set_collide`, `parade_collide_add`): `Gravity` (9.81 for the biker, DefObjectProps' 35 for the bike and
   the food), `Mass` (1), `Restitution` (0.8), `SlidingFriction` (0.4), `InertiaSolidity` and the shape's radius;
-  smashObject's turn rates as its spin about the object's axes [G]. `OnHitGround` every sub-step it touches (the
+  smashObject's turn rates as an angular velocity about a world axis (0x28DD80: axis r / |r|, rate |r|) [R]. `OnHitGround` every sub-step it touches (the
   biker in state 5 is deleted at the first); what it meets (a building's front or side, a car) is a contact, and its
   TakeImpact (none of these scripts has one) goes to another module's object through `PAE_IMPACT`. No rest: it
-  rolls on until its script deletes it. [G] The monsters are left out of what it meets.
+  rolls on until its script deletes it. The monsters are left out of what it meets: their WCISpheres (type 3) never
+  meet a shape (0x27FD70) [R].
 - **The shapes in the world** (0x28FD70, `collide_shape_pick`): the template's CollisionBox, CollisionRadius (the
   bikers' 2, the carts' food 3 and 2.5, about the model's middle) or AutoCollisionBox (the balloons) with the model's
-  box, else the model's bounding sphere [G: the box's], read once. The carts and balloons are PushOutMonsters: the
+  box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres from the file, 0x185AA0), read
+  once [R; the port takes the box's bounding sphere, G]. The carts and balloons are PushOutMonsters: the
   monster is pushed out of them (collide_monster).
-- **[G] Pulses** restart their count when set (as vehicle.c); `getTimeStep` is 1/60; `frand` is an LCG.
-- **[G] The world's state 6** is taken as always true for the chains; gAIMgr's delays count from the block's load.
+- **Pulses** [R]: setPulseDelay only sets the delay; the count runs on (0x309BA4, the Actor's 0x30CEA0).
+  `getTimeStep` is gWorld +4, the world's fixed step **[G: 1/60; where it is set was not found, 0x348C90 picks 1/60
+  or 1/30]**; `frand` is Park-Miller (0x106BD0) [R], here a generator of its own.
+- **The world's state 6** for the chains: the Actor's destructor tests state 6 and a current block ≥ 0 (0x30DFC0)
+  [R]; the port takes it as always true. gAIMgr's clock is reset at the block's load (0x334C40) and runs only while
+  it is activated (BeginBlockNI, 0x333D48) [R]: `parade_activate`.
 - **[G] Clip lengths**: from the host, else the bikers' as read from SanFrancisco.bdp (`Biker_Riding_Throw` 0.7 s,
   `Biker_Held` 1.0 s), else 1 s.
 - **Not ported**: the riderless bike's `onMoverCallback` from a SphereMover (taken to come only from its line), `onBuildingDestruction` (never sent
