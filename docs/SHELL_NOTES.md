@@ -348,7 +348,12 @@ static. It is widened in four ways:
   camera, the shape's model from its interface's bundle (each mesh on its node at the rest pose), lit by its set, and
   the effect's particles (fx.c over that bundle and fx.bdp, `fx_spawn_frame` / `fx_place` in the effect's frame, an
   effect on a node in that node's frame on the drawn model). The depth is cleared once a frame; the 2D quads write
-  none **[G]**. The effect's size follows its frame's scale **[G]**.
+  none: they go through the same camera at depth 1 and CitySelect's full-screen background is drawn before the
+  globe at depth 10, which still shows (the GUI's begin, 0x231900, sets no depth state of its own) **[R from the
+  picture]**. The effect's size follows its frame's scale **[G]**: GuiEffect's draw (0x2376E0) hands the instance its
+  whole matrix, scale and all (+0x70 to method +0x6C, kept as is at ParticleSystemFx +0x2C, 0x1F1D60; CompositeFx
+  0x1EA1A0 keeps it and passes it on), but whether the billboards' sizes take that scale was not read. Every menu
+  effect's scale is 1 but the city ring's (0.971) and the card glow's (1.32), so only the glow could differ.
 - **The 2D path:** an object outside every `<DD>` has its position in screen widths about the centre, x right and y
   down, and a `<DD>` inside it draws about (320, 240), moved there and scaled by it: the GUI camera at depth 1
   **[R]**. The 1 / (1 + z) of a deeper `<o>` is left out: no shell `<DD>` lies in one.
@@ -378,7 +383,8 @@ tag i at 0x3B28A0 + 16 i + 8; short and long names share them (`la`/`lighting` 0
 **The camera** (0x227AD0, GuiFixedCam 0x227F80): the GUI draws through the GuiCamera's view (controller +0x158,
 0x2319DC).
 - Vertical field of view 0.71808 rad: tan(fov / 2) = 0.375. Near 1, far 10000. The aspect is the viewport's times the
-  float at 0x4CB54C **[not traced; 4:3 taken]**.
+  float at 0x4CB54C (renderer 0x4CB480 + 0xCC, zero in the file, so set at run time; read at 0x16B768)
+  **[not traced; 4:3 taken]**. The port keeps the vertical field and widens the view with the window, as the 2D.
 - The eye at (0, −1, 0) looking at the origin, z up.
 - Each interface's frame is followed by rows (1, 0, 0), (0, 0, −1), (0, 1, 0) (+0x78, ctor 0x239230): GUI (x, y, z)
   is the world's (x, z, −y). A GUI point lands at px = 320 + 640 x / (1 + z), py = 240 + 640 y / (1 + z).
@@ -426,8 +432,10 @@ renderer's sign: the direction the light travels]**. `setAmbient` / `setDiffuse`
 
 **Drawing:** each screen draws its interfaces in order, each in tree order (0x241770): an object with F & 0x201, or
 fade × z ≤ 0.01, is skipped; F 0x40 draws its children alone. F 0x1 is hidden, 0x80 no frame event, 0x100 an update
-after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears the screen and switches to its view
-**[G: its depth state]**.
+after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears the screen (0x25C610, flags 7, depth
+1.0), turns the lights off (0x16E320), sets the draw scale state 0x4CB52C to 1 and switches to its view (0x16DEE0)
+**[R]**; it sets no depth test or write of its own. Gui2D's draw (0x2361E0) only sets its pixel view (0x2363F0 /
+0x22F780).
 
 ## Not ported, or guessed [G]
 
@@ -438,7 +446,8 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
   - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the
     card glow) names a sound, so fx.c's sound start never fires for them (traced through the main menu, MonsterSelect
     and CitySelect);
-  - the `<o>` scale on particle sizes (taken to scale them) **[G]**;
+  - the frame's scale on particle sizes (taken to scale them; it is not 1 only for the city ring and the card
+    glow) **[G]**;
   - the globe's brightness step at Greenwich, where its two halves meet: it stays with the lighting off, so it is in
     the halves' own art, not the port's lights.
 - **Popup:**

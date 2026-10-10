@@ -512,7 +512,7 @@ static void hud_state(float aspect)
 
 /* a 3D layer of the front end through the GUI camera (shell.h): eye (0, -1, 0) looking along +y, z up, a vertical field
  * of view of 2 atan(0.375), near 1, far 10000 [R 0x227AD0]; its models lit by their light set, its particles over them
- * [G: the GUI's depth state was not traced; the 2D quads are taken to write none] */
+ * (the 2D quads write no depth: the globe at depth 10 shows over CitySelect's background at depth 1, drawn before it) */
 static void draw_gui3d(Renderer *r, const SceneGui3D *l, float aspect, double t)
 {
     Camera cam = { { 0, -1, 0 }, 1.5707963f, 0, 41.1120914f, 0, { { 0 } } };
