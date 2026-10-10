@@ -97,7 +97,7 @@ typedef struct {
     float cooldown;          /* +0x64 */
     int avoid; float avoid_time;   /* +0x68, +0x6C: a building it was knocked off */
     float on_target;         /* +0x70: seconds on this target */
-    uint32_t seed;           /* rand01 (0x106950 on gWorld +0x82C) [G: an LCG] */
+    uint32_t seed;           /* (unused: rand01 is the world's one state, dir_ai_seed) */
     int st_front, st_side_l, st_side_r, st_respawn, st_punch_down;   /* +0x74 .. +0x84: the states it goes to */
 } DirBot;
 #define DIR_GOALS 8
@@ -135,6 +135,10 @@ void dir_ai_add_waypoint(DirAI *ai, int goal, const float pos[3], float radius);
 /* Monster.destroyBuildings (binding 157): the DestroyBuildings goal, which never ends (a bot in BeginBlockNI). The
  * states it goes to are looked up in g (0x2F1C10). Returns its index, -1 when the queue is full */
 int dir_ai_destroy(DirAI *ai, const MoveGraph *g, uint32_t seed);
+/* the world's rand01 state (gWorld +0x82C) from GameStatus seed[1], at the world's reset (0x2B74D0) */
+void dir_ai_seed(uint32_t seed);
+/* +0x38 (0x2EEBD0): the monster's foot lock moved it, or its hands lifted it: the destroy goal's cooldown */
+void dir_ai_cooldown(DirAI *ai);
 /* what the monster tells the goal (MonsterAI's forwarders 0x2ED680 .., only while it is AI): a hit on a building's
  * face at pt (hitBuildingPt, x in its frame mirrored as it plays), mounted on building b at rail (mountBuilding),
  * knocked off building b (avoid) */

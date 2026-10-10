@@ -992,6 +992,7 @@ static void build(Viewer *v)
                               city_block_index(v->city, v->blocks[v->block]), v->prof.current.seed[0],
                               v->prof.cheats };
             v->game = game_new(&gh, &gc);
+            dir_ai_seed(v->prof.current.seed[1]);   /* RWorld's reset: gWorld +0x82C */
             v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
@@ -1741,8 +1742,10 @@ static void impact_route(Viewer *v, int tag, int kind, const float at[3], float 
     int i = COLLIDE_TAG_INDEX(tag), hit = 0;
     switch (COLLIDE_TAG_OWNER(tag)) {
     case COLLIDE_OWN_BUILDING:
-        if ((uint32_t)i < v->scene.nbuildings)
+        if ((uint32_t)i < v->scene.nbuildings) {    /* Building::hit (0x2BC150): +0x190 = the attacker if it is a */
+            v->scene.buildings[i].hitter = -1;       /* monster, else none: a thrown object clears it */
             hit = building_hit(&v->scene.buildings[i].b, at, mass / 1000);
+        }
         break;
     case COLLIDE_OWN_VEHICLE: if (v->veh) vehicle_impact(v->veh, i); break;
     case COLLIDE_OWN_RAIL: if (v->rail) rail_impact(v->rail, i); break;
@@ -3468,15 +3471,13 @@ static void bot_views(Viewer *v, DirBuilding *db, DirMonster *dm, DirBotView *bv
     }
 }
 
-/* the TwoTilts camera frames this monster: one in the scene, and with others, one not hidden (a defeated one's
- * streaker runs off on its own) [G] */
+/* the TwoTilts camera frames this monster (0x2D69A0) [R]: one in the scene, not hidden, not dropping in, not human
+ * unless its streaker still runs and is not held; alone too (0x312B50 holds its last view when it frames none) */
 static int cam_follows(const Mon *mo)
 {
     const Instance *in = mon_in(mo);
     if (!in)
         return 0;
-    if (mo->v->nmon == 1)                            /* (alone: always, as before) */
-        return 1;
     if (mo->dropping)                                /* 0x2D69A0: not dropping in, not human unless its streaker */
         return 0;                                    /* still runs and is not held [R] */
     if (mo->human) {
@@ -3724,6 +3725,8 @@ static void mon_step(Mon *mo, float dt)
                 foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading)) {
                 mo->mx = place[0];
                 mo->my = place[1];
+                if (mo->is_ai)                       /* 0x2E0F54: the goal's +0x38 */
+                    dir_ai_cooldown(&mo->ai);
             }
         }
         if (!mo->reveal) {                           /* (the revealed one walks off to x 100 [R]) */
@@ -3938,10 +3941,6 @@ static void play_step(Viewer *v, float dt, float aspect)
             nat++;
         }
     }
-    if (!nat) {                                      /* none to follow: player 1 */
-        at[0][0] = v->mon[0].mx; at[0][1] = v->mon[0].my; at[0][2] = v->mon[0].mz;
-        nat = 1;
-    }
     cam_update(&v->cam, (const float (*)[3])at, nat, dt, aspect);
     dircam_update(&v->cd, dt, me, v->nmon, &v->view);   /* the modes (the script camera) and their blend */
 }
@@ -3973,6 +3972,8 @@ static void hands_step(Mon *mo, float dt)
                 lift = up;
         }
         mo->mz += lift;
+        if (lift > 0 && mo->is_ai)                   /* 0x2E1044: the goal's +0x38 */
+            dir_ai_cooldown(&mo->ai);
     }
     float h0 = mo->heading / 57.2957795f, c = cosf(h0), sn = sinf(h0);
     for (int h = 0; h < 2; h++) {

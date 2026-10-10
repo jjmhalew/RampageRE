@@ -333,10 +333,35 @@ static int in_window(float a, float b, float prev, float time)
 #define BOT_COOLDOWN 0.2f                            /* +0x64 (0x2EEBD0) [R] */
 #define BOT_AVOID_TIME 3.0f                          /* +0x6C (0x2EEBE0) [R] */
 
-static float bot_rand(DirBot *b)                     /* [G] an LCG for the game's lagged Fibonacci 0x106950 */
+/* rand01 [R]: the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C): v = t[i] + t[j], i on (16
+ * wraps to 0), t[j] = v, j on; as a float v x 2^-32 (0x2F113C). Seeded (0x1069C0) i = 12, j = 0, t[0] = 0, t[k] =
+ * the Park-Miller run from the seed | 1, t[6] |= 1. The world's other users of it are not ported */
+static struct { uint32_t i, j, t[17]; } lagfib = { 12, 0, { 0 } };
+
+void dir_ai_seed(uint32_t seed)
 {
-    b->seed = b->seed * 1664525u + 1013904223u;
-    return (float)(b->seed >> 8) / 16777216.0f;
+    uint32_t x = seed;
+    lagfib.i = 12;
+    lagfib.j = 0;
+    lagfib.t[0] = 0;
+    for (int k = 1; k < 17; k++) {
+        uint64_t y = (uint64_t)x * 16807u;
+        y = (y & 0x7FFFFFFFu) + (y >> 31);
+        y = (y & 0x7FFFFFFFu) + (y >> 31);
+        x = y == 0x7FFFFFFFu ? 0 : (uint32_t)y;
+        lagfib.t[k] = x | 1;
+    }
+    lagfib.t[6] |= 1;
+}
+
+static float bot_rand(DirBot *b)
+{
+    (void)b;
+    uint32_t v = lagfib.t[lagfib.i] + lagfib.t[lagfib.j];
+    lagfib.i = lagfib.i == 16 ? 0 : lagfib.i + 1;
+    lagfib.t[lagfib.j] = v;
+    lagfib.j = lagfib.j == 16 ? 0 : lagfib.j + 1;
+    return (float)v * 2.3283064e-10f;
 }
 
 static int bot_standing(const DirBuilding *b) { return b->state >= 1 && b->state <= 3; }
@@ -382,6 +407,13 @@ void dir_ai_on_hit(DirAI *ai, const float off[3])    /* +0x28 0x2EED40 [R] */
     ai->bot.use_hit = 1;
 }
 
+void dir_ai_cooldown(DirAI *ai)                      /* +0x38 0x2EEBD0 [R] */
+{
+    for (int i = 0; i < ai->n; i++)
+        if (ai->q[i].type == DG_DESTROY)
+            ai->bot.cooldown = BOT_COOLDOWN;
+}
+
 void dir_ai_on_mount(DirAI *ai, int b, int rail, int width)   /* +0x34 0x2EEC40 [R] */
 {
     ai->bot.target = b;
@@ -406,16 +438,18 @@ static void side_point(const DirBotView *v, const DirBuilding *b, int side, floa
     }
 }
 
-/* the place on a side it mounts at (mountPoint 0x2EEDE0): the front-left corner, the front-right one, or the front's
- * rail nearest the bot (1 .. width - 1), its height a storey up [G: the z] */
+/* the place on a side it mounts at (mountPoint 0x2EEDE0) [R]: the front-left corner, the front-right one, or the
+ * front's rail nearest the bot (1 .. width - 1; under 2 wide, min x - 5), at the street (z 0) */
 static void mount_point(const DirBotView *v, const DirBuilding *b, int side, float out[3])
 {
     out[1] = b->min[1];
-    out[2] = b->min[2] + 7.5f;
+    out[2] = 0;
     if (side == 0)
         out[0] = b->min[0];
     else if (side == 1)
         out[0] = b->max[0];
+    else if (b->width < 2)
+        out[0] = b->min[0] - 5;
     else {
         int rail = (int)floorf((v->pos[0] - b->min[0]) / 5 + 0.5f);
         rail = rail < 1 ? 1 : rail > b->width - 1 ? b->width - 1 : rail;
@@ -570,26 +604,52 @@ static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
         return;
     }
     if (bld >= 0) {
-        /* a building other than bld between it and the point (the ray 0x2ED990, IsBuilding): out into the street, or
-         * along it when it is that far out already */
-        for (int i = 0; i < v->nb; i++) {
+        /* [R 0x2ED990, IsBuilding] the ray from the bot along the flat way to the point, without end: when the first
+         * building it meets is not bld, out into the street, or along it when it is that far out already, and a walk
+         * at once (0x2EE378: no monster checks) */
+        float l2 = dx * dx + dy * dy, rx = 1, ry = 0;
+        if (l2 >= 1e-6f) {
+            rx = dx / sqrtf(l2);
+            ry = dy / sqrtf(l2);
+        }
+        int first = -1;
+        float tbest = 1e30f;
+        for (int i = 0; i < v->nb; i++) {            /* the buildings' boxes, x and y (a start inside meets at 0) */
             const DirBuilding *b = &v->b[i];
-            if (i == bld || b->state == 0)
+            if (b->state == 0)
                 continue;
-            int hit = 0;
-            for (int k = 1; k <= 8 && !hit; k++) {   /* [G] the ray sampled */
-                float x = v->pos[0] + dx * (float)k / 8, y = v->pos[1] + dy * (float)k / 8;
-                hit = x > b->min[0] && x < b->max[0] && y > b->min[1] && y < b->max[1];
-            }
-            if (hit) {
-                if (v->pos[1] < -5)
-                    st[1] = 0;
-                else {
-                    st[0] = 0;
-                    st[1] = -1;
+            float t0 = 0, t1 = 1e30f, o[2] = { v->pos[0], v->pos[1] }, d[2] = { rx, ry };
+            int miss = 0;
+            for (int a = 0; a < 2 && !miss; a++) {
+                if (fabsf(d[a]) < 1e-12f) {
+                    miss = o[a] < b->min[a] || o[a] > b->max[a];
+                    continue;
                 }
-                break;
+                float ta = (b->min[a] - o[a]) / d[a], tb = (b->max[a] - o[a]) / d[a];
+                if (ta > tb) { float x = ta; ta = tb; tb = x; }
+                if (ta > t0) t0 = ta;
+                if (tb < t1) t1 = tb;
+                miss = t0 > t1;
             }
+            if (!miss && t0 < tbest) {
+                tbest = t0;
+                first = i;
+            }
+        }
+        if (first >= 0 && first != bld) {
+            if (v->pos[1] < -5) {
+                st[1] = 0;
+                float l = fabsf(st[0]);
+                st[0] = l > 1e-6f ? st[0] / l : 1;
+            } else {
+                st[0] = 0;
+                st[1] = -1;
+            }
+            ai->stick[0] = st[0];
+            ai->stick[1] = st[1];
+            if (mode == 0)
+                ai_pick(r, ag, DA_WALK, -1, call, ctx);
+            return;
         }
         /* the other monsters (not human): punch one standing on its spot, step past one in the way in depth */
         float rme = v->half_width;

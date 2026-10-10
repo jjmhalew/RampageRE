@@ -186,15 +186,24 @@ pays +0x190 as well. Everything else (army, people, vehicles) goes through addSt
 - **people.c**: `people_hit` takes the monster; its events say which monster they are about.
 
 Stand-ins and gaps:
-- **[G]** Players 3 and 4 have no keys: they are made AI with the bots' goal (the game would read their pads).
-- **[G]** One attack record per monster (the last armed), not one per bone; the hit test is the spheres where they
-  are this frame, not swept; the follow-up slots, the interruptible flag (+0xAA2), held / holder and cheat 4 are not
-  there.
-- **[G]** The bots' rand01 is an LCG seeded per slot; the mount point's height is a storey up; the building's +0x2C
-  is taken as the middle of its foot; the ray against buildings is sampled; the front-corner rule of the walk is not
-  ported; the cooldown +0x64 is never set (its caller is not known).
-- **[G]** A thrown object hitting a building leaves its hitter as it was (the game pays nobody), to keep the
-  single-player scores as they were.
-- **[G]** Alone, the camera frames the monster always (as before), also while it drops in or is human.
+- Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here
+  they have no keys and are made AI with the bots' goal.
+- Not ported (the game's side read above): one attack record per bone and the swept test (0x100230); here one record
+  per monster (the last armed) and the spheres where they are this frame; the follow-up slots, the interruptible flag
+  (+0xAA2), held / holder and cheat 4.
+- The bots' rand01 is the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, seeded by 0x1069C0 from
+  GameStatus seed[1] at the world's reset) [R]; the world's other users of it are not ported, so the sequence
+  differs. The mount point is at the street, z 0, and min x − 5 on a front under 2 wide (0x2EEDE0) [R]. The
+  building's +0x2C is the middle of its foot (0x2BC920: LeftEdgeXPos + 2.5 Width, 2.5 Depth + BackRowOffset, 0) [R].
+  The ray (0x2ED990) runs from the bot along the flat way to the point without end, against the buildings (include
+  0x2000): a first building other than bld sends it out into the street and walks at once [R]. The cooldown +0x64 is
+  set (0x2EEBD0) when the monster's foot lock moved it (0x2E0F54) or its hands lifted it (0x2E1044) [R].
+- **[G]** The front-corner rule of the walk (0x2EE150 … 0x2EE374: D = R + √2 A, A the probe ahead with a per-state
+  offset not read) is not ported; the monster loop's tests are 2D here, 3D in the game, with radii from 0x2E4FA0.
+- A thrown object hitting a building clears its hitter (Building::hit 0x2BC150 keeps only a monster attacker), so
+  nobody is paid for what it fells [R].
+- The camera (0x2D69A0) frames no monster that is hidden, dropping in, or human without a running streaker, alone
+  too; framing none, TwoTilts (0x312B50) holds its last view [R]. (It also frames the 0x4D3100 tracked objects, not
+  passed here.)
 - The respawn's lives, game over, the King blocks and the results' places and screens were game.c's and hud.c's
   already; they now get every player.
