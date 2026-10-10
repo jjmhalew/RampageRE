@@ -112,7 +112,13 @@ set [R]:
   ignored while the victim is not interruptible, held, at 0 HP, or with cheat flag 4 (0x4D7E68);
 - `Monsters::onLightHit` only changes the face; the attacker's follow-up slots (+0x50 / +0x54 / +0x58 by the
   result) when it is interruptible, +0xA59 clear and its scale ≥ 0.3;
-- 0x2E33A0 clears the victim's bit: **each attack hits each monster once**.
+- 0x2E33A0 clears the victim's bit: **each attack hits each monster once**. Each bone's 0x1C bytes are the record
+  (+0) and its own mask of victims left (+0x18: −1 when armed, 0 when disarmed; +6 … +0x14 eight halfwords −1)
+  (0x2E7880); 0x2E33A0(monster, part, victim) clears the bit on every bone of that part (a mask left 0 disarms the
+  bone), and the fight calls it for each part of the record that hit (0x2E45A0), so the record's parts share it [R].
+  Arming a part again starts its bones afresh. Every monster's `Jump_Butt_Slam_impact` has records of different
+  damage armed together (20 on one part with 10 or 16 on others), so the record is the part's, not the monster's.
+  The record's +0x50 / +0x54 / +0x58 (the follow-up slots) are −1 in every attack of all 30 monsters.
 - **No points or kills** for it, **no teams**, no push-out between monsters (0x2E2C50's box query leaves out flag 0x40,
   0x2E22B0 flags 0x2040), no grabbing another monster (the held / holder fields are only ever cleared) [R].
 
@@ -192,8 +198,8 @@ pays +0x190 as well. Everything else (army, people, vehicles) goes through addSt
 Stand-ins and gaps:
 - Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here
   they have no keys and are made AI with the bots' goal.
-- Not ported (the game's side read above): one attack record per bone; here one record per monster (the last
-  armed); the follow-up slots. Needing nothing: the interruptible flag (+0xAA2: set to 1 by every clip's start,
+- Here (main.c `MonAtk`) one record per body part, a bone taking its newest armed part's; the hit marks every part
+  of the record. The follow-up slots are not ported (no attack has one). Needing nothing: the interruptible flag (+0xAA2: set to 1 by every clip's start,
   0x2E7F70; cleared only by a clip event no monster has, 0x2E7CC0, or the binding `setInterruptabe` (id 88,
   0x2AB258), which no script calls [R]: always set in play), and held / holder, only ever cleared.
 - The bots' rand01 is the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, seeded by 0x1069C0 from
