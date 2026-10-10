@@ -98,7 +98,9 @@ typedef struct Obj {
     int mover;                                       /* MV_* */
     Spline sp;
     Line ln;
-    int oriented;                                    /* the spline faces it along its path this frame */
+    int oriented;                                    /* the spline faces it along its path this frame (1), or the
+                                                      * LineMover's frame lrot does (2) */
+    float lrot[9];                                   /* the LineMover's frame: its x, y and z axes */
     uint32_t oflags;
     float pulse_delay, pulse_time;                   /* setPulseDelay; 0: every frame */
     float lo[3], hi[3];                              /* its collision shape's box in its own frame */
@@ -678,6 +680,85 @@ static void ln_add_path(Boss *b, Obj *o, const char *path)   /* addPath(name, 0)
         ln_add(o, p);
     }
 }
+/* [R 0x316E60] a leg's frame: X = |d x (0, 0, 1)| (none: (1, 0, 0)), Y = |d|, Z = X x Y, as a quaternion (0x105090);
+ * a leg shorter than 1e-3 the identity */
+static void leg_quat(const float a[3], const float c[3], float q[4])
+{
+    float d[3];
+    sub3(d, c, a);
+    if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < 1e-6f) {
+        q[0] = q[1] = q[2] = 0;
+        q[3] = 1;
+        return;
+    }
+    float y[3], x[3] = { d[1], -d[0], 0 }, z[3];
+    copy3(y, d);
+    norm3(y);
+    if (len3(x) < 1e-6f)
+        set3(x, 1, 0, 0);
+    norm3(x);
+    z[0] = x[1] * y[2] - x[2] * y[1];
+    z[1] = x[2] * y[0] - x[0] * y[2];
+    z[2] = x[0] * y[1] - x[1] * y[0];
+    float m00 = x[0], m11 = y[1], m22 = z[2], tr = m00 + m11 + m22;   /* the columns x, y, z */
+    if (tr > 0) {
+        float s = sqrtf(tr + 1) * 2;
+        q[3] = s / 4;
+        q[0] = (y[2] - z[1]) / s;
+        q[1] = (z[0] - x[2]) / s;
+        q[2] = (x[1] - y[0]) / s;
+    } else if (m00 > m11 && m00 > m22) {
+        float s = sqrtf(1 + m00 - m11 - m22) * 2;
+        q[3] = (y[2] - z[1]) / s;
+        q[0] = s / 4;
+        q[1] = (y[0] + x[1]) / s;
+        q[2] = (z[0] + x[2]) / s;
+    } else if (m11 > m22) {
+        float s = sqrtf(1 + m11 - m00 - m22) * 2;
+        q[3] = (z[0] - x[2]) / s;
+        q[0] = (y[0] + x[1]) / s;
+        q[1] = s / 4;
+        q[2] = (z[1] + y[2]) / s;
+    } else {
+        float s = sqrtf(1 + m22 - m00 - m11) * 2;
+        q[3] = (x[1] - y[0]) / s;
+        q[0] = (z[0] + x[2]) / s;
+        q[1] = (z[1] + y[2]) / s;
+        q[2] = s / 4;
+    }
+}
+
+static void leg_slerp(const float a[4], const float b[4], float w, float q[4])
+{
+    float c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3], s = 1;
+    if (c < 0) {                                     /* the short way */
+        c = -c;
+        s = -1;
+    }
+    float ka = 1 - w, kb = w;
+    if (c < 0.9995f) {
+        float th = acosf(c), sn = sinf(th);
+        ka = sinf((1 - w) * th) / sn;
+        kb = sinf(w * th) / sn;
+    }
+    float l = 0;
+    for (int k = 0; k < 4; k++) {
+        q[k] = ka * a[k] + kb * s * b[k];
+        l += q[k] * q[k];
+    }
+    l = l > 0 ? 1 / sqrtf(l) : 1;
+    for (int k = 0; k < 4; k++)
+        q[k] *= l;
+}
+
+static void leg_axes(const float q[4], float r[9])  /* 0x104BB0: its x, y and z axes */
+{
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    r[0] = 1 - 2 * (y * y + z * z); r[1] = 2 * (x * y + w * z);     r[2] = 2 * (x * z - w * y);
+    r[3] = 2 * (x * y - w * z);     r[4] = 1 - 2 * (x * x + z * z); r[5] = 2 * (y * z + w * x);
+    r[6] = 2 * (x * z + w * y);     r[7] = 2 * (y * z - w * x);     r[8] = 1 - 2 * (x * x + y * y);
+}
+
 /* [R] 0x315E10 (as people.c): the share of the segment grows by speed x dt / its length; past it the next segment
  * (3), after the last the start again with flag 2, else it stays at the end (2, every frame); flag 1 turns it the
  * way it goes */
@@ -711,28 +792,29 @@ static int ln_step(Obj *o, float dt)
     c = l->p[l->seg + 1];
     for (int k = 0; k < 3; k++)
         o->p.pos[k] = a[k] + (c[k] - a[k]) * l->t;
-    if ((l->flags & 1) && (c[0] != a[0] || c[1] != a[1])) {
-        float yaw = atan2f(-(c[0] - a[0]), c[1] - a[1]);
-        /* [R 0x315E10] flag 4 (flag 8 off): over the segment's second half (+0x68 = 0.5) the heading turns into the
-         * next leg's (after the last: the first's with flag 2, else its own), by w = s^2 (3 - 2s), s = (t - 0.5) / 0.5
-         * (below 0.001 none, above 0.999 all); the place stays on the segment. [G] yaw only: the game's frame also
-         * pitches along the leg */
+    if (l->flags & 1) {
+        /* [R 0x316E60, 0x316A24] the leg's full frame (it pitches along the leg: Path_NYEmpire1's z runs 42.5 ..
+         * 50.5), as a quaternion (+0x70) put on the object's matrix (0x104BB0). Flag 4 (flag 8 off): over the
+         * segment's second half (+0x68 = 0.5) it slerps into the next leg's (after the last: the first's with flag 2,
+         * else its own; 0x3164E8 .. 0x316590) by w = s^2 (3 - 2s), s = (t - 0.5) / 0.5 (below 0.001 none, above
+         * 0.999 all); the place stays on the segment */
+        float q[4];
+        leg_quat(a, c, q);
         if ((l->flags & 4) && !(l->flags & 8) && l->t > 0.5f) {
             int nx = l->seg + 1 < l->n - 1 ? l->seg + 1 : (l->flags & 2) ? 0 : l->seg;
-            const float *na = l->p[nx], *nc = l->p[nx + 1];
             float sx = (l->t - 0.5f) / 0.5f, w = sx * sx * (3 - 2 * sx);
             if (w > 0.999f)
                 w = 1;
-            if (w >= 0.001f && (nc[0] != na[0] || nc[1] != na[1])) {
-                float to = atan2f(-(nc[0] - na[0]), nc[1] - na[1]), dy = to - yaw;
-                while (dy > 3.14159265f)
-                    dy -= 6.28318531f;
-                while (dy < -3.14159265f)
-                    dy += 6.28318531f;
-                yaw += w * dy;
+            if (w >= 0.001f) {
+                float qn[4];
+                leg_quat(l->p[nx], l->p[nx + 1], qn);
+                leg_slerp(q, qn, w, q);
             }
         }
-        o->p.facing[2] = yaw;
+        leg_axes(q, o->lrot);
+        o->oriented = 2;
+        if (o->lrot[3] != 0 || o->lrot[4] != 0)      /* the heading the scripts read: its y axis's */
+            o->p.facing[2] = atan2f(-o->lrot[3], o->lrot[4]);
     }
     return r;
 }
@@ -742,7 +824,7 @@ static int ln_step(Obj *o, float dt)
 static void obj_matrix(Obj *o)
 {
     float *w = o->p.world;
-    if (o->oriented) {                               /* [R] 0x33AD58: the spline's frame */
+    if (o->oriented == 1) {                          /* [R] 0x33AD58: the spline's frame */
         float f[3], up[3] = { 0, 0, 1 }, x[3], z[3];
         copy3(f, o->sp.fwd);
         x[0] = f[1] * up[2] - f[2] * up[1];
@@ -758,6 +840,12 @@ static void obj_matrix(Obj *o)
             w[k] = x[k];
             w[4 + k] = f[k];
             w[8 + k] = z[k];
+        }
+    } else if (o->oriented == 2) {                   /* the LineMover's frame */
+        for (int k = 0; k < 3; k++) {
+            w[k] = o->lrot[k];
+            w[4 + k] = o->lrot[3 + k];
+            w[8 + k] = o->lrot[6 + k];
         }
     } else {                                         /* setFacing(x, y, z): Rz(z) Rx(x) Ry(y) [R 0x101330] */
         float h = o->p.facing[2], ax = o->p.facing[0], ay = o->p.facing[1];

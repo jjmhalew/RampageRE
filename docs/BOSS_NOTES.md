@@ -83,8 +83,11 @@ TwoTilts camera's RepMonsterHeight is 35, so the camera frames higher. It is nev
 **LineMover** (as people.c; the update 0x315E10, flags +0x60): from point to point. Flag 1 faces the way it goes,
 and flag 2 loops. Flag 4 (with flag 8 off) turns the heading into the next leg over each segment's second half
 (t > +0x68 = 0.5): a slerp by w = s²(3 − 2s), s = (t − 0.5) / 0.5, towards the next segment's direction (after the
-last, the first's with flag 2, else its own); the place stays on the straight segment [R]. The port turns the yaw
-only; the game's frame also pitches along the leg [G]. `initWithPath("Path_NYEmpire1", 15, 1)` (descriptor 7 →
+last, the first's with flag 2, else its own); the place stays on the straight segment [R]. The frame is the leg's
+in 3D (0x316E60): X = |d × (0, 0, 1)| (none: (1, 0, 0), the up at 0x40A028), Y = |d|, Z = X × Y, as a quaternion at
++0x70 (0x105090; a leg with |d|² < 1e-6 the identity) put on the object's matrix (0x316A24, 0x104BB0), the next
+leg's built the same way for flag 4's slerp (0x3164E8 .. 0x316590) [R]: so it pitches along the leg (Path_NYEmpire1's
+z runs 42.5 .. 50.5, some 20° on one leg), as here. `initWithPath("Path_NYEmpire1", 15, 1)` (descriptor 7 →
 0x3173D0) takes the path's points from the Objects1_Props group of that name (x y z triples), starts at segment 0,
 t 0, and places the object at the first point at once [R].
 
