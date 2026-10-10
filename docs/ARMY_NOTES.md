@@ -140,7 +140,9 @@ the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with 
 - Otherwise it goes to the monster's TakeDamage.
 
 This is `AE_HIT`, and `army_reaction_slot` is the monster side:
-- **Ignored entirely** while the monster is not interruptible (+0xAA2), is in a grab, or has 0 HP.
+- **Ignored entirely** while the monster is not interruptible, is in a grab, or has 0 HP. The interruptible byte
+  (+0xAA2: set to 1 by every clip's start, 0x2E7F70; cleared only by a clip event no monster has, 0x2E7CC0, or the
+  binding `setInterruptabe` (id 88, 0x2AB258), which no script calls [R]: always set in play).
 - **Level 4 starts no reaction** (pistols, rifles, the pulse cannon). The damage still counts.
 - **In the air:** mode 2 starts slot 42 (44 from behind) and mode 1 starts slot 43 (45).
 - **On the ground or a building** (modes 0 and 5), by the knock made 1 long:

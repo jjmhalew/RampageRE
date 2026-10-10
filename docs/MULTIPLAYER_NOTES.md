@@ -193,7 +193,9 @@ Stand-ins and gaps:
 - Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here
   they have no keys and are made AI with the bots' goal.
 - Not ported (the game's side read above): one attack record per bone; here one record per monster (the last
-  armed); the follow-up slots, the interruptible flag (+0xAA2) and held / holder.
+  armed); the follow-up slots. Needing nothing: the interruptible flag (+0xAA2: set to 1 by every clip's start,
+  0x2E7F70; cleared only by a clip event no monster has, 0x2E7CC0, or the binding `setInterruptabe` (id 88,
+  0x2AB258), which no script calls [R]: always set in play), and held / holder, only ever cleared.
 - The bots' rand01 is the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, seeded by 0x1069C0 from
   GameStatus seed[1] at the world's reset) [R]; the world's other users of it are not ported, so the sequence
   differs. The mount point is at the street, z 0, and min x − 5 on a front under 2 wide (0x2EEDE0) [R]. The
