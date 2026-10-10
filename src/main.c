@@ -1327,6 +1327,8 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         mo->armed = e->p[0] != 0 ? mo->armed | e->value : mo->armed & ~e->value;
         if (e->p[0] != 0 && v->sobj)                 /* a new attack: its hit list is empty (0x2E33A0) */
             streetobj_arm(v->sobj);
+        if (e->p[0] != 0 && v->boss)
+            boss_arm(v->boss, mo->slot);
         if (e->p[0] != 0) {                          /* its record, for the other monsters (0x2E35D0) */
             mo->atk.damage = e->p[1];
             mo->atk.knock = e->p[2];
@@ -1894,7 +1896,7 @@ static void hit_spheres(Mon *mo)
         if (v->rail)                                 /* and the trains, cable cars and freighters */
             rail_hit(v->rail, mo->slot, c, c[3], 20);
         if (v->boss)                                 /* and the bosses */
-            boss_hit(v->boss, mo->slot, c, c[3], 20);
+            boss_hit(v->boss, mo->slot, c, c[3], mo->atk.damage);   /* the attack's damage, once a part */
         if (v->parade)                               /* and the balloons, bikers and food carts */
             parade_hit(v->parade, mo->slot, c, c[3], mo->blow);
         upgrade_touch(mo, c, c[3]);                   /* and the MonsterUpgrade object */

@@ -37,7 +37,8 @@ share of the way; callback 2 at the end, 4 while a monster is within `MonsterRes
 `setFlags(1)` faces it the way it goes.
 
 **SplineMover** [R] (vtable 0x44B800, update 0x33ACA0; boss.c has the same): points with their distance along the
-path (`addPoint(p, d)`; [G] `addPointWithVel(p, d, k)` scales that point's tangent by k), the place along it grows by
+path (`addPoint(p, d)`; `addPointWithVel(p, d, k)`: k is the point's tension, its tangent scaled by 1 − k [R
+0x33B010, BOSS_NOTES.md]), the place along it grows by
 velocity × dt; past the last point it stays there and answers 2 every frame until the script gives it a new path.
 Hermite between the points with Kochanek-Bartels tangents (0x13B780, 0x13B2F0). Flag 2 turns the object along the
 tangent (+Y along it).

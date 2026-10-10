@@ -869,6 +869,8 @@ static void boss_sync(Scene *s, double t)
             in->base.m[c] *= k;
         if (in->has_clip && p->anim_len > 0 && p->clip)
             in->offset = (float)(p->anim_time / p->anim_len * in->clip.duration - t);
+        else if (in->has_clip && !p->clip && !p->animate)   /* [R 0x309CE0] the model's own animation runs only with */
+            in->offset = (float)-t;                  /* flag 0x8000000; else it stays at its start */
     }
 }
 

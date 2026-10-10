@@ -49,8 +49,11 @@ beaten (`BE_DEFEATED`). The NY blimp calls `NewYork::setBossBlockFinished` itsel
 **Every other city** [R]:
 - The data spells the key `xxIsBlockFinished`, which turns it off. The flag their `setBossBlockFinished` sets is
   therefore never read.
-- The block ends by the engine's own rule: no script, so 0x324888 goes on to its other checks. [G] Those are taken as
-  every building down, like `Levels::IsBlockFinished`; 0x33D740 was not read.
+- The block ends by the usual rule. At state 6, 0x3244A0 looks up "IsBlockFinished" through 0x324180 (the block's
+  property, else WorldData's, else the name itself; then `IsBlockFinished`, `<City>::IsBlockFinished`,
+  `Levels::IsBlockFinished`). No city script defines `IsBlockFinished`, so it is Levels.bsf's
+  `getCurrentBuildingCount() <= 0`: every building down [R]. 0x324888's other tests are the clock (0x347DC0) and a
+  cheat: 0x33D740 is `*(0x4D7E68) & 0x10000`, the cheat flags, which with 0x20000 (0x324930) skip a block [R].
 - So the boss is a fight inside the block, worth its `Points` (1500, category 2 "vehicle", through addStats type 2)
   and the challenge's Goal. The block still has to be flattened.
 - When the city's last block is finished, `gCommon.isCityDestroyed` (0x4D7E4F, set by 0x325AD0 in state 9 when the
@@ -72,13 +75,18 @@ TwoTilts camera's RepMonsterHeight is 35, so the camera frames higher. It is nev
   - each point's tangent is ½(1−T)(1+B)(1+C)(p−prev) + ½(1−T)(1−B)(1−C)(next−p);
   - an end takes itself as its missing neighbour; a closed path wraps round.
 - **Flag 2** sets the object's whole turn from the tangent: Y along it, X = tangent × Z, Z = X × tangent.
-- [G] `addPointWithVel(p, d, k)` scales that point's tangent by k. The Jumper's 0.05 gives a sharp take-off and
-  landing.
-- [G] `clearPath` puts d back to 0.
+- `addPointWithVel(p, d, k)` is 0x33B010(mover, p, d, k), and `addPoint` the same with k = 0 (dispatcher 0x2A8050);
+  0x13B660 keeps per point d (+0x18), T = k (+0x1C), B = C = 0. So k is the point's tension: its tangent is scaled
+  by 1 - k. The Jumper's 0.05 leaves an almost ordinary tangent (0.95) [R].
+- `clearPath` (0x33B0B0) frees the points (0x13BB40) and puts the place along the path (+0x48) back to 0 [R].
 
-**LineMover** (as people.c): from point to point. Flag 1 faces the way it goes, and flag 2 loops. [G] Flag 4 is
-taken to round the corners, and is not done. `initWithPath("Path_NYEmpire1", 15, 1)` takes the path's points from
-the Objects1_Props group of that name (x y z triples). [G] It starts at the first point.
+**LineMover** (as people.c; the update 0x315E10, flags +0x60): from point to point. Flag 1 faces the way it goes,
+and flag 2 loops. Flag 4 (with flag 8 off) turns the heading into the next leg over each segment's second half
+(t > +0x68 = 0.5): a slerp by w = s²(3 − 2s), s = (t − 0.5) / 0.5, towards the next segment's direction (after the
+last, the first's with flag 2, else its own); the place stays on the straight segment [R]. The port turns the yaw
+only; the game's frame also pitches along the leg [G]. `initWithPath("Path_NYEmpire1", 15, 1)` (descriptor 7 →
+0x3173D0) takes the path's points from the Objects1_Props group of that name (x y z triples), starts at segment 0,
+t 0, and places the object at the first point at once [R].
 
 **Building finders** (World bindings, dispatcher 0x2AE3D0, table 0x42DD70) [R]:
 - `findBuildingNearMonster(d)` (0x318240):
@@ -89,7 +97,10 @@ the Objects1_Props group of that name (x y z triples). [G] It starts at the firs
 - `findBuildingNearPosition(p, r)` (0x2B4D50): of the buildings whose box meets the box p ± r (z 0 … 1000), the one
   nearest along x.
 - `getRandomBuilding` (0x2AEC40): from a random one on, the first standing one.
-- `findBuildingByPosition` (0x2A3D20): [G] the standing building whose footprint holds the point.
+- `findBuildingByPosition` (0x2A3D20; the binding 0x2AEAA0 passes a zero direction): of every building in the
+  world's list, the last whose box (shape box + place) holds the point in x and y, ends included; z and the state
+  are not tested, so rubble still counts [R]. `b.isValid()` is only a handle check (0x2795E8), and `getSizeZ`
+  (0x2AD818) reads the fixed storey count, so a flattened footprint keeps its full height for the path checks.
 - The scripts' height of a building is always storeys × 3 + 1.5 + 6.
 
 **Other natives** [R]:
@@ -104,11 +115,15 @@ the Objects1_Props group of that name (x y z triples). [G] It starts at the firs
   Generator.
 - 0x40000 `IsObstacle` (Whirlwind).
 - 8 (Whirlwind, the Saucer's rotor) has no name.
-- 0x8000000 (Heli, ambients with `Animate`) has no name. [G] It plays the model's own animation.
+- 0x8000000 (Heli, ambients with `Animate`) has no name. It plays the model's own animation: the frame 0x309AC0
+  (0x309CE0) advances the model's animation state by dt only with it [R]; without it the model holds its start.
 
-[G] Without 0x8000, touching the object calls its TakeDamage(monster, 0, Collision) every frame. That is how the
-Whirlwind catches a monster, how the Jumper's goo burns one, and how the wrecked Tank shoves one. The game's
-collision for this was not read.
+The monster's update (0x2E22B0) tests its spheres against the objects within 20 (up to 64, flags 0x2040 skipped)
+and calls TakeDamage(monster, amount, type): an armed sphere gives the attack's damage (+0x2C) with type 0, and an
+object with 0x8000 goes on the attack's hit list (0x2E33A0, emptied when an attack is armed), so it takes one blow
+an attack. An unarmed sphere gives 2.0 (0x2E2680) with type 1 (Collision), every frame, and only to objects without
+0x8000 [R]. That is how the Whirlwind catches a monster, how the Jumper's goo burns one, and how the wrecked Tank
+shoves one.
 
 ## The bosses
 ### BossTank ("Carbonator", Boss_Tank)
@@ -213,7 +228,7 @@ RenderScale 1.2. Its clips are `JumperBoss_Idle` / `_Launch` / `_Land` on the `J
 - **Where:** it jumps out to (0, −30, 75) and waits there for ReturnDuration (15 s), then jumps back in.
 
 **Damage** [R]:
-- Only attacks of DamageType 0 hurt it. [G] Monster attacks are taken as 0, and touching as 1.
+- Only attacks of DamageType 0 hurt it. A monster's attack is type 0 and a touch type 1 (0x2E25F4) [R].
 - **A hit:** it is knocked slowly away (2.25 points a second, 15 steps of 10, at most 60 up), spinning. Then it
   jumps to any roof.
 - **Effects:** HitEffect, and HitEffect2 / 1 / 0 above ½, above 0.15, below.
@@ -281,8 +296,10 @@ hit points.
   - The test and the push are the monster's own (0x2E2C50, collide_monster) [R]: the trigger is a box in the
     collision world flagged 0x400000 (| PushOutMonsters with DoPushout, 0x3360F4); the monster's box meeting it
     reports a touch (`boss_trigger_touch`), which fires the FireFunc at the next update once MinRefireTime has run
-    (0x335BF0); with DoPushout it is pushed out along the least overlap (x and y only), unless climbing. [G] Center
-    is taken in the world and Extents as half sizes.
+    (0x335BF0); with DoPushout it is pushed out along the least overlap (x and y only), unless climbing.
+    `initByObject` (0x2A6710 case 0x2C) gives the trigger's init (0x335ED0) the group alone, so Center is in the
+    world, and the box is −Extents … +Extents about it [R]. Its CanFireFunc (+0xA8) is not ported: NewYork's
+    `BlimpBarrierCanFire` always answers 1.
 - **Openings:** the back-left and back-right buildings' front cells 1–2 on storeys 4–6 are set to state 3, which
   opens the walls before the generators.
 
@@ -327,18 +344,13 @@ falling back one loses its barriers too.
 
 ## Not traced (stand-ins in boss.c)
 - **Collision:**
-  - the monster touching an object (TakeDamage of type Collision every frame: where the game's touch comes from is
-    not traced; here the monster's spheres within the part's box). The PushOutMonsters push and the VolumeTriggers'
-    test and push-out are the collision world's (`boss_collide_add`, collide_monster);
+  - the touch's test: the port takes the monster's spheres within the part's box, the game the spheres against the
+    part's shape (0x280470);
   - the parts' shapes (0x28FD70, `collide_shape_pick`: CollisionBox (the generators'), CollisionRadius or
-    AutoCollisionBox (the blimp) with the model's box, else the model's bounding sphere [G: the box's]);
-  - which DamageType a monster's attack has (taken as 0);
-  - `findBuildingByPosition` (taken as the footprint).
+    AutoCollisionBox (the blimp) with the model's box, else the sphere the model gives (its vtable +0x14, at
+    0x290384) [G: taken as the box's bounding sphere; the model class's +0x14 was not read].
 - **Movers:**
-  - addPointWithVel's per-point value (taken as the tangent's scale);
-  - whether clearPath restarts the distance (taken as yes);
-  - the LineMover's flag 4;
-  - where `initWithPath` starts.
+  - the LineMover's pitch along a leg (the port turns the yaw only).
 - **Weapons:**
   - the turrets' rates (radians a second, as army.c);
   - `setWeaponAmmo` / `reloadWeapon` (the weapon's ammo, as army.c);
@@ -354,7 +366,6 @@ falling back one loses its barriers too.
   - the movement sounds (`MovementSound`: `Tank Treads`, `Copter Loop`: native, not in the scripts);
   - the bosses' `OscillationScale`;
   - the challenge's Goal count;
-  - the engine's default block-finished check (0x33D740);
   - NewYork's `BossResultsNI` scene;
   - RoofItem.bsf (what `BE_FORCE_DAMAGE` does to the palace ornaments).
 

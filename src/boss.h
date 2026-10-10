@@ -64,7 +64,7 @@ typedef struct {
     float world[16];    /* column-major; always up to date. Draw `shape` with it, scaled by `scale` */
     const char *shape;  /* the model (Shape|Shape, actors their ActorAnimShape's); "InvisShape": draw nothing */
     float scale;        /* RenderScale (1 by default) */
-    int animate;        /* object flag 0x8000000 [G: the template's "Animate"]: the shape's own RawAnim loops */
+    int animate;        /* object flag 0x8000000: the shape's own RawAnim plays (0x309CE0), else it holds its start */
     /* actors (the Jumper): the ActorAnimShape| record it plays */
     char anim[24];
     const char *clip;   /* its Anim|AnimName, NULL: the shape's own */
@@ -188,6 +188,7 @@ int boss_defeated(const Boss *b);
 /* an armed attack sphere reaching boss parts: their TakeDamage(monster, amount, 0 [G: Concussive], the way from
  * the monster). How many it hit */
 int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount);
+void boss_arm(Boss *b, int monster);   /* a new attack of that monster: each part can take one blow of it again */
 
 /* ---- the collision world (collide.c) */
 /* the parts and the VolumeTriggers put into the frame's world: each alive part with its shape (tag

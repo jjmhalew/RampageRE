@@ -488,7 +488,7 @@ static int line_step(Rail *r, RailObj *o, float dt)
 }
 
 /* SplineMover (vtable 0x44B800, update 0x33ACA0; boss.c has the same) [R]: points with their distances along the
- * path (addPoint(p, d), addPointWithVel(p, d, k) [G: k scales that point's tangent]), the place along it grows by
+ * path (addPoint(p, d), addPointWithVel(p, d, k) [R 0x33B010: k the point's tension, the tangent x (1 - k)]), the place along it grows by
  * velocity x dt; past the last point it stays there and answers 2 every frame; flag 2 turns the object along the
  * tangent. The curve (0x13B780, tangents 0x13B2F0) is Hermite with Kochanek-Bartels tangents, T = B = C = 0 */
 static void sp_clear(RailObj *o)                     /* createSplineMover + clearPath [G: the place starts at 0] */
@@ -517,7 +517,7 @@ static void sp_prepare(RailObj *o)
         if (nx >= n)
             nx = closed ? 1 : n - 1;
         for (int k = 0; k < 3; k++)
-            o->sp.pt[i].m[k] = 0.5f * o->sp.pt[i].k *
+            o->sp.pt[i].m[k] = 0.5f * (1 - o->sp.pt[i].k) *
                                ((o->sp.pt[i].p[k] - o->sp.pt[pv].p[k]) + (o->sp.pt[nx].p[k] - o->sp.pt[i].p[k]));
     }
     o->sp.ready = 1;
@@ -878,8 +878,8 @@ static void et_slowdown_path(RailObj *o)
     copy3(end, o->pos);
     end[0] += ((o->flags & 32) ? -1.0f : 1.0f) * dist;   /* calcNextPoint */
     sp_clear(o);
-    sp_add(o, start, 0, 1);
-    sp_add(o, end, 3, 1);
+    sp_add(o, start, 0, 0);
+    sp_add(o, end, 3, 0);
     o->sp.vel = speed * 0.08f;
 }
 static int et_slowdown_chain(Rail *r, RailObj *o)    /* eventSlowdownChain [R] */

@@ -122,6 +122,7 @@ typedef struct Obj {
         GenDef gen;
         AmbientDef amb;
     } s;
+    int hit_attack[8];                               /* per monster: the attack that last hit it (0x2E33A0's list) */
 } Obj;
 
 typedef struct {                                     /* an AIInstance record of gAIMgr (0x335320), as army.c */
@@ -156,6 +157,7 @@ struct Boss {
     WorldObj wobj[MAX_WOBJ];
     int nwobj;
     int play[8];                                     /* gWorld.getPlayValue / setPlayValue */
+    int attack[8];                                   /* per monster: its attack's number (boss_arm) */
     int num_generators;                              /* Boss_NY_Generator.bsf's numGenerators */
     int main, defeated, city_destroyed;
     float now, view[2];
@@ -452,17 +454,21 @@ static void m_centre(const BossMonster *m, float c[3])   /* [G] where a weapon a
 
 /* ---------------------------------------------------------------- the buildings */
 
-static int b_ok(const Boss *b, int i) { return i >= 0 && i < b->nb && b->bl[i].standing; }   /* building.isValid() */
+/* building.isValid() [R 0x2795E8]: only a handle check (the object there, its serial the same); a building stays in
+ * the world's list when it is rubble or gone, so it stays valid */
+static int b_ok(const Boss *b, int i) { return i >= 0 && i < b->nb; }
 
-/* findBuildingByPosition (0x2A3D20 [G: not read]): a standing building whose footprint holds the point */
+/* findBuildingByPosition (0x2A3D20 [R], called with a zero direction): of every building in the world's list, gone
+ * or not, the last whose box (shape box + place) holds the point in x and y, ends included; z is not tested */
 static int bld_by_pos(const Boss *b, const float p[3])
 {
+    int found = -1;
     for (int i = 0; i < b->nb; i++) {
         const BossBuilding *g = &b->bl[i];
-        if (g->standing && p[0] >= g->min[0] && p[0] <= g->max[0] && p[1] >= g->min[1] && p[1] <= g->max[1])
-            return i;
+        if (p[0] >= g->min[0] && p[0] <= g->max[0] && p[1] >= g->min[1] && p[1] <= g->max[1])
+            found = i;
     }
-    return -1;
+    return found;
 }
 /* findBuildingNearPosition(p, r) (0x2B4D50) [R]: of the buildings whose box meets the box p.x +- r, p.y +- r,
  * z 0 .. 1000, the one nearest along x (p.x - its right edge when it stands left of p, its left edge - p.x else;
@@ -538,13 +544,13 @@ static int b_storeys(const Boss *b, int i) { return i >= 0 && i < b->nb ? b->bl[
 
 /* ---------------------------------------------------------------- the SplineMover */
 
-static void sp_clear(Spline *s)                      /* clearPath [G: the place along it starts again at 0] */
+static void sp_clear(Spline *s)                      /* clearPath [R 0x33B0B0]: the points freed, the place along it 0 */
 {
     s->n = 0;
     s->s = 0;
     s->ready = 0;
 }
-static void sp_add(Spline *s, const float p[3], float d, float k)   /* addPoint(p, d) / addPointWithVel(p, d, k) */
+static void sp_add(Spline *s, const float p[3], float d, float k)   /* addPoint(p, d): k 0; addPointWithVel(p, d, k): the tension k */
 {
     if (s->n >= MAX_SP)
         return;
@@ -556,8 +562,8 @@ static void sp_add(Spline *s, const float p[3], float d, float k)   /* addPoint(
 }
 /* [R] 0x13B2F0: each point's tangent is Kochanek-Bartels' 0.5 (1 - T)(1 + B)(1 + C)(p - prev) + 0.5 (1 - T)(1 - B)
  * (1 - C)(next - p) (+0x1C, +0x20, +0x24 per point); the ends take themselves as their missing neighbour, unless the
- * path is closed (its first and last points equal), which wraps round. [G] addPointWithVel's k scales the tangent
- * (its (1 - T)); plain points have T = B = C = 0 */
+ * path is closed (its first and last points equal), which wraps round. [R 0x33B010 -> 0x13B660] addPointWithVel's k
+ * is the point's T (+0x1C), addPoint's 0; B = C = 0 */
 static void sp_prepare(Spline *s)
 {
     int n = s->n;
@@ -570,7 +576,7 @@ static void sp_prepare(Spline *s)
         if (nx >= n)
             nx = s->closed ? 1 : n - 1;
         for (int k = 0; k < 3; k++)
-            s->pt[i].m[k] = 0.5f * s->pt[i].k * ((s->pt[i].p[k] - s->pt[pv].p[k]) + (s->pt[nx].p[k] - s->pt[i].p[k]));
+            s->pt[i].m[k] = 0.5f * (1 - s->pt[i].k) * ((s->pt[i].p[k] - s->pt[pv].p[k]) + (s->pt[nx].p[k] - s->pt[i].p[k]));
     }
     s->ready = 1;
 }
@@ -703,8 +709,29 @@ static int ln_step(Obj *o, float dt)
     c = l->p[l->seg + 1];
     for (int k = 0; k < 3; k++)
         o->p.pos[k] = a[k] + (c[k] - a[k]) * l->t;
-    if ((l->flags & 1) && (c[0] != a[0] || c[1] != a[1]))
-        o->p.facing[2] = atan2f(-(c[0] - a[0]), c[1] - a[1]);
+    if ((l->flags & 1) && (c[0] != a[0] || c[1] != a[1])) {
+        float yaw = atan2f(-(c[0] - a[0]), c[1] - a[1]);
+        /* [R 0x315E10] flag 4 (flag 8 off): over the segment's second half (+0x68 = 0.5) the heading turns into the
+         * next leg's (after the last: the first's with flag 2, else its own), by w = s^2 (3 - 2s), s = (t - 0.5) / 0.5
+         * (below 0.001 none, above 0.999 all); the place stays on the segment. [G] yaw only: the game's frame also
+         * pitches along the leg */
+        if ((l->flags & 4) && !(l->flags & 8) && l->t > 0.5f) {
+            int nx = l->seg + 1 < l->n - 1 ? l->seg + 1 : (l->flags & 2) ? 0 : l->seg;
+            const float *na = l->p[nx], *nc = l->p[nx + 1];
+            float sx = (l->t - 0.5f) / 0.5f, w = sx * sx * (3 - 2 * sx);
+            if (w > 0.999f)
+                w = 1;
+            if (w >= 0.001f && (nc[0] != na[0] || nc[1] != na[1])) {
+                float to = atan2f(-(nc[0] - na[0]), nc[1] - na[1]), dy = to - yaw;
+                while (dy > 3.14159265f)
+                    dy -= 6.28318531f;
+                while (dy < -3.14159265f)
+                    dy += 6.28318531f;
+                yaw += w * dy;
+            }
+        }
+        o->p.facing[2] = yaw;
+    }
     return r;
 }
 
@@ -1075,7 +1102,7 @@ static void sp_by_distance(Spline *s, float pts[][3], int n)   /* addPoint(p[i],
     for (int i = 0; i < n; i++) {
         if (i > 0)
             d += dist3(pts[i], pts[i - 1]);
-        sp_add(s, pts[i], d, 1);
+        sp_add(s, pts[i], d, 0);
     }
 }
 
@@ -1428,10 +1455,10 @@ static void tbomb_init(Boss *b, Obj *o)              /* Construct + onInit: a lo
     sp_clear(&o->sp);
     o->sp.flags = 2;
     o->sp.vel = 20;
-    sp_add(&o->sp, pos, 0, 1);
-    sp_add(&o->sp, xit, s1, 1);
-    sp_add(&o->sp, arc, s2, 1);
-    sp_add(&o->sp, end, s3, 1);
+    sp_add(&o->sp, pos, 0, 0);
+    sp_add(&o->sp, xit, s1, 0);
+    sp_add(&o->sp, arc, s2, 0);
+    sp_add(&o->sp, end, s3, 0);
     t->effect = fx_on(b, o, ustr(o, "AttachEffect"), NULL, NULL, -1, 0);
 }
 
@@ -1725,10 +1752,10 @@ static void jumper_arc(Boss *b, Obj *o, const float pos[3], const float arc[3], 
     sp_clear(&o->sp);
     o->sp.vel = unum(o, "JumpVelocity", 20);
     sp_add(&o->sp, pos, 0, 0.05f);
-    sp_add(&o->sp, pos2, s1, 1);
-    sp_add(&o->sp, arc, s2, 1);
+    sp_add(&o->sp, pos2, s1, 0);
+    sp_add(&o->sp, arc, s2, 0);
     sp_add(&o->sp, end2, s3, 0.05f);
-    sp_add(&o->sp, end, s4, 1);
+    sp_add(&o->sp, end, s4, 0);
     o->s.jumper.flags &= ~(8 | 16);
     o->s.jumper.flags |= 32;
     sfx(b, o, "Leeper_Servo");
@@ -2008,7 +2035,7 @@ static int jumper_damage(Boss *b, Obj *o, int monster, float amount, int type)  
     sp_clear(&o->sp);
     o->sp.vel = 2.25f;
     for (int i = 0; i < n; i++)
-        sp_add(&o->sp, pts[i], (float)i, 1);
+        sp_add(&o->sp, pts[i], (float)i, 0);
     challenge_hud(b, o, j->hp / j->max_hp);
     fx_on(b, o, ustr(o, "HitEffect"), NULL, NULL, -1, 0);
     float hf = j->hp / j->max_hp;
@@ -2061,10 +2088,10 @@ static void jbomb_init(Boss *b, Obj *o)              /* Construct + onInit: roll
     copy3(out, end);
     out[1] = -20;
     float s1 = dist3(xit, pos), s2 = s1 + dist3(end, xit), s3 = s2 + dist3(out, end);
-    sp_add(&o->sp, pos, 0, 1);
-    sp_add(&o->sp, xit, s1, 1);
-    sp_add(&o->sp, end, s2, 1);
-    sp_add(&o->sp, out, s3, 1);
+    sp_add(&o->sp, pos, 0, 0);
+    sp_add(&o->sp, xit, s1, 0);
+    sp_add(&o->sp, end, s2, 0);
+    sp_add(&o->sp, out, s3, 0);
 }
 
 static int jbomb_mover(Boss *b, Obj *o, int state)  /* onMoverCallback: at the end of its roll it bursts */
@@ -2137,7 +2164,7 @@ static void saucer_path(Obj *o, const int *order, const float *at, int n)
 {
     sp_clear(&o->sp);
     for (int i = 0; i < n; i++)
-        sp_add(&o->sp, o->s.saucer.pts[order[i]], at[i], 1);
+        sp_add(&o->sp, o->s.saucer.pts[order[i]], at[i], 0);
 }
 
 static void saucer_new_path(Boss *b, Obj *o)         /* createNewPath: round to where a random monster is */
@@ -2242,8 +2269,8 @@ static void saucer_init(Boss *b, Obj *o)             /* Construct + onInit */
     float start[3] = { -50, -5, 22 }, end[3] = { 50, -5, 22 };   /* in across the front: 8 s */
     o->mover = MV_SPLINE;
     sp_clear(&o->sp);
-    sp_add(&o->sp, start, 0, 1);
-    sp_add(&o->sp, end, 1, 1);
+    sp_add(&o->sp, start, 0, 0);
+    sp_add(&o->sp, end, 1, 0);
     o->sp.vel = s->vel;
     copy3(o->p.pos, start);
     weapons_enable(o, 1);
@@ -2414,7 +2441,7 @@ static int saucer_damage(Boss *b, Obj *o, int monster, float amount)   /* TakeDa
     sp_clear(&o->sp);
     o->sp.vel = 2.5f;
     for (int i = 0; i < 16; i++)
-        sp_add(&o->sp, pts[i], (float)i, 1);
+        sp_add(&o->sp, pts[i], (float)i, 0);
     s->hp -= amount;
     challenge_hud(b, o, s->hp / s->start_hp);
     if (s->hp > 0)
@@ -2470,7 +2497,7 @@ static void wind_init(Boss *b, Obj *o)               /* Construct + onInit + cre
     o->mover = MV_SPLINE;
     sp_clear(&o->sp);
     o->sp.vel = 1;
-    sp_add(&o->sp, pos, 0, 1);
+    sp_add(&o->sp, pos, 0, 0);
     for (int i = 0; i < 5; i++) {                    /* five steps of about 10 down towards it, 1.5 s each */
         if (i == 0)
             pos[2] -= 6;
@@ -2494,7 +2521,7 @@ static void wind_init(Boss *b, Obj *o)               /* Construct + onInit + cre
         pt[1] = pt[1] - 1 + frand(b) * 4;
         for (int k = 0; k < 3; k++)
             pos[k] += pt[k];
-        sp_add(&o->sp, pos, (float)(i + 1) * 1.5f, 1);
+        sp_add(&o->sp, pos, (float)(i + 1) * 1.5f, 0);
     }
 }
 
@@ -3172,7 +3199,7 @@ static void amb_path(Boss *b, Obj *o)                /* createPath: 8 points 37.
     }
     sp_clear(&o->sp);
     for (int i = 0; i < 8; i++)
-        sp_add(&o->sp, pts[i], (float)i * (300.0f / 8), 1);
+        sp_add(&o->sp, pts[i], (float)i * (300.0f / 8), 0);
     if (o->p.kind == BK_AMBIENT_SAUCER) {            /* it will hover at a random x in -30 .. 30 */
         a->state = 0;
         a->hover_start = -30 + frand(b) * 60;
@@ -3377,9 +3404,9 @@ static void away_from(const Obj *o, const BossMonster *m, float dir[3])   /* Tak
     norm3(dir);
 }
 
-/* each frame: a part without OnlyHitWithEffNodes takes TakeDamage(monster, 0, Collision) from a monster touching
- * it [G: where the game's touch comes from is not traced]. A PushOutMonsters part's push is the collision world's
- * (collide_monster), not this */
+/* each frame: a part without OnlyHitWithEffNodes takes TakeDamage(monster, 2, Collision) from a monster touching
+ * it [R 0x2E22B0: an unarmed sphere against the part's shape, amount 2.0 (0x2E2680), type 1]. A PushOutMonsters part's
+ * push is the collision world's (collide_monster), not this */
 static void contacts(Boss *b)
 {
     for (int i = 0; i < b->n; i++) {
@@ -3391,7 +3418,7 @@ static void contacts(Boss *b)
             if (touches(o, mm)) {
                 float dir[3];
                 away_from(o, mm, dir);
-                if (take_damage(b, o, m, 0, DT_COLLISION, dir) == DELETE_ME)
+                if (take_damage(b, o, m, 2, DT_COLLISION, dir) == DELETE_ME)
                     obj_remove(b, o);
             }
         }
@@ -3652,6 +3679,15 @@ int boss_events(Boss *b, BossEvent *out, int max)
     return n;
 }
 
+/* a monster's new attack (0x2E7880 arming its bones): its hit list is emptied (0x2E33A0) */
+void boss_arm(Boss *b, int monster)
+{
+    if (monster >= 0 && monster < 8)
+        b->attack[monster]++;
+}
+
+/* [R 0x2E22B0] an armed sphere: TakeDamage(monster, the attack's damage, 0) on each part it meets; a part with 0x8000
+ * (OnlyHitWithEffNodes: the Tank, Heli, Jumper, Saucer, Blimp, Generator) goes on the attack's hit list, once */
 int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount)
 {
     if (monster < 0 || monster >= b->nm)
@@ -3661,6 +3697,11 @@ int boss_hit(Boss *b, int monster, const float centre[3], float radius, float am
         Obj *o = &b->o[i];
         if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || box_distance(o, centre) > radius)
             continue;
+        if (monster < 8 && (o->oflags & OF_EFF_NODES)) {
+            if (o->hit_attack[monster] == b->attack[monster])
+                continue;
+            o->hit_attack[monster] = b->attack[monster];
+        }
         float dir[3];
         away_from(o, &b->m[monster], dir);
         n++;
