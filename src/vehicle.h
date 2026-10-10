@@ -40,6 +40,10 @@ typedef struct {
     int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     /* optional: node of the object as drawn now, in the world (the fire truck's WeaponNode_Y); 0 = unknown */
     int (*node_world)(void *ctx, const VehObj *o, const char *node, float out[16]);
+    /* optional: the effect's collision rod (fx_rod, 0x1F9290): a beam's reach. Its speed, length, the emitter's
+     * cycle and whether it loops; 0 = none (the beam then meets nothing). Unset: the weapon's Velocity up to its
+     * MaxFiringRange stands in */
+    int (*rod)(void *ctx, const char *effect, float *speed, float *length, float *cycle, int *loops);
     void *ctx;
 } VehicleHost;
 

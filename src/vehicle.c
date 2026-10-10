@@ -1089,7 +1089,22 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
             o->beam_fx = -1;
         } else {
             o->w.age += dt;
-            float reach = fminf(o->w.velocity > 0 ? o->w.velocity * o->w.age : o->w.range, o->w.range);
+            /* [R 0x2270A0, 0x226CC0] the reach is the FireEffect's collision rod (army.c's beam_update): the head at
+             * speed up to the length, the tail from 0 after the cycle when it does not loop; no rod, no cast */
+            float reach, tail = 0, speed, length, cycle;
+            int loops;
+            if (v->host.rod) {
+                reach = 0;
+                if (o->w.fire_fx && v->host.rod(v->host.ctx, o->w.fire_fx, &speed, &length, &cycle, &loops)) {
+                    reach = fminf(speed * o->w.age, length);
+                    if (!loops && o->w.age > cycle)
+                        tail = fminf(speed * (o->w.age - cycle), reach);
+                }
+            } else
+                reach = fminf(o->w.velocity > 0 ? o->w.velocity * o->w.age : o->w.range, o->w.range);
+            for (int k = 0; k < 3; k++)
+                from[k] += dir[k] * tail;
+            reach -= tail;
             (void)tdist;                             /* [R 0x295750] the beam is not cut at its target */
             int mon;
             float t = reach > 0.001f ? ray_monster(v, from, dir, reach, &mon) : -1;
@@ -1116,7 +1131,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
             o->beam.on = 1;
             memcpy(o->beam.from, from, sizeof from);
             memcpy(o->beam.dir, dir, sizeof dir);
-            o->beam.length = t >= 0 ? t : reach;
+            o->beam.length = t >= 0 ? t : reach > 0 ? reach : 0;
             if (t >= 0 && mon >= 0) {
                 float dmg = o->w.first ? o->w.damage : o->w.dps > 0 ? o->w.dps * dt : 0;
                 o->w.first = 0;

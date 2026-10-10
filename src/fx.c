@@ -948,6 +948,39 @@ static float len3(const float v[3]) { return sqrtf(v[0] * v[0] + v[1] * v[1] + v
 
 static float em_graph(const FxWorld *w, const Emit *e, int slot, float t) { return graph_eval(w->lib, &e->d->g[slot], t); }
 
+/* the effect's collision rod (ParticleSystemDef, derived at load by 0x1F9290) [R]: only when emitter 0 has AutoStart
+ * and +ProvidesCollisionRod; its direction em_vel(0) made 1 long (+0x40), its speed |em_vel(0)| (+0x50), its length
+ * speed x p_lifetime.max(0), times destretch_percent_time when above 0 (+0x54, 0x1FB484), its radius |start_area(0)|
+ * + max(p_size) x size_mul (+0x4C); the stream handle's cycle the emitter's longest range.cycle_length (0x2270A0) */
+int fx_rod(const FxLib *L, const char *name, FxRod *r)
+{
+    int i = fx_find(L, name);
+    if (i < 0 || !r)
+        return 0;
+    const Effect *f = &L->fx[i];
+    if (f->type != FX_PARTICLE || f->nem < 1)
+        return 0;
+    const EmDef *d = &f->em[0];
+    if ((d->eflags & (EF_AUTOSTART | EF_COLLISIONROD)) != (EF_AUTOSTART | EF_COLLISIONROD))
+        return 0;
+    float v[3], a[3];
+    for (int k = 0; k < 3; k++) {
+        v[k] = graph_eval(L, &d->g[G_VEL + k], 0);
+        a[k] = graph_eval(L, &d->g[G_AREA + k], 0);
+    }
+    r->speed = len3(v);
+    for (int k = 0; k < 3; k++)
+        r->dir[k] = r->speed > 0 ? v[k] / r->speed : 0;
+    r->length = r->speed * graph_eval(L, &d->g[G_LIFE + 1], 0);
+    if (d->destretch_pct > 0)
+        r->length *= d->destretch_pct;
+    float s0 = graph_eval(L, &d->g[G_SIZE], 0), s1 = graph_eval(L, &d->g[G_SIZE + 1], 0);
+    r->radius = len3(a) + (s0 > s1 ? s0 : s1) * graph_eval(L, &d->g[G_SIZEMUL], 0);
+    r->cycle = d->cycle[0] > d->cycle[1] ? d->cycle[0] : d->cycle[1];
+    r->loops = (d->eflags & EF_CYCLELOOPS) != 0;
+    return 1;
+}
+
 /* a new emitter of an effect (0x1F7F90): its cycle length from range.cycle_length, a start age from
  * graph.em_start_time at a random point (minus a frame: the first advance brings it to it) */
 static int emit_new(FxWorld *w, int fx, const Effect *owner, const EmDef *d, int parent)

@@ -659,13 +659,32 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     memcpy(s->dir, dir, sizeof s->dir);
     norm3(s->dir);
     s->age += dt;
-    float reach = fminf(w->velocity > 0 ? w->velocity * s->age : w->range, w->range);
+    /* [R 0x2270A0, 0x226CC0, 0x295750] the reach is the FireEffect's collision rod: its head grows by its speed up to
+     * its length, its tail stays at 0 until the clock passes the emitter's cycle (then, not looping, follows at the
+     * same speed [G: the loop byte +0x42's writer was not found]); the cast runs from the tail to the head when they
+     * are more than 0.001 apart, along the beam (the rod's own axis in the effect's frame, here the weapon's
+     * direction the effect is placed along [G]). No rod, no cast. MaxFiringRange only gates the firing */
+    float head, tail = 0;
+    float speed, length, cycle;
+    int loops;
+    if (a->host.rod) {
+        head = 0;
+        if (w->fire_fx && a->host.rod(a->host.ctx, w->fire_fx, &speed, &length, &cycle, &loops)) {
+            head = fminf(speed * s->age, length);
+            if (!loops && s->age > cycle)
+                tail = fminf(speed * (s->age - cycle), head);
+        }
+    } else
+        head = fminf(w->velocity > 0 ? w->velocity * s->age : w->range, w->range);
+    float from_t[3] = { s->pos[0] + s->dir[0] * tail, s->pos[1] + s->dir[1] * tail, s->pos[2] + s->dir[2] * tail };
     int mon, obj;
     float nrm[3];
-    float t = reach > 0.001f ? ray_hit(a, s->pos, s->dir, reach, ~0u, 0, u ? who(a, u) : -1, 1, &mon, &obj, nrm) : -1;
-    s->length = t >= 0 ? t : reach;
+    float t = head - tail > 0.001f ?
+              ray_hit(a, from_t, s->dir, head - tail, ~0u, 0, u ? who(a, u) : -1, 1, &mon, &obj, nrm) : -1;
+    s->length = t >= 0 ? tail + t : head;
     if (t < 0)
         return;
+    t += tail;
     float at[3] = { s->pos[0] + s->dir[0] * t, s->pos[1] + s->dir[1] * t, s->pos[2] + s->dir[2] * t };
     if (mon >= 0) {
         float dmg = w->first ? w->scale * w->damage : w->dps > 0 ? w->scale * w->dps * dt : 0;

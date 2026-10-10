@@ -46,6 +46,10 @@ typedef struct {
     int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     /* gWorld.isSphereVisible (id 0x40 -> 0x16C0A0): the sphere inside the camera's frustum; unset, the view's x range */
     int (*visible)(void *ctx, const float p[3], float r);
+    /* optional: the effect's collision rod (fx_rod, 0x1F9290): a beam's reach. Its speed, length, the emitter's
+     * cycle and whether it loops; 0 = none (the beam then meets nothing). Unset: the weapon's Velocity up to its
+     * MaxFiringRange stands in */
+    int (*rod)(void *ctx, const char *effect, float *speed, float *length, float *cycle, int *loops);
     void *ctx;
 } ArmyHost;
 

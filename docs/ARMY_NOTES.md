@@ -130,9 +130,16 @@ otherwise.
   above 0.
 - The beam's reach is its stream effect's (0x295750: the ray's maxt is 0x226950's head − tail, then the effect is cut
   at the hit, 0x226DF0) [R]. The stream (0x226CC0) grows its head by its speed (+0x1C) × dt up to its length
-  (+0x20); its tail stays at 0 until its cycle runs out or it is shut down, then follows at the same speed [R]. Here
-  it grows at Velocity per second up to MaxFiringRange [G: the descriptor's +0x50 / +0x54 were not tied to the
-  effect file's keys].
+  (+0x20); its tail stays at 0 until its cycle runs out or it is shut down, then follows at the same speed [R]. Those
+  are the FireEffect's collision rod [R], derived at load by 0x1F9290 only when emitter 0 has AutoStart and
+  +ProvidesCollisionRod: speed |em_vel(0)| (+0x50), length speed × p_lifetime.max(0) × destretch_percent_time when
+  above 0 (+0x54), radius |start_area(0)| + max(p_size) × size_mul (+0x4C), and the stream handle's cycle the
+  emitter's longest range.cycle_length (0x2270A0); the cast runs along the stream's own axis through the effect's
+  matrix, from the start offset plus the tail. Machinegun_fire and Autocannon_fire (Rifle, PulseCannon): 150 a
+  second, 44.55 long; Blimp_Laser_Fire (BlimpBeam, FireEngineStream) 500, 125; Cyclone_Lightning (LightingZap 0 .. 2)
+  2000, 2000; Roar_Beam (BreathWeapon) 25, 8.75. MaxFiringRange only gates the firing. Here as so (fx.c `fx_rod`,
+  the host's `rod`); the rod's axis is taken as the weapon's direction the effect is placed along, and the tail's
+  start for a looping emitter (the loop byte +0x42's writer was not found) as never [G].
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.
@@ -301,7 +308,6 @@ Floating = 100
     monster (0x292D20: a thunk to the hit object's TakeDamage, vtable +0x34, with the shot's DamageType, its owner
     unit, ImpactDamage, the point and the shot's direction, no knock [R]) is not ported: the scripts' TakeDamage
     begin with coerceToMonster and ignore it, but Fountain.scr (ungated) and DamagingEffect.scr would not;
-  - the beam's reach;
   - a unit has one shape by 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox, else
     the sphere the model keeps (0x184CB0, stored apart from its box, 0x184940) [R]; here the union of its meshes'
     header spheres, city.c `city_shape_sphere`), and the monster's spheres meet that one shape (0x2E22B0 ->

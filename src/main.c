@@ -569,6 +569,20 @@ static int army_shape_box(void *ctx, const char *shape, float min[3], float max[
 {
     return city_shape_box(((Viewer *)ctx)->city, shape, min, max) == 0;
 }
+/* a FireEffect's collision rod (fx.c fx_rod, 0x1F9290): the beams' reach */
+static int effect_rod(void *ctx, const char *effect, float *speed, float *length, float *cycle, int *loops)
+{
+    const Viewer *v = ctx;
+    FxRod r;
+    if (!v->fxlib || !fx_rod(v->fxlib, effect, &r))
+        return 0;
+    *speed = r.speed;
+    *length = r.length;
+    *cycle = r.cycle;
+    *loops = r.loops;
+    return 1;
+}
+
 static int model_sphere(void *ctx, const char *shape, float centre[3], float *radius)
 {
     return city_shape_sphere(((Viewer *)ctx)->city, shape, centre, radius) == 0;
@@ -781,6 +795,7 @@ static void build(Viewer *v)
         host.shape_sphere = model_sphere;
         host.visible = people_visible;
         host.node_world = army_node_world;
+        host.rod = effect_rod;
         host.ctx = v;
         v->army = army_new(&host);
         if (v->army)
@@ -801,6 +816,7 @@ static void build(Viewer *v)
         vh.find = army_find;
         vh.shape_box = army_shape_box;
         vh.shape_sphere = model_sphere;
+        vh.rod = effect_rod;
         vh.ctx = v;
         v->veh = vehicle_new(&vh);
         if (v->veh)

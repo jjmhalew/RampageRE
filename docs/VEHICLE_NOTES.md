@@ -228,6 +228,7 @@ reports every award with its template name, so the viewer can count challenge go
     set at its making (0x2BCBC4) [R]; as here (`building_pos`);
   - the turret's rates are radians a second (0x299640) [R];
   - firing when on target: the turn within π/50, the pitch within π/100 (0x29ADE0) [R];
+  - the stream's reach is Blimp_Laser_Fire's collision rod (500 a second up to 125; ARMY_NOTES.md) [R];
   - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; as here
     (vehicle.c casts the collision world's ray beside the monsters'); `setWeaponFlags(-1, 16)` holds every weapon (0x29AB60: +0x38 |= 16, untargeted) [R];
   - the weapon node: the host's `node_world`, else 3 above the truck.

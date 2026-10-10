@@ -19,7 +19,10 @@ FxLib *fx_open(const char *elf_path, const Bundle *const *bundles, int nbundles)
 void fx_close(FxLib *lib);
 int fx_count(const FxLib *lib);
 const char *fx_name(const FxLib *lib, int effect);
-int fx_find(const FxLib *lib, const char *name);   /* case-insensitive, ".edf" may follow; -1 if absent */
+int fx_find(const FxLib *lib, const char *name);
+/* an effect's collision rod (a beam's reach, 0x1F9290): emitter 0 with AutoStart and +ProvidesCollisionRod; 0 none */
+typedef struct { float dir[3], speed, length, radius, cycle; int loops; } FxRod;
+int fx_rod(const FxLib *lib, const char *name, FxRod *out);   /* case-insensitive, ".edf" may follow; -1 if absent */
 
 typedef struct FxWorld FxWorld;  /* live effects and particles */
 FxWorld *fx_world(const FxLib *lib);
