@@ -191,9 +191,8 @@ leans away, held while the monster stays within 7.
 
 ## Not traced (stand-ins in streetobj.c) [G]
 - The shape tests are the collision world's (collide.c): a blow is the attack sphere against the object's shape
-  (0x280470, `collide_obj_sphere`), a touch the monster's box (3 each way across, 8.5 tall) against it (0x2801A0,
-  `collide_obj_box`); the game tests the monster's unarmed spheres for a touch (0x2E22B0 → 0x280470), its box only
-  for the push-out (0x2E2C50) [R; not done here]. The shape is 0x28FD70's
+  (0x280470, `collide_obj_sphere`), and so is a touch, each of the monster's collision spheres armed or not (0x2E22B0;
+  main.c `mon_spheres`) [R]; the monster's box is only the push-out's (0x2E2C50). The shape is 0x28FD70's
   (`collide_shape_pick`: the template's then the instance's `CollisionBox`, `CollisionRadius` or `AutoCollisionBox`
   with the model's box; else the sphere the model keeps (0x184CB0) [R; taken here as the box's, so a
   `TelephonePole1`, which sets none, is a sphere of 6.1]), read when the object is added; `box_min` / `box_max` hold

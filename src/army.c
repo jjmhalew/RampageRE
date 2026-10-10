@@ -1153,14 +1153,16 @@ static void line_init(ArmyUnit *u, const float p[3], const float q[3], float spe
     memcpy(u->pos, p, sizeof u->pos);
 }
 
-/* SplineMover (helicopters, droppables): points with their distances along the path (addPoint(p, d)) at a
- * velocity. [G] The game's spline (gWorld.createSplineMover, not read) is taken as straight runs between the points;
- * flag 2 faces the way it goes */
+/* SplineMover (helicopters, droppables; vtable 0x44B800, update 0x33ACA0) [R, as boss.c]: points with their
+ * distances along the path (addPoint(p, d), as the scripts give them), a Hermite curve with Kochanek-Bartels tangents
+ * (0x13B2F0, T = B = C = 0 for addPoint); its place grows by the velocity; flag 2 faces along the tangent */
 static void spline_init(ArmyUnit *u, float vel)
 {
     u->mv.n = 0;
     u->mv.seg = 0;
     u->mv.t = 0;
+    u->mv.s = 0;
+    u->mv.ready = 0;
     u->mv.speed = vel;
     u->mv.active = 1;
     u->mv.kind = 1;
@@ -1170,13 +1172,86 @@ static void spline_add(ArmyUnit *u, const float p[3], float d)
     if (u->mv.n < 8) {
         memcpy(u->mv.pts[u->mv.n], p, sizeof u->mv.pts[0]);
         u->mv.dist[u->mv.n++] = d;
+        u->mv.ready = 0;
     }
+}
+static void spline_prepare(ArmyUnit *u)
+{
+    int n = u->mv.n;
+    u->mv.closed = n > 2 && memcmp(u->mv.pts[0], u->mv.pts[n - 1], sizeof u->mv.pts[0]) == 0;
+    for (int i = 0; i < n; i++) {
+        int pv = i - 1, nx = i + 1;
+        if (pv < 0)
+            pv = u->mv.closed ? n - 2 : 0;
+        if (nx >= n)
+            nx = u->mv.closed ? 1 : n - 1;
+        for (int k = 0; k < 3; k++)
+            u->mv.m[i][k] = 0.5f * ((u->mv.pts[i][k] - u->mv.pts[pv][k]) + (u->mv.pts[nx][k] - u->mv.pts[i][k]));
+    }
+    u->mv.ready = 1;
+}
+/* [R 0x13B780] the curve between the two points whose distances hold s (before the first: it; past the last: it) */
+static void spline_eval(ArmyUnit *u, float s, float pos[3], float tan[3])
+{
+    if (!u->mv.ready)
+        spline_prepare(u);
+    int n = u->mv.n;
+    memset(tan, 0, 3 * sizeof(float));
+    if (s <= u->mv.dist[0] || n == 1) {
+        memcpy(pos, u->mv.pts[0], 3 * sizeof(float));
+        if (n > 1)
+            memcpy(tan, u->mv.m[0], 3 * sizeof(float));
+        return;
+    }
+    if (s >= u->mv.dist[n - 1]) {
+        memcpy(pos, u->mv.pts[n - 1], 3 * sizeof(float));
+        memcpy(tan, u->mv.m[n - 1], 3 * sizeof(float));
+        return;
+    }
+    int i = 0;
+    while (i < n - 2 && s >= u->mv.dist[i + 1])
+        i++;
+    float len = u->mv.dist[i + 1] - u->mv.dist[i], t = len > 0 ? (s - u->mv.dist[i]) / len : 1;
+    float t2 = t * t, t3 = t2 * t;
+    float h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+    float d00 = 6 * t2 - 6 * t, d10 = 3 * t2 - 4 * t + 1, d01 = -6 * t2 + 6 * t, d11 = 3 * t2 - 2 * t;
+    for (int k = 0; k < 3; k++) {
+        float p0 = u->mv.pts[i][k], p1 = u->mv.pts[i + 1][k], m0 = u->mv.m[i][k], m1 = u->mv.m[i + 1][k];
+        pos[k] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
+        tan[k] = d00 * p0 + d10 * m0 + d01 * p1 + d11 * m1;
+    }
+}
+/* [R 0x33ACA0] flag 4 holds it; past the last point it loops with flag 1, else stays at the end answering 2 every
+ * frame until the script gives it another path */
+static int spline_step(ArmyUnit *u, float dt)
+{
+    int n = u->mv.n;
+    if ((u->mv.flags & 4) || n == 0)
+        return 1;
+    int r = 1;
+    float end = u->mv.dist[n - 1], start = u->mv.dist[0];
+    u->mv.s += u->mv.speed * dt;
+    if (u->mv.s > end) {
+        if (u->mv.flags & 1)
+            u->mv.s -= end - start;
+        else {
+            u->mv.s = end;
+            r = 2;
+        }
+    }
+    float tan[3];
+    spline_eval(u, u->mv.s, u->pos, tan);
+    if ((u->mv.flags & 2) && (tan[0] != 0 || tan[1] != 0))
+        u->facing = facing_of(tan[0], tan[1]);
+    return r;
 }
 
 static int mover_step(Army *a, ArmyUnit *u, float dt)
 {
-    if (!u->mv.active || u->mv.n < 2)
+    if (!u->mv.active || u->mv.n < 1 || (u->mv.kind == 0 && u->mv.n < 2))
         return 0;
+    if (u->mv.kind == 1)
+        return spline_step(u, dt);
     int r = 1;
     float *p = u->mv.pts[u->mv.seg], *q = u->mv.pts[u->mv.seg + 1];
     float d[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };

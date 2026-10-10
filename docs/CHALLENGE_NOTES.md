@@ -346,8 +346,7 @@ starts again from 0 whenever the block is loaded again (a Continue, a King tie).
 - The upgrade object is reached by the monster's object test (0x2E22B0): each collision sphere against its shape,
   CollisionRadius 1 about InvisShape's middle (its place), so radius + 1 centre to centre [R]. The object has no
   0x8000, so an unarmed sphere's touch (TakeDamage type 1, 2.0, every frame) takes it too, and StreetObject.scr's
-  branch ignores the type. **[G]** Here the body's touch is a sphere about the monster's box (main.c), not its
-  collision spheres.
+  branch ignores the type. Here each of the monster's collision spheres touches it (main.c `mon_spheres`).
 - A new profile's monsters start with their moves locked: 0x33F630 writes 0x80 into each of monsters 0 … 5 [R]
   (PROFILE_NOTES.md); the viewer reads them from the profile, edible.c's 0xF only for a monster the roster lacks.
 - The unused blocks HK06_Towers ("Load this block", 2 × StreetLampChina) and HK09_Gardens ("Find this location", 20)

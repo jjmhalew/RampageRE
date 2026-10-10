@@ -1871,6 +1871,33 @@ static void air_control(Mon *mo, const MoveState *st, float lx, float ly, float 
  * when a NODE_BAKE_ROOT state ends), the stick turns it (NODE_STEER) or drives it (NODE_AIR_*) in the camera's frame,
  * the clip's events set its movement mode and velocity, and in the air it falls by MOVES_GRAVITY until it meets the
  * ground (here the street at z = 0), which fires the landing slot. */
+/* every collision sphere of the monster, armed or not, in the world (0x2DA9E0: the shape's offset by its bone's
+ * matrix, then by the monster's; its count +0x42C, centres +0x6D4): what an unarmed touch tests (0x2E22B0) */
+static int mon_spheres(const Mon *mo, float out[][4], int max)
+{
+    const Instance *in = mon_in(mo);
+    if (!mo->have_graph || !in)
+        return 0;
+    const MoveGraph *g = &mo->graph;
+    int n = 0;
+    for (int i = 0; i < g->nshapes && n < max; i++) {
+        const MoveShape *sh = &g->shapes[i];
+        if (sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
+            continue;
+        const float *m = in->node[sh->bone].m;
+        float l[3];
+        for (int r = 0; r < 3; r++)
+            l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
+        if (mo->mirror)
+            l[0] = -l[0];
+        const float *bm = in->base.m;
+        for (int r = 0; r < 3; r++)
+            out[n][r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
+        out[n++][3] = sh->radius;
+    }
+    return n;
+}
+
 /* the collision spheres an armed attack can hit with, in the world (0x2DA9E0: the shape's offset by its bone's
  * matrix, then by the monster's), into the scene's overlay */
 static void hit_spheres(Mon *mo)
@@ -3039,10 +3066,11 @@ static void street_step(Viewer *v, float dt)
     for (int k = 0; k < nm; k++) {
         Mon *mo = &v->mon[k];
         me[k] = (StreetMonster){ { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
-        if (mo->monster >= 0 && mo->have_graph) {    /* its box: 3 each way across, 8.5 tall */
-            float lo[3] = { mo->mx - MONSTER_HALF_WIDTH, mo->my - MONSTER_HALF_WIDTH, mo->mz };
-            float hi[3] = { mo->mx + MONSTER_HALF_WIDTH, mo->my + MONSTER_HALF_WIDTH, mo->mz + MONSTER_HEIGHT };
-            streetobj_touch(v->sobj, k, &me[k], lo, hi);
+        if (mo->monster >= 0 && mo->have_graph) {    /* [R 0x2E22B0] each collision sphere against the shapes */
+            float sp[32][4];
+            int ns = mon_spheres(mo, sp, 32);
+            for (int i = 0; i < ns; i++)
+                streetobj_touch(v->sobj, k, &me[k], sp[i], sp[i][3]);
         }
     }
     static StreetBuilding sbs[64];
@@ -3897,14 +3925,15 @@ static void play_step(Viewer *v, float dt, float aspect)
         if (k == 0)
             hud_frame(v, 1);
     }
-    for (int k = 0; k < v->nmon && v->challenge.up_state == CU_WAITING; k++) {   /* a monster's body against it
-                                                      * (TakeDamage, Collision): its box, 3 each way across and 8.5
-                                                      * tall, as a sphere [G] */
+    for (int k = 0; k < v->nmon && v->challenge.up_state == CU_WAITING; k++) {   /* a monster's touch (TakeDamage,
+                                                      * Collision): its collision spheres, armed or not [R 0x2E22B0] */
         Mon *mo = &v->mon[k];
         if (!mon_in(mo))
             continue;
-        float body[3] = { mo->mx, mo->my, fminf(fmaxf(v->challenge.up.pos[2], mo->mz), mo->mz + MONSTER_HEIGHT) };
-        upgrade_touch(mo, body, MONSTER_HALF_WIDTH);
+        float sp[32][4];
+        int ns = mon_spheres(mo, sp, 32);
+        for (int i = 0; i < ns && v->challenge.up_state == CU_WAITING; i++)
+            upgrade_touch(mo, sp[i], sp[i][3]);
     }
     switch (challenge_upgrade_tick(&v->challenge, dt)) {   /* gAIMgr: the MonsterUpgrade object, its last banner */
     case CUE_SPAWN:

@@ -113,7 +113,10 @@ struct ArmyUnit {
     int group_index, is_cop, is_grenadier, troops_left[4], troop_i;
     float reload, voice[4];
     const char *vehicle;                             /* Swat.bsf's vehicleType: the truck that brought it */
-    struct { float pts[8][3], dist[8]; int n, seg, active, kind; float t, speed, resp2; uint32_t flags; } mv;
+    struct {
+        float pts[8][3], dist[8]; int n, seg, active, kind; float t, speed, resp2; uint32_t flags;
+        float m[8][3], s; int ready, closed;         /* the SplineMover's tangents and its place along the path */
+    } mv;
     struct { float vmax, app2, flee2, speed, timer, sign, goal, driven; int state, target, tread; } am;   /* AttackMover */
     int target;                                      /* the monster its weapons aim at, -1 none */
     float lock[3];                                   /* StationaryAttackObject's lTarget */

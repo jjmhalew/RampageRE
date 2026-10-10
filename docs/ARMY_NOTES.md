@@ -191,8 +191,8 @@ at 0.
   (`stopFlight`).
 - **Death:** `HitPoints` hits make it fall on a SphereMover. At z ≤ 4 it explodes (`HitEffect0`, `ExplodeEffect`).
 - The spline is the SplineMover's (0x33ACA0, BOSS_NOTES.md: a Kochanek-Bartels curve whose place d grows by the
-  velocity in the points' own d units, answering 2 every frame past its end) [R]; here it is taken as straight runs,
-  facing the way the helicopter goes [G: boss.c's spline not reused yet].
+  velocity in the points' own d units, answering 2 every frame past its end) [R], ported as boss.c's (army.c
+  `spline_step`); flag 2 turns the helicopter along the tangent (yaw only here; the game sets its whole frame).
 
 **Trucks and police cars** (`CombatTruck.bsf`) [R]:
 - **Arrival:** they come from x = ±100 to 8 past the nearest monster (within ±40), at 20.

@@ -898,19 +898,6 @@ static int sphere_meets(const StreetObj *o, const float c[3], float radius)
     as_collide(o, &co);
     return collide_obj_sphere(&co, c, radius, n, pt, push);
 }
-/* the monster's box (world-aligned) against the object's shape (0x2801A0, the monster's test: collide_obj_box) */
-static int box_meets(const StreetObj *o, const float mn[3], const float mx[3])
-{
-    CollideObj co;
-    float c[3], e[3], n[3], pt[3], push[3];
-    for (int k = 0; k < 3; k++) {
-        c[k] = (mn[k] + mx[k]) / 2;
-        e[k] = (mx[k] - mn[k]) / 2;
-    }
-    as_collide(o, &co);
-    return collide_obj_box(&co, c, e, n, pt, push);
-}
-
 static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who, int type)
 {
     o->frame = s->frame;
@@ -944,13 +931,15 @@ int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const fl
     return n;
 }
 
-int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const float min[3], const float max[3])
+int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const float centre[3], float radius)
 {
     int n = 0;
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
-        if (!o->alive || (o->oflags & SF_EFF_NODES) || o->frame == s->frame || !box_meets(o, min, max))
+        if (!o->alive || (o->oflags & SF_EFF_NODES) || o->frame == s->frame || !sphere_meets(o, centre, radius))
             continue;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  street object %d (%s) touched\n", i, o->name ? o->name : "?");
         take_damage(s, o, monster, who, 1);
         n++;
     }
