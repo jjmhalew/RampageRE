@@ -136,12 +136,24 @@ int material_color(const Bundle *b, uint32_t material, float rgba[4])
     return 1;
 }
 
-uint32_t material_env(const Bundle *b, uint32_t material)
+/* the second layer's texture when the material's layer kind (the byte at +0x2, read so by 0x16F030 and 0x25F960) is
+ * `kind`: 0x25F960 binds +0x38 to texture slot 0 and +0x3A to slot 1 for kinds 2 .. 8 */
+static uint32_t material_layer(const Bundle *b, uint32_t material, int kind)
 {
     const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
-    if (!e || e->size < 0x3C || rd16(e->data + 2) != 5)
+    if (!e || e->size < 0x3C || e->data[2] != kind)
         return 0;
     return rd16(e->data + 0x3A);
+}
+
+uint32_t material_env(const Bundle *b, uint32_t material)
+{
+    return material_layer(b, material, MAT_LAYER_REFLECTION);
+}
+
+uint32_t material_damage_layer(const Bundle *b, uint32_t material)
+{
+    return material_layer(b, material, MAT_LAYER_DAMAGE);
 }
 
 uint32_t material_flags(const Bundle *b, uint32_t material)

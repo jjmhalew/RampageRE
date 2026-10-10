@@ -94,7 +94,12 @@ one of them. The speed is constant: a car never brakes for a monster.
 
 **TakeDamage** (the monster's blow) [R]. Nothing happens if the vehicle is wrecked, hidden or thrown. Otherwise:
 - **The look:** flag 8, neither hittable nor pickable, its `DamageShape`; the ambient effect stops; `DamageSound` and
-  `DamageEffect` (both effect names) start on it.
+  `DamageEffect` (both effect names) start on it. The damaged look is all in that mesh: many `DamageShape`s
+  (`citybus_Damaged`, `Car_MinivanRed_Damaged`, `DeliveryVan_Destroyed`, `Garbage_Truck_Damaged`, ...; not the
+  sedans', taxi's, limo's, police car's or fire truck's) have a kind-8 material (shader 0x7A): their own texture
+  with `DestroyedGeneric` blended over it by each vertex's alpha, painted into the mesh (docs/FORMAT_BDP.md
+  "Materials"). Nothing on the vehicle (no hit points, no wreck value) feeds the blend: one hit swaps the whole
+  shape [R].
 - **The flight:** a SphereMover at 25 along the way from the monster's place, z made positive. From the street that
   is mostly sideways: the car skids off.
 - **onThrow(monster, not eaten):** a car counts (addStats type 2) and is "thrown" (32). Flag 8 is already set, so it

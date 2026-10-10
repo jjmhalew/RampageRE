@@ -345,6 +345,12 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
         int prelit = p->col && !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
         if (prelit)
             glDisable(GL_LIGHTING);
+        /* a damage layer (material_damage_layer, shader 0x7A): the vertex alpha is the layer's share, not see-through:
+         * the part itself is drawn opaque, without the alpha test */
+        uint32_t dmg = p->col && p->uv ? material_damage_layer(sm->b, p->material) : 0;
+        GLboolean dmg_test = dmg ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
+        if (dmg)
+            glDisable(GL_ALPHA_TEST);
         if (p->blend || see_through) {                       /* over what is behind, by its alpha */
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -356,6 +362,26 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
             glDisable(GL_BLEND);
             glAlphaFunc(GL_GREATER, 0.5f);
             glDepthMask(GL_TRUE);
+        }
+        if (dmg) {                                           /* the second pass: the layer over the part, (Cs - Cd) x Ad + Cd,
+                                                              * Ad the alpha of the first: its opaque texture's x the vertex's */
+            GLuint id2 = texture(r, sm->b, dmg);
+            if (id2) {
+                glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT);
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, id2);
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glEnable(GL_ALPHA_TEST);                 /* a share of 0 adds nothing */
+                glAlphaFunc(GL_GREATER, 0.0f);
+                glDepthFunc(GL_LEQUAL);
+                glDepthMask(GL_FALSE);
+                glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+                glPopAttrib();
+                r->drawn += p->ntris;
+            }
+            if (dmg_test)
+                glEnable(GL_ALPHA_TEST);
         }
         r->drawn += p->ntris;
         GLuint env = p->uv || p->nrm || skin ? texture(r, sm->b, material_env(sm->b, p->material)) : 0;

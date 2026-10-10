@@ -254,7 +254,7 @@ Every vertex of the cloth mesh sits exactly on a particle (checked on five monst
 weights skin the mesh at rest. A flag's particles have no bones.
 
 ## Materials (type 6)
-0x90 bytes: u16 own name index, u16 layer count?, u16 flags, ..., f32 colours from 0x08 (diffuse, ambient,
+0x90 bytes: u16 own name index, u8 kind, u8 ?, u32 flags, ..., f32 colours from 0x08 (diffuse, ambient,
 specular, ...), u16 name index of the texture at 0x38 (0 = no texture). 1,412 of the 1,695 materials name a
 texture; the rest have none or name an `.ifl` animation or another material. An `.ifl` is a text entry (type 2):
 one line per frame, its image's name (`Parking00.bmp`: the texture `Parking00`) and how many frames it shows
@@ -263,9 +263,47 @@ one line per frame, its image's name (`Parking00.bmp`: the texture `Parking00`) 
 The colour at 0x08 (diffuse rgba) is all a material without a texture has: 218 of them (the saucer's orange
 `saucer_blades`, its green `Saucer_glass` at alpha 0.38, flag poles, bumpers, cloth); every textured material's is
 white. Alpha below 1 is see-through glass (9 materials: the saucer's, the hover tank's, the helicopter's canopy).
-The u16 at +0x2 is the kind of a second layer named by the u16 at +0x3A: 5 a reflection, the sphere map `cubemap`
-(12 materials: the saucer's top `SB_shinyNOTreflective`, the trash cans, the Jumper's shiny body), 8 a damage blend
-`DestroyedGeneric` (38 vehicle materials, not drawn yet).
+The byte at +0x2 is the material's kind (how many textures it binds, below): 1 none (222 materials), 2 one
+(1,621), 5 and 8 a second layer named by the u16 at +0x3A (the byte at +0x3 is 0, or 128 on 90 and 150 on one of
+kind 2): 5 a reflection, the sphere map `cubemap` (12 materials: the saucer's top `SB_shinyNOTreflective`, the
+trash cans, the Jumper's shiny body), 8 a damage blend `DestroyedGeneric` (38 vehicle materials, below).
+
+**How a material is built** [R]: the material library's loader 0x16F540 picks the shader with 0x16F030 from the kind
+(+0x2) and the u32 at +0x4 (bits 0, 1, 0x100000, 0x200000, 0x2000000, 0x8000000), builds the material object
+(0x25C4F0: 0x90 bytes, vtable 0x4488D0; +0x2C the shader, +0x30 its state) and fills it with 0x25F960: by kind (jump
+table 0x426940) no texture (kinds 0, 1: the untextured materials), one (2: +0x38), two (3, 4, 5, 7, 8: +0x38 into
+slot 0, +0x3A into slot 1) or three (6: also +0x3C); with flag 0x100 the 16 bytes right after those indices (+0x3A,
++0x3C or +0x3E) go into the first texture's region; the colours at +0x18 and +0x28 as bytes (x 255 + 0.5). A shader
+is a 0xD8-byte descriptor (0x40F910 + id x 0xD8) compiled offline: its record (0xB8 bytes at 0x3B4960 + n x 0xB8) is
+found by the sum of the descriptor's words mod 0x329 in the table 0x3C73B0 (0xE0 bytes per entry: the sum, n, the
+descriptor). A record is u32 passes, then 0x24 bytes per pass: texture slot, GS state (0x30 bytes at 0x3B4240 + k x
+0x30: ALPHA_1, TEST_1, PRMODE), ..., the colour mode (0x265840: 0 a constant 255 = the GS's 1.0), the GIF registers
+(0x412: STQ, RGBAQ, XYZ2), the VU1 program and its clipping twin.
+
+**The damage blend (kind 8)** [R]. All 38 materials have flags 0x0800000C or 0x08000000 (bit 27, not bits 0 / 1), so
+0x16F030 gives shader 0x7A (descriptor 0x416000, record 122 at 0x3BA110; kind 8 with bit 27 gives 0x7A, 0x60
+see-through (bit 1), 0x7B two-sided (bit 0), 0x61 both; without bit 27 0x5E, 0x5C, 0x5F, 0x5D). Its record: two
+passes, vertex format 0x152 (position, normal, colour, uv), VU1 program 0x37A2A0 (0x384668 clipping) for both:
+- pass 0, slot 0 (the vehicle's own texture: `ArmyVan`, `Citybus`, ...), state 1: no blend (PRMODE 0x38), Z test
+  and write (TEST 0x50002). The colour is written whole, its alpha too: the texture's (opaque in all of them) x the
+  vertex's.
+- pass 1, slot 1 (`DestroyedGeneric`: 128 x 128 crumpled metal, opaque), state 0x14: ALPHA 0x54 =
+  (Cs − Cd) x **Ad** + Cd, the destination alpha pass 0 wrote; PRMODE 0x78 (blended, fogged); TEST 0x50002.
+
+The program lights each vertex (its normal against three light directions, their colours and the ambient at VU
+rows 13 .. 16) and multiplies the vertex colour's rgb by that light; the alpha is the vertex's x the constant
+colour's (0x80): so the share of `DestroyedGeneric` at a vertex is **its vertex alpha** (0x80 = all of it, 0 = the
+vehicle's own texture), and the rgb darkens both layers. Nothing at run time sets it: no material parameter, no
+hit points. The 38 materials are only used by the vehicles' damaged meshes (one part each: `citybus_Damaged`,
+`Army_Van_Destroyed`, `Car_MinivanRed_Damaged`, `DeliveryVan_Destroyed`, `Garbage_Truck_Damaged`,
+`Bus_HongKong_Damaged`, `Bus_UK_Damaged`, the Mini, Sedan, SportsCoupe, Hummer, tour tram, cable car and New
+York's train cars), the `DamageShape` a vehicle's `setShape` swaps in (docs/VEHICLE_NOTES.md). Their alphas: the
+Army van 355 of 394 vertices 0, 30 near 1; the red minivan 256 of 280 at 0; the delivery van 259 of 419 near 1, the
+tanker car 275 of 432. On some the rgb is the alpha again (the Army van, the city bus, the Sedan, the Hummer, the
+red and blue Minis: black where the layer is 0, a burnt shell), on the others white (the minivan stays red with
+metal on its dents). The viewer draws it so (src/render_gl.c draw_mesh: the part opaque without the alpha test, then
+`material_damage_layer`'s texture over it by the vertex alpha) [G: GL's source alpha, `DestroyedGeneric`'s x the
+vertex's, stands for the GS's destination alpha; the same while both textures are opaque].
 
 Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees, cloth, teeth), bit 1 see-through
 (fog masks, skylines, tree cards), 0xC the monsters' own; 0x100 on 78 city materials, not decoded.

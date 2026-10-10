@@ -61,9 +61,18 @@ uint32_t material_flags(const Bundle *b, uint32_t material);
  * saucer's orange blades, its green glass at alpha 0.38, flag poles, bumpers); every textured one is white. 0 when
  * the name is not a material (a texture named directly): white */
 int material_color(const Bundle *b, uint32_t material, float rgba[4]);
-/* a reflection layer: the material's second texture (u16 at +0x3A) when its layer kind (u16 at +0x2) is 5, the
- * sphere map "cubemap" on 12 materials (the saucer's top, the trash cans, the Jumper's shiny body); 0 none */
+/* a material's second layer: its texture is the u16 at +0x3A, its kind the byte at +0x2 (0x16F030 picks the shader by
+ * it, docs/FORMAT_BDP.md "Materials") */
+enum { MAT_LAYER_REFLECTION = 5, MAT_LAYER_DAMAGE = 8 };
+/* a reflection layer (kind 5): the sphere map "cubemap" on 12 materials (the saucer's top, the trash cans, the
+ * Jumper's shiny body); 0 none */
 uint32_t material_env(const Bundle *b, uint32_t material);
+/* a damage layer (kind 8, shader 0x7A): "DestroyedGeneric" on the 38 materials of the vehicles' DamageShapes
+ * (citybus_Damaged, Army_Van_Destroyed, ...). The part is drawn twice: its own texture opaque, the vertex alpha
+ * going into the frame's alpha, then this texture blended over it by that alpha (GS ALPHA (Cs - Cd) x Ad + Cd). So
+ * the share of the layer is the part's vertex alpha (0x80 = all of it), painted into the damaged mesh; nothing at
+ * run time sets it. 0 none */
+uint32_t material_damage_layer(const Bundle *b, uint32_t material);
 
 /* ---- property books (type 22), read in place; a value of a group-valued record is an offset into the book */
 enum { PK_INT = 0, PK_FLOAT = 1, PK_NAME = 2, PK_GROUP = 3 };
