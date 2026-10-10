@@ -208,6 +208,7 @@ typedef struct Viewer {
     char elf_path[512];                              /* RAMPAGE.ELF beside the VOL (fx.c's words) */
     Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
+    int lang;                                        /* --lang: the .loc column (hud.h: 0 English .. 8 Portuguese) */
     ShellGame last_game;                             /* the shell's last choices (back from a game) */
     const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */
@@ -1054,6 +1055,7 @@ static void build(Viewer *v)
             if (mo->hud) {
                 hud_set(mo->hud, mo->hp, 200, mo->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
                 hud_set_project(mo->hud, hud_project, v);
+                hud_set_language(mo->hud, v->lang);
                 hud_set_settings(mo->hud, profile_sound_volume(&v->prof), profile_music_volume(&v->prof),
                                  profile_rumble(&v->prof));
                 hud_add_bundle(mo->hud, v->scene.city);   /* <City>.loc: the block names, the challenge texts */
@@ -4435,6 +4437,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->loaded = v->prof.loaded;
     sp->allow_save = v->prof.allow_save && v->prof_write;
     sp->was_saving = v->prof.was_saving;
+    sp->language = v->lang;
     sp->profile_shown = v->prof.profile_shown;
     snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
     for (int p = 0; p < 4; p++)
@@ -5060,6 +5063,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
         else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
         else if (strcmp(argv[i], "--shell") == 0) v.shell_mode = 1;
+        else if (strcmp(argv[i], "--lang") == 0 && i + 1 < argc) v.lang = atoi(argv[++i]);
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) v.prof_path = argv[++i];
         else if (strcmp(argv[i], "--cheat") == 0 && i + 1 < argc) cheat = argv[++i];
         else if (strcmp(argv[i], "--play") == 0 && i + 1 < argc) {   /* campaign, kingcity, kingworld, timed */

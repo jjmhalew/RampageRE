@@ -31,19 +31,22 @@ move graph and the game's camera follows it
 ([CAMERA.md](CAMERA.md)). `--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a
 `--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
 directions held and buttons pressed, each followed by that many seconds; `at x y` puts the monster there facing the
-buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... drive it; `award Name` counts an object of
+buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... drive it (and the results screens:
+`menu b0` / `menu b1` their Change Monster and Save; keys C and V); `award Name` counts an object of
 that template for the block's challenge; `p2` (`p1` .. `p4`): the words after it play that player's monster, the
 other players on keys idle meanwhile; `--walk S` is `right S`). `--players N` (1 .. 4) plays N monsters, the last
 `--bots B` of them the computer's; `--monster2 Name` .. `--monster4 Name` pick players 2 .. 4's monsters (without
 one: George, Lizzie, Ralph or Boosy, the first not taken). Players 3 and 4 and the bots are computer-driven
 (below, "Several monsters"); the front end (`--shell`) hands its players, bots and monsters over the same way. `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
-(its results screens). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
+(its results screens). `--lang N` picks the texts' language (the .loc column: 0 English, 1 English 2, 2 Japanese,
+3 French, 4 German, 5 Italian, 6 Spanish, 7 Dutch, 8 Portuguese). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
 upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
 autosave notice, the movies (the logos and the intro, Start or Enter skips them once a profile exists; the
 Victory movie and the credits after the campaign), the profile popup (one profile, its file; letters and digits type
-the name, Enter is DONE), the main menu, players, monster select, city select, the loading screen, then the game it chose; the Pause menu's Quit
+the name, Enter is DONE; it opens from Back on the main menu, "Profiles", and autosave is on once a profile is
+loaded from it or the Results' Save is pressed), the main menu, players, monster select, city select, the loading screen, then the game it chose; the Pause menu's Quit
 goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
 square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
 `menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), and the words left once a game

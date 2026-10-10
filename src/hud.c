@@ -507,6 +507,9 @@ typedef struct Node {
     TexRef hl_tex, endcap; int has_hl_tex, has_endcap;
     float hl_d[2];
     int sel, pulse;
+    unsigned la; float lsp;     /* list: <a> its flags (8 across), <sp> its spacing (setExtraSpacing replaces it) */
+    int sizer; unsigned sflags; /* <sz> (GuiSizer): <sflags>; an item's <si> room before and after it */
+    float si[2];
     int clip; float clip_x0, clip_x1;
     float ep[4]; int has_ep;    /* line (<l>): <ep> its first and last point (x y) */
     float lw;                   /* line: <width>, 3 without (GuiLine ctor 0x23BA10: +0x228) */
@@ -700,8 +703,11 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         float w = 3;
         parse_floats(text, &w, 1);
         nd->lw = w;
-    }
-    /* sc (script), f (entry function), R, a, sp, growth, si / sflags / stretch (sizers), X / xf (child interfaces):
+    } else if (strcmp(tag, "a") == 0) nd->la = (unsigned)strtoul(text, NULL, 0);
+    else if (strcmp(tag, "sflags") == 0) nd->sflags = (unsigned)strtoul(text, NULL, 0);
+    else if (strcmp(tag, "si") == 0) parse_floats(text, nd->si, 2);
+    else if (strcmp(tag, "sp") == 0) nd->lsp = strtof(text, NULL);
+    /* sc (script), f (entry function), R, growth, si / sflags / stretch (sizers), X / xf (child interfaces):
      * not needed for drawing */
 }
 
@@ -713,7 +719,7 @@ static int node_kind(const char *tag)
     if (strcmp(tag, "r") == 0) return N_RECT;
     if (strcmp(tag, "lb") == 0) return N_LIST;
     if (strcmp(tag, "l") == 0) return N_LINE;
-    /* sz: a sizer (GuiSizer: Pause's Cancel / Accept buttons); its items are taken where the layout puts them [G] */
+    /* sz: a sizer (GuiSizer: Pause's Cancel / Accept buttons): a group that lays its items out (layouts_lay) */
     if (strcmp(tag, "o") == 0 || strcmp(tag, "DD") == 0 || strcmp(tag, "i") == 0 || strcmp(tag, "sz") == 0)
         return N_GROUP;
     return -1;
@@ -766,6 +772,8 @@ static int xml_element(Gui *g, Layout *L, Xml *x, Node *parent)
     xml_name(x, tag, sizeof tag);
     int kind = node_kind(tag);
     Node *nd = kind >= 0 ? node_new(L, kind) : NULL;
+    if (nd && strcmp(tag, "sz") == 0)
+        nd->sizer = 1;
     Attr at[8];
     int na = 0;
     for (;;) {
@@ -923,6 +931,89 @@ static float text_h(const Gui *g, const Node *nd)
 }
 
 /* ---------------------------------------------------------------- list boxes (GuiListBox) */
+/* the lists lay their items out every frame [R 0x23CF60]: a list across (<a> & 8) puts each shown item at a running
+ * place from 0, by its justify (0, 1/2, 1 of its width), and steps its width + <sp>. Down the list the steps are the
+ * items' heights, which no language changes: those keep the layout's places */
+/* a node's extent across x in its own frame (before its <m>): itself (a quad's picture or <d>, a text's width by its
+ * justify), its origin and its children's, each through its place and scale [R 0x248B80's boxes] */
+static void node_span(const Gui *g, const Node *nd, float *x0, float *x1)
+{
+    float a = 0, b = 0;                                  /* joined with the origin */
+    if (nd->kind == N_QUAD) {
+        float w = nd->has_d ? nd->d[0] : nd->has_tex ? nd->tex.w : 0, q = nd->Q & 2 ? -0.5f * w : 0;
+        a = fminf(a, q);
+        b = fmaxf(b, q + w);
+    } else if (nd->kind == N_TEXT) {
+        float w = text_w(g, nd), q = nd->justify == 1 ? -0.5f * w : nd->justify == 2 ? -w : 0;
+        a = fminf(a, q);
+        b = fmaxf(b, q + w);
+    }
+    for (const Node *c = nd->child; c; c = c->next) {
+        float c0, c1;
+        node_span(g, c, &c0, &c1);
+        a = fminf(a, c->p[0] + c->m * c0);
+        b = fmaxf(b, c->p[0] + c->m * c1);
+    }
+    *x0 = a;
+    *x1 = b;
+}
+
+/* a sizer across (sflags 1; Pause's buttons) [R 0x248B80]: each item's place = the last's + its max + its room
+ * after + this one's room before - this one's min; flag 4 ends the last at 0, 8 centres the row, else it starts at 0.
+ * Hidden items count. Down (no flag 1), the spread (0x100) and the across alignments are not needed here */
+static void sizer_lay(const Gui *g, Node *sz)
+{
+    if (!(sz->sflags & 1))
+        return;
+    float place = 0, prev_max = 0, prev_after = 0, start = 0;
+    int first = 1;
+    Node *last = NULL;
+    for (Node *c = sz->child; c; c = c->next) {
+        float c0, c1;
+        node_span(g, c, &c0, &c1);
+        c0 *= c->m;
+        c1 *= c->m;
+        if (first) {
+            place = c->si[0] - c0;
+            start = 0;
+            first = 0;
+        } else
+            place = place + prev_max + prev_after + c->si[0] - c0;
+        c->p[0] = place;
+        prev_max = c1;
+        prev_after = c->si[1];
+        last = c;
+    }
+    if (!last)
+        return;
+    float end = last->p[0] + prev_max + prev_after, shift = 0;
+    if (sz->sflags & 4)
+        shift = -end;
+    else if (sz->sflags & 8)
+        shift = -0.5f * (start + end);
+    for (Node *c = sz->child; c; c = c->next)
+        c->p[0] += shift;
+}
+
+static void layouts_lay(const Gui *g, Node *nd)
+{
+    for (; nd; nd = nd->next) {
+        if (nd->sizer)
+            sizer_lay(g, nd);
+        if (nd->kind == N_LIST && (nd->la & 8)) {
+            float place = 0;
+            for (Node *c = nd->child; c; c = c->next) {
+                if (!c->visible || c->kind != N_TEXT)
+                    continue;
+                float w = text_w(g, c) * c->m;
+                c->p[0] = place + (c->justify == 1 ? 0.5f * w : c->justify == 2 ? w : 0.0f);
+                place += w + nd->lsp;
+            }
+        }
+        layouts_lay(g, nd->child);
+    }
+}
+
 static int list_count(const Node *l)
 {
     int n = 0;
@@ -3632,9 +3723,9 @@ static void pause_options_setup(Hud *h, Screen *s)
     list_select(s->l_rumble, !s->b_rumble);              /* item 0 ON, 1 OFF */
     for (int i = 0; i < 3; i++)
         if (s->titles[i]) s->titles[i]->tscale = 1.0f;
-    if (h->gui.lang == 7 && s->l_rumble) {               /* Dutch: the list moved, its words smaller (and
-                                                          * setExtraSpacing(30) [G: not done]) */
+    if (h->gui.lang == 7 && s->l_rumble) {               /* Dutch: the list moved, its words smaller, 30 apart */
         s->l_rumble->p[0] = 185; s->l_rumble->p[1] = 180; s->l_rumble->p[2] = 0;
+        s->l_rumble->lsp = 30;
         Node *on = layout_find(s->l_rumble->child, "ON"), *off = layout_find(s->l_rumble->child, "OFF");
         if (on) on->tscale = 0.6f;
         if (off) off->tscale = 0.6f;
@@ -4050,6 +4141,10 @@ void hud_update(Hud *h, float dt)
         else
             pause_frame(h, h->pause, dt);
     }
+    if (h->scr && h->scr->L)
+        layouts_lay(&h->gui, h->scr->L->root);
+    if (h->pause && h->pause->L)
+        layouts_lay(&h->gui, h->pause->L->root);
 }
 
 int hud_sounds(Hud *h, HudSound *out, int max)

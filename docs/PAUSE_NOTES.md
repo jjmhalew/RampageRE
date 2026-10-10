@@ -171,7 +171,8 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   menu already shows. It loads its own copy of `Pause.ifc` (drawn last, over everything) and runs the 8192 setup.
   - The challenge data come from the last `hud_challenge()` (`last_block`, `identifier`, `icon`, `icon_scale`,
     `pause_scale`, `icon_shift`, `upgrade`) and `hud_challenge_items()`.
-  - The language comes from `hud_set_language` (> 2: the foreign boss card; 7: the Dutch rumble list).
+  - The language comes from `hud_set_language` (> 2: the foreign boss card; 7: the Dutch rumble list), the viewer's
+    `--lang`.
 - `hud_input` / `hud_input_pad` go to the menu while it shows. `hud_pad_held` gives pad 0's held stick x and left /
   right.
 - The script's engine calls come out of `hud_calls`:
@@ -198,14 +199,17 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   at a running place from 0, horizontal (`<a>` & 8) step its width + sp, vertical its height + its line spacing + sp;
   x by its justify (0, ½, 1 of its width, or of the list's when vertical), y by the origin (0, ½, 1 of the list's
   height, or of the item's when vertical), 0x20 centred; items outside the window get F 0x200. Checked: ON / OFF
-  (ArialBlack24 × 0.8: 30.4 and 40 wide) come at 15.2 and 110.4, the layout's. Not ported: the port keeps the
-  layout's English places, so Dutch (`setExtraSpacing(30)`, scale 0.6) does not move them.
+  (ArialBlack24 × 0.8: 30.4 and 40 wide) come at 15.2 and 110.4, the layout's, and ConfirmQuit's No / Yes at 0 and
+  131.2. The port lays out the lists across every `hud_update` (hud.c `layouts_lay`); down a list the steps
+  are heights no language changes, so those keep the layout's places. Dutch sets the rumble list's spacing to 30.
 - The sizer [R] (GuiSizer type 0x12, ctor 0x249160, vtable 0x447B20, update 0x248B80 with F 0x100): each child's box
   (its bounds with children, joined with the origin, through its 3 × 3) laid along x (flag 1) or y: place_i =
   place_i−1 + max_i−1 + after_i−1 + before_i − min_i, `<si>` before (u16 +0), after (+2), stretch (byte +6); flag 4
   ends at 0, 8 centres; across 0x20 / 0x40 / 0x10 (horizontal) or 2 / 8 / 4; 0x100 spreads (stretch − total) / Σ(s +
-  1) below `<stretch>` (0x2490D0); hidden children count. Checked: Cancel / Accept come at −61.8375 / −161.7125, the
-  layout's. Not ported: the places are the layout's (other languages would move them).
+  1) below `<stretch>` (0x2490D0); hidden children count. Checked: Cancel / Accept come at −161.7125 / −61.8375, the
+  layout's. The port lays out a sizer across (flags 1, 4, 8; hud.c `sizer_lay`): French's "Accepter" then ends at
+  the frame's edge as Accept does. Down, the spread and the across alignments are not needed by any layout and are
+  not ported.
 - The line [R]: GuiLine (ctor 0x23BA10) is 3 wide by default (+0x228), drawn as a band ± width / 2 across its points
   (0x23A8E0); `<ep>` (0x22C0E0) copies two points, floats 0 .. 2 and 3 .. 5 after the count. As here (`<width>`, 3).
 - The slider steps: one per script frame, the world's step 1/30 s (the GuiManager's update in the tick 0x288340,
