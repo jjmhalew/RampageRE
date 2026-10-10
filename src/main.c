@@ -34,6 +34,8 @@
 #include "challenge.h"
 #include "reveal.h"
 #include "profile.h"
+#include "shell.h"
+#include <ctype.h>
 #include <time.h>
 #include "boss.h"
 #include "streetobj.h"
@@ -144,6 +146,10 @@ typedef struct {
     RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
     Rubble rubble;                                   /* findPointInRubble's slots: the block left's buildings */
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
+    int prof_on_card;                                /* its file exists (the shell's profile list) */
+    Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
+    int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
+    ShellGame last_game;                             /* the shell's last choices (back from a game) */
     const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */             /* the Options page's volumes, 1 = as the game; the music now */              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
@@ -3501,9 +3507,211 @@ static void play_script(Viewer *v, const char *script, float aspect)
     }
 }
 
+/* ---- the front end (shell.c): --shell starts there, and a game's Quit goes back */
+
+/* the profile as the shell reads it */
+static void shell_profile(Viewer *v, ShellProfile *sp)
+{
+    memset(sp, 0, sizeof *sp);
+    sp->loaded = v->prof.loaded;
+    sp->allow_save = v->prof.allow_save && v->prof_write;
+    snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
+    for (int p = 0; p < 4; p++)
+        for (int m = 0; m < SHELL_MONSTERS; m++)
+            sp->monster_flags[p][m] = (uint8_t)profile_monster_flags(&v->prof, p, m);
+    for (int c = 0; c < SHELL_CITIES; c++) {
+        sp->city_flags[c] = (uint8_t)profile_city_flags(&v->prof, c);
+        sp->start_block[c] = profile_start_block(&v->prof, c);
+    }
+    sp->sound = profile_sound_volume(&v->prof);
+    sp->music = profile_music_volume(&v->prof);
+    sp->rumble = profile_rumble(&v->prof);
+    sp->cheats = profile_cheat_flags(&v->prof);
+    sp->nprofiles = v->prof_on_card ? 1 : 0;         /* one profile file: the "card" holds it or nothing */
+    if (sp->nprofiles)
+        snprintf(sp->profiles[0], sizeof sp->profiles[0], "%s", v->prof.block.name[0] ? v->prof.block.name : "Profile");
+}
+
+static void shell_enter(Viewer *v, const ShellStart *st)
+{
+    ShellProfile sp;
+    shell_profile(v, &sp);
+    v->shell = shell_open(&v->vol, st, &sp);
+    static Scene empty;                              /* nothing but the screens, black around their 4:3 */
+    memset(&empty, 0, sizeof empty);
+    empty.fog_end = 1;
+    v->shell_scene = &empty;
+    if (v->shell)
+        rnd_scene(v->rnd, v->shell_scene);           /* (the texture cache is keyed by the bundles: anew) */
+}
+
+/* what the shell asked for since the last call; 1 when a game is to start */
+static int shell_answer(Viewer *v)
+{
+    ShellEvent ev[32];
+    int n, start = 0;
+    float sv, mv;
+    int rumble;
+    while ((n = shell_events(v->shell, ev, 32)) > 0)
+        for (int i = 0; i < n; i++) {
+            const ShellEvent *e = &ev[i];
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  shell event %d (%s) %d %.2f\n", e->kind, e->name, e->arg, e->value);
+            switch (e->kind) {
+            case SHELL_EVT_SOUND: sound_play(e->name, NULL, 1); break;
+            case SHELL_EVT_MUSIC:
+                if (e->name[0])
+                    music_replace(e->name, 0.5f, 0.5f);
+                else
+                    music_stop(0.5f);
+                break;
+            case SHELL_EVT_MUSIC_VOLUME: v->music_now = e->value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+            case SHELL_EVT_SFX_VOLUME: v->sfx_vol = e->value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+            case SHELL_EVT_SAVE_SETTINGS:            /* Options' Accept: into the profile, saved */
+                shell_settings(v->shell, &sv, &mv, &rumble);
+                profile_set_sound_volume(&v->prof, sv);
+                profile_set_music_volume(&v->prof, mv);
+                profile_set_rumble(&v->prof, rumble, 1);
+                v->sfx_vol = sv / 0.75f;
+                v->music_vol = v->music_now = mv / 0.75f;
+                sound_volume(v->sfx_vol, v->music_now);
+                if (v->prof_write && v->prof.loaded)
+                    profile_write(&v->prof, v->prof_path, 1, (uint64_t)time(NULL) * 1000);
+                break;
+            case SHELL_EVT_PROFILE_LOAD: {           /* the one profile file */
+                ShellProfile sp;
+                if (profile_read(&v->prof, v->prof_path) > 0) {
+                    v->prof.loaded = 1;
+                    profile_restore_checkpoint(&v->prof);
+                }
+                shell_profile(v, &sp);
+                shell_set_profile(v->shell, &sp);
+                break;
+            }
+            case SHELL_EVT_PROFILE_CREATE: {
+                ShellProfile sp;
+                profile_create(&v->prof, e->name);
+                v->prof.loaded = 1;
+                if (v->prof_write && profile_write(&v->prof, v->prof_path, 1, (uint64_t)time(NULL) * 1000) > 0)
+                    v->prof_on_card = 1;
+                shell_profile(v, &sp);
+                shell_set_profile(v->shell, &sp);
+                break;
+            }
+            case SHELL_EVT_PROFILE_NONE: v->prof.allow_save = 0; break;
+            case SHELL_EVT_BUDDY_PROFILE: shell_buddy_profile(v->shell, -1); break;   /* no second profile here */
+            case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
+            case SHELL_EVT_START: start = 1; break;
+            default: break;                          /* the movies, the emulators, the demo game: skipped */
+            }
+        }
+    return start;
+}
+
+/* gShell.startGame: the game the shell chose (GameStatus), the city opened at its block */
+static void shell_start_game(Viewer *v)
+{
+    const ShellGame *g = shell_game(v->shell);
+    int city = v->city_index;
+    for (int i = 0; i < NCITIES; i++)
+        if (!_stricmp(g->city, CITIES[i]))
+            city = i;
+    v->play_type = g->play_type;
+    v->night = g->night;
+    v->monster = -1;
+    for (uint32_t i = 0; i < v->nmonsters; i++)
+        if (!_stricmp(g->monster_name[0], v->monsters[i]))
+            v->monster = (int)i;
+    v->clip = -1;
+    v->play = v->monster >= 0;
+    v->last_game = *g;
+    shell_close(v->shell);
+    v->shell = NULL;
+    v->exit_game = 0;
+    open_city(v, city, (uint32_t)(v->last_game.start_block > 0 ? v->last_game.start_block : 0));   /* (g is gone) */
+}
+
+/* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,
+ * letters and digits into the name entry, F2 Start + Cross held for the cheat entry), its time, its answers */
+static void shell_frame(Viewer *v, const Window *w, float dt)
+{
+    static const struct { int key, ev, button; } KEYS[] = {
+        { VK_RETURN, HUD_EV_ACCEPT, 0 }, { VK_SPACE, HUD_EV_ACCEPT, 0 }, { VK_BACK, HUD_EV_BACK, 0 },
+        { VK_UP, HUD_EV_UP, 0 }, { VK_DOWN, HUD_EV_DOWN, 0 }, { VK_LEFT, HUD_EV_LEFT, 0 }, { VK_RIGHT, HUD_EV_RIGHT, 0 },
+        { 'P', HUD_EV_START, 0 }, { 'C', HUD_EV_BUTTON, 0 }, { 'V', HUD_EV_BUTTON, 1 }, { 'R', HUD_EV_BUTTON, 4 } };
+    const char *focus = shell_focus(v->shell);
+    int typing = focus && !strcmp(focus, "MemoryCard");
+    for (int c = 'A'; typing && c <= 'Z'; c++)
+        if (w->pressed[c])
+            shell_type(v->shell, c);
+    for (int c = '0'; typing && c <= '9'; c++)
+        if (w->pressed[c])
+            shell_type(v->shell, c);
+    if (typing && w->pressed[VK_RETURN])             /* the name entry: Enter is DONE, Backspace rubs out */
+        shell_type(v->shell, '\r');
+    if (typing && w->pressed[VK_BACK])
+        shell_type(v->shell, '\b');
+    for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
+        if (w->pressed[KEYS[k].key] && !(typing && ((KEYS[k].key >= 'A' && KEYS[k].key <= 'Z') ||
+                                                    KEYS[k].key == VK_RETURN || KEYS[k].key == VK_BACK)))
+            shell_input(v->shell, KEYS[k].ev, KEYS[k].button);
+    int held = (w->keys[VK_LEFT] ? SHELL_HELD_LEFT : 0) | (w->keys[VK_RIGHT] ? SHELL_HELD_RIGHT : 0) |
+               (w->keys[VK_F2] ? SHELL_HELD_START | SHELL_HELD_CROSS : 0);
+    shell_pad_held(v->shell, 0, held);
+    shell_update(v->shell, dt);
+    if (shell_answer(v))
+        v->shell_go = 1;                             /* after this frame: the loading screen is drawn once */
+}
+
+/* --shell with --shot: the --do words for the shell (wait S at 1/60 s, menu <ev>, button N, type TEXT, done); the
+ * words left once a game starts (they play in it), NULL none */
+static const char *shell_script(Viewer *v, const char *script)
+{
+    static const struct { const char *name; int ev; } EV[] = {
+        { "up", HUD_EV_UP }, { "down", HUD_EV_DOWN }, { "left", HUD_EV_LEFT }, { "right", HUD_EV_RIGHT },
+        { "accept", HUD_EV_ACCEPT }, { "back", HUD_EV_BACK }, { "start", HUD_EV_START } };
+    const char *p = script;
+    char word[32], arg[32];
+    while (*p && v->shell && !v->shell_go) {
+        while (*p == ' ' || *p == ',') p++;
+        int n = 0, k = 0;
+        while (*p && *p != ' ' && *p != ',' && n < 31) word[n++] = *p++;
+        word[n] = 0;
+        while (*p == ' ') p++;
+        while (*p && *p != ',' && k < 31) arg[k++] = *p++;
+        while (k > 0 && arg[k - 1] == ' ') k--;
+        arg[k] = 0;
+        if (!_stricmp(word, "wait"))
+            for (int f = 0, frames = (int)(atof(arg) * 60 + 0.5); f < frames && !v->shell_go; f++) {
+                shell_update(v->shell, 1.0f / 60);
+                if (shell_answer(v))
+                    v->shell_go = 1;
+            }
+        else if (!_stricmp(word, "menu"))
+            for (size_t i = 0; i < sizeof EV / sizeof *EV; i++) {
+                if (!_stricmp(arg, EV[i].name))
+                    shell_input(v->shell, EV[i].ev, 0);
+            }
+        else if (!_stricmp(word, "button"))
+            shell_input(v->shell, HUD_EV_BUTTON, atoi(arg));
+        else if (!_stricmp(word, "done"))            /* the name entry's DONE */
+            shell_type(v->shell, '\r');
+        else if (!_stricmp(word, "type"))
+            for (const char *c = arg; *c; c++)
+                shell_type(v->shell, toupper((unsigned char)*c));
+        shell_update(v->shell, 1.0f / 60);
+        if (shell_answer(v))
+            v->shell_go = 1;
+    }
+    while (*p == ' ' || *p == ',') p++;
+    return *p ? p : NULL;
+}
+
 int main(int argc, char **argv)
 {
     static Viewer v;
+    if (getenv("RAMPAGE_TRACE"))                     /* a trace survives a crash */
+        setvbuf(stdout, NULL, _IONBF, 0);
     const char *shot = NULL, *monster = NULL, *pos[3] = { "build\\disc\\RAMPAGE.VOL", "Chicago", "1" };
     int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0;
     float view[5] = { 0 };
@@ -3528,6 +3736,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
         else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
+        else if (strcmp(argv[i], "--shell") == 0) v.shell_mode = 1;
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) v.prof_path = argv[++i];
         else if (strcmp(argv[i], "--cheat") == 0 && i + 1 < argc) cheat = argv[++i];
         else if (strcmp(argv[i], "--play") == 0 && i + 1 < argc) {   /* campaign, kingcity, kingworld, timed */
@@ -3604,8 +3813,12 @@ int main(int argc, char **argv)
     v.prof_write = !shot || v.prof_path;
     if (!v.prof_path)
         v.prof_path = "rampage_profile.bin";
-    if (!newprofile && v.prof_write && profile_read(&v.prof, v.prof_path) > 0)
+    if (!newprofile && v.prof_write && profile_read(&v.prof, v.prof_path) > 0) {
         printf("profile %s\n", v.prof_path);
+        v.prof_on_card = 1;
+        if (v.shell_mode)                            /* the shell's popup loads it */
+            profile_init(&v.prof);
+    }
     profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
     if (cheat && !profile_cheat_code(&v.prof, cheat))
         printf("no cheat %s\n", cheat);
@@ -3619,7 +3832,22 @@ int main(int argc, char **argv)
         if (_stricmp(monster, v.monsters[i]) == 0)
             v.monster = (int)i;
     v.play = v.monster >= 0 && clip < 0;
-    if (open_city(&v, city, block) != 0) {
+    if (v.shell_mode) {                              /* the front end first: the city once a game starts */
+        shell_enter(&v, NULL);
+        if (!v.shell) {
+            plat_message("The shell's bundles are not in RAMPAGE.VOL.", 1);
+            return 1;
+        }
+        if (shot && script)                          /* its words, then the shot (of the shell, or of the game, which
+                                                      * plays the words left) */
+            script = shell_script(&v, script);
+        if (!v.shell_go)
+            script = NULL;
+        if (v.shell_go) {
+            v.shell_go = 0;
+            shell_start_game(&v);
+        }
+    } else if (open_city(&v, city, block) != 0) {
         plat_message("The city's bundles are not in RAMPAGE.VOL.", 1);
         return 1;
     }
@@ -3645,6 +3873,28 @@ int main(int argc, char **argv)
         float dt = (float)(now - last);
         last = now;
         if (w.pressed[VK_ESCAPE]) w.quit = 1;
+        if (v.shell) {                               /* the front end has the screen and the pad */
+            if (v.shell_go) {                        /* the loading screen was drawn: the game */
+                v.shell_go = 0;
+                shell_start_game(&v);
+                continue;
+            }
+            if (!shot)
+                shell_frame(&v, &w, dt > 0.1f ? 0.1f : dt);
+            static HudQuad sq[4096];
+            v.shell_scene->hud = sq;
+            v.shell_scene->nhud = shell_quads(v.shell, sq, 4096);
+            Camera none = { { 0, 0, 0 }, 0, 0, 60 };
+            sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
+            rnd_frame(v.rnd, &w, &none, now - start, 0);
+            if (shot) {
+                int ok = shot_png(shot, w.width, w.height) == 0;
+                printf(ok ? "wrote %s\n" : "cannot write %s\n", shot);
+                break;
+            }
+            win_swap(&w);
+            continue;
+        }
         if (v.hud && hud_results_showing(v.hud)) {   /* a results screen has the pad: Enter / Space go on,
                                                       * Backspace quits, the arrows choose, C changes monster */
             static const struct { int key, ev, button; } KEYS[] = {
@@ -3666,8 +3916,16 @@ int main(int argc, char **argv)
             hud_pad_held(v.hud, 0, w.keys[VK_LEFT] != 0, w.keys[VK_RIGHT] != 0);
         } else if (v.hud && v.play && (w.pressed['P'] || w.pressed[VK_RETURN]))   /* Start: the Pause menu */
             pause_open(&v);
-        if (v.exit_game)                             /* back to the shell: there is none here */
+        if (v.exit_game) {                           /* back to the shell (--shell), or the viewer ends */
+            v.exit_game = 0;
+            if (v.shell_mode) {
+                ShellStart st = { SHELL_FROM_GAME, 1, 0, 0, -1, 0, v.last_game };
+                v.play = 0;
+                shell_enter(&v, &st);
+                continue;
+            }
             w.quit = 1;
+        }
         game_next_block(&v);                         /* the game moved on to the next block */
         if (w.pressed[VK_NEXT] && v.nblocks) { v.block = (v.block + 1) % v.nblocks; build(&v); }
         if (w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }
@@ -3705,6 +3963,8 @@ int main(int argc, char **argv)
                     play_script(&v, script, aspect);
             }
             settled = 1;
+            if (v.exit_game)                         /* the script quit the game: the shell's turn */
+                continue;
             float lx = (float)(w.keys['D'] - w.keys['A']);   /* the left stick: W A S D; the right: the arrows */
             float ly = (float)(w.keys['S'] - w.keys['W']);
             v.rx = (float)(w.keys[VK_RIGHT] - w.keys[VK_LEFT]);

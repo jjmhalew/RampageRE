@@ -32,7 +32,13 @@ that template for the block's challenge; `--walk S` is `right S`). `--cam x y z 
 (its results screens). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
-upgrade challenges teach; `--cheat 011235` gives every move. The console prints
+upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
+autosave notice, the profile popup (one profile, its file; letters and digits type the name, Enter is DONE), the
+main menu, players, monster select, city select, the loading screen, then the game it chose; the Pause menu's Quit
+goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
+square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
+`menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), and the words left once a game
+starts play in it. The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
@@ -147,7 +153,8 @@ event, `impact_route`: a building is hit with radius Mass / 1000), and the stree
 
 ## Not there yet
 - the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
-- more than one player, the front end.
+- more than one player (the front end hands over up to four; the viewer plays player 1); the movies, the menus' 3D
+  globe and effects.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),
