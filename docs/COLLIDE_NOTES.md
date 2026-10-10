@@ -178,9 +178,10 @@ Each frame, before anything moves, main.c's `world_build` fills the Viewer's `Co
 3. each module's objects with their shapes (0x28FD70, `collide_shape_pick`, read once per object) and their own
    flags | 4: `army_collide_add`, `vehicle_collide_add`, `rail_collide_add`, `parade_collide_add`,
    `streetobj_collide_add`, `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged
-   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). A held object is left out **[G]**: in the game the
-   grab (0x2DA310) keeps it in the world with its shape (BeingHeld set, Pickupable and PushOutMonsters cleared), so
-   the monster's box no longer sees it but flying objects meet it (TakeImpact) and rays may [R];
+   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). A held object stays in, as in the game: the grab
+   (0x2DA310) keeps it in the world with its shape (BeingHeld set, Pickupable and PushOutMonsters cleared), so the
+   monster's box no longer sees it but flying objects meet it (TakeImpact) [R]; here it is flagged RAYSKIP, so shots
+   pass it **[G: whether shots, include 4, meet it]**;
 4. `collide_finish`.
 
 The tag (`COLLIDE_TAG(owner, index)`, `COLLIDE_TAG_OWNER`, `COLLIDE_TAG_INDEX`) names the module and its index; each

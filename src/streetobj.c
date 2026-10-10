@@ -968,10 +968,14 @@ void streetobj_collide_add(StreetObjs *s, CollideWorld *w)
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
         o->cobj = -1;
-        if (!w || !o->alive || (o->oflags & SF_HELD) || s->deleting[i])
-            continue;                                /* [G] a held one is the hand's */
+        if (!w || !o->alive || s->deleting[i])
+            continue;
         CollideObj c;
         as_collide(o, &c);
+        /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
+         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+        if (o->oflags & SF_HELD)
+            c.flags = (c.flags & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
         o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_STREET, i), 0);
     }
 }

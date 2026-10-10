@@ -2202,10 +2202,14 @@ void rail_collide_add(Rail *r, CollideWorld *w)
     for (int i = 0; i < r->n; i++) {
         RailObj *o = &r->o[i];
         o->cobj = -1;
-        if (!w || o->phase != RP_ALIVE || o->hidden || is_controller(o->kind))
-            continue;                                /* [G] a held one is the hand's */
+        if (!w || (o->phase != RP_ALIVE && o->phase != RP_HELD) || o->hidden || is_controller(o->kind))
+            continue;
         CollideObj c;
         obj_collide(r, o, &c);
+        /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
+         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+        if (o->phase == RP_HELD)
+            c.flags = (c.flags & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
         o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_RAIL, i), 0);
     }
 }

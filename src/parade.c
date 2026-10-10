@@ -1258,14 +1258,18 @@ void parade_collide_add(Parade *p, CollideWorld *w)
     for (int i = 0; i < p->n; i++) {
         ParadeObj *o = &p->o[i];
         o->cobj = -1;
-        if (!w || o->phase == PAP_GONE || o->phase == PAP_HELD)
-            continue;                                /* [G] a held one is the hand's */
+        if (!w || o->phase == PAP_GONE)
+            continue;
         CollideShape sh;
         float m[12];
         obj_shape(p, o, &sh);
         collide_matrix_from16(m, o->world);
-        o->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)(PAF_HELD | PAF_COUNTED)),
-                              COLLIDE_TAG(COLLIDE_OWN_PARADE, i), 0);
+        uint32_t fl = COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)(PAF_HELD | PAF_COUNTED));
+        /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
+         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+        if (o->phase == PAP_HELD)
+            fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+        o->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_PARADE, i), 0);
     }
 }
 

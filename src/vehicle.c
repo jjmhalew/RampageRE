@@ -1447,14 +1447,18 @@ void vehicle_collide_add(Vehicles *v, CollideWorld *w)
     for (int i = 0; i < v->n; i++) {
         VehObj *o = &v->o[i];
         o->cobj = -1;
-        if (!w || o->phase != VP_ALIVE || o->hidden)
-            continue;                                /* [G] a held one is the hand's; the hidden one has no body */
+        if (!w || (o->phase != VP_ALIVE && o->phase != VP_HELD) || o->hidden)
+            continue;                                /* (the hidden one has no body) */
         CollideShape sh;
         float m[12];
         obj_shape(v, o, &sh);
         collide_matrix_from16(m, o->world);
-        o->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)VF_HELD),
-                              COLLIDE_TAG(COLLIDE_OWN_VEHICLE, i), 0);
+        uint32_t fl = COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)VF_HELD);
+        /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
+         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+        if (o->phase == VP_HELD)
+            fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+        o->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_VEHICLE, i), 0);
     }
 }
 

@@ -3134,14 +3134,18 @@ void army_collide_add(Army *a, CollideWorld *w)
     for (int i = 0; i < a->n; i++) {
         ArmyUnit *u = &a->u[i];
         u->cobj = -1;
-        if (!w || u->phase == AU_GONE || u->phase == AU_HELD)
-            continue;                                /* [G] a held one is the hand's, not in the world */
+        if (!w || u->phase == AU_GONE)
+            continue;
         CollideShape sh;
         float m[12];
         unit_shape(a, u, &sh);
         collide_matrix_from16(m, u->world);
-        u->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | (u->oflags & ~(uint32_t)(OF_HELD | OF_MONSTER)),
-                              COLLIDE_TAG(COLLIDE_OWN_ARMY, i), 0);
+        uint32_t fl = COLLIDE_F_WORLD | (u->oflags & ~(uint32_t)(OF_HELD | OF_MONSTER));
+        /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
+         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+        if (u->phase == AU_HELD)
+            fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+        u->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_ARMY, i), 0);
     }
 }
 
