@@ -112,7 +112,8 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   (op 3), which tests again. A write fails below 140 free (0x1A2E00, error 11): mcNoSpace with Retry (the write
   again) / Don't Save (a create back to the list, else state 2).
 - The port: the notice, then the room test against `shell_set_card_free` (the viewer: `--card-free-kb N`, else the
-  free room of the drive the profile file is on, capped at 8000 [G: an empty card's], looked at once a second;
+  free room of the drive the profile file is on, looked at once a second; only the tests against 140 read the free
+  KB, no text shows it [R 0x33FECC: the texts get the 140], so it needs no 8 MB card's cap;
   unset or nothing written: room enough). Retry at the boot runs the test again [G: the host's room comes back
   without a status change]. No card and unformatted have no host meaning; corruption is checked at the load (error
   18). An autosave from the game (Results) that finds no room is not shown: nothing is written.

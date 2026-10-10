@@ -5010,7 +5010,8 @@ static void shell_start_game(Viewer *v)
 }
 
 /* the "card"'s free room for the shell's room tests: --card-free-kb, else the drive the profile file is on, a look a
- * second, capped at what an empty 8 MB card has [G: 8000]; nothing written (a --shot run): room enough */
+ * second; nothing written (a --shot run): room enough. Only the tests against 140 read it (no text shows it), so a
+ * drive's room needs no card's cap */
 static void card_free(Viewer *v, float dt)
 {
     if (!v->shell)
@@ -5024,7 +5025,7 @@ static void card_free(Viewer *v, float dt)
     v->card_poll = 1;
     long long kb = plat_free_kb(v->prof_path);
     if (kb >= 0)
-        shell_set_card_free(v->shell, kb > 8000 ? 8000 : (int)kb);
+        shell_set_card_free(v->shell, kb > 0x7FFFFFFF ? 0x7FFFFFFF : (int)kb);
 }
 
 /* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,
