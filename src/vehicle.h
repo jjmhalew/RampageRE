@@ -100,6 +100,7 @@ struct VehObj {
         const char *name, *node, *fire_fx, *impact_fx;
         int ammo, counts, reaction, on, firing, first;
         float timer, charge, offset, refire, duration, damage, dps, velocity, range, h_knock, v_knock, left, age;
+        float head, tail;                            /* the beam's stream (0x226CC0) */
         float rot_rate, elev_rate, elev_min, elev_max;
     } w;
 };

@@ -1089,17 +1089,22 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
             o->beam_fx = -1;
         } else {
             o->w.age += dt;
-            /* [R 0x2270A0, 0x226CC0] the reach is the FireEffect's collision rod (army.c's beam_update): the head at
-             * speed up to the length, the tail from 0 after the cycle when it does not loop; no rod, no cast */
+            /* [R 0x2270A0, 0x226CC0, 0x226DF0] the reach is the FireEffect's collision rod, a stream kept from frame
+             * to frame (army.c's beam_update): the tail 0 within the cycle, then growing by the speed; the head growing
+             * up to the length, cut to tail + t at a hit; tail at head: the stream is done for the burst; no rod, no
+             * cast */
             float reach, tail = 0, speed, length, cycle;
             int loops;
             if (v->host.rod) {
                 reach = 0;
                 if (o->w.fire_fx && v->host.rod(v->host.ctx, o->w.fire_fx, &speed, &length, &cycle, &loops)) {
-                    reach = fminf(speed * o->w.age, length);
-                    if (!loops && o->w.age > cycle)
-                        tail = fminf(speed * (o->w.age - cycle), reach);
+                    tail = o->w.age <= cycle ? 0 : o->w.tail + speed * dt;
+                    reach = fminf(o->w.head + speed * dt, length);
+                    if (tail >= reach)
+                        reach = tail = 0;
                 }
+                o->w.tail = tail;
+                o->w.head = reach;
             } else
                 reach = fminf(o->w.velocity > 0 ? o->w.velocity * o->w.age : o->w.range, o->w.range);
             for (int k = 0; k < 3; k++)
@@ -1128,6 +1133,8 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
                     }
                 }
             }
+            if (t >= 0 && v->host.rod)
+                o->w.head = tail + t;                /* [R 0x226DF0] the cut */
             o->beam.on = 1;
             memcpy(o->beam.from, from, sizeof from);
             memcpy(o->beam.dir, dir, sizeof dir);
@@ -1168,6 +1175,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
     o->w.first = 1;
     o->w.left = o->w.duration;
     o->w.age = 0;
+    o->w.head = o->w.tail = 0;
     if (o->w.fire_fx) {
         VehicleEvent *e = emit(v, VE_EFFECT, idx(v, o), o->w.fire_fx, from);
         memcpy(e->dir, dir, sizeof e->dir);

@@ -696,32 +696,42 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     memcpy(s->dir, dir, sizeof s->dir);
     norm3(s->dir);
     s->age += dt;
-    /* [R 0x2270A0, 0x226CC0, 0x295750] the reach is the FireEffect's collision rod: its head grows by its speed up to
-     * its length, its tail stays at 0 until the clock passes the emitter's cycle (then, not looping, follows at the
-     * same speed [G: the loop byte +0x42's writer was not found]); the cast runs from the tail to the head when they
-     * are more than 0.001 apart, along the beam (the rod's own axis in the effect's frame, here the weapon's
-     * direction the effect is placed along [G]). No rod, no cast. MaxFiringRange only gates the firing */
-    float head, tail = 0;
+    /* [R 0x2270A0, 0x226CC0, 0x226DF0, 0x295750] the reach is the FireEffect's collision rod, a stream kept from
+     * frame to frame: the clock (the age) runs on; the tail stays at 0 while the clock is within the emitter's cycle,
+     * then grows by the rod's speed (the loop byte +0x42 that would wrap the clock is never written: no beam loops);
+     * the head grows by the speed up to the rod's length; a tail at the head ends the stream for the burst (both 0).
+     * The cast runs from the tail, head - tail long when that is more than 0.001, and a hit at t cuts the head to
+     * tail + t, so it grows again from there. The axis: the rod's direction through the weapon's firing matrix
+     * (0x2971A0), here the weapon's direction the effect is placed along [G: the WeaponNodes' frames not compared].
+     * No rod, no cast. MaxFiringRange only gates the firing */
+    float head, tail;
     float speed, length, cycle;
     int loops;
     if (a->host.rod) {
-        head = 0;
+        head = tail = 0;
         if (w->fire_fx && a->host.rod(a->host.ctx, w->fire_fx, &speed, &length, &cycle, &loops)) {
-            head = fminf(speed * s->age, length);
-            if (!loops && s->age > cycle)
-                tail = fminf(speed * (s->age - cycle), head);
+            tail = s->age <= cycle ? 0 : s->tail + speed * dt;
+            head = fminf(s->head + speed * dt, length);
+            if (tail >= head)
+                head = tail = 0;
         }
-    } else
+    } else {
+        tail = 0;
         head = fminf(w->velocity > 0 ? w->velocity * s->age : w->range, w->range);
+    }
     float from_t[3] = { s->pos[0] + s->dir[0] * tail, s->pos[1] + s->dir[1] * tail, s->pos[2] + s->dir[2] * tail };
     int mon, obj;
     float nrm[3];
     float t = head - tail > 0.001f ?
               ray_hit(a, from_t, s->dir, head - tail, ~0u, 0, u ? who(a, u) : -1, 1, &mon, &obj, nrm) : -1;
-    s->length = t >= 0 ? tail + t : head;
+    if (t >= 0)
+        head = tail + t;                             /* [R 0x226DF0] the cut */
+    s->head = head;
+    s->tail = tail;
+    s->length = head;
     if (t < 0)
         return;
-    t += tail;
+    /* [R 0x2958CC] the impact at the weapon's place + t along: the tail not added */
     float at[3] = { s->pos[0] + s->dir[0] * t, s->pos[1] + s->dir[1] * t, s->pos[2] + s->dir[2] * t };
     if (mon >= 0) {
         float dmg = w->first ? w->scale * w->damage : w->dps > 0 ? w->scale * w->dps * dt : 0;

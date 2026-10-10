@@ -144,6 +144,7 @@ typedef struct {                                     /* a shot in the air, or a 
     const char *weapon, *effect;                     /* WeaponName, its FireEffect (the shot's look) */
     int owner;                                       /* the unit, -1 (a person's) */
     float pos[3], dir[3], speed, age, length;        /* a beam: from pos along dir, length long */
+    float head, tail;                                /* a beam's stream (0x226CC0's +0x30 / +0x34) */
     float damage, gravity, duration, mobility, accel, velocity, h_knock, v_knock, vis_range, impact_delay;   /* +0xF0 .. */
     int damage_type, reaction, target;
     uint32_t flags;

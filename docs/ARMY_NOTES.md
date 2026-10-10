@@ -135,11 +135,20 @@ otherwise.
   +ProvidesCollisionRod: speed |em_vel(0)| (+0x50), length speed × p_lifetime.max(0) × destretch_percent_time when
   above 0 (+0x54), radius |start_area(0)| + max(p_size) × size_mul (+0x4C), and the stream handle's cycle the
   emitter's longest range.cycle_length (0x2270A0); the cast runs along the stream's own axis through the effect's
-  matrix, from the start offset plus the tail. Machinegun_fire and Autocannon_fire (Rifle, PulseCannon): 150 a
+  matrix, from the start offset plus the tail. The stream is state [R 0x226CC0, 0x226DF0]: each frame the clock
+  runs on; the tail is 0 while the clock is within the cycle, then grows by speed × dt; the head grows by speed × dt
+  up to the length; a tail at the head sets both to 0, which then holds for the rest of the burst (Machinegun_fire,
+  cycle 0.5 s, stops hitting about 0.8 s in; Blimp_Laser_Fire, 2 s, at about 2.25 s); a hit at t cuts the head to
+  tail + t, from where it grows again. The loop byte +0x42, which would wrap the clock, is never written (no store
+  to it in the whole ELF; the emitter's CycleLoops does not reach it): no beam loops. The impact is placed at the
+  weapon's place + t (0x2958CC), the tail not added. The start offset is em_pt_offset (none of the five rod effects
+  sets it); the direction is rod.dir through the weapon's firing matrix (+0xBC × the WeaponNode's world, 0x2971A0):
+  +X for Machinegun_fire / Autocannon_fire / Blimp_Laser_Fire / Cyclone_Lightning, +Y for Roar_Beam. Stopping
+  (0x295650) releases the handle at once: the reach ends the frame the firing stops. Machinegun_fire and Autocannon_fire (Rifle, PulseCannon): 150 a
   second, 44.55 long; Blimp_Laser_Fire (BlimpBeam, FireEngineStream) 500, 125; Cyclone_Lightning (LightingZap 0 .. 2)
   2000, 2000; Roar_Beam (BreathWeapon) 25, 8.75. MaxFiringRange only gates the firing. Here as so (fx.c `fx_rod`,
-  the host's `rod`); the rod's axis is taken as the weapon's direction the effect is placed along, and the tail's
-  start for a looping emitter (the loop byte +0x42's writer was not found) as never [G].
+  the host's `rod`, the stream in `ArmyShot.head` / `tail`); the rod's axis is taken as the weapon's direction the
+  effect is placed along [G: the WeaponNodes' frames were not compared with that direction].
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.
