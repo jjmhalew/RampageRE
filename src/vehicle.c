@@ -43,6 +43,7 @@ struct Vehicles {
     const ArmyMonster *m; int nm;
     const ArmyBox *b; int nb;
     float acc;
+    CollideWorld *cw;                                /* the frame's collision world (vehicle_set_collide), NULL none */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -294,6 +295,7 @@ static VehObj *obj_new(Vehicles *v, const char *name, Group tmpl, int kind)
     o->slot = o->building = o->parent = o->child[0] = o->child[1] = -1;
     o->ambient_fx = o->beam_fx = -1;
     o->ft_building = -1;
+    o->cobj = -1;
     o->shape = gstr(tmpl, "Shape");
     rot_z(o->rot, 0);
     return o;
@@ -368,63 +370,114 @@ static int line_step(Vehicles *v, VehObj *o, float dt)
     return r == 1 ? 0 : r;
 }
 
-/* SphereMover (setVelocity) and the smash's SpherePhysicsMover: [G] the template's Gravity (DefObjectProps: 35)
- * down; on the street (z = 0) a bounce with Restitution (0.2 for the vehicles), then a slide slowed by
- * SlidingFriction x Gravity, at rest when still; a standing building's box stops it (TakeImpact). The game's
- * collision world (gp - 0x6D60) is not read. Returns 1 while it touches the street (OnHitGround, script event 11) */
-static int sphere_step(Vehicles *v, VehObj *o, float dt)
+/* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
+static const float *book_box(Group g, float b[6])
+{
+    Record r[8];
+    Group cb = group_sub(g, "CollisionBox|CollisionBox");
+    if (!cb.at)
+        cb = group_sub(g, "CollisionBox");
+    if (!cb.at || group_items(cb, r, 8) < 6)
+        return NULL;
+    for (int k = 0; k < 6; k++)
+        b[k] = record_num(r[k]);
+    return b;
+}
+
+/* the object's shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius or
+ * AutoCollisionBox with the model's box; else the model's bounding sphere [G: taken as its box's, the host's] */
+static void obj_shape_read(const Vehicles *v, const VehObj *o, CollideShape *s)
+{
+    float tb[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
+    int have = o->shape && v->host.shape_box && v->host.shape_box(v->host.ctx, o->shape, mb, mb + 3);
+    if (have) {
+        float h[3];
+        for (int k = 0; k < 3; k++) {
+            c[k] = (mb[k] + mb[3 + k]) / 2;
+            h[k] = (mb[3 + k] - mb[k]) / 2;
+        }
+        r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
+    }
+    collide_shape_pick(s, have ? c : NULL, r, o->tmpl.at ? book_box(o->tmpl, tb) : NULL, tnum(o, "CollisionRadius", -1),
+                       tnum(o, "AutoCollisionBox", 0) != 0, NULL, -1, 0, have ? mb : NULL);
+}
+
+static void obj_shape(const Vehicles *v, VehObj *o, CollideShape *s)   /* read once, at its first use */
+{
+    if (!o->cshape_ok) {
+        obj_shape_read(v, o, &o->cshape);
+        o->cshape_ok = 1;
+    }
+    *s = o->cshape;
+}
+
+static void car_hit_ground(Vehicles *v, VehObj *o);
+typedef struct { Vehicles *v; VehObj *o; } FlightCtx;
+
+/* a contact of the flight: the street is OnHitGround (event 11, every sub-step on it [R 0x28E440]); an object is
+ * TakeImpact on both (0x287430): Vehicle.bsf's wrecks it; on another module's object through VE_IMPACT */
+static void flight_contact(void *user, int other, const float p[3], const float n[3])
+{
+    FlightCtx *c = user;
+    Vehicles *v = c->v;
+    if (other < 0) {
+        if (getenv("RAMPAGE_TRACE") && c->o->cm.vel[2] > 0.5f)   /* a bounce (the impulse is in) */
+            printf("  %s bounced off the street at %.1f %.1f %.1f\n", c->o->name ? c->o->name : "?", p[0], p[1], p[2]);
+        if (c->o->kind == VK_CAR && c->o->phase != VP_GONE)
+            car_hit_ground(v, c->o);
+        return;
+    }
+    if (!v->cw)
+        return;
+    const CollideObj *w = &v->cw->o[other];
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %s met %d.%d at %.1f %.1f %.1f\n", c->o->name ? c->o->name : "?", COLLIDE_TAG_OWNER(w->tag),
+               COLLIDE_TAG_INDEX(w->tag), p[0], p[1], p[2]);
+    vehicle_impact(v, idx(v, c->o));
+    if (COLLIDE_TAG_OWNER(w->tag) == COLLIDE_OWN_VEHICLE) {
+        if (COLLIDE_TAG_INDEX(w->tag) != idx(v, c->o))
+            vehicle_impact(v, COLLIDE_TAG_INDEX(w->tag));
+        return;
+    }
+    VehicleEvent *e = emit(v, VE_IMPACT, idx(v, c->o), c->o->name, p);
+    e->id = w->tag;
+    e->level = w->kind;
+    memcpy(e->dir, n, sizeof e->dir);
+    e->amount = c->o->cm.mass;
+}
+
+/* SphereMover (setVelocity) and the smash's SpherePhysicsMover: the game's (collide.c, 0x28E440) with the template's
+ * Gravity (DefObjectProps: 35), Mass, Restitution, SlidingFriction and InertiaSolidity (0x28F220); its spin the
+ * smash's turn rates about the object's own axes; the street (OnHitGround) and the frame's objects (TakeImpact both
+ * ways: a building is hit, Vehicle.bsf's TakeImpact wrecks the car). No rest: it rolls on until the script ends it */
+static void sphere_step(Vehicles *v, VehObj *o, float dt)
 {
     if (!o->sphere.on)
-        return 0;
-    float g = tnum(o, "Gravity", 35), e = tnum(o, "Restitution", 0.5f), mu = tnum(o, "SlidingFriction", 0.3f);
-    float *vel = o->sphere.vel;
-    vel[2] -= g * dt;
-    for (int k = 0; k < 3; k++)
-        o->pos[k] += vel[k] * dt;
-    if (o->sphere.tumble) {
-        float s[3] = { o->sphere.spin[0] * dt, o->sphere.spin[1] * dt, o->sphere.spin[2] * dt };
-        rotate_local(o->rot, s);
+        return;
+    if (!o->cm_on) {
+        CollideShape sh;
+        obj_shape(v, o, &sh);
+        float r = collide_mover_radius(&sh);
+        if (r < 0.05f)
+            r = sh.radius > 0.05f ? sh.radius : 1;
+        collide_mover_init(&o->cm, r, tnum(o, "Gravity", 9.81f), tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
+                           tnum(o, "SlidingFriction", 0.4f), tnum(o, "InertiaSolidity", 1));
+        float w[3];
+        for (int k = 0; k < 3; k++)                  /* the turn rates about its own axes, in the world */
+            w[k] = o->sphere.tumble ? o->rot[k] * o->sphere.spin[0] + o->rot[3 + k] * o->sphere.spin[1] +
+                                      o->rot[6 + k] * o->sphere.spin[2] : 0;
+        collide_mover_spin(&o->cm, w);
+        memcpy(o->cmat, o->rot, sizeof o->rot);
+        memcpy(o->cmat + 9, o->pos, sizeof o->pos);
+        o->cm_on = 1;
     }
-    int contact = 0;
-    if (o->pos[2] <= 0) {
-        o->pos[2] = 0;
-        contact = 1;
-        if (vel[2] < 0) {
-            vel[2] = -vel[2] * e;
-            if (vel[2] < 1)
-                vel[2] = 0;
-            for (int k = 0; k < 3; k++)
-                o->sphere.spin[k] *= 0.5f;
-        }
-        if (vel[2] == 0) {
-            float h = sqrtf(vel[0] * vel[0] + vel[1] * vel[1]), dec = mu * g * dt;
-            if (h <= dec) {
-                vel[0] = vel[1] = 0;
-                o->sphere.spin[0] = o->sphere.spin[1] = o->sphere.spin[2] = 0;
-                o->sphere.on = 0;                    /* at rest */
-            } else {
-                vel[0] *= (h - dec) / h;
-                vel[1] *= (h - dec) / h;
-            }
-        }
-    }
-    for (int i = 0; i < v->nb; i++) {                /* [G] into a standing building: stopped there, TakeImpact */
-        const ArmyBox *b = &v->b[i];
-        if (b->gone || o->pos[0] <= b->min[0] || o->pos[0] >= b->max[0] || o->pos[1] <= b->min[1] ||
-            o->pos[1] >= b->max[1] || o->pos[2] >= b->max[2])
-            continue;
-        float dx0 = o->pos[0] - b->min[0], dx1 = b->max[0] - o->pos[0];
-        float dy0 = o->pos[1] - b->min[1], dy1 = b->max[1] - o->pos[1];
-        float best = fminf(fminf(dx0, dx1), fminf(dy0, dy1));
-        if (best == dx0) o->pos[0] = b->min[0];
-        else if (best == dx1) o->pos[0] = b->max[0];
-        else if (best == dy0) o->pos[1] = b->min[1];
-        else o->pos[1] = b->max[1];
-        vel[0] = vel[1] = 0;
-        if (o->kind == VK_CAR)
-            o->flags |= CF_WRECK;                    /* Vehicle.bsf TakeImpact */
-    }
-    return contact;
+    memcpy(o->cm.vel, o->sphere.vel, sizeof o->cm.vel);
+    int self = collide_check(v->cw, o->cobj, COLLIDE_TAG(COLLIDE_OWN_VEHICLE, idx(v, o)), 0);
+    FlightCtx c = { v, o };
+    collide_mover_step_ex(v->cw, &o->cm, o->cmat, self, dt, COLLIDE_F_MONSTER, flight_contact, &c);
+    memcpy(o->sphere.vel, o->cm.vel, sizeof o->sphere.vel);
+    memcpy(o->rot, o->cmat, sizeof o->rot);
+    memcpy(o->pos, o->cmat + 9, sizeof o->pos);
 }
 
 /* smashObject (0x2B2F50) on a street object (class 0x4D0720) [R, as army.c / people.c]: it flies off on a
@@ -448,6 +501,7 @@ static void smash_object(Vehicles *v, VehObj *o, float monster_heading)
     o->sphere.spin[1] = (frand(v) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(v));
     o->sphere.spin[2] = (frand(v) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(v));
     o->sphere.on = o->sphere.tumble = 1;
+    o->cm_on = 0;
     o->line.on = 0;
 }
 
@@ -757,6 +811,7 @@ static int car_damage(Vehicles *v, VehObj *o, int monster, const float direction
     o->sphere.vel[2] = fabsf(o->sphere.vel[2]);
     o->sphere.on = 1;
     o->sphere.tumble = 0;
+    o->cm_on = 0;
     o->line.on = 0;                                  /* setMover(the SphereMover) */
     float heading = monster >= 0 && monster < v->nm ? v->m[monster].heading : 0;
     car_throw(v, o, monster >= 0 && monster < v->nm ? monster : -1, 0, heading);
@@ -1288,9 +1343,9 @@ static void obj_step(Vehicles *v, VehObj *o)
                 return;
             }
         }
-        int moving = o->sphere.on;
-        if (sphere_step(v, o, TIMESTEP) && moving && o->kind == VK_CAR)
-            car_hit_ground(v, o);
+        sphere_step(v, o, TIMESTEP);                 /* OnHitGround, TakeImpact: its contacts */
+        if (o->phase == VP_GONE)
+            return;
         if (o->kind == VK_FIRETRUCK)
             ft_weapon(v, o, TIMESTEP);
     }
@@ -1307,7 +1362,7 @@ static void obj_step(Vehicles *v, VehObj *o)
         default: break;
         }
     }
-    if (o->phase != VP_HELD && !o->sphere.tumble && o->kind != VK_ROCKET_PART)
+    if (o->phase != VP_HELD && !o->sphere.tumble && !(o->sphere.on && o->cm_on) && o->kind != VK_ROCKET_PART)
         rot_z(o->rot, o->facing);
     update_world(o);
 }
@@ -1380,6 +1435,24 @@ int vehicle_hit(Vehicles *v, int monster, const float centre[3], float radius, f
         hits += took;
     }
     return hits;
+}
+
+void vehicle_set_collide(Vehicles *v, CollideWorld *w) { v->cw = w; }
+
+void vehicle_collide_add(Vehicles *v, CollideWorld *w)
+{
+    for (int i = 0; i < v->n; i++) {
+        VehObj *o = &v->o[i];
+        o->cobj = -1;
+        if (!w || o->phase != VP_ALIVE || o->hidden)
+            continue;                                /* [G] a held one is the hand's; the hidden one has no body */
+        CollideShape sh;
+        float m[12];
+        obj_shape(v, o, &sh);
+        collide_matrix_from16(m, o->world);
+        o->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)VF_HELD),
+                              COLLIDE_TAG(COLLIDE_OWN_VEHICLE, i), 0);
+    }
 }
 
 void vehicle_impact(Vehicles *v, int obj)            /* TakeImpact [R]: wrecked, it explodes on its next pulse */
@@ -1458,6 +1531,7 @@ void vehicle_throw(Vehicles *v, int obj, int monster, int eat, const float vel[3
         memcpy(o->sphere.vel, vel, sizeof o->sphere.vel);
     o->sphere.on = 1;
     o->sphere.tumble = 1;                            /* keeps its turn: no spin */
+    o->cm_on = 0;
     memset(o->sphere.spin, 0, sizeof o->sphere.spin);
     if (o->kind == VK_CAR)
         car_throw(v, o, monster, eat, monster_heading);

@@ -126,7 +126,9 @@ one of them. The speed is constant: a car never brakes for a monster.
 - The books hold the pour (`People_pour`, `Garbage_pour`) as an unnamed `Effect|` list element, which the lookup by
   name does not find. So no pour plays, and none here.
 
-**TakeImpact** [R]: flag 8. It explodes on its next pulse.
+**TakeImpact** [R]: flag 8. It explodes on its next pulse. Its caller is the SpherePhysicsMover's meeting with
+another object (0x287430, docs/COLLIDE_NOTES.md): a flying car that meets anything (a building, another vehicle,
+a street object) is wrecked, and so is a vehicle that a flying object meets.
 
 **What this means:**
 - A punched car skids and explodes half a second later.
@@ -196,14 +198,18 @@ reports every award with its template name, so the viewer can count challenge go
 - **Random numbers and time:** an LCG for both of the game's generators. The scripts run at a fixed 1/60 frame
   (gWorld.getTimeStep).
 - **Pulses:** `setPulseDelay` is taken to restart the count from the call.
-- **The SphereMover:**
-  - `Gravity` (35 from DefObjectProps) down; a bounce on z = 0 with `Restitution`; a slide slowed by
-    `SlidingFriction` × Gravity; at rest when still;
-  - OnHitGround every frame it touches the street while moving;
-  - a standing building's box stops it and counts as TakeImpact.
-  The game's collision world (gp − 0x6D60) is not read, nor whether the mover sends a callback when it comes to rest.
-- **TakeImpact's callers** (the virtual +0x38 on WSimpleObject 0x28FA30) were not found. The viewer can call
-  `vehicle_impact` when its own collision sees something hit a vehicle.
+- **The SphereMover** is the game's SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) in the frame's
+  collision world (`vehicle_set_collide`, `vehicle_collide_add`): the template's `Gravity` (35 from
+  DefObjectProps), `Mass` (12000 for the cars), `Restitution` (0.2), `SlidingFriction` (0.3), `InertiaSolidity`,
+  and the radius of the object's shape (√ of a box's max x, as the game reads it). OnHitGround every sub-step it
+  touches the street (so a car left on the street reaches 40 and explodes), TakeImpact on both objects it meets:
+  Vehicle.bsf's on the car, `VE_IMPACT` for another module's (a building is hit with radius Mass / 1000 = 12).
+  There is no rest: it rolls on. [G] The smash's spin is its turn rates about the car's own axes; the sphere is
+  centred on the car's place, which is its base, so a car on the street rests one radius up; the mover leaves the
+  monsters out (`COLLIDE_F_MONSTER`). The meeting of two flying objects takes the other as static (collide.c).
+- **The shape** in the world: 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox with
+  the model's box, else the model's bounding sphere [G: the box's]), read once. The traffic is PushOutMonsters: the
+  monster is pushed out of a car's box (collide_monster).
 - **A blow's shape:** the model's box (AutoCollisionBox) from the host, else the `ShadowRect` 2.5 high.
 - **The hold:** the HeldObjectMover's `MajorAxis` frame is not ported; the object takes the hand's turn. A thrown
   object keeps the hand's turn and does not spin.
@@ -230,7 +236,9 @@ reports every award with its template name, so the viewer can count challenge go
 2. **Each frame:** `vehicle_update(dt, monsters, boxes)` with the same ArmyMonster and ArmyBox arrays as
    army_update. Then:
    - draw each object that is not VP_GONE and not `hidden`: its `shape` at `world`;
-   - apply the events (see vehicle.h).
+   - apply the events (see vehicle.h); `VE_IMPACT` is TakeImpact on the object with collision tag `id`.
+   - before the update, the frame's collision world: `vehicle_set_collide` once, `vehicle_collide_add` each frame
+     between `collide_begin` and `collide_finish` (main.c `world_build`).
 3. **Monster attacks:**
    - every armed attack sphere also calls `vehicle_hit`;
    - the grab tries `vehicle_nearest_pickup` and then `vehicle_grab`; `vehicle_hold` each frame with the hand's

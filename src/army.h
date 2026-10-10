@@ -26,6 +26,7 @@
 #define RAMPAGE_ARMY_H
 #include <stdint.h>
 #include "data.h"
+#include "collide.h"
 
 typedef struct Army Army;
 typedef struct ArmyUnit ArmyUnit;
@@ -117,6 +118,10 @@ struct ArmyUnit {
     int weapons_on;
     uint32_t oflags;                                 /* object flags: 0x4000 PushOutMonsters, 0x8000 OnlyHitWithEffNodes, 0x10000 Pickupable, 0x20000 BeingHeld */
     int spawner, counted, friend_of, person;
+    /* the SpherePhysicsMover of a flight (mv.kind 2: a wreck, a smashed actor, a thrown vehicle; collide.c) */
+    CollideMover cm; float cmat[12]; int cm_on;
+    int cobj;                                        /* its object in the frame's collision world, -1 none */
+    CollideShape cshape; int cshape_ok;              /* its shape, read once (WSimpleObject's init, 0x28FD70) */
 };
 
 typedef struct {                                     /* a shot in the air, or a beam */
@@ -129,6 +134,7 @@ typedef struct {                                     /* a shot in the air, or a 
     uint32_t flags;
     float phase;
     const char *impact_fx;
+    uint32_t include, exclude;                       /* +0x134, +0x138: the ray's flag masks (0x2953E0, 0x33B770) */
 } ArmyShot;
 
 /* ---- what happened */
@@ -147,7 +153,10 @@ enum {
     AE_SCORE,         /* points: monster's category level (0 .. 5) got amount (army_stats has the totals) */
     AE_FLOAT,         /* a floating score number (0x331D50, scale 0.8) of amount at pos; level 1 a building's */
     AE_FART,          /* Monsters::timedDoFart on monster, amount (2) seconds from now */
-    AE_REMOVED        /* unit is gone (requestDelete) */
+    AE_REMOVED,       /* unit is gone (requestDelete) */
+    AE_IMPACT         /* unit's flight met an object of another module (0x287430): its TakeImpact (vtable +0x38) is the
+                       * caller's to give. id the object's collision tag (collide.h COLLIDE_TAG), level its kind, pos
+                       * where, dir the normal, amount the mover's Mass (a building: hit with radius Mass / 1000) */
 };
 typedef struct { int type, id, unit, shot, monster, level; const char *name; float v[3], dir[3], pos[3], amount; } ArmyEvent;
 
@@ -178,6 +187,14 @@ void army_person_weapon(Army *a, int who, const char *weapon, const float person
 void army_person_moved(Army *a, int who, const float person_world[16]);
 
 void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
+
+/* ---- the collision world (collide.c): the frame's world the shots' rays and the flights ask (NULL: the street
+ * only), and the units put into it (each alive unit not held, with its shape: tag COLLIDE_TAG(COLLIDE_OWN_ARMY,
+ * unit), kind 0; flags 4, PushOutMonsters, IsObstacle as its own). The caller adds the monsters' spheres (flag
+ * COLLIDE_F_MONSTER, tag COLLIDE_TAG(COLLIDE_OWN_MONSTER, slot)): a ray meeting one hits that monster */
+void army_set_collide(Army *a, CollideWorld *w);
+void army_collide_add(Army *a, CollideWorld *w);
+void army_impact(Army *a, int unit);                 /* TakeImpact: another module's flying object met the unit */
 
 int army_count(const Army *a);                       /* units (some may be AU_GONE: skip those) */
 const ArmyUnit *army_unit(const Army *a, int i);

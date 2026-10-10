@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include "data.h"
 #include "army.h"
+#include "collide.h"
 
 typedef struct Parade Parade;
 
@@ -89,6 +90,9 @@ typedef struct {
     float walk_speed, throwing_range;
     struct { float a[3], b[3], t, speed; int on; } line;   /* LineMover */
     struct { float vel[3], spin[3]; int on, landed; } sphere;   /* SpherePhysicsMover (smashObject) */
+    CollideMover cm; float cmat[12]; int cm_on;     /* the sphere's mover (collide.c) and its matrix */
+    int cobj;                                        /* its object in the frame's collision world, -1 none */
+    CollideShape cshape; int cshape_ok;              /* its shape, read once (WSimpleObject's init, 0x28FD70) */
     float blend, blend_left, from_q[4], from_p[3];   /* the hold's blend */
 } ParadeObj;
 
@@ -105,9 +109,12 @@ enum {
     PAE_FART,         /* Monsters::timedDoFart(monster), due now: doFart (Expression_Smile, the Fart effect at
                        * fxNode_Fart, the monster's velocity + 20 up) */
     PAE_WEAPON,       /* obj's Weapon|RifleWeapon on (name its WeaponName, monster its target) or off (name NULL) */
-    PAE_REMOVED       /* obj is gone (requestDelete, or eaten) */
+    PAE_REMOVED,      /* obj is gone (requestDelete, or eaten) */
+    PAE_IMPACT        /* obj flying met an object of another module (0x287430): that object's TakeImpact is the
+                       * caller's (no script here has one of its own). id its collision tag (collide.h), level its
+                       * kind, pos where, v the normal, amount obj's Mass (a building: hit with radius Mass / 1000) */
 };
-typedef struct { int type, obj, monster, level; const char *name; Group tmpl; float pos[3], v[3], amount; } ParadeEvent;
+typedef struct { int type, obj, monster, level; const char *name; Group tmpl; float pos[3], v[3], amount; int id; } ParadeEvent;
 
 Parade *parade_new(const ParadeHost *host);
 void parade_free(Parade *p);
@@ -126,6 +133,12 @@ int parade_spawn(Parade *p, const char *tmpl_name, const float pos[3], float fac
 
 /* the frame: the monsters as the objects see them, the camera's x (the bikers' VisibleSound) */
 void parade_update(Parade *p, float dt, const ArmyMonster *m, int nm, float camera_x);
+
+/* ---- the collision world (collide.c): the frame's world the smashed objects ask (NULL: the street only), and the
+ * objects put into it (each one alive, not held, with its shape: tag COLLIDE_TAG(COLLIDE_OWN_PARADE, obj), kind 0,
+ * flags 4 and its own: the carts' PushOutMonsters push the monster in collide_monster) */
+void parade_set_collide(Parade *p, CollideWorld *w);
+void parade_collide_add(Parade *p, CollideWorld *w);
 
 int parade_count(const Parade *p);                   /* objects (skip PAP_GONE) */
 const ParadeObj *parade_obj(const Parade *p, int i);

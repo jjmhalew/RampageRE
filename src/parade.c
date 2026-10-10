@@ -31,6 +31,7 @@ struct Parade {
     const ArmyMonster *m;                            /* this frame's monsters */
     int nm;
     float camera_x;
+    CollideWorld *cw;                                /* the frame's collision world (parade_set_collide), NULL none */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -113,6 +114,10 @@ static int nearest_monster(const Parade *p, const float pos[3])   /* getNearestM
 /* the world matrix (column-major) of a place turned by setFacing (x, y, z): R = Rz(z) Ry(y) Rx(x) [G, as army.c] */
 static void update_world(ParadeObj *o)
 {
+    if (o->sphere.on && o->cm_on) {                  /* flying: its mover's matrix */
+        collide_matrix_to16(o->cmat, o->world);
+        return;
+    }
     float ax = o->rot[0], ay = o->rot[1], h = o->rot[2];
     float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
     float r[9] = { ch * cy, sh * cy, -sy,
@@ -288,50 +293,118 @@ static void smash_object(Parade *p, ParadeObj *o, float monster_heading)
     o->sphere.spin[2] = (frand(p) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(p));
     o->sphere.on = 1;
     o->sphere.landed = 0;
+    o->cm_on = 0;
     o->line.on = 0;
     memcpy(o->pos, &o->world[12], sizeof o->pos);   /* from where it is (in the hand, on its ride) */
     o->oflags &= ~(uint32_t)PAF_HELD;
     o->phase = PAP_FLYING;
 }
 
-/* the SpherePhysicsMover's frame: [R] Gravity (9.81 unless the template says: the objects' DefObjectProps 35) and
- * Restitution 0.8 (0x28F220); [G] a bounce on the street (z = 0), then a slide slowed by 0.3 x gravity, at rest when
- * still (the game's collision world is not read). 1 at the first touch of the street: OnHitGround (event 11) */
-static int sphere_step(ParadeObj *o, float dt)
+/* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
+static const float *book_box(Group g, float b[6])
+{
+    Record r[8];
+    Group cb = group_sub(g, "CollisionBox|CollisionBox");
+    if (!cb.at)
+        cb = group_sub(g, "CollisionBox");
+    if (!cb.at || group_items(cb, r, 8) < 6)
+        return NULL;
+    for (int k = 0; k < 6; k++)
+        b[k] = record_num(r[k]);
+    return b;
+}
+
+/* an object's shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius (the bikers'
+ * DefActorProps 2, the carts' own) or AutoCollisionBox (the balloons) with the model's box; else the model's bounding
+ * sphere [G: taken as its box's, the host's] */
+static void obj_shape_read(const Parade *p, const ParadeObj *o, CollideShape *s)
+{
+    float tb[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
+    int have = o->shape && p->host.shape_box && p->host.shape_box(p->host.ctx, o->shape, mb, mb + 3);
+    if (have) {
+        float h[3];
+        for (int k = 0; k < 3; k++) {
+            c[k] = (mb[k] + mb[3 + k]) / 2;
+            h[k] = (mb[3 + k] - mb[k]) / 2;
+        }
+        r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
+    }
+    collide_shape_pick(s, have ? c : NULL, r, o->tmpl.at ? book_box(o->tmpl, tb) : NULL, tnum(o, "CollisionRadius", -1),
+                       tnum(o, "AutoCollisionBox", 0) != 0, NULL, -1, 0, have ? mb : NULL);
+}
+
+static void obj_shape(const Parade *p, ParadeObj *o, CollideShape *s)   /* read once, at its first use */
+{
+    if (!o->cshape_ok) {
+        obj_shape_read(p, o, &o->cshape);
+        o->cshape_ok = 1;
+    }
+    *s = o->cshape;
+}
+
+typedef struct { Parade *p; ParadeObj *o; int ground; } FlightCtx;
+
+/* a contact of the flight: the street is OnHitGround (event 11, every sub-step it touches); an object is TakeImpact
+ * on both (0x287430): none of these scripts has one, so only another module's object hears of it (PAE_IMPACT) */
+static void flight_contact(void *user, int other, const float pt[3], const float n[3])
+{
+    FlightCtx *c = user;
+    Parade *p = c->p;
+    if (other < 0) {
+        if (getenv("RAMPAGE_TRACE") && c->o->cm.vel[2] > 0.5f)   /* a bounce (the impulse is in) */
+            printf("  %s bounced off the street at %.1f %.1f %.1f\n", c->o->name ? c->o->name : "?", pt[0], pt[1], pt[2]);
+        c->ground++;
+        return;
+    }
+    if (!p->cw)
+        return;
+    const CollideObj *w = &p->cw->o[other];
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %s met %d.%d at %.1f %.1f %.1f\n", c->o->name ? c->o->name : "?", COLLIDE_TAG_OWNER(w->tag),
+               COLLIDE_TAG_INDEX(w->tag), pt[0], pt[1], pt[2]);
+    if (COLLIDE_TAG_OWNER(w->tag) == COLLIDE_OWN_PARADE)
+        return;
+    ParadeEvent *e = emit(p, PAE_IMPACT, idx(p, c->o), c->o->name, pt);
+    e->id = w->tag;
+    e->level = w->kind;
+    memcpy(e->v, n, sizeof e->v);
+    e->amount = c->o->cm.mass;
+}
+
+/* the SpherePhysicsMover's frame (collide.c, 0x28E440): [R] Gravity (9.81 unless the template says: the objects'
+ * DefObjectProps 35), Mass, Restitution (0.8), SlidingFriction (0.4) and InertiaSolidity (0x28F220); its spin
+ * smashObject's turn rates about the object's x, y, z; the street and the frame's objects. No rest: it rolls on until
+ * its script deletes it. Returns its street contacts this frame (OnHitGround, event 11) */
+static int sphere_step(Parade *p, ParadeObj *o, float dt)
 {
     if (!o->sphere.on)
         return 0;
-    float g = tnum(o, "Gravity", 9.81f), e = tnum(o, "Restitution", 0.8f), *vel = o->sphere.vel;
-    vel[2] -= g * dt;
-    for (int k = 0; k < 3; k++) {
-        o->pos[k] += vel[k] * dt;
-        o->rot[k] += o->sphere.spin[k] * dt;
+    if (!o->cm_on) {
+        CollideShape sh;
+        obj_shape(p, o, &sh);
+        float r = collide_mover_radius(&sh);
+        if (r < 0.05f)
+            r = sh.radius > 0.05f ? sh.radius : 1;
+        collide_mover_init(&o->cm, r, tnum(o, "Gravity", 9.81f), tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
+                           tnum(o, "SlidingFriction", 0.4f), tnum(o, "InertiaSolidity", 1));
+        update_world(o);                             /* from where it is, turned as it is */
+        float w[3];
+        for (int k = 0; k < 3; k++)
+            w[k] = o->world[k] * o->sphere.spin[0] + o->world[4 + k] * o->sphere.spin[1] +
+                   o->world[8 + k] * o->sphere.spin[2];
+        collide_mover_spin(&o->cm, w);
+        collide_matrix_from16(o->cmat, o->world);
+        o->cm_on = 1;
     }
-    int first = 0;
-    if (o->pos[2] <= 0) {
-        o->pos[2] = 0;
-        if (vel[2] < 0) {
-            first = !o->sphere.landed;
-            o->sphere.landed = 1;
-            vel[2] = -vel[2] * e;
-            if (vel[2] < 1)
-                vel[2] = 0;
-            for (int k = 0; k < 3; k++)
-                o->sphere.spin[k] *= 0.5f;
-        }
-        if (vel[2] == 0) {
-            float h = sqrtf(vel[0] * vel[0] + vel[1] * vel[1]), dec = 0.3f * g * dt;
-            if (h <= dec) {
-                vel[0] = vel[1] = 0;
-                memset(o->sphere.spin, 0, sizeof o->sphere.spin);
-                o->sphere.on = 0;                    /* at rest */
-            } else {
-                vel[0] *= (h - dec) / h;
-                vel[1] *= (h - dec) / h;
-            }
-        }
-    }
-    return first;
+    memcpy(o->cm.vel, o->sphere.vel, sizeof o->cm.vel);
+    int self = collide_check(p->cw, o->cobj, COLLIDE_TAG(COLLIDE_OWN_PARADE, idx(p, o)), 0);
+    FlightCtx c = { p, o, 0 };
+    collide_mover_step_ex(p->cw, &o->cm, o->cmat, self, dt, COLLIDE_F_MONSTER, flight_contact, &c);
+    memcpy(o->sphere.vel, o->cm.vel, sizeof o->sphere.vel);
+    memcpy(o->pos, o->cmat + 9, sizeof o->pos);
+    if (c.ground)
+        o->sphere.landed = 1;
+    return c.ground;
 }
 
 /* ---------------------------------------------------------------- objects */
@@ -355,6 +428,7 @@ static int new_obj(Parade *p, Group tmpl, int kind, const float pos[3], float fa
     o->kind = kind;
     o->phase = PAP_ALIVE;
     o->partner = -1;
+    o->cobj = -1;
     o->last_blow = -1;
     o->pulse_delay = -1;                             /* none until a script sets one */
     o->scale = tnum(o, "RenderScale", 1);
@@ -861,7 +935,7 @@ static void obj_step(Parade *p, ParadeObj *o, float dt)
         if (o->phase == PAP_ALIVE) {
             if (line_step(o, dt) == 2 && o->state != 2 && o->state != 5)   /* onMoverCallback(2): ride back */
                 biker_walk(p, o);
-        } else if (o->phase == PAP_FLYING && sphere_step(o, dt) && o->state == 5) {
+        } else if (o->phase == PAP_FLYING && sphere_step(p, o, dt) && o->state == 5) {
             obj_delete(p, o);                        /* OnHitGround in state 5 */
             return;
         }
@@ -877,7 +951,7 @@ static void obj_step(Parade *p, ParadeObj *o, float dt)
                 obj_delete(p, o);
         }
     } else if (o->phase == PAP_FLYING)
-        sphere_step(o, dt);
+        sphere_step(p, o, dt);
     if (o->phase == PAP_GONE)
         return;
     if (o->kind == PAK_BALLOON) {                    /* Process */
@@ -1195,6 +1269,24 @@ void parade_clear(Parade *p)
     p->npend = 0;
     p->nfart = 0;
     p->block.at = 0;
+}
+
+void parade_set_collide(Parade *p, CollideWorld *w) { p->cw = w; }
+
+void parade_collide_add(Parade *p, CollideWorld *w)
+{
+    for (int i = 0; i < p->n; i++) {
+        ParadeObj *o = &p->o[i];
+        o->cobj = -1;
+        if (!w || o->phase == PAP_GONE || o->phase == PAP_HELD)
+            continue;                                /* [G] a held one is the hand's */
+        CollideShape sh;
+        float m[12];
+        obj_shape(p, o, &sh);
+        collide_matrix_from16(m, o->world);
+        o->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)(PAF_HELD | PAF_COUNTED)),
+                              COLLIDE_TAG(COLLIDE_OWN_PARADE, i), 0);
+    }
 }
 
 int parade_count(const Parade *p) { return p->n; }

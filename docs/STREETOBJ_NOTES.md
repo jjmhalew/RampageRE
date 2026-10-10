@@ -122,7 +122,9 @@ frame + the delay. `IsMonsterUpgrade` sets nFlags 2 (challenge.c).
   `CustomOscillationScale` × 2 (the boat rocks harder while touched).
 - The monster's place is kept for the next touch.
 
-**TakeImpact** (a thrown object): its `HitEffect` on it, deleted; no score.
+**TakeImpact** (a thrown object): its `HitEffect` on it, deleted; no score. Its caller is the SpherePhysicsMover of a
+flying object that meets the street object in the collision world (0x287430, docs/COLLIDE_NOTES.md): the viewer
+passes the flying module's impact on to `streetobj_take_impact`.
 
 **onPickup**: `DamageShape`, `PickupSound` (add3DSfx(…, 0)), `HitEffect`, no longer PushOutMonsters. **onThrow**:
 addStats, no longer Pickupable. **OnHitGround**: `HitEffect` where it is, deleted.
@@ -187,10 +189,13 @@ palace's HKPalaceTopAdorn2 under forceDamage falls without a score; a tree swaye
 leans away, held while the monster stays within 7.
 
 ## Not traced (stand-ins in streetobj.c) [G]
-- The collision shape test (0x280470) and the monster's spheres for a touch: the object's `CollisionBox`, else its
-  model's bounds (taken for every model, `AutoCollisionBox` or not), else a 1 × 1 × 1 box; a touch is the monster's
-  box (3 each way across, 8.5 tall) meeting the object's box made world-aligned. One hit list for the whole attack
-  (the game keeps one per body part's attack record).
+- The shape tests are the collision world's (collide.c): a blow is the attack sphere against the object's shape
+  (0x280470, `collide_obj_sphere`), a touch the monster's box (3 each way across, 8.5 tall) against it (0x2801A0,
+  `collide_obj_box`) [G: the game tries the monster's spheres for a touch]. The shape is 0x28FD70's
+  (`collide_shape_pick`: the template's then the instance's `CollisionBox`, `CollisionRadius` or `AutoCollisionBox`
+  with the model's box; else the model's bounding sphere [G: taken as the box's, so a `TelephonePole1`, which sets
+  none, is a sphere of 6.1]), read when the object is added; `box_min` / `box_max` hold its box. One hit list for the
+  whole attack (the game keeps one per body part's attack record).
 - `setPulseDelay` restarts the count from the call and the pulses go on at that delay; 0 stops them.
 - `rotateAA` turns about the object's own axis, right-handed (so a pole falls away from the monster); `rotate` is
   rot × Rx × Ry × Rz (as vehicle.c's RocketBase); `setFacing` is Rz × Rx × Ry. A requestDelete takes the object at the
@@ -198,6 +203,7 @@ leans away, held while the monster stays within 7.
 - The building's shake on an attached object is not added to its matrix (the viewer's building objects sway with
   their building through `building_place` until they move on their own).
 - `gWorld.frand`: an LCG. FollowEffects follow the object's place (and node), not its turn.
-- TakeImpact's callers (WSimpleObject +0x38) are not found; PushOutMonsters (the gongs' and chimneys' push) is not
-  ported; the pick-up of the Pickupable parked cars (`streetobj_pickup` / `_throw` / `_hit_ground`) is there but no
-  grab reaches it.
+- The objects are in the frame's collision world (`streetobj_collide_add`: tag `COLLIDE_TAG(COLLIDE_OWN_STREET, i)`,
+  flags 4 and their own): the PushOutMonsters ones (the gongs, the chimneys) push the monster out (collide_monster),
+  a flying object's TakeImpact reaches them. The pick-up of the Pickupable parked cars (`streetobj_pickup` /
+  `_throw` / `_hit_ground`) is there but no grab reaches it.

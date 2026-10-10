@@ -35,6 +35,7 @@
 #define RAMPAGE_STREETOBJ_H
 #include <stdint.h>
 #include "data.h"
+#include "collide.h"
 
 typedef struct StreetObjs StreetObjs;
 
@@ -75,7 +76,9 @@ typedef struct {
     const char *shape;                               /* its model now: Shape|Shape, DamageShape once set */
     uint32_t oflags;                                 /* SF_* */
     int building;                                    /* the building it is attached to (the caller's index), -1 */
-    float box_min[3], box_max[3];                    /* its collision box in its own frame */
+    float box_min[3], box_max[3];                    /* its collision shape's box in its own frame */
+    CollideShape cshape;                             /* its collision shape (WCollisionInfo, 0x28FD70) */
+    int cobj;                                        /* its object in the frame's collision world, -1 none */
     /* ---- the rest is the module's own */
     float rot[9];                                    /* world's 3 x 3 */
     float facing[3];                                 /* setFacing's angles (x, y tilt, z its turn) */
@@ -143,6 +146,11 @@ int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const 
 /* a thrown object (a car, a person, a unit) reaching objects: StreetObject's TakeImpact (its HitEffect, deleted; no
  * score). RoofItem has none. How many */
 int streetobj_impact(StreetObjs *s, const float centre[3], float radius);
+/* the same for object i, which a flying object met in the collision world (0x287430): 1 if it took it */
+int streetobj_take_impact(StreetObjs *s, int i);
+/* the collision world (collide.c): the objects put into the frame's world (each one alive and not held, with its
+ * shape: tag COLLIDE_TAG(COLLIDE_OWN_STREET, i), kind 0, flags 4 and its own: PushOutMonsters, IsObstacle) */
+void streetobj_collide_add(StreetObjs *s, CollideWorld *w);
 /* RoofItem's forceDamage (boss.c's BE_FORCE_DAMAGE: name, pos): the object of that template nearest pos (within 5)
  * is knocked off as by a blow without a monster. Its index, -1 none */
 int streetobj_force_damage(StreetObjs *s, const char *name, const float pos[3]);

@@ -100,7 +100,8 @@ typedef struct Obj {
     int oriented;                                    /* the spline faces it along its path this frame */
     uint32_t oflags;
     float pulse_delay, pulse_time;                   /* setPulseDelay; 0: every frame */
-    float lo[3], hi[3];                              /* its collision box in its own frame */
+    float lo[3], hi[3];                              /* its collision shape's box in its own frame */
+    CollideShape cshape;                             /* its collision shape (WCollisionInfo, 0x28FD70) */
     ArmyWeapon w[4];
     int nw, need_rot[4], need_elev[4];
     float elev_min[4], elev_max[4];
@@ -135,6 +136,7 @@ typedef struct {                                     /* a VolumeTrigger (initByO
     float c[3], e[3], refire, last;
     const char *fire, *name;
 } Trigger;
+typedef struct { int trig, monster; float n[3]; } TriggerTouch;   /* collide_monster's, for the next update */
 
 typedef struct { const char *name; float pos[3]; Group tmpl; int gone; } WorldObj;
 
@@ -149,6 +151,8 @@ struct Boss {
     int nsp, active;
     Trigger trig[MAX_TRIG];
     int ntrig;
+    TriggerTouch touch[MAX_TRIG * 4];
+    int ntouch;
     WorldObj wobj[MAX_WOBJ];
     int nwobj;
     int play[8];                                     /* gWorld.getPlayValue / setPlayValue */
@@ -895,6 +899,22 @@ static int kind_of(const char *script)
 }
 int boss_is_boss_template(Group tmpl) { return kind_of(gstr(tmpl, "ScriptName")) != BK_NONE; }
 
+/* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
+static const float *book_box(Group g, float bx[6])
+{
+    Record r[8];
+    if (!g.at)
+        return NULL;
+    Group cb = group_sub(g, "CollisionBox|CollisionBox");
+    if (!cb.at)
+        cb = group_sub(g, "CollisionBox");
+    if (!cb.at || group_items(cb, r, 8) < 6)
+        return NULL;
+    for (int k = 0; k < 6; k++)
+        bx[k] = record_num(r[k]);
+    return bx;
+}
+
 static Obj *obj_new(Boss *b, const char *name, Group tmpl, Group inst, const float pos[3])
 {
     int k = -1;
@@ -929,18 +949,29 @@ static Obj *obj_new(Boss *b, const char *name, Group tmpl, Group inst, const flo
     o->spawner = -1;
     o->pulse_delay = 0.25f;                          /* [R as army.c] an AttackObject's pulse */
     o->weapons_on = 1;                               /* [G] Boss_Helicopter never calls enableWeapons, yet fires */
-    /* its box: CollisionBox { min x y z, max x y z }, else AutoCollisionBox's (the model's bounds) */
-    Record r[8];
-    set3(o->lo, -2, -2, 0);
-    set3(o->hi, 2, 2, 4);
-    Group cb = group_sub(tmpl, "CollisionBox|CollisionBox");
-    if (cb.at && group_items(cb, r, 8) >= 6)
-        for (int c = 0; c < 3; c++) {
-            o->lo[c] = record_num(r[c]);
-            o->hi[c] = record_num(r[3 + c]);
+    /* its shape (0x28FD70, collide_shape_pick): the template's CollisionBox { min x y z, max x y z } (the
+     * generators'), CollisionRadius or AutoCollisionBox (the blimp) with the model's box, then the instance's; else
+     * the model's bounding sphere [G: taken as its box's; no model: radius 1 at the origin]. lo / hi: its box */
+    {
+        float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, rr = 1;
+        int have = o->p.shape && b->host.shape_box && b->host.shape_box(b->host.ctx, o->p.shape, mb, mb + 3);
+        if (have) {
+            float h[3];
+            for (int k = 0; k < 3; k++) {
+                c[k] = (mb[k] + mb[3 + k]) / 2;
+                h[k] = (mb[3 + k] - mb[k]) / 2;
+            }
+            rr = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
         }
-    else if (b->host.shape_box && o->p.shape)
-        b->host.shape_box(b->host.ctx, o->p.shape, o->lo, o->hi);
+        collide_shape_pick(&o->cshape, have ? c : NULL, rr, book_box(tmpl, tb), group_num(tmpl, "CollisionRadius", -1),
+                           group_num(tmpl, "AutoCollisionBox", 0) != 0, inst.at ? book_box(inst, ib) : NULL,
+                           inst.at ? group_num(inst, "CollisionRadius", -1) : -1,
+                           inst.at && group_num(inst, "AutoCollisionBox", 0) != 0, have ? mb : NULL);
+        for (int k = 0; k < 3; k++) {
+            o->lo[k] = o->cshape.centre[k] - o->cshape.half[k];
+            o->hi[k] = o->cshape.centre[k] + o->cshape.half[k];
+        }
+    }
     const char *def = gstr(tmpl, "DefaultAnim");     /* an actor starts in its DefaultAnim */
     char key[64];
     if (def && group_sub(tmpl, (snprintf(key, sizeof key, "ActorAnimShape|%s", def), key)).at)
@@ -2620,41 +2651,58 @@ static void m_bounds(const BossMonster *m, float lo[3], float hi[3])
         }
 }
 
+/* 0x335BF0 for each touch collide_monster reported (0x2E2C50's box query, include VolumeTrigger | PushOutMonsters):
+ * an enabled trigger with a FireFunc whose refire clock has run down fires it (FireFunc(monster, normal); the
+ * clock set to MinRefireTime, 0x3361A0 runs it) [R]. The DoPushout push was collide_monster's own */
 static void triggers_update(Boss *b)
 {
-    for (int i = 0; i < b->ntrig; i++) {
-        Trigger *t = &b->trig[i];
+    for (int i = 0; i < b->ntouch; i++) {
+        const TriggerTouch *k = &b->touch[i];
+        Trigger *t = &b->trig[k->trig];
+        if (!t->alive || k->monster < 0 || k->monster >= b->nm || b->now - t->last < t->refire)
+            continue;
+        t->last = b->now;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  trigger %d (%s) fired by monster %d: %s\n", k->trig, t->name ? t->name : "?", k->monster,
+                   t->fire ? t->fire : "-");
+        if (same_text(t->fire, "NewYork::BlimpBarrierFire"))   /* BlimpBarrierCanFire says yes */
+            barrier_fire(b, k->monster);
+    }
+    b->ntouch = 0;
+}
+
+void boss_trigger_touch(Boss *b, int trigger, int monster, const float normal[3])
+{
+    if (!b || trigger < 0 || trigger >= b->ntrig || b->ntouch >= MAX_TRIG * 4)
+        return;
+    TriggerTouch *k = &b->touch[b->ntouch++];
+    k->trig = trigger;
+    k->monster = monster;
+    copy3(k->n, normal);
+}
+
+void boss_collide_add(Boss *b, CollideWorld *w)
+{
+    if (!w)
+        return;
+    for (int i = 0; i < b->n; i++) {
+        const Obj *o = &b->o[i];
+        if (!o->p.alive || o->pending)
+            continue;
+        float m[12];
+        collide_matrix_from16(m, o->p.world);
+        collide_add(w, &o->cshape, m, COLLIDE_F_WORLD | o->oflags, COLLIDE_TAG(COLLIDE_OWN_BOSS, i), 0);
+    }
+    for (int i = 0; i < b->ntrig; i++) {             /* 0x3360F4: 0x400000, | PushOutMonsters with DoPushout */
+        const Trigger *t = &b->trig[i];
         if (!t->alive)
             continue;
-        for (int m = 0; m < b->nm; m++) {
-            float lo[3], hi[3], pen[3];
-            m_bounds(&b->m[m], lo, hi);
-            int in = 1;
-            for (int k = 0; k < 3; k++) {
-                float a = t->c[k] - t->e[k], c = t->c[k] + t->e[k];
-                if (hi[k] < a || lo[k] > c)
-                    in = 0;
-                /* the way out along k: the smaller of pushing below a or above c */
-                pen[k] = (hi[k] - a) < (c - lo[k]) ? -(hi[k] - a) : (c - lo[k]);
-            }
-            if (!in)
-                continue;
-            if (t->pushout) {                        /* DoPushout [G]: out the shortest way */
-                int k = 0;
-                for (int q = 1; q < 3; q++)
-                    if (fabsf(pen[q]) < fabsf(pen[k]))
-                        k = q;
-                BossEvent *e = emit(b, BE_PUSH, NULL, t->name, b->m[m].pos);
-                e->monster = m;
-                e->building = t->building;
-                e->v[k] = pen[k];
-            }
-            if (b->now - t->last >= t->refire) {    /* MinRefireTime; BlimpBarrierCanFire says yes */
-                t->last = b->now;
-                if (same_text(t->fire, "NewYork::BlimpBarrierFire"))
-                    barrier_fire(b, m);
-            }
-        }
+        CollideShape sh;
+        float lo[3] = { -t->e[0], -t->e[1], -t->e[2] }, m[12];
+        collide_shape_box(&sh, lo, t->e);
+        collide_matrix(m, 0, t->c);
+        collide_add(w, &sh, m, COLLIDE_F_TRIGGER | (t->pushout ? COLLIDE_F_PUSHOUT : 0u),
+                    COLLIDE_TAG(COLLIDE_OWN_BOSS, i), 1);
     }
 }
 
@@ -3330,36 +3378,17 @@ static void away_from(const Obj *o, const BossMonster *m, float dir[3])   /* Tak
 }
 
 /* each frame: a part without OnlyHitWithEffNodes takes TakeDamage(monster, 0, Collision) from a monster touching
- * it [G: the game's collision, not read], and a PushOutMonsters part pushes a monster's root out of its box, the
- * shorter way along its x or y [G] */
+ * it [G: where the game's touch comes from is not traced]. A PushOutMonsters part's push is the collision world's
+ * (collide_monster), not this */
 static void contacts(Boss *b)
 {
     for (int i = 0; i < b->n; i++) {
         Obj *o = &b->o[i];
-        if (!o->p.alive || o->pending || !can_take_damage(o->p.kind))
+        if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || (o->oflags & OF_EFF_NODES))
             continue;
         for (int m = 0; m < b->nm && o->p.alive; m++) {
             const BossMonster *mm = &b->m[m];
-            if ((o->oflags & OF_PUSH_OUT)) {
-                const float *w = o->p.world;
-                float r = mm->box_max[0] > mm->box_min[0] ? (mm->box_max[0] - mm->box_min[0]) / 2 : 3;
-                float d[3] = { mm->pos[0] - w[12], mm->pos[1] - w[13], mm->pos[2] - w[14] }, l[3];
-                for (int k = 0; k < 3; k++)
-                    l[k] = d[0] * w[4 * k] + d[1] * w[4 * k + 1] + d[2] * w[4 * k + 2];
-                if (l[0] > o->lo[0] - r && l[0] < o->hi[0] + r && l[1] > o->lo[1] - r && l[1] < o->hi[1] + r &&
-                    l[2] + 8.5f > o->lo[2] && l[2] < o->hi[2]) {
-                    float px[2] = { o->lo[0] - r - l[0], o->hi[0] + r - l[0] };
-                    float py[2] = { o->lo[1] - r - l[1], o->hi[1] + r - l[1] };
-                    float ax = fabsf(px[0]) < fabsf(px[1]) ? px[0] : px[1];
-                    float ay = fabsf(py[0]) < fabsf(py[1]) ? py[0] : py[1];
-                    float lx = fabsf(ax) < fabsf(ay) ? ax : 0, ly = fabsf(ax) < fabsf(ay) ? 0 : ay;
-                    BossEvent *e = emit(b, BE_PUSH, o, NULL, mm->pos);
-                    e->monster = m;
-                    for (int k = 0; k < 3; k++)
-                        e->v[k] = w[k] * lx + w[4 + k] * ly;
-                }
-            }
-            if (!(o->oflags & OF_EFF_NODES) && touches(o, mm)) {
+            if (touches(o, mm)) {
                 float dir[3];
                 away_from(o, mm, dir);
                 if (take_damage(b, o, m, 0, DT_COLLISION, dir) == DELETE_ME)

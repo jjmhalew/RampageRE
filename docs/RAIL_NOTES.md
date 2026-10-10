@@ -42,11 +42,15 @@ velocity × dt; past the last point it stays there and answers 2 every frame unt
 Hermite between the points with Kochanek-Bartels tangents (0x13B780, 0x13B2F0). Flag 2 turns the object along the
 tangent (+Y along it).
 
-**SphereMover** [G, as vehicle.c]: the template's Gravity (35) down, a bounce on the street with Restitution (0.2), a
-slide slowed by SlidingFriction (0.3) × Gravity, at rest when still. `setRotation(r)` is taken as radians a second
-about the object's own x, y, z. A building it flies into from the side (below its top's last 1.5) stops it (TakeImpact);
-one it was already over (a train coming off the track over the next track building) is a floor at its top.
-OnHitGround every frame it touches while it moves.
+**SphereMover**: the game's SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440, docs/COLLIDE_NOTES.md) in
+the frame's collision world (`rail_set_collide`, `rail_collide_add`), with the template's `Gravity` (35 from
+DefObjectProps), `Mass` (12000), `Restitution` (0.2), `SlidingFriction` (0.3), `InertiaSolidity` and the radius of
+its shape (√ of the box's max x, as the game reads it). OnHitGround every sub-step it touches the street; a building
+(a track building's roof or front, the back row's fronts) or another object it meets is a contact with the
+restitution and friction, and TakeImpact on both (0x287430): ours on our own objects, `RE_IMPACT` for another
+module's (a building is hit with radius Mass / 1000 = 12, every sub-step it touches it). No rest: it rolls on until
+its script ends it. [G] `setRotation(r)` is taken as radians a second about the object's own x, y, z; the monsters
+are left out of what it meets.
 
 **The hold** [R] (0x2DA310, HeldObjectMover 0x310ED0, as vehicle.c): BeingHeld, neither Pickupable nor
 PushOutMonsters, `HoldOffset` (0, 1, 0) or `MirroredHoldOffset` (0, −0.5, 0) along the hand's axes. [G] The object
@@ -236,15 +240,18 @@ starting at a random share; at its end it starts again from that side. No block 
 - **setPulseDelay:** taken to change the interval, the clock since the last pulse running on (a cable car calls it at
   every touch of the street; restarting the clock would hold its dying off while it slides).
 - **Process:** every frame.
-- **The SphereMover**, `setRotation`'s units, the building it meets (above), and whether it calls back at rest.
+- **The SphereMover:** `setRotation`'s units (above); the meeting of two flying objects (collide.c takes the other as
+  static).
 - **findBuildingByPosition:** the footprint test above.
-- **The contacts:** an object without OnlyHitWithEffNodes that a monster's box touches takes TakeDamage(monster, 0,
-  Collision (1)) every frame (as boss.c); a PushOutMonsters object pushes a monster's root out of its box the shorter
-  way along its own x or y. The game's collision (gp − 0x6D60, 0x2801A0) was not read. A train therefore pushes a
-  monster on its track ahead of it. The knock-downs repeat every frame while the monster's move still says `Ground`:
-  the viewer starts a reaction at its next clip event, not at once.
-- **An object's box:** its `CollisionBox` (the New York engine's), else the model's (AutoCollisionBox) from the host,
-  else the ShadowRect 3 high.
+- **The contacts:** an object without OnlyHitWithEffNodes that a monster's box meets (collide.c `collide_obj_box`,
+  0x2801A0, against the object's shape) takes TakeDamage(monster, 0, Collision (1)) every frame (as boss.c): where the
+  game's touch comes from is not traced. The knock-downs repeat every frame while the monster's move still says
+  `Ground`: the viewer starts a reaction at its next clip event, not at once. A PushOutMonsters object's push is the
+  game's (collide_monster, 0x2E2C50: out of the object's box along its least overlap; a train pushes a monster on
+  its track ahead of it).
+- **An object's shape** (0x28FD70, `collide_shape_pick`): its `CollisionBox` (the New York engine's), else
+  `CollisionRadius`, else `AutoCollisionBox` (every car here) with the model's box from the host, then the
+  instance's; else the model's bounding sphere [G: the box's; the freighter]. A blow is tested on the shape's box.
 - **Attached effects:** at the object's place + the offset, in the world, their +Y along the object's; they follow
   it. Its 3D sounds end when it goes.
 - **A monster's blow** is TakeDamage of type 0 (Concussive) [G, as boss.c].
@@ -260,6 +267,8 @@ starting at a random share; at its end it starts again from that side. No block 
    y + 82). army.c must skip the AIInstances whose template's script is `freighter.bsf`, as it skips the bosses.
 2. **Each frame:** `rail_update(dt, monsters, n, boxes, nb)` with the ArmyMonster the army gets and a RailBox per
    building (destroyed = BUILDING_GONE, falling = collapse ≠ −1). Draw each object that is not RP_GONE and not
-   `hidden` (its `shape` at `world`, the template's ShadowData), and apply the events (rail.h).
+   `hidden` (its `shape` at `world`, the template's ShadowData), and apply the events (rail.h; `RE_IMPACT` is
+   TakeImpact on the object with collision tag `id`). Before the update: `rail_collide_add` into the frame's
+   collision world between `collide_begin` and `collide_finish` (`rail_set_collide` once).
 3. **Monster attacks:** every armed attack sphere also calls `rail_hit`; the grab tries `rail_nearest_pickup` then
    `rail_grab`, `rail_hold` each frame with the hand's matrix, `throwObject` calls `rail_throw`.

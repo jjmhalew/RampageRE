@@ -148,10 +148,45 @@ centred on the object's position: an object whose origin is at its base rests r 
 - The gate at the top of 0x2E2C50 (monster +0xFC against 0x4D7E28, byte 0x4D6A9A), +0x108, +0xB9C0, +0x258C,
   the move offset +0xBAA0, the building's +0x38C.
 - The order of 0x101A90 (the spin turning the matrix: taken about a world axis).
-- WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays): the viewer can add the spheres as
-  sphere objects flagged 0x40.
+- WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays): the viewer adds the spheres as sphere
+  objects flagged 4 | 0x40. Whether 0x27F620 meets it (a thrown object against its thrower) is not traced: the
+  viewer's movers leave the monsters out (`collide_mover_step_ex`'s exclude).
+- Which objects carry flag 4 (a shot's default include): taken as every object but a VolumeTrigger.
 - Where the monster's touch damage (TakeDamage of type Collision, boss.c / rail.c) comes from: not 0x2E2C50.
 - `isSphereVisible` is the camera's, not the collision world's.
+
+## Wired in (main.c and the modules)
+
+Each frame, before anything moves, main.c's `world_build` fills the Viewer's `CollideWorld`:
+1. `collide_begin(w, -1)`; the block's buildings (`collide_add_building`, tag `COLLIDE_TAG(COLLIDE_OWN_BUILDING, i)`);
+2. the monster's collision spheres (flags 4 | `COLLIDE_F_MONSTER`, tag `COLLIDE_TAG(COLLIDE_OWN_MONSTER, slot)`, kind
+   the sphere's number), moved again with the monster before the modules update (`world_monster_moved`);
+3. each module's objects with their shapes (0x28FD70, `collide_shape_pick`, read once per object) and their own
+   flags | 4: `army_collide_add`, `vehicle_collide_add`, `rail_collide_add`, `parade_collide_add`,
+   `streetobj_collide_add`, `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged
+   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). A held object is left out [G];
+4. `collide_finish`.
+
+The tag (`COLLIDE_TAG(owner, index)`, `COLLIDE_TAG_OWNER`, `COLLIDE_TAG_INDEX`) names the module and its index; each
+module keeps its object's index in the world (`cobj`, checked with `collide_check`) for its mover's `self`.
+
+Who asks it:
+- **The monster** (`push_out`, every mode: on a face only the triggers): `collide_monster`; the PushOutMonsters
+  objects (traffic, trains, carts, balloons, chimneys and gongs, the bosses' tanks and jumpers) and DoPushout triggers
+  push it, and `out.touch` goes to `boss_trigger_touch` (the FireFunc at the boss's next update, 0x335BF0).
+- **The shots** (army.c `ray_hit`): `collide_ray` with the shot's masks (include 4, 0x2000 for DamageType 8, 0x2040
+  for Blunt; exclude 8; a hit on its owner is none) or a beam's (include −1, its owner flagged 8). A monster's sphere
+  is a hit on that monster; anything else stops the shot.
+- **The flights** (army.c, vehicle.c, rail.c, parade.c `sphere_step`): one `CollideMover` per flying object from the
+  template's Gravity, Mass, Restitution, SlidingFriction and InertiaSolidity and `collide_mover_radius` of its shape,
+  stepped by `collide_mover_step_ex` (the monsters left out). The −1 contact is OnHitGround; an object contact is
+  TakeImpact on both: within the module directly, else an `AE_IMPACT` / `VE_IMPACT` / `RE_IMPACT` / `PAE_IMPACT` event
+  that main.c's `impact_route` gives to the owner (`building_hit` with radius Mass / 1000, `vehicle_impact`,
+  `rail_impact`, `streetobj_take_impact`, `army_impact`).
+- **The street objects' tests** (streetobj.c): a blow `collide_obj_sphere`, a touch `collide_obj_box`, against the
+  object's shape.
+- [G] The world is built from where everything was at the end of the last frame; what moves this frame is seen by the
+  others next frame (the game's objects move one after another within its frame).
 
 ## The API (collide.h)
 
@@ -167,4 +202,6 @@ collide_mover_step(&w, &mover, m, self, dt, on_contact, user);   /* 0x28E440 */
 plus the single tests (`collide_obj_box`, `collide_obj_sphere`, `collide_obj_ray`, `collide_pair`), the queries
 (`collide_sphere_query`, `collide_box_query`), the building searches (`collide_building_at`, `collide_hit_point`,
 `collide_buildings_push`, `collide_roof_clamp`, `collide_building_below`) and the mover's pieces
-(`collide_mover_init`, `collide_mover_spin`, `collide_mover_impulse`, `collide_mover_contact`).
+(`collide_mover_init`, `collide_mover_spin`, `collide_mover_impulse`, `collide_mover_contact`), and for the viewer:
+`collide_mover_step_ex` (with an exclude mask), the tags (`COLLIDE_TAG`, `collide_check`), `collide_matrix_from16` /
+and `collide_matrix_to16` (the modules' column-major 4 x 4).

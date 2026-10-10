@@ -52,6 +52,7 @@ struct Army {
     const ArmyBox *b; int nb;
     float dt;
     float view[2];                                   /* [G] the street the camera sees, along x */
+    CollideWorld *cw;                                /* the frame's collision world (army_set_collide), NULL none */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -442,98 +443,35 @@ static ArmyShot *new_shot(Army *a)
     return s;
 }
 
-/* the first thing a ray from p along the unit d meets within len: a monster's sphere (or its box), a standing
- * building's box, the street (z = 0). [G] The game asks its collision world (gp-0x6D60 vtable +0xC +0x18, mask 8,
- * flags 4 / 0x2000 / 0x2040), not read; the owner is passed over [R 0x293CD0]. Returns the distance, -1 none;
- * *monster the monster it hit or -1, nrm the surface */
-static float ray_hit(const Army *a, const float p[3], const float d[3], float len, int *monster, float nrm[3])
+/* the first thing a ray from p along the unit d meets within len: the world's ray (gp - 0x6D60 vtable +0x18,
+ * 0x283730, collide_ray): the street first, then every object with a flag of include and none of exclude, the
+ * nearest. A shot's (0x293CB4): include the shot's +0x134, exclude its +0x138 | 8, and a hit on its owner (+0xC4) is
+ * no hit [R 0x293CD8]; a beam's (0x295800): include -1, exclude 8 with the owner flagged 8 around the cast [R].
+ * Returns the distance, -1 none; *monster the monster it hit (an object tagged COLLIDE_OWN_MONSTER) or -1, *obj the
+ * world's object (-1 the street or none), nrm the surface */
+static float ray_hit(Army *a, const float p[3], const float d[3], float len, uint32_t include, uint32_t exclude,
+                     int owner, int beam, int *monster, int *obj, float nrm[3])
 {
-    float best = -1;
-    *monster = -1;
-    nrm[0] = -d[0];
-    nrm[1] = -d[1];
-    nrm[2] = -d[2];
-    for (int i = 0; i < a->nm; i++) {
-        const ArmyMonster *m = &a->m[i];
-        for (int s = 0; s < m->nspheres; s++) {
-            float oc[3] = { p[0] - m->spheres[s][0], p[1] - m->spheres[s][1], p[2] - m->spheres[s][2] };
-            float bq = oc[0] * d[0] + oc[1] * d[1] + oc[2] * d[2];
-            float c = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - m->spheres[s][3] * m->spheres[s][3];
-            float disc = bq * bq - c;
-            if (disc < 0)
-                continue;
-            float t = -bq - sqrtf(disc);
-            if (t < 0)
-                t = c <= 0 ? 0 : -1;
-            if (t >= 0 && t <= len && (best < 0 || t < best)) {
-                best = t;
-                *monster = i;
-                for (int k = 0; k < 3; k++)
-                    nrm[k] = p[k] + d[k] * t - m->spheres[s][k];
-                norm3(nrm);
-            }
-        }
-        if (m->nspheres == 0 && m->box_max[2] > m->box_min[2]) {
-            float t0 = 0, t1 = len;
-            int ok = 1;
-            for (int k = 0; k < 3 && ok; k++) {
-                if (fabsf(d[k]) < 1e-8f) {
-                    if (p[k] < m->box_min[k] || p[k] > m->box_max[k])
-                        ok = 0;
-                } else {
-                    float ta = (m->box_min[k] - p[k]) / d[k], tb = (m->box_max[k] - p[k]) / d[k];
-                    if (ta > tb) { float x = ta; ta = tb; tb = x; }
-                    if (ta > t0) t0 = ta;
-                    if (tb < t1) t1 = tb;
-                    if (t0 > t1) ok = 0;
-                }
-            }
-            if (ok && (best < 0 || t0 < best)) {
-                best = t0;
-                *monster = i;
-            }
-        }
+    static CollideWorld none;                        /* no world: the street alone */
+    CollideWorld *w = a->cw ? a->cw : &none;
+    *monster = *obj = -1;
+    int oo = owner >= 0 && owner < a->n ? collide_check(w, a->u[owner].cobj, COLLIDE_TAG(COLLIDE_OWN_ARMY, owner), 0) : -1;
+    uint32_t keep = oo >= 0 ? w->o[oo].flags : 0;
+    if (beam && oo >= 0)
+        w->o[oo].flags |= COLLIDE_F_RAYSKIP;
+    CollideHit h;
+    int got = collide_ray(w, p, d, len, include, exclude | COLLIDE_F_RAYSKIP, 0, &h);
+    if (oo >= 0)
+        w->o[oo].flags = keep;
+    if (!got || (!beam && oo >= 0 && h.obj == oo))
+        return -1;
+    memcpy(nrm, h.normal, sizeof h.normal);
+    *obj = h.obj;
+    if (h.obj >= 0 && COLLIDE_TAG_OWNER(w->o[h.obj].tag) == COLLIDE_OWN_MONSTER) {
+        int m = COLLIDE_TAG_INDEX(w->o[h.obj].tag);
+        *monster = m < a->nm ? m : -1;
     }
-    for (int i = 0; i < a->nb; i++) {
-        const ArmyBox *bx = &a->b[i];
-        if (bx->gone)
-            continue;
-        /* [G] a shot that starts in or at a building (a soldier in its window) leaves it unhindered */
-        if (p[0] >= bx->min[0] - 0.5f && p[0] <= bx->max[0] + 0.5f && p[1] >= bx->min[1] - 0.5f &&
-            p[1] <= bx->max[1] + 0.5f && p[2] >= bx->min[2] - 0.5f && p[2] <= bx->max[2] + 0.5f)
-            continue;
-        float t0 = 0, t1 = len;
-        int ok = 1, axis = -1;
-        for (int k = 0; k < 3 && ok; k++) {
-            if (fabsf(d[k]) < 1e-8f) {
-                if (p[k] < bx->min[k] || p[k] > bx->max[k])
-                    ok = 0;
-            } else {
-                float ta = (bx->min[k] - p[k]) / d[k], tb = (bx->max[k] - p[k]) / d[k];
-                if (ta > tb) { float x = ta; ta = tb; tb = x; }
-                if (ta > t0) { t0 = ta; axis = k; }
-                if (tb < t1) t1 = tb;
-                if (t0 > t1) ok = 0;
-            }
-        }
-        if (ok && (best < 0 || t0 < best)) {
-            best = t0;
-            *monster = -1;
-            nrm[0] = nrm[1] = nrm[2] = 0;
-            if (axis >= 0)
-                nrm[axis] = d[axis] > 0 ? -1.0f : 1.0f;
-        }
-    }
-    if (d[2] < 0 && p[2] >= 0) {
-        float t = -p[2] / d[2];
-        if (t <= len && (best < 0 || t < best)) {
-            best = t;
-            *monster = -1;
-            nrm[0] = nrm[1] = 0;
-            nrm[2] = 1;
-        }
-    }
-    return best;
+    return h.t;
 }
 
 /* [R] the impact on a monster (RProjectile 0x33BCA0, RBeam 0x33B440): the hit object flagged 0x40 (a monster) gets
@@ -593,8 +531,14 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
     s->v_knock = w->v_knock;
     s->reaction = w->reaction;
     s->damage_type = w->damage_type;
-    if (s->damage_type == 4)                         /* [R] 0x33B770: Blunt counts as 0 (collision flags 0x2040) */
+    s->include = COLLIDE_F_WORLD;                    /* [R] 0x2953E0: the ray's masks, include 4, exclude 0 */
+    s->exclude = 0;
+    if (s->damage_type == 8)                         /* [R] 0x33B770: DamageType 8 meets only the buildings */
+        s->include = COLLIDE_F_BUILDING;
+    if (s->damage_type == 4) {                       /* [R] 0x33B770: Blunt counts as 0 and meets buildings and monsters */
         s->damage_type = 0;
+        s->include = COLLIDE_F_BUILDING | COLLIDE_F_MONSTER;
+    }
     s->phase = frand(a) * 2 * PI;                    /* [R] 0x29463C: +0xC0 */
     s->speed = s->velocity * w->init_vel;            /* [R] 0x2949B8: Velocity x InitialVelocityPercent */
     if (s->effect) {
@@ -645,11 +589,18 @@ static void shot_update(Army *a, ArmyShot *s, float dt)
             s->dir[k] = v[k] / s->speed;
     float step = s->speed * dt;
     if (step > 0.001f && s->age >= s->impact_delay) {
-        int mon;
+        int mon, obj;
         float nrm[3];
-        float t = ray_hit(a, s->pos, s->dir, step + 0.001f, &mon, nrm);
+        float t = ray_hit(a, s->pos, s->dir, step + 0.001f, s->include, s->exclude, s->owner, 0, &mon, &obj, nrm);
         if (t >= 0) {
             float at[3] = { s->pos[0] + s->dir[0] * t, s->pos[1] + s->dir[1] * t, s->pos[2] + s->dir[2] * t };
+            if (getenv("RAMPAGE_TRACE")) {           /* what it met: the street, a monster, a module's object */
+                int tag = obj >= 0 && a->cw ? a->cw->o[obj].tag : 0;
+                printf("  shot %s hit %s %d.%d at %.1f %.1f %.1f\n", s->weapon ? s->weapon : "?",
+                       obj < 0 ? "street" : COLLIDE_TAG_OWNER(tag) == COLLIDE_OWN_BUILDING ? "building" :
+                       COLLIDE_TAG_OWNER(tag) == COLLIDE_OWN_MONSTER ? "monster" : "object",
+                       obj < 0 ? -1 : COLLIDE_TAG_OWNER(tag), obj < 0 ? -1 : COLLIDE_TAG_INDEX(tag), at[0], at[1], at[2]);
+            }
             if (mon >= 0)
                 hit_monster(a, mon, s->weapon, s->owner, s->damage, s->damage_type, s->reaction, s->h_knock,
                             s->v_knock, s->dir, at);
@@ -685,9 +636,9 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     norm3(s->dir);
     s->age += dt;
     float reach = fminf(w->velocity > 0 ? w->velocity * s->age : w->range, w->range);
-    int mon;
+    int mon, obj;
     float nrm[3];
-    float t = reach > 0.001f ? ray_hit(a, s->pos, s->dir, reach, &mon, nrm) : -1;
+    float t = reach > 0.001f ? ray_hit(a, s->pos, s->dir, reach, ~0u, 0, u ? who(a, u) : -1, 1, &mon, &obj, nrm) : -1;
     s->length = t >= 0 ? t : reach;
     if (t < 0)
         return;
@@ -1249,34 +1200,116 @@ static int mover_step(Army *a, ArmyUnit *u, float dt)
     return r;
 }
 
-/* SphereMover (a wreck flying off: setVelocity): [G] the template's Gravity (DefObjectProps: 35) down, a bounce on
- * the street with its Restitution (0.2 for the vehicles), at rest when slow; 1 when it first meets the street */
-static int sphere_step(ArmyUnit *u, float dt)
+/* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
+static const float *book_box(Group g, float b[6])
 {
-    float g = tnum(u, "Gravity", 9.81f), e = tnum(u, "Restitution", 0.8f);
-    int hit = 0;
-    u->vel[2] -= g * dt;
-    for (int k = 0; k < 3; k++)
-        u->pos[k] += u->vel[k] * dt;
-    u->tilt[0] += u->spin[0] * dt;
-    u->tilt[1] += u->spin[1] * dt;
-    u->facing += u->spin[2] * dt;
-    if (u->pos[2] < 0) {
-        u->pos[2] = 0;
-        if (u->vel[2] < 0) {
-            hit = 1;
-            u->vel[2] = -u->vel[2] * e;
-            u->vel[0] *= 0.7f;
-            u->vel[1] *= 0.7f;
-            u->spin[0] *= 0.5f;
-            u->spin[1] *= 0.5f;
-            u->spin[2] *= 0.5f;
-            if (u->vel[2] < 1) {
-                u->vel[0] = u->vel[1] = u->vel[2] = 0;
-                u->spin[0] = u->spin[1] = u->spin[2] = 0;
-            }
+    Record r[8];
+    Group cb = group_sub(g, "CollisionBox|CollisionBox");
+    if (!cb.at)
+        cb = group_sub(g, "CollisionBox");
+    if (!cb.at || group_items(cb, r, 8) < 6)
+        return NULL;
+    for (int k = 0; k < 6; k++)
+        b[k] = record_num(r[k]);
+    return b;
+}
+
+/* the unit's shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius (DefActorProps: 2)
+ * or AutoCollisionBox with the model's box, then the instance's; else the model's bounding sphere [G: taken as its
+ * box's, the host's; without one radius 1 at the origin] */
+static void unit_shape_read(const Army *a, const ArmyUnit *u, CollideShape *s)
+{
+    float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
+    int have = u->shape && a->host.shape_box && a->host.shape_box(a->host.ctx, u->shape, mb, mb + 3);
+    if (have) {
+        float h[3];
+        for (int k = 0; k < 3; k++) {
+            c[k] = (mb[k] + mb[3 + k]) / 2;
+            h[k] = (mb[3 + k] - mb[k]) / 2;
         }
+        r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
+    Group t = u->tmpl, in = u->inst;
+    collide_shape_pick(s, have ? c : NULL, r, t.at ? book_box(t, tb) : NULL, t.at ? gnum(t, "CollisionRadius", -1) : -1,
+                       t.at && gnum(t, "AutoCollisionBox", 0) != 0, in.at ? book_box(in, ib) : NULL,
+                       in.at ? group_num(in, "CollisionRadius", -1) : -1,
+                       in.at && group_num(in, "AutoCollisionBox", 0) != 0, have ? mb : NULL);
+}
+
+static void unit_shape(const Army *a, ArmyUnit *u, CollideShape *s)   /* read once, at its first use */
+{
+    if (!u->cshape_ok) {
+        unit_shape_read(a, u, &u->cshape);
+        u->cshape_ok = 1;
+    }
+    *s = u->cshape;
+}
+
+static void unit_take_impact(Army *a, ArmyUnit *u);
+
+typedef struct { Army *a; ArmyUnit *u; } FlightCtx;
+
+/* a contact of the flight (collide_mover_step): the street is OnHitGround (counted by the step); an object is
+ * TakeImpact on both [R 0x287430]: on a unit of ours here, on anything else through AE_IMPACT */
+static void flight_contact(void *user, int other, const float p[3], const float n[3])
+{
+    FlightCtx *c = user;
+    Army *a = c->a;
+    if (other < 0 && getenv("RAMPAGE_TRACE") && c->u->cm.vel[2] > 0.5f)   /* a bounce (the impulse is in) */
+        printf("  %s bounced off the street at %.1f %.1f %.1f\n", c->u->name ? c->u->name : "?", p[0], p[1], p[2]);
+    if (other < 0 || !a->cw)
+        return;
+    const CollideObj *o = &a->cw->o[other];
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %s met %d.%d at %.1f %.1f %.1f\n", c->u->name ? c->u->name : "?", COLLIDE_TAG_OWNER(o->tag),
+               COLLIDE_TAG_INDEX(o->tag), p[0], p[1], p[2]);
+    unit_take_impact(a, c->u);
+    if (COLLIDE_TAG_OWNER(o->tag) == COLLIDE_OWN_ARMY) {
+        int j = COLLIDE_TAG_INDEX(o->tag);
+        if (j < a->n && &a->u[j] != c->u)
+            unit_take_impact(a, &a->u[j]);
+        return;
+    }
+    ArmyEvent *e = emit(a, AE_IMPACT, who(a, c->u), c->u->name, p);
+    e->id = o->tag;
+    e->level = o->kind;
+    memcpy(e->dir, n, sizeof e->dir);
+    e->amount = c->u->cm.mass;
+}
+
+/* the SphereMover of a flight (setVelocity, smashObject's SpherePhysicsMover): the game's (collide.c, 0x28E440) with
+ * the template's Gravity (DefObjectProps: 35, else 9.81), Mass, Restitution, SlidingFriction and InertiaSolidity
+ * (0x28F220); started from the unit's place, velocity and spin (its tilt and facing rates [G: about the unit's x,
+ * its y and the world's z]); the street and the frame's objects (TakeImpact). Returns the street contacts this frame
+ * (OnHitGround, script event 11, every sub-step it touches) */
+static int sphere_step(Army *a, ArmyUnit *u, float dt)
+{
+    if (!u->cm_on) {
+        CollideShape sh;
+        unit_shape(a, u, &sh);
+        float r = collide_mover_radius(&sh);
+        if (r < 0.05f)
+            r = sh.radius > 0.05f ? sh.radius : 1;
+        collide_mover_init(&u->cm, r, tnum(u, "Gravity", 9.81f), tnum(u, "Mass", 1), tnum(u, "Restitution", 0.8f),
+                           tnum(u, "SlidingFriction", 0.4f), tnum(u, "InertiaSolidity", 1));
+        float w[3];
+        for (int k = 0; k < 3; k++)
+            w[k] = u->world[k] * u->spin[0] + u->world[4 + k] * u->spin[1] + (k == 2 ? u->spin[2] : 0);
+        collide_mover_spin(&u->cm, w);
+        collide_matrix_from16(u->cmat, u->world);
+        u->cm_on = 1;
+    }
+    memcpy(u->cm.vel, u->vel, sizeof u->cm.vel);    /* the scripts may set it (setVelocity) */
+    int i = who(a, u);
+    int self = collide_check(a->cw, u->cobj, COLLIDE_TAG(COLLIDE_OWN_ARMY, i), 0);
+    FlightCtx c = { a, u };
+    int hit = collide_mover_step_ex(a->cw, &u->cm, u->cmat, self, dt, COLLIDE_F_MONSTER, flight_contact, &c);
+    memcpy(u->vel, u->cm.vel, sizeof u->vel);
+    collide_matrix_to16(u->cmat, u->world);
+    u->pos[0] = u->cmat[9];
+    u->pos[1] = u->cmat[10];
+    u->pos[2] = u->cmat[11];
+    u->facing = atan2f(u->cmat[1], u->cmat[0]);     /* unit_matrix's x axis is (cos, sin) x cos tilt */
     return hit;
 }
 
@@ -1291,6 +1324,7 @@ static void wreck_away(ArmyUnit *u, const float monster_pos[3])
     u->vel[2] = fabsf(d[2] * 1.5f);
     u->mv.active = 0;
     u->mv.kind = 2;
+    u->cm_on = 0;
 }
 
 /* the AttackMover (vtable 0x44B430: init 0x313D90, update 0x313F80 ...): see attack_step below */
@@ -1321,6 +1355,7 @@ static void smash_object(Army *a, ArmyUnit *u, float monster_heading)
     u->pos[2] = u->world[14];
     u->mv.active = 0;
     u->mv.kind = 2;
+    u->cm_on = 0;
     u->oflags &= ~(uint32_t)OF_HELD;
     u->phase = AU_DYING;
 }
@@ -1366,6 +1401,7 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     u->spawner = -1;
     u->friend_of = -1;
     u->person = -1;
+    u->cobj = -1;
     u->pulse_delay = 0.25f;
     unit_weapons(a, u);
     unit_matrix(u);
@@ -1983,6 +2019,7 @@ static void truck_damage(Army *a, ArmyUnit *u, int monster)
             u->vel[k] = d[k] * 15;
         u->mv.active = 0;
         u->mv.kind = 2;
+        u->cm_on = 0;
         u->pulse_delay = 0.25f;
         u->state = 6;
     } else
@@ -2485,6 +2522,7 @@ static void turret_damage(Army *a, ArmyUnit *u, int monster, const float directi
             u->vel[2] = fabsf(direction[2] * 1.5f);
             u->mv.active = 0;
             u->mv.kind = 2;
+            u->cm_on = 0;
         }
         add_stats(a, u, monster, 0);
     }
@@ -2596,6 +2634,7 @@ static void bomber_damage(Army *a, ArmyUnit *u, int monster)
     u->spin[0] = PI / 4;                             /* setRotation(pi / 4, 0, 0) [G: radians per second] */
     u->mv.active = 0;
     u->mv.kind = 2;
+    u->cm_on = 0;
     effect_stop(a, (int)u->aux[0]);
     float o1[3] = { 0, 4, 0 }, o2[3] = { 0, -4, 0 };
     effect_on(a, u, fx, NULL);
@@ -2897,8 +2936,10 @@ static void unit_update(Army *a, int i, float dt)
     }
     int r = 1;
     /* the mover */
+    if (u->mv.kind != 2)
+        u->cm_on = 0;                                /* a flight is over once another mover takes it */
     if (u->mv.kind == 2)
-        r = sphere_step(u, dt) ? -2 : 1;             /* -2: OnHitGround (script event 11) */
+        r = sphere_step(a, u, dt) ? -2 : 1;          /* -2: OnHitGround (script event 11) [G: once a frame] */
     else if (u->mv.kind == 3)
         attack_step(a, u, dt);
     else {
@@ -2950,7 +2991,8 @@ static void unit_update(Army *a, int i, float dt)
     }
     if (u->kind == AK_DROP)
         u->tilt[1] += u->spin[1] * dt;               /* Process: rotate(p3RotRate) every frame */
-    unit_matrix(u);
+    if (!(u->mv.kind == 2 && u->cm_on))              /* a flight's matrix is its mover's */
+        unit_matrix(u);
     if (u->phase == AU_ALIVE && u->nw > 0)
         unit_weapons_tick(a, u, dt, u->kind == AK_TURRET && u->count ? u->lock : NULL);
 }
@@ -2990,6 +3032,37 @@ void army_free(Army *a)
 
 void army_seed(Army *a, uint32_t seed) { a->rng = seed ? seed : 1; }
 void army_set_view(Army *a, float xmin, float xmax) { a->view[0] = xmin; a->view[1] = xmax; }
+
+void army_set_collide(Army *a, CollideWorld *w) { a->cw = w; }
+
+void army_collide_add(Army *a, CollideWorld *w)
+{
+    for (int i = 0; i < a->n; i++) {
+        ArmyUnit *u = &a->u[i];
+        u->cobj = -1;
+        if (!w || u->phase == AU_GONE || u->phase == AU_HELD)
+            continue;                                /* [G] a held one is the hand's, not in the world */
+        CollideShape sh;
+        float m[12];
+        unit_shape(a, u, &sh);
+        collide_matrix_from16(m, u->world);
+        u->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | (u->oflags & ~(uint32_t)(OF_HELD | OF_MONSTER)),
+                              COLLIDE_TAG(COLLIDE_OWN_ARMY, i), 0);
+    }
+}
+
+/* TakeImpact (the world's 0x287430, vtable +0x38): Bomber.bsf's is onHitGround's; no other script of ours has one */
+static void unit_take_impact(Army *a, ArmyUnit *u)
+{
+    if (u->phase != AU_GONE && u->kind == AK_BOMBER)
+        bomber_ground(a, u);
+}
+
+void army_impact(Army *a, int unit)
+{
+    if (unit >= 0 && unit < a->n)
+        unit_take_impact(a, &a->u[unit]);
+}
 
 void army_clear(Army *a)
 {
@@ -3280,6 +3353,7 @@ void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], flo
         memcpy(u->vel, vel, sizeof u->vel);
     u->mv.active = 0;
     u->mv.kind = 2;
+    u->cm_on = 0;
 }
 
 /* [R] the monster's weapon hit 0x2D6A50 (from 0x2D9650): the slot it starts, see army.h */

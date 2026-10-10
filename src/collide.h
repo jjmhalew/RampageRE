@@ -179,5 +179,26 @@ typedef void (*CollideContactFn)(void *user, int other, const float point[3], co
  * street). Returns the number of street contacts */
 int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, CollideContactFn fn,
                        void *user);
+/* the same, the objects with any of `exclude` left out of the objects it meets (0x287430 asks with include -1,
+ * exclude 0: collide_mover_step). The viewer's movers leave out the monsters (COLLIDE_F_MONSTER) [G: the monster's
+ * own shape, WCISpheres, against a thrown object in 0x27F620 is not traced] */
+int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, uint32_t exclude,
+                          CollideContactFn fn, void *user);
+
+/* ---- the viewer's side: who owns an object of the frame's world */
+#define COLLIDE_F_WORLD 0x4u                         /* every object in the world (the queries' "4") */
+/* CollideObj.tag / CollideBuilding.tag: the module that added it and its index there; kind is the module's own
+ * (which of its lists: boss.c's parts 0 and VolumeTriggers 1, the monster's spheres by number, ...) */
+enum { COLLIDE_OWN_NONE, COLLIDE_OWN_BUILDING, COLLIDE_OWN_MONSTER, COLLIDE_OWN_ARMY, COLLIDE_OWN_VEHICLE,
+       COLLIDE_OWN_RAIL, COLLIDE_OWN_PARADE, COLLIDE_OWN_STREET, COLLIDE_OWN_BOSS };
+#define COLLIDE_TAG(owner, index) ((int)(((unsigned)(owner) << 24) | ((unsigned)(index) & 0xFFFFFFu)))
+#define COLLIDE_TAG_OWNER(tag) ((int)((unsigned)(tag) >> 24))
+#define COLLIDE_TAG_INDEX(tag) ((int)((unsigned)(tag) & 0xFFFFFFu))
+/* an object index of this frame's world still its owner's (its tag and kind as added); -1 otherwise */
+int collide_check(const CollideWorld *w, int obj, int tag, int kind);
+
+/* the game's 3 x 4 matrix from and to a column-major 4 x 4 (the modules' world matrices) */
+void collide_matrix_from16(float m[12], const float w16[16]);
+void collide_matrix_to16(const float m[12], float w16[16]);
 
 #endif

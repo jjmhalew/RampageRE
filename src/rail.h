@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include "data.h"
 #include "army.h"
+#include "collide.h"
 
 typedef struct Rail Rail;
 typedef struct RailObj RailObj;
@@ -37,7 +38,8 @@ typedef struct RailObj RailObj;
 typedef struct {
     /* a property group by book and name: "Objects1_Props" for a template; case-insensitive (army.h's find) */
     Group (*find)(void *ctx, const char *book, const char *name);
-    /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (the ShadowRect stands in) */
+    /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (the shape is then a
+     * sphere of radius 1, collide_shape_pick) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
     void *ctx;
 } RailHost;
@@ -83,6 +85,9 @@ struct RailObj {
     struct { float a[3], b[3], t, speed, resp2; int flags; } line;
     struct { struct { float p[3], s, k, m[3]; } pt[8]; int n, ready, flags; float s, vel; } sp;
     struct { float vel[3], spin[3]; int tumble; } sphere;
+    CollideMover cm; float cmat[12]; int cm_on;     /* the sphere's SpherePhysicsMover (collide.c), its matrix */
+    int cobj;                                        /* its object in the frame's collision world, -1 none */
+    CollideShape cshape; int cshape_ok;              /* its shape, read once (WSimpleObject's init, 0x28FD70) */
     int own_rot;                                     /* the mover keeps rot (a SplineMover's flag 2, a tumble, the hand) */
     int paid, spawner;
     int sfx[6], nsfx;                                /* its 3D sounds (add3DSfx ids), ended with it */
@@ -118,7 +123,10 @@ enum {
                        * v[1] its Energy; id 1 when an Army was bound and has applied it (its AE_SCORE / AE_STATS_*
                        * events follow from army_events), 0 when the caller must apply it (and count `name` for the
                        * block's challenge) */
-    RE_REMOVED        /* obj is gone (requestDelete) */
+    RE_REMOVED,       /* obj is gone (requestDelete) */
+    RE_IMPACT         /* obj flying met an object of another module (0x287430): that object's TakeImpact is the
+                       * caller's. id its collision tag (collide.h), level its kind, pos where, dir the normal, amount
+                       * obj's Mass (a building: hit with radius Mass / 1000) */
 };
 typedef struct { int type, id, obj, monster, level; const char *name; float v[3], dir[3], pos[3], amount; } RailEvent;
 
@@ -143,14 +151,21 @@ void rail_clear(Rail *r);                            /* every object gone, no sp
 
 void rail_update(Rail *r, float dt, const ArmyMonster *m, int nm, const RailBox *b, int nb);
 
+/* ---- the collision world (collide.c): the frame's world the flying objects ask (NULL: the street only), and the
+ * objects put into it (each one alive and seen, not a controller, with its shape: tag COLLIDE_TAG(COLLIDE_OWN_RAIL,
+ * obj), kind 0, flags 4 and its own). A PushOutMonsters one pushes the monster out in collide_monster (0x2E2C50) */
+void rail_set_collide(Rail *r, CollideWorld *w);
+void rail_collide_add(Rail *r, CollideWorld *w);
+
 int rail_count(const Rail *r);                       /* objects (skip RP_GONE and hidden) */
 const RailObj *rail_obj(const Rail *r, int i);
 int rail_events(Rail *r, RailEvent *out, int max);   /* takes the events since the last call */
 
 /* ---- the monster's side */
 /* an armed attack sphere reaching objects: their TakeDamage(monster, amount, 0, direction) [G: a monster's blow is
- * DamageType 0, Concussive]; how many it reached. (A touch, TakeDamage of type 1 Collision every frame, and the
- * PushOutMonsters push come from rail_update's own contact test with the monsters' boxes [G].) */
+ * DamageType 0, Concussive]; how many it reached. (A touch, TakeDamage of type 1 Collision every frame, comes from
+ * rail_update's own contact test of the monsters' boxes with the objects' shapes [G]; the PushOutMonsters push is the
+ * collision world's, collide_monster.) */
 int rail_hit(Rail *r, int monster, const float centre[3], float radius, float amount);
 void rail_impact(Rail *r, int obj);                  /* TakeImpact: something flying hit obj */
 /* doGrabObject's search over the objects: Pickupable, not held, in front of root, nearest within radius of hand */

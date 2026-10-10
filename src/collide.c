@@ -899,6 +899,33 @@ static void rotate_axis(float m[12], const float a[3], float ang)   /* 0x1014D0 
 int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, CollideContactFn fn,
                        void *user)
 {
+    return collide_mover_step_ex(w, mv, m, self, dt, 0, fn, user);
+}
+
+int collide_check(const CollideWorld *w, int obj, int tag, int kind)
+{
+    return w && obj >= 0 && obj < w->no && w->o[obj].tag == tag && w->o[obj].kind == kind ? obj : -1;
+}
+
+void collide_matrix_from16(float m[12], const float w16[16])
+{
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 3; r++)
+            m[3 * c + r] = w16[4 * c + r];
+}
+
+void collide_matrix_to16(const float m[12], float w16[16])
+{
+    for (int c = 0; c < 4; c++) {
+        for (int r = 0; r < 3; r++)
+            w16[4 * c + r] = m[3 * c + r];
+        w16[4 * c + 3] = c == 3 ? 1.0f : 0.0f;
+    }
+}
+
+int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, uint32_t exclude,
+                          CollideContactFn fn, void *user)
+{
     float r = mv->radius, f23 = 0.75f * r, vmax = dt > 0 ? 50 * f23 / dt : BIG, left = dt;
     int contacts = 0;
     if (dt <= 0)
@@ -933,7 +960,7 @@ int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self,
             memcpy(o->m, m, sizeof o->m);
             float c[3];
             shape_world_centre(o, c);
-            int near[32], nn = collide_sphere_query(w, c, o->shape.radius, ~0u, 0, near, 32);
+            int near[32], nn = collide_sphere_query(w, c, o->shape.radius, ~0u, exclude, near, 32);
             for (int i = 0; i < nn; i++) {
                 if (near[i] == self)
                     continue;

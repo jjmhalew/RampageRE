@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include "data.h"
 #include "army.h"
+#include "collide.h"
 
 typedef struct Boss Boss;
 
@@ -81,7 +82,8 @@ typedef struct {
     /* optional: node (a WeaponNode, "Attach_Rotor_Right", ...) of the part as drawn now, in the world; 0 = unknown
      * (the part's place stands in) */
     int (*node_world)(void *ctx, const BossPart *p, const char *node, float out[16]);
-    /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (a 4 x 4 x 4 box stands in) */
+    /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (the shape is then a
+     * sphere of radius 1, collide_shape_pick) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
     /* the army's weapons (army.c weapon_make over a template's Weapon| group, and one frame of weapon_tick with no
      * owning unit). Without them the bosses do not fire */
@@ -128,7 +130,8 @@ enum {
     BE_VEL,             /* monster.setVel(v, 0): its velocity becomes v (it is thrown) */
     BE_HP,              /* monster.addHitPoints(amount): + heals, - hurts (0 .. its most; nothing at 0 HP) */
     BE_FACING,          /* monster.setFacingZ(amount) */
-    BE_PUSH,            /* the monster is pushed by v (out of a PushOutMonsters box or a barrier) [G] */
+    BE_PUSH,            /* the monster is pushed by v (not sent any more: the PushOutMonsters parts' and the DoPushout
+                         * triggers' pushes are the collision world's, collide_monster) */
     BE_STATS,           /* gCommon.addStats(part obj, monster, level): army_add_stats(army, monster, tmpl, level) */
     BE_BOSS_HEALTH,     /* gCommon.updateChallengeHud(amount): the boss's health bar, 0 .. 1 */
     BE_DEFEATED,        /* the boss's CompletionCallback `name` (gWorld.iCallScriptV): see BOSS_NOTES "The block" */
@@ -185,5 +188,16 @@ int boss_defeated(const Boss *b);
 /* an armed attack sphere reaching boss parts: their TakeDamage(monster, amount, 0 [G: Concussive], the way from
  * the monster). How many it hit */
 int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount);
+
+/* ---- the collision world (collide.c) */
+/* the parts and the VolumeTriggers put into the frame's world: each alive part with its shape (tag
+ * COLLIDE_TAG(COLLIDE_OWN_BOSS, part), kind 0; flags 4 and its own: PushOutMonsters, IsObstacle, 8), each alive
+ * trigger as its box (Center +- Extents; tag COLLIDE_TAG(COLLIDE_OWN_BOSS, trigger), kind 1; flags
+ * COLLIDE_F_TRIGGER, | COLLIDE_F_PUSHOUT with DoPushout [R 0x3360F4]). collide_monster pushes the monster out of
+ * both and reports the triggers it touched */
+void boss_collide_add(Boss *b, CollideWorld *w);
+/* collide_monster's touch of trigger `trigger` (a kind 1 object's tag index) by monster `monster` with the normal:
+ * 0x335BF0 fires its FireFunc at the next boss_update, its MinRefireTime permitting */
+void boss_trigger_touch(Boss *b, int trigger, int monster, const float normal[3]);
 
 #endif

@@ -105,11 +105,17 @@ and from the unit's place otherwise.
   moves by velocity × dt.
 - **Hit:** after `ImpactDelay` seconds, the step's segment is tested and the first thing met is hit. The
   `ImpactEffect` starts there and the shot is gone. It is also gone at `Duration`.
-- [G] What the ray meets: the monster's collision spheres (or its box), a standing building's box (not one the shot
-  starts in), and the street. The game asks its collision world (gp−0x6D60), which is not read.
+- **What the ray meets** [R] (0x293CB4, the world's ray 0x283730, collide.c `collide_ray`): the street first, then
+  every object of the frame's collision world with a flag of the shot's include mask (+0x134) and none of its
+  exclude mask (+0x138) | 8, the nearest. The masks come from the record (0x2953E0: include 4, exclude 0), changed by
+  0x33B770: `DamageType` 8 meets only buildings (0x2000), Blunt (4, counted as 0) buildings and monsters (0x2040).
+  A hit on the shot's own unit (+0xC4) is no hit at all (0x293CD8). The monsters are their collision spheres, flagged
+  0x40; a ray that starts inside a box meets nothing [G]. What the shot hits that is not a monster only stops it: its
+  impact on such an object (0x292D20) is not ported.
 
 **A beam** (0x295750) [R]:
-- The beam runs from the weapon along its direction and stops at the first thing it meets.
+- The beam runs from the weapon along its direction and stops at the first thing it meets: the world's ray with
+  include −1 and exclude 8 (+ the fire's own, 0 here), its owner flagged 8 around the cast (0x2957E0).
 - On the beam's first touch it deals `ImpactDamage`. After that it deals `DamagePerSec` × dt per frame, if that is
   above 0.
 - [G] The beam's reach is its stream effect's, which is not read. It is taken as growing at Velocity per second up to
@@ -261,14 +267,23 @@ Floating = 100
 
 ## Not traced (stand-ins in army.c)
 - **Random numbers:** the sequence (an LCG stands in for Park-Miller 0x106BD0) and the frame step (1/60).
-- **The collision world:**
-  - what a shot's or beam's ray meets;
+- **The collision world** (collide.c, the frame's world the viewer builds, `army_set_collide` /
+  `army_collide_add`): the shots' and beams' rays and the flights are the game's. Left:
+  - flag 4 is taken as every object's but a VolumeTrigger's (so a shell stops at a soldier or a passing car), and a
+    shot's damage to what it hits other than a monster (0x292D20) is not ported;
   - the beam's reach;
   - when a droppable meets the monster;
   - the units' shapes for the monster's attacks (actors: a sphere of `CollisionRadius` 2; objects: the host's model
-    box, else 4 × 6 × 3).
-- **Movers:** the SplineMover's curve, the SphereMover's collision response (a bounce on z = 0 with `Restitution`,
-  coming to rest), and the HeldObjectMover's axis turn (the unit takes the hand's matrix).
+    box, else 4 × 6 × 3). In the collision world a unit has its shape by 0x28FD70 (`collide_shape_pick`:
+    CollisionBox, CollisionRadius, AutoCollisionBox, else the model's bounding sphere [G: the box's]).
+- **Movers:** the SplineMover's curve and the HeldObjectMover's axis turn (the unit takes the hand's matrix). A flight
+  (`mv.kind` 2: a wreck knocked away, a smashed actor, a thrown vehicle, a falling bomber) is the game's
+  SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) with the template's `Gravity` (DefObjectProps 35,
+  else 9.81), `Mass`, `Restitution`, `SlidingFriction`, `InertiaSolidity` and the shape's radius; it has no rest
+  (it rolls on until the script ends it). OnHitGround is sent once a frame it touches [G: the game's every sub-step;
+  the trucks' and bombers' are the same either way], TakeImpact on both what it meets (0x287430: Bomber.bsf's is
+  its onHitGround; another module's object through `AE_IMPACT`). [G] Its spin: the tilt and facing rates about the
+  unit's x, y and the world's z; the facing follows the mover's x axis, the tilt stays.
 - **The weapon system:** the turret's rate units, the aim of actors and people, `reloadWeapon`, and the weapon node
   without the host's `node_world`. Both the projectile's wobble (definition flag 8) and its spread (record flag 8)
   come from flags no book sets.
@@ -286,7 +301,12 @@ Floating = 100
    - draw each live shot by its `effect` at `pos` along `dir` (a beam spans `length`);
    - apply the events: start and stop effects by name (attached ones follow `unit` / `shot`), play sounds, route
      `AE_HIT` through `army_reaction_slot` to the monster's slots and HP, `AE_REACTION` straight to the slot,
-     `AE_STATS_*` to HP and energy, and `AE_PUSH` to the monster's place.
+     `AE_STATS_*` to HP and energy, `AE_PUSH` to the monster's place, and `AE_IMPACT` (a flight met another
+     module's object, `id` its collision tag) to that object's TakeImpact (a building: `building_hit` with radius
+     `amount` / 1000).
+   - before the update, the frame's collision world: `army_set_collide` once, then each frame `army_collide_add`
+     between `collide_begin` and `collide_finish`, with the monster's spheres added as `COLLIDE_F_MONSTER` objects
+     tagged `COLLIDE_TAG(COLLIDE_OWN_MONSTER, slot)` (main.c `world_build`).
 3. **Monster attacks:** an armed attack sphere calls `army_hit`. The grab uses `army_nearest_pickup`, `army_grab`,
    `army_hold` each frame and `army_throw`.
 4. **People:** `PE_DROP` goes to `army_drop` with the block's `DroppableDef` template, and `PE_WEAPON` goes to

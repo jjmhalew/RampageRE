@@ -740,22 +740,36 @@ int streetobj_kind_of(Group tmpl)
     return same_text(sc, "StreetObject.bsf") ? SK_STREET : same_text(sc, "RoofItem.bsf") ? SK_ROOF : -1;
 }
 
-/* the collision box in its own frame [G]: CollisionBox|CollisionBox (min, max), else the model's bounds (the
- * AutoCollisionBox the host measures, taken for every model), else 1 x 1 x 1 on the ground */
+/* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
+static const float *book_box(Group g, float b[6])
+{
+    return gpoint(g, "CollisionBox", b, 6) ? b : NULL;
+}
+
+/* its collision shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius or AutoCollisionBox
+ * with the model's box (the host measures it), then the instance's; else the model's bounding sphere [G: taken as
+ * its box's; no model: radius 1 at the origin]. box_min / box_max: the shape's box (a sphere's bounding cube) */
 static void object_box(StreetObjs *s, StreetObj *o)
 {
-    float b[6];
-    if (gpoint(o->tmpl, "CollisionBox", b, 6)) {
-        memcpy(o->box_min, b, sizeof o->box_min);
-        memcpy(o->box_max, b + 3, sizeof o->box_max);
-        return;
+    float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
+    int have = o->shape && s->host.shape_box && s->host.shape_box(s->host.ctx, o->shape, mb, mb + 3);
+    if (have) {
+        float h[3];
+        for (int k = 0; k < 3; k++) {
+            c[k] = (mb[k] + mb[3 + k]) / 2;
+            h[k] = (mb[3 + k] - mb[k]) / 2;
+        }
+        r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
-    if (o->shape && s->host.shape_box && s->host.shape_box(s->host.ctx, o->shape, o->box_min, o->box_max))
-        return;
-    o->box_min[0] = o->box_min[1] = -0.5f;
-    o->box_min[2] = 0;
-    o->box_max[0] = o->box_max[1] = 0.5f;
-    o->box_max[2] = 1;
+    Group t = o->tmpl, in = o->inst;
+    collide_shape_pick(&o->cshape, have ? c : NULL, r, t.at ? book_box(t, tb) : NULL,
+                       t.at ? group_num(t, "CollisionRadius", -1) : -1, t.at && group_num(t, "AutoCollisionBox", 0) != 0,
+                       in.at ? book_box(in, ib) : NULL, in.at ? group_num(in, "CollisionRadius", -1) : -1,
+                       in.at && group_num(in, "AutoCollisionBox", 0) != 0, have ? mb : NULL);
+    for (int k = 0; k < 3; k++) {
+        o->box_min[k] = o->cshape.centre[k] - o->cshape.half[k];
+        o->box_max[k] = o->cshape.centre[k] + o->cshape.half[k];
+    }
 }
 
 int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building)
@@ -782,6 +796,7 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
     o->shape = gstr(tmpl, "Shape");
     o->oflags = template_flags(tmpl);
     o->building = building;
+    o->cobj = -1;
     if (building >= 0)
         o->oflags |= SF_ATTACHED;                    /* the building that made it (+0x104 already set) */
     object_box(s, o);
@@ -862,33 +877,35 @@ void streetobj_update(StreetObjs *s, float dt, const StreetMonster *m, int nm, c
 
 void streetobj_arm(StreetObjs *s) { s->attack++; }
 
-/* the sphere against the object's box in its own frame (0x280470 [G: the shape test is not traced]) */
+/* the object as the collision world has it (WCollisionInfo at its matrix) */
+static void as_collide(const StreetObj *o, CollideObj *c)
+{
+    memset(c, 0, sizeof *c);
+    c->shape = o->cshape;
+    collide_matrix_from16(c->m, o->world);
+    c->flags = COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)SF_HELD);
+    c->building = -1;
+}
+
+/* the sphere against the object's shape (0x280470: the shape's sphere test, collide_obj_sphere) */
 static int sphere_meets(const StreetObj *o, const float c[3], float radius)
 {
-    float d[3] = { c[0] - o->world[12], c[1] - o->world[13], c[2] - o->world[14] }, l[3], q = 0;
-    world_to_object(o, d, l);
-    for (int k = 0; k < 3; k++) {
-        float e = l[k] < o->box_min[k] ? o->box_min[k] - l[k] : l[k] > o->box_max[k] ? l[k] - o->box_max[k] : 0;
-        q += e * e;
-    }
-    return q <= radius * radius;
+    CollideObj co;
+    float n[3], pt[3], push[3];
+    as_collide(o, &co);
+    return collide_obj_sphere(&co, c, radius, n, pt, push);
 }
-static int box_meets(const StreetObj *o, const float mn[3], const float mx[3])   /* its box made world-aligned */
+/* the monster's box (world-aligned) against the object's shape (0x2801A0, the monster's test: collide_obj_box) */
+static int box_meets(const StreetObj *o, const float mn[3], const float mx[3])
 {
-    float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
-    for (int c = 0; c < 8; c++) {
-        float l[3] = { c & 1 ? o->box_max[0] : o->box_min[0], c & 2 ? o->box_max[1] : o->box_min[1],
-                       c & 4 ? o->box_max[2] : o->box_min[2] }, w[3];
-        for (int r = 0; r < 3; r++) {
-            w[r] = o->world[12 + r] + o->rot[r] * l[0] + o->rot[3 + r] * l[1] + o->rot[6 + r] * l[2];
-            if (w[r] < lo[r]) lo[r] = w[r];
-            if (w[r] > hi[r]) hi[r] = w[r];
-        }
+    CollideObj co;
+    float c[3], e[3], n[3], pt[3], push[3];
+    for (int k = 0; k < 3; k++) {
+        c[k] = (mn[k] + mx[k]) / 2;
+        e[k] = (mx[k] - mn[k]) / 2;
     }
-    for (int k = 0; k < 3; k++)
-        if (hi[k] < mn[k] || lo[k] > mx[k])
-            return 0;
-    return 1;
+    as_collide(o, &co);
+    return collide_obj_box(&co, c, e, n, pt, push);
 }
 
 static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who, int type)
@@ -935,6 +952,33 @@ int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const 
         n++;
     }
     return n;
+}
+
+int streetobj_take_impact(StreetObjs *s, int i)
+{
+    if (i < 0 || i >= s->n)
+        return 0;
+    StreetObj *o = &s->o[i];                         /* TakeImpact [R] */
+    if (!o->alive || o->kind != SK_STREET || (o->oflags & SF_HELD))
+        return 0;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  street object %d (%s) TakeImpact\n", i, o->name ? o->name : "?");
+    effect(s, o, ostr(o, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);
+    delete_now(s, o);
+    return 1;
+}
+
+void streetobj_collide_add(StreetObjs *s, CollideWorld *w)
+{
+    for (int i = 0; i < s->n; i++) {
+        StreetObj *o = &s->o[i];
+        o->cobj = -1;
+        if (!w || !o->alive || (o->oflags & SF_HELD) || s->deleting[i])
+            continue;                                /* [G] a held one is the hand's */
+        CollideObj c;
+        as_collide(o, &c);
+        o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_STREET, i), 0);
+    }
 }
 
 int streetobj_impact(StreetObjs *s, const float centre[3], float radius)

@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include "data.h"
 #include "army.h"
+#include "collide.h"
 
 typedef struct Vehicles Vehicles;
 typedef struct VehObj VehObj;
@@ -82,6 +83,9 @@ struct VehObj {
     int horn, bounce_count, paid, in_list, ambient_fx, beam_fx, gone_age;
     struct { float a[3], b[3], t, speed, resp2; int on; } line;   /* LineMover: from a to b, the share t */
     struct { float vel[3], spin[3]; int on, tumble, rest; } sphere;   /* SphereMover / smash */
+    CollideMover cm; float cmat[12]; int cm_on;     /* the sphere's SpherePhysicsMover (collide.c), its matrix */
+    int cobj;                                        /* its object in the frame's collision world, -1 none */
+    CollideShape cshape; int cshape_ok;              /* its shape, read once (WSimpleObject's init, 0x28FD70) */
     float shake_step, shake_time, cur[3];            /* Rocket.bsf */
     float elapsed, rpf[3], xpf, ypf;                 /* RocketBase.bsf */
     /* Vehicle_FireTruck.bsf */
@@ -112,7 +116,10 @@ enum {
                        * v[1] its Energy; id 1 when an Army was bound and has applied it (its AE_SCORE /
                        * AE_STATS_* events follow from army_events), 0 when the caller must apply it */
     VE_FART,          /* Monsters::timedDoFart on monster, amount (2) seconds from now */
-    VE_REMOVED        /* obj is gone (requestDelete, or eaten) */
+    VE_REMOVED,       /* obj is gone (requestDelete, or eaten) */
+    VE_IMPACT         /* obj flying met an object of another module (0x287430): that object's TakeImpact is the
+                       * caller's. id its collision tag (collide.h), level its kind, pos where, dir the normal, amount
+                       * obj's Mass (a building: hit with radius Mass / 1000) */
 };
 typedef struct { int type, id, obj, monster, level; const char *name; float v[3], dir[3], pos[3], amount; } VehicleEvent;
 
@@ -138,6 +145,12 @@ int vehicle_kind_of(Vehicles *v, const char *tmpl_name);   /* VK_* of a template
 void vehicle_building_gone(Vehicles *v, int building);
 
 void vehicle_update(Vehicles *v, float dt, const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
+
+/* ---- the collision world (collide.c): the frame's world the flying objects ask (NULL: the street only), and the
+ * objects put into it (each one alive with its shape: tag COLLIDE_TAG(COLLIDE_OWN_VEHICLE, obj), kind 0, flags 4 and
+ * its own: PushOutMonsters for the traffic) */
+void vehicle_set_collide(Vehicles *v, CollideWorld *w);
+void vehicle_collide_add(Vehicles *v, CollideWorld *w);
 
 int vehicle_count(const Vehicles *v);                /* objects (skip VP_GONE) */
 const VehObj *vehicle_obj(const Vehicles *v, int i);

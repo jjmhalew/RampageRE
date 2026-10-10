@@ -98,7 +98,8 @@ the Objects1_Props group of that name (x y z triples). [G] It starts at the firs
 - `Monster.playReaction(name)`: the move state of that name (0x2D9890), started through 0x2D9710.
 
 **Object flags** (0x3F5F70) [R]:
-- 0x4000 `PushOutMonsters` (Tank, Jumper): [G] a monster's root is pushed out of the box.
+- 0x4000 `PushOutMonsters` (Tank, Jumper): a monster is pushed out of the part's box by the collision world
+  (collide_monster, 0x2E2C50 [R]: the box query with include VolumeTrigger | PushOutMonsters).
 - 0x8000 `OnlyHitWithEffNodes`: only attacks reach TakeDamage. It is on the Tank, Heli, Jumper, Saucer, Blimp and
   Generator.
 - 0x40000 `IsObstacle` (Whirlwind).
@@ -277,7 +278,11 @@ hit points.
   - a monster not climbing is thrown (0, −100, 30) with React_Airborne;
   - a climbing one plays React_Front_Zap (React_Side_L_Zap on a side);
   - `Hazard_Electricity_Explode` plays on it either way.
-  - [G] DoPushout pushes it out the shortest way.
+  - The test and the push are the monster's own (0x2E2C50, collide_monster) [R]: the trigger is a box in the
+    collision world flagged 0x400000 (| PushOutMonsters with DoPushout, 0x3360F4); the monster's box meeting it
+    reports a touch (`boss_trigger_touch`), which fires the FireFunc at the next update once MinRefireTime has run
+    (0x335BF0); with DoPushout it is pushed out along the least overlap (x and y only), unless climbing. [G] Center
+    is taken in the world and Extents as half sizes.
 - **Openings:** the back-left and back-right buildings' front cells 1–2 on storeys 4–6 are set to state 3, which
   opens the walls before the generators.
 
@@ -322,8 +327,11 @@ falling back one loses its barriers too.
 
 ## Not traced (stand-ins in boss.c)
 - **Collision:**
-  - the monster touching an object (TakeDamage of type Collision every frame), the PushOutMonsters push and the
-    VolumeTrigger's test and push-out;
+  - the monster touching an object (TakeDamage of type Collision every frame: where the game's touch comes from is
+    not traced; here the monster's spheres within the part's box). The PushOutMonsters push and the VolumeTriggers'
+    test and push-out are the collision world's (`boss_collide_add`, collide_monster);
+  - the parts' shapes (0x28FD70, `collide_shape_pick`: CollisionBox (the generators'), CollisionRadius or
+    AutoCollisionBox (the blimp) with the model's box, else the model's bounding sphere [G: the box's]);
   - which DamageType a monster's attack has (taken as 0);
   - `findBuildingByPosition` (taken as the footprint).
 - **Movers:**
@@ -362,7 +370,10 @@ falling back one loses its barriers too.
    - `boss_activate(1)` when gAIMgr is activated.
    - The army must not spawn the boss's AIInstance (`boss_is_boss_template`). city.c must not place the ambient
      bosses' or generators' AttackObjectInstance / ObjectInstance as still models.
-2. **Each frame:** `boss_update(dt, monsters, buildings)`, then draw each alive part: `shape` at `world` × `scale`;
-   `animate`: its own RawAnim; the Jumper: `clip` at `anim_time`. Then apply the events.
+2. **Each frame:** `boss_collide_add` into the frame's collision world (between `collide_begin` and
+   `collide_finish`, before anything moves), each touch of a kind-1 object (a trigger) that collide_monster reports
+   to `boss_trigger_touch`; `boss_update(dt, monsters, buildings)`, then draw each alive part: `shape` at `world` ×
+   `scale`; `animate`: its own RawAnim; the Jumper: `clip` at `anim_time`. Then apply the events (`BE_PUSH` no
+   longer comes: the pushes are collide_monster's).
 3. **Monster attacks:** an armed attack sphere calls `boss_hit`.
 4. **The city's end:** `boss_set_city_destroyed(1)` once the city's last block is finished.

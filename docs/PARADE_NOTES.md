@@ -169,15 +169,22 @@ template's name is what the challenge counts (0x346780).
   place.
 - **[G] setFacing's order** (Rz Ry Rx, as army.c and boss.c take it) decides which way the balloons lean.
 - **[G] `this.actor.onPickup()`** in Biker.bsf's TakeDamage is taken as the script's own onPickup (as people.c).
-- **[G] The SpherePhysicsMover**: `Gravity` (9.81 for the biker, DefObjectProps' 35 for the bike and the food),
-  `Restitution` 0.8, a bounce on z = 0 and a slide slowed by 0.3 g; `OnHitGround` at the first touch. Without the
-  game's collision world the smashed ones slide far, past the street's far side.
+- **The SpherePhysicsMover** is the game's (collide.c `collide_mover_step`, 0x28E440) in the frame's collision world
+  (`parade_set_collide`, `parade_collide_add`): `Gravity` (9.81 for the biker, DefObjectProps' 35 for the bike and
+  the food), `Mass` (1), `Restitution` (0.8), `SlidingFriction` (0.4), `InertiaSolidity` and the shape's radius;
+  smashObject's turn rates as its spin about the object's axes [G]. `OnHitGround` every sub-step it touches (the
+  biker in state 5 is deleted at the first); what it meets (a building's front or side, a car) is a contact, and its
+  TakeImpact (none of these scripts has one) goes to another module's object through `PAE_IMPACT`. No rest: it
+  rolls on until its script deletes it. [G] The monsters are left out of what it meets.
+- **The shapes in the world** (0x28FD70, `collide_shape_pick`): the template's CollisionBox, CollisionRadius (the
+  bikers' 2, the carts' food 3 and 2.5, about the model's middle) or AutoCollisionBox (the balloons) with the model's
+  box, else the model's bounding sphere [G: the box's], read once. The carts and balloons are PushOutMonsters: the
+  monster is pushed out of them (collide_monster).
 - **[G] Pulses** restart their count when set (as vehicle.c); `getTimeStep` is 1/60; `frand` is an LCG.
 - **[G] The world's state 6** is taken as always true for the chains; gAIMgr's delays count from the block's load.
 - **[G] Clip lengths**: from the host, else the bikers' as read from SanFrancisco.bdp (`Biker_Riding_Throw` 0.7 s,
   `Biker_Held` 1.0 s), else 1 s.
-- **Not ported**: PushOutMonsters (the balloons and the carts' food push the monster out of their box), the riderless
-  bike's `onMoverCallback` from a SphereMover (taken to come only from its line), `onBuildingDestruction` (never sent
+- **Not ported**: the riderless bike's `onMoverCallback` from a SphereMover (taken to come only from its line), `onBuildingDestruction` (never sent
   to these), which monster's slot gets the score with two players (the port says monster 0 / the one given).
 
 ## Driving it from the viewer
@@ -186,7 +193,9 @@ template's name is what the challenge counts (0x346780).
    placement leaves out the objects and actors `parade_script_ours` claims (only the play block's: the blocks behind
    keep their still models).
 2. **Each frame**: `parade_update` with the monster (army.h's ArmyMonster) and the camera's x; draw each object not
-   PAP_GONE: its `shape` (and `clip` at `anim_time / anim_len`) at `world` scaled by `scale`; apply the events.
+   PAP_GONE: its `shape` (and `clip` at `anim_time / anim_len`) at `world` scaled by `scale`; apply the events
+   (`PAE_IMPACT`: TakeImpact on the object with collision tag `id`). Before the update: `parade_collide_add` into
+   the frame's collision world between `collide_begin` and `collide_finish` (`parade_set_collide` once).
 3. **The monster**: every armed attack sphere calls `parade_hit` with the number of the blow; the ground grab tries
    `parade_nearest_pickup` (before the street's vehicles: the bikers and carts are on the sidewalk) and
    `parade_grab`; `parade_hold` each frame with the hand's matrix; `throwObject` calls `parade_throw`; a held object

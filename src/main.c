@@ -149,6 +149,9 @@ typedef struct {
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
     float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
+    CollideWorld cw;                                 /* the frame's collision world (collide.c): built by world_build
+                                                      * before anything moves, asked by the monster and the modules */
+    int msph0, nmsph;                                /* the monster's spheres in it (objects msph0 ..) */
 } Viewer;
 
 static int water_at(const Viewer *v, float x, float y);
@@ -537,6 +540,8 @@ static void build(Viewer *v)
         host.node_world = army_node_world;
         host.ctx = v;
         v->army = army_new(&host);
+        if (v->army)
+            army_set_collide(v->army, &v->cw);
         if (v->army) {
             army_load_block(v->army, v->scene.block);
             army_activate(v->army, 1);
@@ -554,6 +559,8 @@ static void build(Viewer *v)
         vh.shape_box = army_shape_box;
         vh.ctx = v;
         v->veh = vehicle_new(&vh);
+        if (v->veh)
+            vehicle_set_collide(v->veh, &v->cw);
         if (v->veh) {
             if (v->army)
                 vehicle_bind_army(v->veh, v->army);
@@ -604,6 +611,8 @@ static void build(Viewer *v)
         ph.clip_seconds = parade_clip_seconds;
         ph.ctx = v;
         v->parade = parade_new(&ph);
+        if (v->parade)
+            parade_set_collide(v->parade, &v->cw);
         if (v->parade) {
             int n = parade_load_block(v->parade, v->scene.block);
             if (getenv("RAMPAGE_TRACE"))
@@ -621,6 +630,8 @@ static void build(Viewer *v)
         rh.shape_box = army_shape_box;
         rh.ctx = v;
         v->rail = rail_new(&rh);
+        if (v->rail)
+            rail_set_collide(v->rail, &v->cw);
         if (v->rail) {
             if (v->army)
                 rail_bind_army(v->rail, v->army);
@@ -1314,27 +1325,131 @@ static float ground_at(const Viewer *v, float x, float y, float z)
     return g;
 }
 
-/* the monster's box against the buildings, as the game moves it (0x2E2C50); roofs are landed on by ground_at */
-static void push_out(Viewer *v)
+/* the monster's collision spheres (MoveShape: a bone and an offset) in the world now: centre, radius; how many */
+static int monster_spheres(const Viewer *v, float out[][4], int max)
 {
-    /* the game's response (collide.c, 0x2E2C50): the box query against the buildings (fronts, alley walls and
-     * corners), held on a roof, the street's limits */
-    static CollideWorld w;
-    collide_begin(&w, -1);
+    if (!v->have_graph || v->scene.monster < 0)
+        return 0;
+    const Instance *in = &v->scene.instances[v->scene.monster];
+    int ns = 0;
+    for (int i = 0; i < v->graph.nshapes && ns < max; i++) {
+        const MoveShape *sh = &v->graph.shapes[i];
+        if (sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
+            continue;
+        const float *m = in->node[sh->bone].m, *bm = in->base.m;
+        float l[3];
+        for (int r = 0; r < 3; r++)
+            l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
+        if (v->mirror)
+            l[0] = -l[0];
+        for (int r = 0; r < 3; r++)
+            out[ns][r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
+        out[ns++][3] = sh->radius;
+    }
+    return ns;
+}
+
+/* the frame's collision world (collide.c; the game's RGridMgr 0x4D0900 and RSceneryMgr 0x4D0B00), built once a frame
+ * before anything moves: the block's buildings (tag COLLIDE_TAG(COLLIDE_OWN_BUILDING, scene index)), the monster's
+ * spheres (flags 4 | COLLIDE_F_MONSTER: what the shots' rays hit; WCISpheres 0x449A20 [G: as separate spheres]),
+ * then every module's objects with their shapes and flags (army, vehicles, rail, parade, street and roof objects,
+ * the bosses' parts and VolumeTriggers). The monster (push_out), the shots and the flying objects ask it */
+static void world_build(Viewer *v)
+{
+    CollideWorld *w = &v->cw;
+    collide_begin(w, -1);
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
-        collide_add_building(&w, b->min, b->max, b->row, b->state, b->collapse != -1, (int)i);
+        collide_add_building(w, b->min, b->max, b->row, b->state, b->collapse != -1,
+                             COLLIDE_TAG(COLLIDE_OWN_BUILDING, (int)i));
     }
-    collide_finish(&w);
+    float sp[64][4];
+    int ns = monster_spheres(v, sp, 64);
+    v->msph0 = w->no;
+    v->nmsph = 0;
+    for (int k = 0; k < ns; k++) {
+        CollideShape sh;
+        float m[12], zero[3] = { 0, 0, 0 };
+        collide_shape_sphere(&sh, zero, sp[k][3]);
+        collide_matrix(m, 0, sp[k]);
+        if (collide_add(w, &sh, m, COLLIDE_F_WORLD | COLLIDE_F_MONSTER, COLLIDE_TAG(COLLIDE_OWN_MONSTER, 0), k) >= 0)
+            v->nmsph++;
+    }
+    if (v->army) army_collide_add(v->army, w);
+    if (v->veh) vehicle_collide_add(v->veh, w);
+    if (v->rail) rail_collide_add(v->rail, w);
+    if (v->parade) parade_collide_add(v->parade, w);
+    if (v->sobj) streetobj_collide_add(v->sobj, w);
+    if (v->boss) boss_collide_add(v->boss, w);
+    collide_finish(w);
+}
+
+/* the monster's spheres moved with it: their objects in the frame's world follow (before the modules update) */
+static void world_monster_moved(Viewer *v, const float (*sp)[4], int ns)
+{
+    for (int k = 0; k < ns && k < v->nmsph; k++) {
+        CollideObj *o = &v->cw.o[v->msph0 + k];
+        memcpy(o->m + 9, sp[k], 3 * sizeof(float));
+        o->shape.radius = o->shape.half[0] = o->shape.half[1] = o->shape.half[2] = sp[k][3];
+        o->shape.raw[3] = sp[k][3] * sp[k][3];
+    }
+}
+
+/* TakeImpact on what a module's flying object met (0x287430, vtable +0x38 of the other): a building is hit at the
+ * contact with radius Mass / 1000 of the mover (Building 0x2BC0F0 -> 0x2BC150) [R]; another module's object gets its
+ * script's TakeImpact (Vehicle.bsf, ElevatedTrain.bsf, CableCar.bsf, StreetObject.bsf, Bomber.bsf); the monster,
+ * the parade's and the bosses' scripts have none */
+static void impact_route(Viewer *v, int tag, int kind, const float at[3], float mass)
+{
+    int i = COLLIDE_TAG_INDEX(tag), hit = 0;
+    switch (COLLIDE_TAG_OWNER(tag)) {
+    case COLLIDE_OWN_BUILDING:
+        if ((uint32_t)i < v->scene.nbuildings)
+            hit = building_hit(&v->scene.buildings[i].b, at, mass / 1000);
+        break;
+    case COLLIDE_OWN_VEHICLE: if (v->veh) vehicle_impact(v->veh, i); break;
+    case COLLIDE_OWN_RAIL: if (v->rail) rail_impact(v->rail, i); break;
+    case COLLIDE_OWN_STREET: if (v->sobj) hit = streetobj_take_impact(v->sobj, i); break;
+    case COLLIDE_OWN_ARMY: if (v->army) army_impact(v->army, i); break;
+    default: break;
+    }
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  impact on %d.%d (kind %d) at %.1f %.1f %.1f, mass %.0f%s\n", COLLIDE_TAG_OWNER(tag), i, kind, at[0],
+               at[1], at[2], mass, hit ? ": hit" : "");
+}
+
+/* the monster's box against the frame's world, as the game moves it (0x2E2C50): the PushOutMonsters objects and the
+ * VolumeTriggers (their touches go to their owner: boss.c's barriers), then the buildings (fronts, alley walls and
+ * corners), held on a roof, the street's limits; on a building's face (mode 5) only the triggers. Roofs are landed on
+ * by ground_at */
+static void push_out(Viewer *v)
+{
     float s = v->scale > 0 ? v->scale : 1;
     CollideMonster m = { { v->mx, v->my, v->mz }, v->heading, v->mode,
                          (v->graph.box[0] > 0 ? v->graph.box[0] : 3) * s, (v->graph.box[1] > 0 ? v->graph.box[1] : 4.25f) * s,
                          { v->graph.probe[0] * s, v->graph.probe[1] * s }, 0, 0, 0,
                          { v->vel[0], v->vel[1], v->vel[2] }, { v->air[0], v->air[1], v->air[2] } };
     CollideMonsterOut o;
-    collide_monster(&w, &m, &o);
-    if (getenv("RAMPAGE_TRACE") && (m.pos[0] != v->mx || m.pos[1] != v->my))
-        printf("  collide: %.2f %.2f -> %.2f %.2f (below %d roof %d walled %d)\n", v->mx, v->my, m.pos[0], m.pos[1], o.below, o.on_roof, o.walled);
+    collide_monster(&v->cw, &m, &o);
+    for (int k = 0; k < o.ntouch; k++) {             /* 0x335BF0: the trigger's FireFunc, by its owner */
+        const CollideObj *t = &v->cw.o[o.touch[k]];
+        if (COLLIDE_TAG_OWNER(t->tag) == COLLIDE_OWN_BOSS && t->kind == 1 && v->boss)
+            boss_trigger_touch(v->boss, COLLIDE_TAG_INDEX(t->tag), 0, o.touch_normal[k]);
+    }
+    if (getenv("RAMPAGE_TRACE")) {
+        for (int k = 0; k < o.npushed; k++) {
+            const CollideObj *t = &v->cw.o[o.pushed[k]];
+            printf("  collide: pushed out of %d.%d (kind %d)\n", COLLIDE_TAG_OWNER(t->tag), COLLIDE_TAG_INDEX(t->tag),
+                   t->kind);
+        }
+        for (int k = 0; k < o.ntouch; k++) {
+            const CollideObj *t = &v->cw.o[o.touch[k]];
+            printf("  collide: touched trigger %d.%d\n", COLLIDE_TAG_OWNER(t->tag), COLLIDE_TAG_INDEX(t->tag));
+        }
+        if (m.pos[0] != v->mx || m.pos[1] != v->my)
+            printf("  collide: %.2f %.2f -> %.2f %.2f (below %d roof %d walled %d)\n", v->mx, v->my, m.pos[0], m.pos[1],
+                   o.below, o.on_roof, o.walled);
+    }
     v->mx = m.pos[0];
     v->my = m.pos[1];
     v->vel[0] = m.vel[0]; v->vel[1] = m.vel[1];
@@ -2205,6 +2320,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, const ArmyBo
                 if (e->obj == v->held_vehicle)
                     v->held_vehicle = -1;
                 break;
+            case VE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             default: break;
             }
             if (getenv("RAMPAGE_TRACE") && e->type != VE_EFFECT && e->type != VE_EFFECT_STOP)
@@ -2301,6 +2417,7 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m)
             case RE_SET_VEL: if (v->rail_knock < 2) memcpy(v->vel, e->v, sizeof v->vel); break;
             case RE_HP: if (v->hp > 0 && v->rail_knock < 2) v->hp = fmaxf(0, fminf(200, v->hp + e->amount)); break;
             case RE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
+            case RE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             case RE_STATS:
                 if (e->id == 0) {
                     monster_stats(v, e->v[0], e->v[1]);
@@ -2408,6 +2525,7 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m)
                 if (e->obj == v->held_parade)
                     v->held_parade = -1;
                 break;
+            case PAE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             default: break;
             }
             if (getenv("RAMPAGE_TRACE"))
@@ -2558,22 +2676,8 @@ static void army_step(Viewer *v, float dt)
     if (!v->army || !v->have_graph || v->scene.monster < 0)
         return;
     static float spheres[64][4];
-    const Instance *in = &v->scene.instances[v->scene.monster];
-    int ns = 0;
-    for (int i = 0; i < v->graph.nshapes && ns < 64; i++) {   /* every collision sphere, in the world */
-        const MoveShape *sh = &v->graph.shapes[i];
-        if (sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
-            continue;
-        const float *m = in->node[sh->bone].m, *bm = in->base.m;
-        float l[3];
-        for (int r = 0; r < 3; r++)
-            l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
-        if (v->mirror)
-            l[0] = -l[0];
-        for (int r = 0; r < 3; r++)
-            spheres[ns][r] = bm[r] * l[0] + bm[4 + r] * l[1] + bm[8 + r] * l[2] + bm[12 + r];
-        spheres[ns++][3] = sh->radius;
-    }
+    int ns = monster_spheres(v, spheres, 64);       /* every collision sphere, in the world */
+    world_monster_moved(v, (const float (*)[4])spheres, ns);
     ArmyMonster m;
     memset(&m, 0, sizeof m);
     m.pos[0] = v->mx; m.pos[1] = v->my; m.pos[2] = v->mz;
@@ -2645,6 +2749,7 @@ static void army_step(Viewer *v, float dt)
             case AE_HIT: monster_hit(v, e->name, e->amount, e->level, e->v, e->pos); break;
             case AE_REACTION: v->pending_slot = e->level; break;
             case AE_PUSH: v->mx += e->v[0]; v->my += e->v[1]; break;
+            case AE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             case AE_STATS_HEALTH: v->hp = v->hp > 0 ? fmaxf(1, fminf(200, v->hp + e->amount)) : v->hp; break;
             case AE_STATS_ENERGY: monster_stats(v, 0, e->amount); break;
             case AE_FLOAT:                           /* a PointsBanner: 0.8 for the army's awards (0x2BAB2C) */
@@ -2772,6 +2877,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         return;
     }
     static const uint8_t none[MV_COUNT];
+    world_build(v);                                  /* the collision world as the frame begins */
     if (v->is_ai) {                                  /* the game drives the monster: no pad */
         lx = v->ai.stick[0];
         ly = v->ai.stick[1];
@@ -2993,8 +3099,7 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
         if (v->mx < -75) v->mx = -75;
         if (v->mx > 75) v->mx = 75;
         if (v->my < -30) v->my = -30;
-        if (v->mode != MODE_BUILDING)               /* on a face it is held by it, not pushed out */
-            push_out(v);
+        push_out(v);                                 /* on a face (mode 5) only the triggers: it is held by the face */
         v->heading = fmodf(v->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE"))
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", v->graph.states[v->run.state].name,
@@ -3264,6 +3369,7 @@ static void game_next_block(Viewer *v)
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
+ * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
@@ -3356,6 +3462,16 @@ static void play_script(Viewer *v, const char *script, float aspect)
             }
             continue;
         }
+        char *plus = strchr(word, '+');              /* button+direction: the stick held with it */
+        float sx = 0, sy = 0;
+        if (plus) {
+            *plus = 0;
+            for (size_t i = 0; i < sizeof WORDS / sizeof *WORDS; i++)
+                if (WORDS[i].button == -1 && _stricmp(plus + 1, WORDS[i].name) == 0) {
+                    sx = WORDS[i].x;
+                    sy = WORDS[i].y;
+                }
+        }
         for (size_t i = 0; n && i < sizeof WORDS / sizeof *WORDS; i++) {
             if (_stricmp(word, WORDS[i].name) != 0)
                 continue;
@@ -3369,7 +3485,7 @@ static void play_script(Viewer *v, const char *script, float aspect)
                     v->rx = WORDS[i].x;
                     v->ry = WORDS[i].y;
                 }
-                play_step(v, right ? 0 : WORDS[i].x, right ? 0 : WORDS[i].y, pressed, held, 1.0f / 60, aspect);
+                play_step(v, right ? 0 : WORDS[i].x + sx, right ? 0 : WORDS[i].y + sy, pressed, held, 1.0f / 60, aspect);
                 if (v->have_graph && v->scene.monster >= 0) {   /* posed each frame, as the main loop does */
                     v->scene.instances[v->scene.monster].offset =
                         (float)clip_at(v, &v->graph.states[v->run.state], v->run.time);
@@ -3609,6 +3725,7 @@ int main(int argc, char **argv)
             cam.fov_deg = v.view.fov * 57.2957795f;
         } else {
             if (v.have_scene) {
+                world_build(&v);                     /* the traffic's and the parade's world */
                 scene_buildings_update(&v.scene, dt > 0.1f ? 0.1f : dt);
                 v.scene.cloth_dt += dt > 0.1f ? 0.1f : dt;   /* the flags fly in the free camera too */
                 if (v.veh)                           /* and the traffic drives on, with no monster about */

@@ -126,19 +126,27 @@ mantles onto the roof at the top (its hands gripping the wall: the game's arm IK
 hold while the clip climbs on), steps across onto the front of a building it touches, and braces itself across a
 10-unit alley to climb between two buildings and turn onto the other one ([FORMAT_MONSTER.md](FORMAT_MONSTER.md)
 "Climbing"; the checks the game also makes against attachments, cells flagged 0x1000 and other monsters are left
-out). `--do "at x y"` puts the monster there, facing the buildings. Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
+out). `--do "at x y"` puts the monster there, facing the buildings; `--do "square+up 0.3"` presses a button with the stick
+held that way. Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
 transition, so which way it comes in is not traced). The monster's collision box is the game's (MONSTER_DATA +0x198 / +0x19C: 3 each way across, 8.5 tall, 0x2E2C50):
-it cannot go into a building's box (the viewer pushes it out the shorter way; the game's response, 0x2801A0, is not
-read), it can land on a roof (6 + 3 × storeys up) and stand there, and walking off the edge it falls (a stand-in: it
+it cannot go into a building's box (the game's response, collide.c's `collide_monster`), it can land on a roof (6 + 3 × storeys up) and stand there, and walking off the edge it falls (a stand-in: it
 drops in the state it is in until the landing slot catches it). The building a hit goes to is the one whose face
 lies within 5 units along the side's direction (the game's search, 0x2A3D20, is not read). The street ends at
 x ±75 and y −30.
 
+**The collision world** (collide.c, [COLLIDE_NOTES.md](COLLIDE_NOTES.md)): main.c's `world_build` fills the frame's
+`CollideWorld` (a Viewer field) once a frame, before anything moves: the block's buildings, the monster's collision
+spheres (`COLLIDE_F_MONSTER`), then each module's objects (`army_collide_add`, `vehicle_collide_add`,
+`rail_collide_add`, `parade_collide_add`, `streetobj_collide_add`, `boss_collide_add`), each tagged
+`COLLIDE_TAG(owner, index)`. The army, vehicles, rail and parade hold it (`xxx_set_collide`). Asked of it: the
+monster's push-out (`push_out`: the buildings, the PushOutMonsters objects, the VolumeTriggers, whose touches go to
+boss.c), the shots' and beams' rays (army.c), every flying object's SpherePhysicsMover (the street's OnHitGround, the
+objects it meets: TakeImpact on both; another module's object or a building is told through the module's `*_IMPACT`
+event, `impact_route`: a building is hit with radius Mass / 1000), and the street objects' blow and touch tests.
+`RAMPAGE_TRACE` prints the pushes, the trigger touches, what each shot hit, what each flight met and its bounces.
+
 ## Not there yet
 - the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
-- the collision world (collide.c, [COLLIDE_NOTES.md](COLLIDE_NOTES.md)) moves the monster against the buildings; the
-  shots' rays, the thrown objects' SpherePhysicsMover with TakeImpact, the triggers and PushOutMonsters still use the
-  modules' stand-ins;
 - more than one player, the front end.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people

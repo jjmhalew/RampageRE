@@ -36,6 +36,7 @@ struct Rail {
     const ArmyMonster *m; int nm;
     const RailBox *b; int nb;
     float acc;
+    CollideWorld *cw;                                /* the frame's collision world (rail_set_collide), NULL none */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -94,16 +95,6 @@ static void mul33(const float a[9], const float b[9], float out[9])
         for (int k = 0; k < 3; k++)
             t[c * 3 + k] = a[k] * b[c * 3] + a[3 + k] * b[c * 3 + 1] + a[6 + k] * b[c * 3 + 2];
     memcpy(out, t, sizeof t);
-}
-/* rot = rot x Rx(e[0]) x Ry(e[1]) x Rz(e[2]): the object turned about its own axes [G: as vehicle.c] */
-static void rotate_local(float rot[9], const float e[3])
-{
-    float cx = cosf(e[0]), sx = sinf(e[0]), cy = cosf(e[1]), sy = sinf(e[1]);
-    float rx[9] = { 1, 0, 0, 0, cx, sx, 0, -sx, cx }, ry[9] = { cy, 0, -sy, 0, 1, 0, sy, 0, cy }, rz[9];
-    rot_z(rz, e[2]);
-    mul33(rot, rx, rot);
-    mul33(rot, ry, rot);
-    mul33(rot, rz, rot);
 }
 /* setFacing(x, y, z): [G] Rz(z) x Ry(y) x Rx(x), the heading last; only the freighter's sway uses x and y */
 static void rot_of_facing(float rot[9], const float f[3])
@@ -413,6 +404,7 @@ static RailObj *obj_new(Rail *r, const char *name, Group tmpl, int kind)
     o->phase = RP_ALIVE;
     o->uid = ++r->next_uid;
     o->spawner = -1;
+    o->cobj = -1;
     o->next.i = -1;
     o->ambient_sfx = o->stopping_sfx = o->sparks_fx = o->ambient_fx = o->light_fx = -1;
     o->shape = gstr(tmpl, "Shape");
@@ -592,11 +584,13 @@ static int sp_step(RailObj *o, float dt)
     return cb;
 }
 
-/* SphereMover (setVelocity, setRotation): [G, as vehicle.c] the template's Gravity (DefObjectProps: 35) down; on the
- * street (z = 0) a bounce with Restitution (0.2 for these), then a slide slowed by SlidingFriction x Gravity, at rest
- * when still; setRotation's turn as radians a second about the object's own x, y, z; a standing building's box stops
- * it (TakeImpact). Returns 1 while it touches the street (OnHitGround) */
+/* SphereMover (setVelocity, setRotation): the game's SpherePhysicsMover (collide.c, 0x28E440) with the template's
+ * Gravity (DefObjectProps: 35), Mass, Restitution, SlidingFriction and InertiaSolidity (0x28F220); setRotation's
+ * turn as radians a second about the object's own x, y, z; the street (OnHitGround every sub-step on it) and the
+ * frame's objects: a track building's roof or front is met as its box, and TakeImpact goes both ways (0x287430) */
 static void rail_take_impact(Rail *r, RailObj *o);
+static void hit_ground(Rail *r, RailObj *o);
+static void obj_shape(const Rail *r, RailObj *o, CollideShape *s);
 static void sphere_init(RailObj *o, const float vel[3], const float spin[3])
 {
     copy3(o->sphere.vel, vel);
@@ -606,70 +600,71 @@ static void sphere_init(RailObj *o, const float vel[3], const float spin[3])
         set3(o->sphere.spin, 0, 0, 0);
     o->sphere.tumble = 1;
     o->own_rot = 1;
+    o->cm_on = 0;
     o->mv = MV_SPHERE;
 }
-static int in_footprint(const RailBox *b, const float p[3])
+
+typedef struct { Rail *r; RailObj *o; } FlightCtx;
+
+static void flight_contact(void *user, int other, const float p[3], const float n[3])
 {
-    return p[0] > b->min[0] && p[0] < b->max[0] && p[1] > b->min[1] && p[1] < b->max[1];
+    FlightCtx *c = user;
+    Rail *r = c->r;
+    RailObj *o = c->o;
+    if (o->phase == RP_GONE)
+        return;
+    if (other < 0) {
+        if (getenv("RAMPAGE_TRACE") && o->cm.vel[2] > 0.5f)   /* a bounce (the impulse is in) */
+            printf("  %s bounced off the street at %.1f %.1f %.1f\n", o->name ? o->name : "?", p[0], p[1], p[2]);
+        hit_ground(r, o);                            /* OnHitGround (event 11) */
+        return;
+    }
+    if (!r->cw)
+        return;
+    const CollideObj *w = &r->cw->o[other];
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %s met %d.%d at %.1f %.1f %.1f\n", o->name ? o->name : "?", COLLIDE_TAG_OWNER(w->tag),
+               COLLIDE_TAG_INDEX(w->tag), p[0], p[1], p[2]);
+    rail_take_impact(r, o);                          /* TakeImpact (event 10) on both */
+    if (COLLIDE_TAG_OWNER(w->tag) == COLLIDE_OWN_RAIL) {
+        int j = COLLIDE_TAG_INDEX(w->tag);
+        if (j < r->n && j != idx(r, o) && r->o[j].phase == RP_ALIVE)
+            rail_take_impact(r, &r->o[j]);
+        return;
+    }
+    RailEvent *e = emit(r, RE_IMPACT, idx(r, o), o->name, p);
+    e->id = w->tag;
+    e->level = w->kind;
+    copy3(e->dir, n);
+    e->amount = o->cm.mass;
 }
-static int sphere_step(Rail *r, RailObj *o, float dt)
+
+static void sphere_step(Rail *r, RailObj *o, float dt)
 {
-    float g = tnum(o, "Gravity", 35), e = tnum(o, "Restitution", 0.5f), mu = tnum(o, "SlidingFriction", 0.3f);
-    float *vel = o->sphere.vel, prev[3];
-    copy3(prev, o->pos);
-    vel[2] -= g * dt;
-    for (int k = 0; k < 3; k++)
-        o->pos[k] += vel[k] * dt;
-    float s[3] = { o->sphere.spin[0] * dt, o->sphere.spin[1] * dt, o->sphere.spin[2] * dt };
-    rotate_local(o->rot, s);
-    /* [G] the ground under it: the street, or the roof of a standing building it was already over (a train coming
-     * off the track over the next track building lands on it: the track stands 0.5 below its box's top) */
-    float floor_z = 0;
-    for (int i = 0; i < r->nb; i++) {
-        const RailBox *b = &r->b[i];
-        if (!b->destroyed && in_footprint(b, prev) && in_footprint(b, o->pos) && prev[2] >= b->max[2] - 1.5f &&
-            b->max[2] > floor_z)
-            floor_z = b->max[2];
+    if (!o->cm_on) {
+        CollideShape sh;
+        obj_shape(r, o, &sh);
+        float rad = collide_mover_radius(&sh);
+        if (rad < 0.05f)
+            rad = sh.radius > 0.05f ? sh.radius : 1;
+        collide_mover_init(&o->cm, rad, tnum(o, "Gravity", 9.81f), tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
+                           tnum(o, "SlidingFriction", 0.4f), tnum(o, "InertiaSolidity", 1));
+        float w[3];
+        for (int k = 0; k < 3; k++)                  /* setRotation's rates about its own axes, in the world */
+            w[k] = o->sphere.tumble ? o->rot[k] * o->sphere.spin[0] + o->rot[3 + k] * o->sphere.spin[1] +
+                                      o->rot[6 + k] * o->sphere.spin[2] : 0;
+        collide_mover_spin(&o->cm, w);
+        memcpy(o->cmat, o->rot, sizeof o->rot);
+        copy3(o->cmat + 9, o->pos);
+        o->cm_on = 1;
     }
-    int contact = 0;
-    if (o->pos[2] <= floor_z) {
-        o->pos[2] = floor_z;
-        contact = 1;
-        if (vel[2] < 0) {
-            vel[2] = -vel[2] * e;
-            if (vel[2] < 1)
-                vel[2] = 0;
-            for (int k = 0; k < 3; k++)
-                o->sphere.spin[k] *= 0.5f;
-        }
-        if (vel[2] == 0) {
-            float h = sqrtf(vel[0] * vel[0] + vel[1] * vel[1]), dec = mu * g * dt;
-            if (h <= dec) {
-                vel[0] = vel[1] = 0;
-                set3(o->sphere.spin, 0, 0, 0);
-                o->mv = MV_NONE;                     /* at rest */
-            } else {
-                vel[0] *= (h - dec) / h;
-                vel[1] *= (h - dec) / h;
-            }
-        }
-    }
-    for (int i = 0; i < r->nb && o->phase != RP_GONE; i++) {   /* [G] into a standing building's side: stopped,
-                                                                * TakeImpact */
-        const RailBox *b = &r->b[i];
-        if (b->destroyed || !in_footprint(b, o->pos) || in_footprint(b, prev) || o->pos[2] >= b->max[2] - 1.5f)
-            continue;
-        float dx0 = o->pos[0] - b->min[0], dx1 = b->max[0] - o->pos[0];
-        float dy0 = o->pos[1] - b->min[1], dy1 = b->max[1] - o->pos[1];
-        float best = fminf(fminf(dx0, dx1), fminf(dy0, dy1));
-        if (best == dx0) o->pos[0] = b->min[0];
-        else if (best == dx1) o->pos[0] = b->max[0];
-        else if (best == dy0) o->pos[1] = b->min[1];
-        else o->pos[1] = b->max[1];
-        vel[0] = vel[1] = 0;
-        rail_take_impact(r, o);
-    }
-    return contact;
+    copy3(o->cm.vel, o->sphere.vel);
+    int self = collide_check(r->cw, o->cobj, COLLIDE_TAG(COLLIDE_OWN_RAIL, idx(r, o)), 0);
+    FlightCtx c = { r, o };
+    collide_mover_step_ex(r->cw, &o->cm, o->cmat, self, dt, COLLIDE_F_MONSTER, flight_contact, &c);
+    copy3(o->sphere.vel, o->cm.vel);
+    memcpy(o->rot, o->cmat, sizeof o->rot);
+    copy3(o->pos, o->cmat + 9);
 }
 
 static RailObj *create(Rail *r, const char *name);   /* gWorld.createScriptObject */
@@ -2018,29 +2013,70 @@ static void hit_ground(Rail *r, RailObj *o)          /* OnHitGround */
 
 /* ---------------------------------------------------------------- contact with the monsters */
 
-/* [G] an object's shape: its CollisionBox (x0 y0 z0 x1 y1 z1: the New York engine's, a box 6 .. 8 ahead of it), else
- * its model's box (AutoCollisionBox) from the host, else its ShadowRect (x0, y0, x1, y1) 3 high, else 2 x 2 x 2 */
-static void obj_box(const Rail *r, const RailObj *o, float mn[3], float mx[3])
+/* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
+static const float *book_box(Group g, float b[6])
 {
-    Record rec[6];
-    Group cb = group_sub(o->tmpl, "CollisionBox|CollisionBox");
-    if (cb.at && group_items(cb, rec, 6) == 6) {
+    Record rec[8];
+    Group cb = group_sub(g, "CollisionBox|CollisionBox");
+    if (!cb.at)
+        cb = group_sub(g, "CollisionBox");
+    if (!cb.at || group_items(cb, rec, 8) < 6)
+        return NULL;
+    for (int k = 0; k < 6; k++)
+        b[k] = record_num(rec[k]);
+    return b;
+}
+
+/* an object's shape (0x28FD70, collide_shape_pick): the template's CollisionBox (the New York engine's, a box 6 .. 8
+ * ahead of it), CollisionRadius or AutoCollisionBox (every car here) with the model's box, then the instance's; else
+ * the model's bounding sphere [G: taken as its box's, the host's; the freighter] */
+static void obj_shape_read(const Rail *r, const RailObj *o, CollideShape *s)
+{
+    float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, rad = 1;
+    int have = o->shape && r->host.shape_box && r->host.shape_box(r->host.ctx, o->shape, mb, mb + 3);
+    if (have) {
+        float h[3];
         for (int k = 0; k < 3; k++) {
-            mn[k] = record_num(rec[k]);
-            mx[k] = record_num(rec[3 + k]);
+            c[k] = (mb[k] + mb[3 + k]) / 2;
+            h[k] = (mb[3 + k] - mb[k]) / 2;
         }
-        return;
+        rad = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
-    if (o->shape && r->host.shape_box && r->host.shape_box(r->host.ctx, o->shape, mn, mx))
-        return;
-    Group sd = group_sub(o->tmpl, "ShadowData"), sr = group_sub(sd, "ShadowRect");
-    if (sr.at && group_items(sr, rec, 4) == 4) {
-        mn[0] = record_num(rec[0]); mn[1] = record_num(rec[1]); mn[2] = 0;
-        mx[0] = record_num(rec[2]); mx[1] = record_num(rec[3]); mx[2] = 3;
-        return;
+    Group in = o->inst;
+    collide_shape_pick(s, have ? c : NULL, rad, o->tmpl.at ? book_box(o->tmpl, tb) : NULL, tnum(o, "CollisionRadius", -1),
+                       tnum(o, "AutoCollisionBox", 0) != 0, in.at ? book_box(in, ib) : NULL,
+                       in.at ? group_num(in, "CollisionRadius", -1) : -1,
+                       in.at && group_num(in, "AutoCollisionBox", 0) != 0, have ? mb : NULL);
+}
+
+static void obj_shape(const Rail *r, RailObj *o, CollideShape *s)   /* read once, at its first use */
+{
+    if (!o->cshape_ok) {
+        obj_shape_read(r, o, &o->cshape);
+        o->cshape_ok = 1;
     }
-    set3(mn, -1, -1, 0);
-    set3(mx, 1, 1, 2);
+    *s = o->cshape;
+}
+
+/* the object as the collision world has it: its shape at its matrix */
+static void obj_collide(const Rail *r, RailObj *o, CollideObj *c)
+{
+    memset(c, 0, sizeof *c);
+    obj_shape(r, o, &c->shape);
+    collide_matrix_from16(c->m, o->world);
+    c->flags = COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)RF_HELD);
+    c->building = -1;
+}
+
+/* the box a blow is tested on [G]: the shape's box (a sphere's bounding cube) in the object's frame */
+static void obj_box(const Rail *r, RailObj *o, float mn[3], float mx[3])
+{
+    CollideShape s;
+    obj_shape(r, o, &s);
+    for (int k = 0; k < 3; k++) {
+        mn[k] = s.centre[k] - s.half[k];
+        mx[k] = s.centre[k] + s.half[k];
+    }
 }
 static void to_local(const RailObj *o, const float p[3], float l[3])   /* rot^T (p - pos) */
 {
@@ -2049,20 +2085,23 @@ static void to_local(const RailObj *o, const float p[3], float l[3])   /* rot^T 
         l[k] = o->rot[k * 3] * d[0] + o->rot[k * 3 + 1] * d[1] + o->rot[k * 3 + 2] * d[2];
 }
 
-/* each frame [G: the game's collision, not read; as boss.c]: an object without OnlyHitWithEffNodes that a monster's
- * box touches takes TakeDamage(monster, 0, Collision (1)) every frame (how a speeding train knocks a monster off the
- * track); a PushOutMonsters object pushes a monster's root out of its box, the shorter way along its own x or y */
+/* each frame [G: where the game's touch comes from is not traced; as boss.c]: an object without OnlyHitWithEffNodes
+ * that a monster's box (0x2E2C50's: its feet +- half width across, +- half height about its middle) meets
+ * (collide_obj_box, the world's shape test 0x2801A0) takes TakeDamage(monster, 0, Collision (1)) every frame (how a
+ * speeding train knocks a monster off the track). A PushOutMonsters object's push is the collision world's
+ * (collide_monster), not this */
 static void contacts(Rail *r)
 {
     for (int i = 0; i < r->n; i++) {
         RailObj *o = &r->o[i];
-        if (o->phase != RP_ALIVE || o->hidden || is_controller(o->kind) || o->kind == RK_LOOPTRAIN)
+        if (o->phase != RP_ALIVE || o->hidden || is_controller(o->kind) || o->kind == RK_LOOPTRAIN ||
+            (o->oflags & RF_EFF_NODES))
             continue;
-        float lo[3], hi[3];
-        obj_box(r, o, lo, hi);
+        CollideObj co;
+        obj_collide(r, o, &co);
         for (int m = 0; m < r->nm && o->phase == RP_ALIVE; m++) {
             const ArmyMonster *mm = &r->m[m];
-            float bmn[3], bmx[3];
+            float bmn[3], bmx[3], c[3], e[3], nrm[3], pt[3], push[3];
             if (mm->box_max[0] > mm->box_min[0]) {
                 copy3(bmn, mm->box_min);
                 copy3(bmx, mm->box_max);
@@ -2070,31 +2109,12 @@ static void contacts(Rail *r)
                 set3(bmn, mm->pos[0] - 3, mm->pos[1] - 3, mm->pos[2]);
                 set3(bmx, mm->pos[0] + 3, mm->pos[1] + 3, mm->pos[2] + 8.5f);
             }
-            float rad = (bmx[0] - bmn[0]) / 2, l[3];
-            to_local(o, mm->pos, l);
-            float bottom = l[2], top = l[2] + (bmx[2] - bmn[2]);
-            int touch = l[0] > lo[0] - rad && l[0] < hi[0] + rad && l[1] > lo[1] - rad && l[1] < hi[1] + rad &&
-                        top > lo[2] && bottom < hi[2];
-            if (!touch)
-                continue;
-            if (!(o->oflags & RF_EFF_NODES)) {
+            for (int k = 0; k < 3; k++) {
+                c[k] = (bmn[k] + bmx[k]) / 2;
+                e[k] = (bmx[k] - bmn[k]) / 2;
+            }
+            if (collide_obj_box(&co, c, e, nrm, pt, push))
                 take_damage(r, o, m, 1);
-                if (o->phase != RP_ALIVE)
-                    break;
-            }
-            if (o->oflags & RF_PUSH_OUT) {
-                float px[2] = { lo[0] - rad - l[0], hi[0] + rad - l[0] };
-                float py[2] = { lo[1] - rad - l[1], hi[1] + rad - l[1] };
-                float ax = fabsf(px[0]) < fabsf(px[1]) ? px[0] : px[1];
-                float ay = fabsf(py[0]) < fabsf(py[1]) ? py[0] : py[1];
-                float lx = fabsf(ax) < fabsf(ay) ? ax : 0, ly = fabsf(ax) < fabsf(ay) ? 0 : ay;
-                RailEvent *e = emit(r, RE_PUSH, i, NULL, mm->pos);
-                e->monster = m;
-                for (int k = 0; k < 3; k++) {
-                    e->v[k] = o->rot[k] * lx + o->rot[3 + k] * ly;
-                    e->pos[k] = mm->pos[k] + e->v[k];
-                }
-            }
         }
     }
 }
@@ -2114,10 +2134,8 @@ static void obj_step(Rail *r, RailObj *o)
             cb = line_step(r, o, TIMESTEP);
         else if (o->mv == MV_SPLINE)
             cb = sp_step(o, TIMESTEP);
-        else if (o->mv == MV_SPHERE) {
-            if (sphere_step(r, o, TIMESTEP) && o->phase != RP_GONE)
-                hit_ground(r, o);
-        }
+        else if (o->mv == MV_SPHERE)
+            sphere_step(r, o, TIMESTEP);             /* OnHitGround, TakeImpact: its contacts */
         if (cb && on_mover(r, o, cb))
             return;
         if (o->phase == RP_GONE)
@@ -2182,6 +2200,21 @@ int rail_hit(Rail *r, int monster, const float centre[3], float radius, float am
         hits++;
     }
     return hits;
+}
+
+void rail_set_collide(Rail *r, CollideWorld *w) { r->cw = w; }
+
+void rail_collide_add(Rail *r, CollideWorld *w)
+{
+    for (int i = 0; i < r->n; i++) {
+        RailObj *o = &r->o[i];
+        o->cobj = -1;
+        if (!w || o->phase != RP_ALIVE || o->hidden || is_controller(o->kind))
+            continue;                                /* [G] a held one is the hand's */
+        CollideObj c;
+        obj_collide(r, o, &c);
+        o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_RAIL, i), 0);
+    }
 }
 
 void rail_impact(Rail *r, int obj)
