@@ -234,10 +234,14 @@ static int nearest_monster(const Army *a, const float pos[3])   /* getNearestMon
 
 /* where a weapon aims: the monster's target point (its vtable +0x1C, 0x2DB030): 6 above its feet [R]; x and y its
  * place [G: the offsets 0x2E6000 / +0xBD54 adds were not traced] */
+/* [R 0x2DB030] the monster's target point: 0x2E6000's place of `Bip01 Spine1` (node +0x7DB0, its model place at
+ * +0xB18 + 0x30 node, scaled by +0xA78, turned and moved by the monster's matrix) plus M (+0xBD54), which only the
+ * unused script binding setTargetOffset sets (0 at 0x2DA6CC, 0x2E805C, 0x2E9A34), then z = the feet's + 6
+ * (0x2DB0D4 .. 0x2DB108) */
 static void monster_target(const ArmyMonster *m, float c[3])
 {
-    c[0] = m->pos[0];
-    c[1] = m->pos[1];
+    c[0] = m->target[0];
+    c[1] = m->target[1];
     c[2] = m->pos[2] + 6;
 }
 
@@ -3345,7 +3349,8 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
     for (int i = 0; i < a->n; i++) {
         ArmyUnit *u = &a->u[i];
         if (u->phase != AU_ALIVE || !unit_meets(a, u, centre, radius))
-            continue;        if (u->kind != AK_DROP && monster < ARMY_MONSTERS) {
+            continue;
+        if (u->kind != AK_DROP && monster < ARMY_MONSTERS) {
             if (u->hit_attack[monster] == a->attack[monster])
                 continue;
             u->hit_attack[monster] = a->attack[monster];

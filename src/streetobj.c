@@ -336,8 +336,8 @@ static void add_stats(StreetObjs *s, StreetObj *o, int monster)
     e->tmpl = o->tmpl;
     e->amount = (float)(int)onum(o, "Points", 0);
 }
-/* requestDelete: [G] the object goes at the end of its step (the rest of the script's call still runs); the effects it
- * turns off go with it */
+/* requestDelete (0x285DD0) marks the object (0x800) for the world's walk, a frame later [R]; here it goes at the end
+ * of its step (the rest of the script's call still runs); the effects it turns off go with it */
 static void request_delete(StreetObjs *s, StreetObj *o)
 {
     s->deleting[idx(s, o)] = 1;
@@ -996,11 +996,12 @@ int streetobj_impact(StreetObjs *s, const float centre[3], float radius)
 
 int streetobj_force_damage(StreetObjs *s, const char *name, const float pos[3])
 {
-    /* gWorld.findWorldObject(name) (0x279E70 -> 0x284930) [R]: by name alone (a case-blind hash), the first of its
-     * chain [G: the chain's order, taken as the objects'] */
+    /* gWorld.findWorldObject(name) (0x279E70 -> 0x2852A0 -> 0x284930) [R]: by name alone (h = h x 131 + c, case
+     * folded, 127 buckets; the stored hash +0x8C and the name +0x88 compared case-blind), the first of its chain;
+     * addObject puts a named object (flag 0x1000) at its chain's head (0x284A90), so the newest one wins */
     int best = -1;
     (void)pos;
-    for (int i = 0; i < s->n && best < 0; i++) {
+    for (int i = s->n - 1; i >= 0 && best < 0; i--) {
         const StreetObj *o = &s->o[i];
         if (o->alive && o->kind == SK_ROOF && same_text(o->name, name))
             best = i;

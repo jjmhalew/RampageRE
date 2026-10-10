@@ -318,8 +318,14 @@ Floating = 100
   through `AE_IMPACT`). Its spin: smashObject (0x2B2F50) hands its rates to setRotation (0x28DD80) as they are, an
   angular velocity about a world axis (Bomber's setRotation(π/4, 0, 0): π/4 a second about world x) [R]; the facing
   follows the mover's x axis, the tilt stays.
-- **The weapon system:** the weapon node without the host's `node_world`; the monster's target point's x and y. Both the projectile's wobble (definition flag 8) and its spread (record flag 8)
-  come from flags no book sets.
+- **The weapon system:** the weapon node without the host's `node_world`. The monster's target point (0x2DB030) [R]
+  is 0x2E6000's world place of `Bip01 Spine1` (node index +0x7DB0, its model place +0xB18 + 0x30 × node, scaled by
+  +0xA78 when byte +0xA74 is set, through the monster's matrix) plus M × the offset +0xBD54 (set only by the script
+  binding `setTargetOffset`, id 76, which no script calls; zeroed at 0x2DA6CC, 0x2E805C, 0x2E9A34), its z then the
+  feet's + 6: here Spine1's x and y (`ArmyMonster.target`). A shot's homing aims at the target's shape centre (+0x74,
+  +0xC, through its matrix: 0x293260 → 0x287F00); what that centre is for a monster was not resolved, here its box's
+  middle [G]. Both the projectile's wobble (definition flag 8) and its spread (record flag 8) come from flags no book
+  sets.
 - **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject hit wobble (+0x18C), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).
 - **Not ported:** bosses, `Vehicle.bsf` (the `Humvee` and other street vehicles, plain `AK_OTHER` here), the news

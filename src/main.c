@@ -3289,6 +3289,15 @@ static int army_monsters(Viewer *v, ArmyMonster *m)
         int ns = monster_spheres(mo, spheres[k], 64);   /* every collision sphere, in the world */
         world_monster_moved(mo, (const float (*)[4])spheres[k], ns);
         m[k].pos[0] = mo->mx; m[k].pos[1] = mo->my; m[k].pos[2] = mo->mz;
+        Mat4 sp;                                     /* the weapons' target: Spine1's x and y (0x2E6000) */
+        if (scene_monster_node(&v->scene, mo->slot, "Bip01 Spine1", &sp) == 0) {
+            m[k].target[0] = sp.m[12];
+            m[k].target[1] = sp.m[13];
+        } else {
+            m[k].target[0] = mo->mx;
+            m[k].target[1] = mo->my;
+        }
+        m[k].target[2] = mo->mz + 6;
         m[k].heading = mo->heading / 57.2957795f;
         m[k].move = mo->graph.states[mo->run.state].name;
         m[k].mode = mo->mode;

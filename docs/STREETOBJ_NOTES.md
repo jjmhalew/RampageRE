@@ -189,26 +189,29 @@ the smoke and deletes it in `Smoke_stack_hit`; the same blow from the street doe
 palace's HKPalaceTopAdorn2 under forceDamage falls without a score; a tree swayed by the monster walking into it
 leans away, held while the monster stays within 7.
 
-## Not traced (stand-ins in streetobj.c) [G]
+## Not traced (stand-ins in streetobj.c)
 - The shape tests are the collision world's (collide.c): a blow is the attack sphere against the object's shape
   (0x280470, `collide_obj_sphere`), and so is a touch, each of the monster's collision spheres armed or not (0x2E22B0;
   main.c `mon_spheres`) [R]; the monster's box is only the push-out's (0x2E2C50). The shape is 0x28FD70's
   (`collide_shape_pick`: the template's then the instance's `CollisionBox`, `CollisionRadius` or `AutoCollisionBox`
   with the model's box; else the sphere the model keeps (0x184CB0) [R], here the union of its meshes' header spheres, city.c `city_shape_sphere`), read when the object is
   added; `box_min` / `box_max` hold
-  its box. One hit list for the whole attack (the game keeps one per body part's attack record, 8 ids at +0x6,
-  0x2E33A0).
+  its box. One hit list for the whole attack, shared by the monsters (`streetobj_arm`: any monster's new attack
+  empties it); the game keeps one per body part's attack record (8 ids at +0x6, 0x2E33A0) [G: a stand-in].
 - `setPulseDelay` only sets the delay (0x2AA2A0) and the clock runs on: with a delay of 0.01 or more it grows by the
   step and at the delay it is taken off, onPulse once a frame; below 0.01 neither (0x309BA0) [R].
 - `rotate(e)` is rot × Rz(e[2]) Rx(e[0]) Ry(e[1]) (case 0xD, 0x278258) and `rotateAA(a, axis)` rot × (I + [a axis]×)
   made square again (case 0xE, 0x278320; 0x101F70, 0x1017F0) [R].
 - `requestDelete` (0x285DD0) only marks an object in the world (0x800) for the world's walk to delete at its turn,
-  one frame later than here, the rest of the script call running on [R]; here it goes at once.
-- `gWorld.findWorldObject(name)` (0x279E70 → 0x284930) finds by name alone in a case-blind hash [R]; the first of
-  its chain is taken as the first such object [G].
-- `rotateAA` turns about the object's own axis, right-handed (so a pole falls away from the monster); `rotate` is
-  rot × Rx × Ry × Rz (as vehicle.c's RocketBase); `setFacing` is Rz × Rx × Ry. A requestDelete takes the object at the
-  end of its call (the rest of the call still runs, as the chimney's fallOff after DeleteOnHit).
+  the rest of the script call running on [R]; here it goes at the end of the object's step (the chimney's fallOff
+  after DeleteOnHit still runs), a frame earlier than the game.
+- `gWorld.findWorldObject(name)` [R]: 0x279E70 → 0x2852A0 → 0x284930, h = h × 131 + c (case folded by 0x32EC08) over
+  127 buckets, the first of the chain whose hash (+0x8C) and name (+0x88, 0x32C9C8 case-blind) match; addObject
+  (0x284A90) puts a named object (flag 0x1000, from the instance's `Name`, 0x287DF0) at its chain's head and removal
+  (0x284A10) unlinks it, so the newest one of that name wins. Here the newest roof object of that name; the three
+  HK palace names (Boss_Jumper.scr:132-134, the only callers) are unique.
+- `rotateAA` turns about the object's own axis, right-handed (so a pole falls away from the monster); `setFacing` is
+  Rz × Rx × Ry (0x277E78 → 0x101330).
 - The building's shake on an attached object is not added to its matrix (the viewer's building objects sway with
   their building through `building_place` until they move on their own).
 - `gWorld.frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]. FollowEffects follow the object's place (and node), not its turn.
