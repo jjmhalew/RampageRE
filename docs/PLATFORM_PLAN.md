@@ -38,6 +38,13 @@ and the offscreen `--shot` path that already works stays as it is.
 
 ### PS2 pad → RampageRE variable → current keys → controller
 
+[R] The PS2 pack's table (0x3B18B0, 16 × {libpad mask, slot, pressure slot}, mask = pad byte 3 | byte 2 << 8) puts
+each button in the controller's slot of the same number as the MV id: L2 → 11 (pressure 29), R2 → 10 (pressure 28),
+L1 → 13, R1 → 12, Triangle → 17, Circle → 15, Cross → 14, Square → 16, Select → 9, L3 → 21, R3 → 20, Start → 8,
+Up → 4, Right → 7, Down → 5, Left → 6 (no pressure: 0x3B). The GUI's buttons are shown by CommonGUI's pictures
+`Controller_Select` (a cross: Accept), `Controller_Back` (a circle: Back), `Controller_B0` (a square) and
+`Controller_B1` (a triangle), so on the PS2 the GUI's Back (GuiEvent 32) is Circle.
+
 The pad variables are the game's own (docs/FORMAT_MONSTER.md "variables", `MV_*` in moves.h). The game's logical pad
 is Xbox-named (SHELL_NOTES.md: the PS2 pack 0x1A5220 / table 0x3B18B0 maps Cross→A, Circle→B, Square→X, Triangle→Y,
 L1/R1→shoulders, L2/R2→triggers, Select→Back), so SDL's GameController names fit it directly.
@@ -48,12 +55,12 @@ L1/R1→shoulders, L2/R2→triggers, Select→Back), so SDL's GameController nam
 | Right stick | MV_RX/RY 2,3 | arrows | Num / * (x only) | – | right stick |
 | D-pad | MV_UP..MV_RIGHT 4-7 | – (not mapped in play) | – | arrows | D-pad (`PAD_UP..PAD_RIGHT`) |
 | Start | MV_START 8 | P or Enter (pause) | – | P = HUD_EV_START | Start / Options / + |
-| Select | MV_SELECT 9 | – | – | Backspace = HUD_EV_BACK *(check: the pack maps Select to the logical Back; whether GuiEvent 32 comes from Select or Triangle on PS2 needs confirming from 0x3B18B0 and the screens' scripts before fixing the binding)* | Back / Share / − |
+| Select | MV_SELECT 9 | – | – | – (the logical "Back" button of getButtons, not the GUI's Back) | Back / Share / − |
 | R2 | MV_R2 10 (+ pressure 28) | R (roar) | Num 3 | R = HUD_EV_BUTTON 4 | RT (`rt` analog → pressure 28) |
 | L2 | MV_L2 11 (+ pressure 29) | – | – | F2 = L2+R2 held (cheat entry) | LT (`lt` → pressure 29) |
 | R1 / L1 | 12 / 13 | – | – | – | RB / LB |
 | Cross | MV_CROSS 14 | Space (jump) | Num 0 | Enter / Space = ACCEPT | A / Cross / B-position on Nintendo |
-| Circle | MV_CIRCLE 15 | L (grab) | Num 1 | (back? see Select) | B / Circle |
+| Circle | MV_CIRCLE 15 | L (grab) | Num 1 | Backspace = HUD_EV_BACK | B / Circle |
 | Square | MV_SQUARE 16 | J (punch) | Num 7 | C = HUD_EV_BUTTON 0 (Change Monster / Bonus) | X / Square |
 | Triangle | MV_TRIANGLE 17 | K (kick) | Num 9 | V = HUD_EV_BUTTON 1 (Autosave / Options) | Y / Triangle |
 | R3 / L3 | 20 / 21 | – | – | – | RS / LS |
@@ -131,7 +138,7 @@ players (`--players`, `DRIVE_KEYS1/2/COMPUTER`).
   pressure from `rt` and MV_L2 from `lt` if the move graphs read ids 28/29; check `moves.c`'s variable fill.
   `keys_pad` still writes the keys. Combine by OR for buttons and the larger magnitude for sticks.
 - `shell_frame` / pause / results blocks: turn the pad into HUD events (D-pad or stick past 0.5 with repeat → UP/DOWN/LEFT/RIGHT, Cross →
-  ACCEPT, Start → START, Square/Triangle/R2 → HUD_EV_BUTTON 0/1/4, back per the open question above). `shell_pad_held`
+  ACCEPT, Circle → BACK, Start → START, Square/Triangle/R2 → HUD_EV_BUTTON 0/1/4). `shell_pad_held`
   gets `stick_x` and L2+R2 from the triggers (the real cheat entry instead of F2).
 - Rumble: `HUD_CALL_RUMBLE` (setEnableRumble) → `pad_set_strength(0/1)`; `HUD_CALL_RUMBLE_PULSE` (rumble(250 ms)) →
   `pad_rumble`. The game's own pad effects go through PS2ControllerPack (0x488700, `0x1A5020 → scePadSetActDirect`;
