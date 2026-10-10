@@ -49,15 +49,16 @@ enum {
 /* ---- the cheat flags (gCommon.getCheatFlags, 0x4D7E68; MainMenu.activateCheat sets them) [R the users named] */
 #define PCH_MONSTERS 0x1u        /* "141421" (with 2): MonsterSelect / MonsterSheet: every finished monster */
 #define PCH_CITIES 0x2u          /* "271828": CitySelect: every city open, its stars shown */
-#define PCH_4 0x4u               /* "986960": not traced */
+#define PCH_4 0x4u               /* "986960": no monster can be hit (0x2D6A50 answers 0; the reaction bindings
+                                  * 0x2ABB18 / 0x2ABB70 do nothing) */
 #define PCH_MOVES 0x8u           /* "011235": Monsters.bsf, Eyegore, Furby, Leon: every upgrade move usable */
 #define PCH_VIDEO 0x10u          /* "66730n": setCheatFlagsI(16, n), a movie (the parameter, read by the shell
                                   * 0x308390) */
 #define PCH_10000 0x10000u       /* "082864": no vibration (setEnableRumble), the status's seeds for the world
                                   * (0x2B6580); the Pause menu's Quit clears it */
 #define PCH_20000 0x20000u       /* "874098" (with 0x10000): 0x324930 skips a block */
-#define PCH_20000000 0x20000000u /* "000020": not traced */
-#define PCH_40000000 0x40000000u /* "071767": not traced */
+#define PCH_20000000 0x20000000u /* "000020": dead (0x308340 calls the empty 0x1A61F0) */
+#define PCH_40000000 0x40000000u /* "071767": a standing building falls at its first hit (0x2BC1F0) */
 #define PCH_BLOCK 0x80000000u    /* "24902n": setCheatFlagsI(0x80000000, n), a start block; but that binding stores
                                   * nothing for it (0x2C3350) and getCheatParam answers -1 (0x2C33B8): CitySelect's
                                   * cheat block is never above 0 */

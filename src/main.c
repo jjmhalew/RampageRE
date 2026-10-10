@@ -993,6 +993,7 @@ static void build(Viewer *v)
                               v->prof.cheats };
             v->game = game_new(&gh, &gc);
             dir_ai_seed(v->prof.current.seed[1]);   /* RWorld's reset: gWorld +0x82C */
+            building_set_one_hit((v->prof.cheats & PCH_40000000) != 0);
             v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
@@ -2744,7 +2745,7 @@ static int edible_cell_where(void *ctx, int building, int storey, int column, fl
 /* 0x2D6A50: a hit on the monster: HP off, the reaction by its level and the knock */
 static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3])
 {
-    if (mo->defeated)
+    if (mo->defeated || (mo->v->prof.cheats & PCH_4))   /* cheat 986960: no monster can be hit (0x2D6A50) */
         return;
     mo->hp = fmaxf(0, mo->hp - amount);
     float heading = mo->heading / 57.2957795f, at[3] = { mo->mx, mo->my, mo->mz };

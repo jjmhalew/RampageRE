@@ -75,6 +75,8 @@ int building_cell_index(const Building *b, int face, int column);    /* -1 if ou
 /* a hit at the world point p (on or near one of its faces) with radius r (2.0 from a monster's attack); 1 if a cell
  * took damage. Only front cells take damage from hits, and only while it stands, as in the game. */
 int building_hit(Building *b, const float p[3], float radius);
+/* cheat 071767 (profile PCH_40000000): every hit fells a standing building (0x2BC1F0) */
+void building_set_one_hit(int on);
 /* hitBuildingRoof's hit (0x2BBE80), p the stomping bone in the world: the roof (roof) one state worse, up to 3, and
  * the top storey's front cell below p's x (or the nearest one not destroyed) hit at its middle, 0.3 under the storey's
  * top, by building_hit with radius r (2.0); 1 if that cell or its vertices took damage; *col the column hit, -1 none.

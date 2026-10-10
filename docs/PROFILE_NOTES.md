@@ -304,7 +304,8 @@ The cheats are not in the saved block.
 - The header's leftover bytes are heap leftovers in the game; the viewer's file leaves them zero.
 - Cheats [R]: 4 (986960) no monster can be hit (0x2D6A50 answers 0; the reaction bindings 0x2ABB18 / 0x2ABB70 do
   nothing); 0x20000000 (000020) dead (0x1A61F0 is empty); 0x40000000 (071767) one-hit buildings (Building::hit
-  0x2BC1F0: a standing building collapses at its first hit). Not ported.
+  0x2BC1F0: a standing building collapses at its first hit). 4 and 0x40000000 are ported (main.c
+  `monster_hit`, building.c `building_set_one_hit`).
 - Players 2 .. 4's own profiles [R]: gShell.loadBuddyProfile (0x3077B0) loads one into a block of its own (0x4D5218,
   no autosave) and 0x307EE0 copies its 30 monster flags (& 0xFF) into the player's bytes, [30] = 1. Kept as
   `player_flags`; the viewer has one profile file, so nothing fills them.

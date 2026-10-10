@@ -288,10 +288,18 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     return 1;
 }
 
+/* cheat 071767 (0x40000000): Building::hit (0x2BC1F0) fells a standing building at its first hit, as a kind-8 hit */
+static int one_hit;
+void building_set_one_hit(int on) { one_hit = on; }
+
 int building_hit(Building *b, const float p[3], float radius)
 {
     if (b->state != BUILDING_STANDING)
         return 0;
+    if (one_hit) {
+        building_destroy(b);
+        return 1;
+    }
     float q[3];
     for (int k = 0; k < 3; k++)                      /* 0x2BB7B0: into the box, onto the nearest face (not the back) */
         q[k] = p[k] < b->min[k] ? b->min[k] : p[k] > b->max[k] ? b->max[k] : p[k];
@@ -351,6 +359,10 @@ int building_hit_roof(Building *b, const float p[3], float radius, int *col_out)
         *col_out = -1;
     if (b->state != BUILDING_STANDING)
         return 0;
+    if (one_hit) {
+        building_destroy(b);
+        return 1;
+    }
     if (b->roof + 1 < 4) {                           /* 0x2BB580 refuses while a storey falls: none does here */
         b->roof++;
         b->dirty = 1;
