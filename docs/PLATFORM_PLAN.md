@@ -141,10 +141,17 @@ players (`--players`, `DRIVE_KEYS1/2/COMPUTER`).
   ACCEPT, Circle → BACK, Start → START, Square/Triangle/R2 → HUD_EV_BUTTON 0/1/4). `shell_pad_held`
   gets `stick_x` and L2+R2 from the triggers (the real cheat entry instead of F2).
 - Rumble: `HUD_CALL_RUMBLE` (setEnableRumble) → `pad_set_strength(0/1)`; `HUD_CALL_RUMBLE_PULSE` (rumble(250 ms)) →
-  `pad_rumble`. The game's own pad effects go through PS2ControllerPack (0x488700, `0x1A5020 → scePadSetActDirect`;
-  FOOTSTEP_NOTES.md: the landing calls vtable+0x28 with +0xFC and 400). Find every caller of that vtable slot, the way
-  WoodyRE listed the strength/duration of each 0x44d1b0 call (docs/INPUT.md "Rumble"). This is a research subtask.
-  Ship enable/pulse first.
+  `pad_rumble`. The game's own pad effects go through PS2ControllerPack (0x488700) vtable +0x28 = 0x1A5020
+  (pad, milliseconds) [R]: with the vibration on (+0xC84) it sets the big motor to 0xC0 and the small one to 0
+  (scePadSetActDirect) for that long. Every call (the object at gp−0x6F5C, the pad the monster's +0xFC, never for a
+  computer's monster, +0x108) [R]:
+  - a hit on the monster (0x2D6A50; its level, the 8th argument): level 1 400 ms, level 2 800 ms, level 0 none;
+  - a landing from the air, from movement modes 1 / 2 (0x2DC450): 400 ms;
+  - the front of the building it climbs (0x2D6150) or stands on (+0xC640 while +0xC644) starting to crack
+    (0x2BD7D0, the collapse): 2000 ms;
+  - `gCommon.rumble(250)` (0x2C34AC), from Options.scr / Pause.scr when the vibration is turned on;
+  - the controller script binding (0x169E38), which no script uses for rumble.
+  The PS2's big motor has one speed; map 0xC0 / 255 to the pad's low-frequency motor.
 - `render_gl.c` (Win32): count `WM_DEVICECHANGE` into `w->dev_changes`, track focus. `build_viewer.bat` LIBS:
   add `-lhid -lsetupapi` (pad.c loads xinput at run time; WoodyRE links `-lhid -lsetupapi`).
 - Light bar: WoodyRE paints the DualSense "Woody red". Use a per-player colour (the monster's) or the PS player LEDs
