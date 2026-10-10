@@ -270,8 +270,17 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
   +0x58, next +0x68) without flag 0x200000 gets the world's vtable +0x40 and 0x283BF0 (its destructor, vtable +8, and
   the slot back to the pool 0x4D0000). 0x200000 is set only at 0x2D4EE8 (0x2D4C40, the monster's WeaponList objects,
   from 0x2E8D8C): every vehicle, person, street, parade and army object goes, the monsters' weapons stay. Then
-  0x2B6640 re-attaches the new block's script objects to buildings (0x309E20). Here the whole scene is freed and
-  built again at GS_BEGIN_BLOCK (main.c `build`): the same end, a few frames later than GE_BLOCK.
+  0x2B6640 re-attaches the new block's script objects to buildings (0x309E20). The usual path is 0x325924, in
+  block_won (0x3255B0) as GS_BLOCK_WON begins, before ResultsNI: the old block is gone for the whole Results screen
+  and the EndBlockNI walk; only its rubble (0x303C90, the RubbleShapes) and its GroundShape at (0, −41, 0)
+  (0x303BB0) are left, and 0x302AF0 lays the new block out at once in slot 0 (y 0; slot 1 at 41, 0x302F0C; slot 2 at
+  82, 0x303044). 0x325054 is a tied King block played again, 0x325258 Game Over's Continue (both the same block,
+  loaded fresh), 0x2AF260 the script binding (NewYork's CrossParkNI). Here [main.c `block_left`, at GE_BLOCK (b = 1
+  in the game)]: the old block's people, traffic, street, parade, rail and edible objects and the army's units go,
+  the effects following them stop, its buildings are left as their rubble (city.c `scene_block_left`, flat for the
+  collision), and the traffic of the blocks ahead is loaded again; the scene keeps the old frame (the new block at
+  slot 1, +41) until GS_BEGIN_BLOCK builds the new one, so the new block's own people and objects come then. The
+  same block again rebuilds it at once. The bosses stay [G: the ambient ones belong to the blocks behind].
 - The results screens are not drawn here: `src/hud.c` has them (hud_results; docs/SCREENS_NOTES.md), fed by these
   queries (game_points, game_kills, game_king, game_blocks_won, game_cities_won, game_blocks_to_win,
   game_cities_to_win, game_city_index, game_clock, game_clock_limit, game_block_name, game_city_destroyed ...).

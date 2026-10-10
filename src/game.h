@@ -113,7 +113,8 @@ typedef struct {
 /* ---- what happened (events) */
 enum {
     GE_STATE,          /* the world entered state a (GS_*) */
-    GE_BLOCK,          /* activateNextBlock: block a of the BlockList (name its BlockDef name) becomes the current
+    GE_BLOCK,          /* activateNextBlock: block a of the BlockList (name its BlockDef name; b 1 in the game, 0 the
+                        * world's reset) becomes the current
                         * one; build it (BlockDef|<name>), load its AIDef (army_load_block) but do not activate the AI
                         * yet (GE_AI_ACTIVATE). The block just left lies 41 towards -y now (0x302AF0) */
     GE_RESET,          /* monster slot: resetMonsterState + clearAllGoals; a = 1: also put it at pos facing f */

@@ -3079,6 +3079,20 @@ static const char *hitter_move(const Scene *s, const SceneBuilding *sb)
     return sb->hitter >= 0 && sb->hitter < s->nmon ? s->mon[sb->hitter].move : NULL;
 }
 
+void scene_block_left(Scene *s)
+{
+    s->left = 1;
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        SceneBuilding *sb = &s->buildings[i];
+        for (int k = sb->first; k < sb->last; k++)
+            s->instances[k].hidden = k != sb->rubble;
+    }
+    for (int k = 0; k < s->nstreet; k++)             /* the slots behind (41, 82) keep theirs */
+        if (s->street[k].world[13] < 20.5f)
+            for (int i = s->street[k].first; i < s->street[k].last; i++)
+                s->instances[i].hidden = 1;
+}
+
 void scene_buildings_update(Scene *s, float dt)
 {
     s->water_acc += dt;                              /* the water, a world step at a time: 0x338180 -> 0x336DC0 in */
@@ -3089,7 +3103,7 @@ void scene_buildings_update(Scene *s, float dt)
             water_step(s->water[k], 1.0f / 30);
     s->light_frame++;                                /* 0x2B8F80: the queue's frame; no grant yet */
     s->light_granted = 0;
-    for (uint32_t i = 0; i < s->nbuildings; i++) {
+    for (uint32_t i = 0; i < s->nbuildings && !s->left; i++) {
         SceneBuilding *sb = &s->buildings[i];
         building_update(&sb->b, dt);
         int moving = sb->b.collapse >= 0 || sb->b.shake_time > 0 || building_sink(&sb->b) > 0 ||

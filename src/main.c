@@ -750,6 +750,8 @@ static void reveal_events(Viewer *v)
     }
 }
 
+static void block_left(Viewer *v);
+
 static void build(Viewer *v)
 {
     if (v->have_scene)
@@ -1730,8 +1732,12 @@ static void world_build(Viewer *v)
     collide_begin(w, -1);
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
-        collide_add_building(w, b->min, b->max, b->row, b->state, b->collapse != -1,
-                             COLLIDE_TAG(COLLIDE_OWN_BUILDING, (int)i));
+        if (v->scene.left) {                         /* the block left: rubble, flat (scene_block_left) */
+            float top[3] = { b->max[0], b->max[1], b->min[2] };
+            collide_add_building(w, b->min, top, b->row, BUILDING_GONE, 0, COLLIDE_TAG(COLLIDE_OWN_BUILDING, (int)i));
+        } else
+            collide_add_building(w, b->min, b->max, b->row, b->state, b->collapse != -1,
+                                 COLLIDE_TAG(COLLIDE_OWN_BUILDING, (int)i));
     }
     for (int j = 0; j < v->nmon; j++) {              /* each monster's, tagged with its slot */
         Mon *mo = &v->mon[j];
@@ -2456,7 +2462,7 @@ static void game_step(Viewer *v, float dt)
                         k = (int)i;
                 if (k >= 0 && k != (int)v->block) {
                     v->next_block = k;
-                    v->block_shift = 41;             /* slot 1 (city.c), the block left 41 towards -y [G] */
+                    v->block_shift = 41;             /* [R 0x302F0C: slot 1 at y 41, 0x303BB0 the block left at -41] */
                 }
                 /* the reveal's tubes in this block (0x3235F0), now if it is the one built */
                 v->ntubes = reveal_block(&v->reveal, e->a, 1 << 30, v->tubes, REVEAL_LOCS);
@@ -2467,6 +2473,15 @@ static void game_step(Viewer *v, float dt)
                 rh.shape_box = rubble_box;
                 rh.ctx = v;
                 rubble_load(&v->rubble, v->scene.block, k >= 0 && k != (int)v->block, &rh);
+                if (k >= 0 && k != (int)v->block)
+                    block_left(v);
+                else if (k >= 0 && e->b) {           /* the same block again in the game (a tied King block
+                                                      * 0x325054, Game Over's Continue 0x325258): torn down and
+                                                      * loaded fresh at once */
+                    v->next_block = -1;
+                    v->block_shift = 0;
+                    v->game_block = k;
+                }
                 break;
             }
             case GE_STATE:
@@ -4235,6 +4250,56 @@ static int pose_monsters(Viewer *v, double t)
 
 /* the game's next block begins: the scene is rebuilt around it, the monster and the cameras carried along (the block
  * left was 41 towards -y of it) */
+/* the block left behind, as activateNextBlock tears it down (0x2B66C0 from block_won 0x325924, as the results
+ * start) [R]: every vehicle, person, street, parade, rail and army object goes (the monsters' weapons stay, flag
+ * 0x200000), the buildings are freed and only their rubble is left (0x302800, 0x303C90), and the next block is
+ * loaded. Here the scene's frame stays the old one until the next block begins (GS_BEGIN_BLOCK, the new block at
+ * slot 1, +41): its moving objects are freed now, the effects that follow them stopped, its buildings left as
+ * rubble, and the traffic of the blocks ahead (slots 1, 2) loaded again. The bosses stay (the ambient ones belong
+ * to the blocks behind) [G: the game reloads them with those blocks] */
+static void block_left(Viewer *v)
+{
+    for (int k = 0; k < v->nmon; k++) {
+        Mon *mo = &v->mon[k];
+        mo->held = mo->held_unit = mo->held_vehicle = mo->held_parade = mo->held_rail = -1;
+    }
+    if (v->fxw) {
+        for (int i = 0; i < v->nfxa; i++) fx_stop(v->fxw, v->fxa[i].fx);
+        for (int i = 0; i < v->nvfx; i++) fx_stop(v->fxw, v->vfx[i].fx);
+        for (int i = 0; i < v->nsofx; i++) fx_stop(v->fxw, v->sofx[i].fx);
+        for (int i = 0; i < v->npfx; i++) fx_stop(v->fxw, v->pfx[i].fx);
+        for (int i = 0; i < v->nrfx; i++) fx_stop(v->fxw, v->rfx[i].fx);
+        for (int i = 0; i < v->nefx; i++) fx_stop(v->fxw, v->efx[i].fx);
+    }
+    v->nfxa = v->nvfx = v->nsofx = v->npfx = v->nrfx = v->nrsnd = v->nefx = 0;
+    if (v->veh) {
+        vehicle_clear(v->veh);
+        for (int k = 1; k < 3; k++)
+            if (v->scene.traffic_def[k].at)
+                vehicle_load_traffic(v->veh, k, v->scene.traffic_def[k]);
+        vehicle_level_start(v->veh);
+    }
+    if (v->army) {                                   /* its units and shots; the army stays, the scores' way */
+        army_clear(v->army);
+        army_activate(v->army, 0);
+    }
+    streetobj_free(v->sobj);
+    v->sobj = NULL;
+    for (int k = 0; k < SCENE_STREET_MAX; k++)
+        v->sobj_of[k] = -1;
+    parade_free(v->parade);
+    v->parade = v->scene.parade = NULL;
+    rail_free(v->rail);
+    v->rail = NULL;
+    v->scene.rail = NULL;
+    edible_free(v->edibles);
+    v->edibles = v->scene.edibles = NULL;
+    if (v->scene.folk)
+        for (int i = 0; i < people_count(v->scene.folk); i++)
+            people_remove(v->scene.folk, i);
+    scene_block_left(&v->scene);
+}
+
 static void game_next_block(Viewer *v)
 {
     if (v->game_block < 0)

@@ -340,7 +340,7 @@ static void cancel_respawn(Game *g, int slot, int full)
  * GameStatus' seeds (+0x828 = seed[0], 0x1069C0(+0x82C, seed[1])); the world's block index (+0x878) goes on by one,
  * the start block follows it, the block manager makes it the current one (0x302AF0) and the clock reads its
  * TimeBonus (0x347ED0) [R] */
-static void activate_next_block(Game *g)
+static void activate_next_block(Game *g, int in_game)
 {
     if (g->cfg.cheats & 0x10000u) {
         wrand_seed_pm(g->cfg.seed);
@@ -351,6 +351,7 @@ static void activate_next_block(Game *g)
     clock_block(g);
     GameEvent *e = emit(g, GE_BLOCK, -1);
     e->a = g->cur;
+    e->b = in_game;                                  /* a1: 1 in the game (the old block torn down), 0 the reset */
     e->name = g->cur >= 0 && g->cur < g->nblocks ? g->blocks[g->cur] : NULL;
 }
 
@@ -796,7 +797,7 @@ static void block_won(Game *g)
         cancel_respawn(g, i, 0);
     g->level_done = !(g->cur < g->last);
     if (!g->level_done)
-        activate_next_block(g);
+        activate_next_block(g, 1);
     if (g->level_done && g->city_total >= g->par_score)
         g->city_flags |= 2;
     /* isAtCheckpoint is always 1 (0x3030B0); 0x323240: every monster of the city revealed, flag 8 (Boosy's unlock
@@ -898,7 +899,7 @@ static void transition(Game *g)
             set_state(g, GS_END_BLOCK);
         else {                                       /* nobody won the block: it is played again */
             g->cur -= 2;
-            activate_next_block(g);
+            activate_next_block(g, 1);
             set_state(g, GS_BEGIN_LEVEL);
         }
         break;
@@ -926,7 +927,7 @@ static void transition(Game *g)
             g->cur = g->first - 1;
         else
             g->cur = (g->first > g->start_block ? g->first : g->start_block) - 1;
-        activate_next_block(g);
+        activate_next_block(g, 1);
         for (int i = 0; i < np(g); i++) {            /* full HP (min(most, 100000)), 0x2E5730(m, 0) */
             GameEvent *e = emit(g, GE_REVIVE, i);
             e->a = 1;
@@ -1102,7 +1103,7 @@ void game_start(Game *g)
     if (g->cfg.play_type == GP_TIMED_RUN)
         g->clock_limit = 0;                          /* [G] the run's time starts from nothing */
     g->cur = (g->first > g->start_block ? g->first : g->start_block) - 1;   /* 0x2B74D0 */
-    activate_next_block(g);
+    activate_next_block(g, 0);
     checkpoint_save(g);                              /* [G] the checkpoint starts here */
     for (int i = 0; i < GAME_PLAYERS; i++)
         clear_points(&g->p[i]);

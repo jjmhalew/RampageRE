@@ -215,6 +215,7 @@ typedef struct {
     struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel; float world[16]; Mat4 rel[4]; }
         street[SCENE_STREET_MAX];
     int nstreet;
+    int left;                                         /* the game has moved on (scene_block_left): the block is behind */
     int placing_block;                                /* placing the block's own objects (not those behind) */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
@@ -259,6 +260,9 @@ int scene_adornments_hit(Scene *s, const float centre[3], float radius);
 /* street object k (Scene.street[k], streetobj.c's object) drawn at world (its model's base: StreetObj.world), or
  * hidden: its model and its flags' cloths move together (the cloths kept where they were relative to the model) */
 void scene_street_place(Scene *s, int k, const float world[16], int hidden);
+/* activateNextBlock's teardown of this block (0x2B66C0, 0x302800): its playable buildings are left as their rubble
+ * shapes (a standing one too) and no longer move, its street objects (this block's, y below 20.5) are gone */
+void scene_block_left(Scene *s);
 /* street object k's model is now `shape` (streetobj.c's SE_SHAPE: setShape(DamageShape)), placed where the old one
  * is, which is no longer drawn; 0 = ok, -1 no such model (the old one stays) */
 int scene_street_shape(Scene *s, int k, const char *shape);
