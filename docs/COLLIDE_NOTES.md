@@ -30,7 +30,7 @@ sphere (no model: radius 1 at the origin). `RenderRadius` only sets the drawing 
 
 **Buildings** [R]: `Building` is a WorldObject (vtable 0x44A8F0). At its init (+0x14, 0x2BC920) and every frame of
 its update while a storey or the whole is falling (+0x10, 0x2BDC70) its shape (+0x98) is set to the grid's box
-(+0x1DC .. +0x1F0) less its place (+0x2C: x the middle, y 5 + row × BackRowOffset): the box's top comes down as it
+(+0x1DC .. +0x1F0) less its place (+0x2C: x the middle, y 2.5 Depth + row × BackRowOffset): the box's top comes down as it
 falls. `RGridMgr` keeps them too: all of them at +0x5C (count +0x58), and by row at +0x18 + row × 0x20 (count
 +0x10 + row × 4), added by 0x2A5110 in the block's order and sorted by x (+0x2C) by 0x2A51B0. The row's fronts are
 at y = row × `BackRowOffset` (the int at 0x4D502C, set from the block). `collide_add_building`.

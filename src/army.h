@@ -58,7 +58,7 @@ typedef struct {
 } ArmyMonster;
 
 /* a building as the units see it: its box in the world, its grid (columns of 5 along x, storeys of 3 above 6) */
-typedef struct { float min[3], max[3]; int width, storeys, gone; } ArmyBox;
+typedef struct { float min[3], max[3]; int width, depth, storeys, gone; } ArmyBox;
 
 /* ---- the units */
 enum {                                               /* by the template's Script|ScriptName */

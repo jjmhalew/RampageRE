@@ -3233,6 +3233,7 @@ static void army_step(Viewer *v, float dt)
         memcpy(boxes[nb].min, b->min, sizeof boxes[nb].min);
         memcpy(boxes[nb].max, b->max, sizeof boxes[nb].max);
         boxes[nb].width = b->width;
+        boxes[nb].depth = b->depth;
         boxes[nb].storeys = b->n;
         boxes[nb].gone = b->state == BUILDING_GONE;
     }

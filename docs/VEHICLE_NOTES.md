@@ -225,7 +225,8 @@ reports every award with its template name, so the viewer can count challenge go
   (x = −hand x, y = hand z, z = hand y). A thrown object keeps the held turn and does not spin (0x2D9DC0) [R].
 - **The fire truck:**
   - getRandomBuilding (0x2AEC40): from (int)(n × frand) round the list, the first not gone [R];
-  - Building.getPosition (0x277C60) is +0x2C, y = 5 + the row's BackRowOffset [R]; here the middle of its footprint;
+  - Building.getPosition (0x277C60) is +0x2C: (LeftEdgeXPos + 2.5 Width, 2.5 Depth + the row's BackRowOffset, 0),
+    set at its making (0x2BCBC4) [R]; as here (`building_pos`);
   - the turret's rates are radians a second (0x299640) [R];
   - firing when on target: the turn within π/50, the pitch within π/100 (0x29ADE0) [R];
   - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; as here

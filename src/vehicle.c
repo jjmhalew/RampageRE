@@ -940,11 +940,13 @@ static int ft_pick_building(Vehicles *v)
     }
     return -1;
 }
+/* Building.getPosition (0x277C60): +0x2C, set at its making (0x2BCBC4) to (LeftEdgeXPos + 2.5 Width, 2.5 Depth (+
+ * BackRowOffset on the back row), 0) [R]; the box's middle is at 5 (+ BackRowOffset), the instance's place (0x305EDC) */
 static void building_pos(const ArmyBox *b, float out[3])
 {
     out[0] = (b->min[0] + b->max[0]) / 2;
-    out[1] = (b->min[1] + b->max[1]) / 2;
-    out[2] = b->min[2];
+    out[1] = (b->min[1] + b->max[1]) / 2 - 5 + 2.5f * (float)b->depth;
+    out[2] = 0;
 }
 
 static void ft_weapons_off(Vehicles *v, VehObj *o)   /* setWeaponFlags(-1, 16) [G: 16 holds every weapon] */
