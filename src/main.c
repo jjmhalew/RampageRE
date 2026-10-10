@@ -1101,6 +1101,42 @@ static void hit_building_front(Mon *mo, const float *p)
         printf(" (state %d, %d storeys, HP %d)\n", best->b.state, best->b.n, best->b.hp);
 }
 
+/* Monsters.bsf's damageRoof (the roof punch, a jump's landing, a fall's, the butt slam's six beats; its arguments
+ * unused): monster.hitBuildingRoof(bone, 1, 2.0), Monster method 0x6F (descriptor 0x42B9C0, dispatcher case 0x2AB620):
+ * the bone's place in the world (vtable +0x48 0x2E54A0 by name, +0x4C 0x2E4FF0 its matrix), the building under the
+ * monster's body (0x2D6150: the one at its probe point, its top no more than 5 above the feet), and its hit 0x2BBE80
+ * (building_hit_roof) with kind 1 and radius 2.0. The script ignores the answer: no energy, no rage; the points are
+ * Building::hit's (its hitter). The monsters with a damageRoof of their own (Cal, Eyegore, Jill, Natalie, Venus) take
+ * "Bip01 Spine". */
+static void hit_building_roof(Mon *mo, const char *bone)
+{
+    Viewer *v = mo->v;
+    float s = mo->scale > 0 ? mo->scale : 1;
+    CollideMonster cm = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->mode,
+                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
+                          { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, 0, mo->defeated || mo->hp <= 0,
+                          { 0, 0, 0 }, { 0, 0, 0 } };
+    int bi = collide_building_below(&v->cw, &cm);
+    Mat4 w;
+    float at[3] = { mo->mx, mo->my, mo->mz };
+    if (scene_monster_node(&v->scene, mo->slot, bone, &w) == 0) {   /* the named bone, as the game's mirrored pose has it */
+        at[0] = w.m[12]; at[1] = w.m[13]; at[2] = w.m[14];
+    }
+    if (bi < 0 || (uint32_t)bi >= v->scene.nbuildings) {
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  hitBuildingRoof %s at %.1f %.1f %.1f: no building below\n", bone, at[0], at[1], at[2]);
+        return;
+    }
+    SceneBuilding *sb = &v->scene.buildings[bi];
+    if (sb->b.state == BUILDING_STANDING)            /* Building::hit's +0x190: its Scoring pays this monster */
+        sb->hitter = mo->slot;
+    int col, roof = sb->b.roof, hit = building_hit_roof(&sb->b, at, 2.0f, &col);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  hitBuildingRoof %s at %.1f %.1f %.1f: building %d roof %d -> %d, top storey %d column %d %s "
+               "(state %d, %d storeys, HP %d)\n", bone, at[0], at[1], at[2], bi, roof, sb->b.roof, sb->b.n - 1, col,
+               hit ? "hit" : "no damage", sb->b.state, sb->b.n, sb->b.hp);
+}
+
 /* the monster as its foot object reads it (footstep.c): the feet's bones, its velocity, its ground, the water */
 static void foot_pose(Mon *mo, FootPose *m)
 {
@@ -1421,6 +1457,10 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::transitionFromBuildingTop")) { mo->mount.from_top = 1; return; }
     else if (strstr(n, "::hitBuildingFront")) { hit_building_front(mo, e->p); return; }
+    else if (strstr(n, "::damageRoof")) {            /* Monsters.bsf the foot, Cal.bsf's kin the spine */
+        hit_building_roof(mo, !strncmp(n, "Monsters::", 10) ? "Bip01 R Foot" : "Bip01 Spine");
+        return;
+    }
     else return;
     if (relative) {                                  /* the monster's frame (0x2E7330 / 0x2E74F0: by its matrix) */
         w[0] = c * l[0] - s * l[1];

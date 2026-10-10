@@ -70,6 +70,9 @@ the time (`rand01`, the lagged Fibonacci 0x106950 on gWorld +0x82C) [R].
 - On a roof (the building under its body, 0x2D6150): a falling one, off it towards the target (jumping when it faces
   it); standing, it walks to the roof's middle and plays `Ground_Punch_Down`, or with JUMP SMASH (upgrade flag 8) or
   the rage butt-slams it (jumps, then attacks in the air near the middle) (onRoof 0x2F0140).
+  The stomp's `damageRoof` (`hitBuildingRoof`, [FORMAT_BDP.md](FORMAT_BDP.md) "The roof stomp") wears the top
+  storey down one cell at a time until it drops, then the next, until the building falls: a bot stomping in Chicago 1
+  fells a 4-storey building in about 25 s, well before its 60 s guard.
 - On the ground: a building of 2 storeys or more is approached and mounted (approachAndMount 0x2EFA90: the walk
   point beside the side (sidePoint 0x2EEF30: the half width out from the side's middle), facing the face ≥ 0.95 and
   on the ground it goes for the side's transition state, mirrored sides swapped; canMount −5 / −6 drops the target;
@@ -190,8 +193,6 @@ Stand-ins and gaps:
 - **[G]** The bots' rand01 is an LCG seeded per slot; the mount point's height is a storey up; the building's +0x2C
   is taken as the middle of its foot; the ray against buildings is sampled; the front-corner rule of the walk is not
   ported; the cooldown +0x64 is never set (its caller is not known).
-- **[G]** The roof stomp (`Monsters::damageRoof` → `hitBuildingRoof`) is not ported, so a bot stomping a roof does
-  no damage until its 60 s guard fells the building.
 - **[G]** A thrown object hitting a building leaves its hitter as it was (the game pays nobody), to keep the
   single-player scores as they were.
 - **[G]** Alone, the camera frames the monster always (as before), also while it drops in or is human.

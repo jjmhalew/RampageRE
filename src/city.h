@@ -78,6 +78,9 @@ typedef struct {                                      /* a building's cells and 
      * FloorHP is down to DamagedSkeletonHP (half of FloorHP unless set; drawn around 0x2CD898) */
     int skeleton[BUILDING_STOREYS], damaged_skeleton[BUILDING_STOREYS], skeleton_hp[BUILDING_STOREYS];
     int ground, facade, top, rubble;                  /* its instances (-1 none) */
+    /* the TopFloorShapes models by the roof's damage state (G+0x65C + 4 x state, 0x28D890; drawn 0x2CD5E0: the state's
+     * or the nearest lower one there is); roof_inst[0] is top. The cities list two: intact, damaged */
+    int roof_inst[4];
     int first, last; Mat4 *rest;                      /* all its instances, first .. last - 1, where they were built */
     Mat4 node;                                        /* its place */
     int moving;                                       /* it moved last frame */

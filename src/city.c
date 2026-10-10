@@ -1722,6 +1722,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->ground = ground_inst;
         sb->facade = facade_inst;
         sb->top = sb->rubble = -1;
+        sb->roof_inst[0] = sb->roof_inst[1] = sb->roof_inst[2] = sb->roof_inst[3] = -1;
         sb->first = sb->last = 0;
         sb->rest = NULL;
         sb->moving = 0;
@@ -1779,9 +1780,16 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
             }
         }
     }
-    const char *top = str_item(group_sub(t, "ShapeSet|TopFloorShapes"), 0);
-    if (top)
-        top_inst = place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)nfloors, 0)), -1);
+    int roof_inst[4] = { -1, -1, -1, -1 };          /* the roof's models by its damage state (0x28D890) */
+    for (uint32_t k = 0; k < 4; k++) {
+        const char *top = str_item(group_sub(t, "ShapeSet|TopFloorShapes"), k);
+        if (!top)
+            break;
+        roof_inst[k] = place_model(c, s, top, mat_mul(node, mat_trs_z(0, 0, GROUND_FLOOR + STOREY * (float)nfloors, 0)), -1);
+        if (k > 0 && roof_inst[k] >= 0)
+            s->instances[roof_inst[k]].hidden = 1;
+    }
+    top_inst = roof_inst[0];
     Record obj[MAX_REC];
     uint32_t no = group_values(inst, "ObjectInstance|", &where, obj, MAX_REC);
     s->placing_building = !scenery && *count > had ? (int)(*count - 1) : -1;
@@ -1799,6 +1807,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         if (sb->rubble >= 0)
             s->instances[sb->rubble].hidden = 1;
         sb->top = top_inst;
+        memcpy(sb->roof_inst, roof_inst, sizeof roof_inst);
         sb->first = first;
         sb->last = (int)s->ninstances;
         sb->rest = malloc(sizeof *sb->rest * (size_t)(sb->last - sb->first + 1));
@@ -2021,7 +2030,10 @@ static void light_items_make(Scene *s, SceneBuilding *sb)
     sb->nlit_items = 0;
     for (uint32_t i = 0; i < s->nitems && sb->nlit_items < 16; i++) {
         DrawItem *it = &s->items[i];
-        if (it->skin || (it->instance != sb->ground && it->instance != sb->top))
+        int roof = 0;
+        for (int k = 0; k < 4; k++)
+            roof |= sb->roof_inst[k] >= 0 && it->instance == sb->roof_inst[k];
+        if (it->skin || (it->instance != sb->ground && it->instance != sb->top && !roof))
             continue;
         uint32_t src = it->mesh;
         Mesh copy = mesh_copy_lit(&s->meshes[src].mesh);
@@ -2911,11 +2923,22 @@ static void building_place(Scene *s, SceneBuilding *sb)
         in->base = mat_mul(sway, sb->rest[i - sb->first]);
         if (i == sb->facade)
             in->base = mat_mul(mat_trs_z(x, 0, 0, 0), sb->rest[i - sb->first]);   /* its storeys move by vertex */
-        else if (i == sb->top) {
-            float bottom, height;
-            building_storey(b, b->n, &bottom, &height);    /* where a storey above the last would stand */
-            float was = GROUND_FLOOR + STOREY * (float)b->storeys;
-            in->base = mat_mul(mat_trs_z(x, 0, bottom - was, 0), sb->rest[i - sb->first]);
+        else {
+            int k = 0;
+            while (k < 4 && (sb->roof_inst[k] < 0 || i != sb->roof_inst[k]))
+                k++;
+            if (k < 4 || i == sb->top) {
+                float bottom, height;
+                building_storey(b, b->n, &bottom, &height);    /* where a storey above the last would stand */
+                float was = GROUND_FLOOR + STOREY * (float)b->storeys;
+                in->base = mat_mul(mat_trs_z(x, 0, bottom - was, 0), sb->rest[i - sb->first]);
+            }
+            if (k < 4) {                             /* 0x2CD5E0: the roof state's model, or the nearest lower one */
+                int st = b->roof < 0 ? 0 : b->roof > 3 ? 3 : b->roof;
+                while (st > 0 && sb->roof_inst[st] < 0)
+                    st--;
+                in->hidden = k != st;
+            }
         }
         if (gone && i != sb->rubble)
             in->hidden = 1;

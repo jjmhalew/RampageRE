@@ -65,7 +65,7 @@ world). The fog is on (F toggles it, `--nofog` starts without).
 | `src/anim.c` | clips: KeyInterpAnim tracks with the game's rotation decode (0x192010), RawAnim segments (`tools/anim.py`) |
 | `src/city.c` | a block: ground, buildings with generated facades, objects, people, traffic, lighting (`tools/city.py`); a monster; posing and CPU skinning every frame |
 | `src/camera.c` | the game's play camera, TwoTilts, transcribed from 0x312B50 (docs/CAMERA.md) |
-| `src/building.c` | a building's cells and the game's hit on them: 0x2BC150, 0x2BB7B0, 0x2BB950 (docs/FORMAT_BDP.md "Damage") |
+| `src/building.c` | a building's cells and the game's hit on them: 0x2BC150, 0x2BB7B0, 0x2BB950, the roof stomp's 0x2BBE80 (docs/FORMAT_BDP.md "Damage") |
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
@@ -123,6 +123,9 @@ game's rules: the front cell takes 2 HP, the hit spreads up or down and sideways
 buildings keep their HP pools, and each facade tile shows its cell's state (the sheet's row), so five punches crack,
 break and wreck a cell and its neighbours, and a damaged storey shows its interior (the floor's `Skeleton`, then its
 `DamagedSkeleton` once half its `FloorHP` is gone) through the holes ([FORMAT_BDP.md](FORMAT_BDP.md) "Damage").
+The roof stomp (`damageRoof` → `hitBuildingRoof`: the punch down, `square+down` on a roof, the landings and the butt
+slam) shows the roof's damaged `TopFloorShapes` model and hits the top storey's front cell below the foot, so a
+monster or a bot on a roof wears the building down a storey at a time (FORMAT_BDP.md "The roof stomp").
 The facade's other passes are the game's too ("Facade geometry"): intact windows show `InnerWindow` interiors behind
 the sheet's clear panes, tinted `CubeTint`; hits dent the facade (its grid vertices move in the face, 0.1 … 0.45 by level) and fade in `CrackTexture` by the levels,
 around the windows of lightly damaged cells; a broken corner cell shows the inner wall behind it (the sheet's
@@ -176,8 +179,7 @@ the other monsters' lines `[2]` .. `[4]`.
 
 ## Not there yet
 - the revealed monster walking on (the viewer has no extra monster for it), Boosy's unlock (the cities' saved flags);
-- the roof stomp (`Monsters::damageRoof` → `hitBuildingRoof`): a bot on a roof stomps without effect until its 60 s
-  guard fells the building; grabbing another monster; the movies, the menus' 3D globe and effects.
+- grabbing another monster; the movies, the menus' 3D globe and effects.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),

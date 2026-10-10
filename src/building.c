@@ -341,6 +341,47 @@ int building_hit(Building *b, const float p[3], float radius)
     return (face == FACE_FRONT ? cell_damage(b, s, col, 2, 1, fv) : 0) | dented;
 }
 
+/* 0x2BBE80 (hitBuildingRoof's hit): the roof one state worse (0x2CF7C0 / 0x2BB580 on face 5, G+0x658, capped at 3);
+ * then the top storey's front cell under the point's x, or the nearest one to it still standing (state < 3; the left
+ * one nearer wins, a tie the right), hit at its middle 0.3 under the storey's top with Building::hit (kind as given,
+ * here 1; radius r) */
+int building_hit_roof(Building *b, const float p[3], float radius, int *col_out)
+{
+    if (col_out)
+        *col_out = -1;
+    if (b->state != BUILDING_STANDING)
+        return 0;
+    if (b->roof + 1 < 4) {                           /* 0x2BB580 refuses while a storey falls: none does here */
+        b->roof++;
+        b->dirty = 1;
+    }
+    int at = (int)(0.2f * (p[0] - b->min[0])), s = b->n - 1, front = 2 * b->depth;   /* cvt.w.s: towards 0 */
+    if (s < 0)
+        return 0;
+    int o = b->live[s];
+    int left = at < b->width ? at : b->width - 1;    /* the game reads past the row beyond the width [G: clamped] */
+    while (left >= 0 && b->cell[o][front + left].state >= 3)
+        left--;
+    int right = at + 1 > 0 ? at + 1 : 0;             /* [G: from column 0 when left of the box] */
+    while (right < b->width && b->cell[o][front + right].state >= 3)
+        right++;
+    int dl = left >= 0 ? at - left : at + 0x200, dr = right < b->width ? right - at : 0x400 - at;
+    int col;
+    if (dl < dr) {
+        if (dl >= 0x200)
+            return 0;                                /* the whole storey's front is destroyed */
+        col = left;
+    } else {
+        col = right;
+    }
+    if (col < 0 || col >= b->width)
+        return 0;
+    if (col_out)
+        *col_out = col;
+    float q[3] = { b->min[0] + CELL_W * (float)col + 2.5f, b->min[1], GROUND_H + STOREY_H * (float)b->n - 0.3f };
+    return building_hit(b, q, radius);
+}
+
 /* 0x2BD3B0: a floor has come down onto the one below (only a floor's own collapse, not the destruction's): the one
  * below is crushed by the weight of what fell, by the HP the cells on it have left */
 static void landed(Building *b, int k)
@@ -425,7 +466,14 @@ static int crack_step(Building *b)
 void building_set_cell(Building *b, int face, int o, int col, int state)
 {
     static const uint8_t HP[4] = { 10, 7, 3, 0 };   /* the HP a state starts below (cell_damage's 7 and 3) [G] */
-    if (o < 0 || o >= BUILDING_STOREYS || state < 0 || state > 3)
+    if (state < 0 || state > 3)
+        return;
+    if (face == FACE_ROOF) {                         /* 0x2CFDA0: one state for the whole roof, G+0x658 */
+        b->roof = state;
+        b->dirty = 1;
+        return;
+    }
+    if (o < 0 || o >= BUILDING_STOREYS)
         return;
     if (face == FACE_FRONT) {
         set_state(b, o, col, state);

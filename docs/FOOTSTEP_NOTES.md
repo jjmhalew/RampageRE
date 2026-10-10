@@ -102,7 +102,7 @@ The foot lifts: record +0x24 &= ~3, +0x0 = 0. Nothing else: no effect, the ancho
 
 The record itself is not touched: footPlant only makes the footfall. No sound but the effect's, no camera shake, no
 damage to people, vehicles or roofs (the roof stomp is the separate event `Monsters::damageRoof` →
-`hitBuildingRoof("Bip01 R Foot", 1, 2)`), no scale (the monster's size moves the foot, not the puff), and the water
+`hitBuildingRoof("Bip01 R Foot", 1, 2)`, [FORMAT_BDP.md](FORMAT_BDP.md) "The roof stomp"), no scale (the monster's size moves the foot, not the puff), and the water
 is not pressed (the wading does that every frame on its own, WATER_NOTES.md).
 
 ### cancelFootStep (0x33CA10) [R]

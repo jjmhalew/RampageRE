@@ -55,6 +55,7 @@ typedef struct {
     int floor_hp[BUILDING_STOREYS];                  /* FloorHP per storey (floor +0x14; default 8 x width) */
     BuildingCell cell[BUILDING_STOREYS][BUILDING_CELLS];   /* [o][face x depth + column], fronts from 2 x depth */
     BuildingVert vert[BUILDING_STOREYS + 1][3][BUILDING_VCOLS];   /* by live row, face (FACE_*), column: the dents */
+    int roof;                                        /* G+0x658: the roof's damage state 0 .. 3 (its TopFloorShapes model) */
     int collapse;                                    /* G+0x1CC: -1 none, k >= 1 live storey k-1 falls, 0 it sinks */
     float progress;                                  /* G+0x1D0: storeys fallen (0 .. 1; 0 .. 7/3 sinking) */
     float timer;                                     /* the destruction's clock (+0x150) */
@@ -74,9 +75,15 @@ int building_cell_index(const Building *b, int face, int column);    /* -1 if ou
 /* a hit at the world point p (on or near one of its faces) with radius r (2.0 from a monster's attack); 1 if a cell
  * took damage. Only front cells take damage from hits, and only while it stands, as in the game. */
 int building_hit(Building *b, const float p[3], float radius);
+/* hitBuildingRoof's hit (0x2BBE80), p the stomping bone in the world: the roof (roof) one state worse, up to 3, and
+ * the top storey's front cell below p's x (or the nearest one not destroyed) hit at its middle, 0.3 under the storey's
+ * top, by building_hit with radius r (2.0); 1 if that cell or its vertices took damage; *col the column hit, -1 none.
+ * Only a standing building. */
+int building_hit_roof(Building *b, const float p[3], float radius, int *col);
 void building_destroy(Building *b);                 /* the collapseBuilding binding (0x2BB8B0): it falls */
 /* setCellDamage(face, floor, column, state): the cell of template storey o (0 the first above the ground floor) on
- * that face to damage state 0 .. 3, its HP with it (10, 7, 3, 0); a front end cell is its side's too */
+ * that face to damage state 0 .. 3, its HP with it (10, 7, 3, 0); a front end cell is its side's too; face 5 (the
+ * roof) sets the roof's state, whatever the storey and column (0x2CFDA0) */
 void building_set_cell(Building *b, int face, int o, int col, int state);
 void building_update(Building *b, float dt);         /* collapses, destruction, the shaker (0x2BDC70) */
 float building_shake(const Building *b);             /* the sway along x now (0x2CC450) */

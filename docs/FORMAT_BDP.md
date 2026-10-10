@@ -439,6 +439,35 @@ units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.
    colour per grid vertex times the storey's `FloorTintR/G/B` (the cells' tint): see
    [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md).
 
+**The roof stomp** [R]. `Monsters.bsf`'s `damageRoof` ignores its four arguments and calls
+`monster.hitBuildingRoof("Bip01 R Foot", 1, 2.0)` (the monsters with a `damageRoof` of their own, Cal, Eyegore, Jill,
+Natalie and Venus, pass `"Bip01 Spine"`). George's graph fires it in `Ground_Punch_Down` (Square with the stick down,
+at 0.328 of the clip), `Jump_Finish` (a jump's landing), `Jump_Fall_Finish` / `Jump_Fall_Finish2` (twice) and
+`Jump_Butt_Slam_impact` (six times); the debris effect and the camera shake beside them are clip events of their own.
+`hitBuildingRoof` is Monster method 0x6F (descriptor 0x42B9C0, the lookup's strcmp at 0x2ACE90; the dispatcher's case
+0x2AB620 via the jump table 0x42CEE0):
+1. the bone's place in the world: its index by name (vtable +0x48, 0x2E54A0) and its matrix (+0x4C, 0x2E4FF0; the
+   translation at +0x24), from the pose as played, mirrored or not (no left/right swap);
+2. the building under the monster's body (0x2D6150, as on the ground: the one at its probe point 2.5 ahead, whatever
+   its height, unless its top is more than 5 above the feet); none, or a dead monster: 0, nothing happens;
+3. 0x2BBE80(building, monster, point, 1, 2.0), only for a standing building (+0x14C = 1):
+   - the roof (face 5, a single state at G+0x658, 0x2CF7C0 / 0x2BB580 → 0x2CFDA0) one state worse, up to 3. The roof
+     is drawn (0x2CD5E0) as the `ShapeSet|TopFloorShapes` model of its state (G+0x65C + 4 × state, filled by 0x28D890
+     in list order; a missing one: the nearest lower state's). Every city lists two (`Bank00_Top10.pwk`,
+     `Bank00_TopDmg10.pwk`), so the first stomp shows the damaged roof for good;
+   - the column under the point, (x − min x) × 0.2 truncated; on the top storey (G+0x18 − 1) the nearest front cell
+     not destroyed (state < 3): searching left from that column and right from the next one, the left when it is
+     strictly nearer, else the right; none: 0;
+   - Building::hit (0x2BC150) of kind 1 with radius 2.0 at that cell's middle (x = min x + 5 × column + 2.5), on the
+     front (y = min y), 0.3 below the top storey's top (z = 6 + 3 × storeys − 0.3): the dents, 2 HP off the cell and
+     the spreading, as a punch.
+The script ignores the answer: no energy (hitBuildingFront's +2 is the script's own) and no rage; the points are
+Building::hit's own (its `Scoring`, paid to the hitter it keeps at +0x190). Because only the top storey's front
+cells are hit, stomping drops the top storey once its `FloorHP` is gone (8 × width: about 11 stomps on a 3-wide
+building), the roof model comes down a storey with the monster on it (the roof is the building's top, which drops; the
+monster lands, `Jump_Finish`, whose own `damageRoof` hits the new top storey), and so on until the BuildingHP runs out
+and the building falls (state 4). There is no separate cave-in through the roof.
+
 ### Collapse
 The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then its state (jump table 0x42FA00).
 `DefBuildingProps` gives the times: `CollapseTime` 0.25, `CrackSpreadTime` 0.05, `HesitationTime` 0.4,
