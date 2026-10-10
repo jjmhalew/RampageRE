@@ -435,7 +435,12 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
   - the emulators and the demo game (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md));
   - the turn of HudQuads;
   - the main menu's two searchlights: `auto="false"`, and no script starts them **[R]**;
-  - the GUI effects' sounds, and the `<o>` scale on particle sizes (taken to scale them) **[G]**.
+  - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the
+    card glow) names a sound, so fx.c's sound start never fires for them (traced through the main menu, MonsterSelect
+    and CitySelect);
+  - the `<o>` scale on particle sizes (taken to scale them) **[G]**;
+  - the globe's brightness step at Greenwich, where its two halves meet: it stays with the lighting off, so it is in
+    the halves' own art, not the port's lights.
 - **Popup:**
   - the memory card's own states (checking, saving, errors, formatting);
   - how the selection starts (item 0);
