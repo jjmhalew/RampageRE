@@ -491,6 +491,9 @@ typedef struct Node {
     int sel, pulse, top;        /* list box: the selection, setHighlightPulse, the first item shown */
     float ep[4]; int has_ep;
     float lw;                                            /* a line's <width>: 3 without (GuiLine ctor 0x23BA10) */
+    int sizer; unsigned sflags; /* <sz> (GuiSizer): <sflags>, <stretch>; an item's <si> room before and after it, */
+    float si[2], stretch;       /* and its stretch byte (s=) */
+    int si_s;
     int visible;
     int video;                  /* the Video quad: the movie's picture when there is one */
     /* the 3D objects (N_FX): what they are, their files and their state */
@@ -735,6 +738,12 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
             nd->ep[2] = e[1 + 3 * (n - 1)]; nd->ep[3] = e[2 + 3 * (n - 1)];
             nd->has_ep = 1;
         }
+    } else if (strcmp(tag, "sflags") == 0) nd->sflags = (unsigned)strtoul(text, NULL, 0);
+    else if (strcmp(tag, "stretch") == 0) nd->stretch = strtof(text, NULL);
+    else if (strcmp(tag, "si") == 0) {
+        parse_floats(text, nd->si, 2);
+        for (int i = 0; i < na; i++)
+            if (strcmp(at[i].k, "s") == 0) nd->si_s = atoi(at[i].v);
     } else if (strcmp(tag, "width") == 0) {              /* a GuiLine's width (+0x228) */
         float w = 3;
         parse_floats(text, &w, 1);
@@ -831,6 +840,8 @@ static int xml_element(Gui *g, Layout *L, Xml *x, Node *parent)
     xml_name(x, tag, sizeof tag);
     int kind = node_kind(tag);
     Node *nd = kind >= 0 ? node_new(L, kind) : NULL;
+    if (nd && strcmp(tag, "sz") == 0)
+        nd->sizer = 1;
     Attr at[8];
     int na = 0;
     for (;;) {
@@ -1047,6 +1058,113 @@ static float text_w(const Gui *g, const Node *nd)
     text_extent(g, &ts, nd->text, &w, &h);
     return w * nd->tscale;
 }
+static float text_h(const Gui *g, const Node *nd);
+
+/* a node's extent across x in its own frame (before its <m>): itself (a quad's picture or <d>, a text's width by its
+ * justify), its origin and its children's, each through its place and scale [R 0x2491D0's boxes; hud.c] */
+static void node_span(const Gui *g, const Node *nd, float *x0, float *x1)
+{
+    float a = 0, b = 0;
+    if (nd->kind == N_QUAD) {
+        float w = nd->has_d ? nd->d[0] : nd->has_tex ? nd->tex.w : 0, q = nd->Q & 2 ? -0.5f * w : 0;
+        a = fminf(a, q);
+        b = fmaxf(b, q + w);
+    } else if (nd->kind == N_TEXT) {
+        float w = text_w(g, nd), q = nd->justify == 1 ? -0.5f * w : nd->justify == 2 ? -w : 0;
+        a = fminf(a, q);
+        b = fmaxf(b, q + w);
+    }
+    for (const Node *c = nd->child; c; c = c->next) {
+        float c0, c1, k = c->m * c->sx;
+        node_span(g, c, &c0, &c1);
+        a = fminf(a, c->p[0] + k * c0);
+        b = fmaxf(b, c->p[0] + k * c1);
+    }
+    *x0 = a;
+    *x1 = b;
+}
+
+/* GuiSizer's row across (sflags 1) [R 0x248B80]: n items with boxes [mn, mx] about their origins, room before /
+ * after (<si>, s16) and stretch bytes s; out: the origins. The first sits at 0 and each next one at the last's
+ * origin + max + after + its before - its min. With 0x100 and <stretch> S above the boxes' total, (S - total) /
+ * sum(s + 1) a unit goes between them: the first's share f (s + 1) after it, the last's before it, a middle one's
+ * split. Then (any of 0x7E) 4 ends the last box at 0 (its after not counted), 8 centres the row (8 over 4) */
+static void sizer_row(int n, const float *mn, const float *mx, const float *before, const float *after,
+                      const int *st, unsigned fl, float S, float *pos)
+{
+    float tot = 0, ssum = 0, f = 0;
+    for (int i = 0; i < n; i++) {
+        tot += mx[i] - mn[i];
+        ssum += (float)(st[i] + 1);
+    }
+    if ((fl & 0x100) && ssum > 0 && S > 0 && tot < S)
+        f = (S - tot) / ssum;
+    float carry = (fl & 0x100) ? f * (float)(st[0] + 1) : 0, span = 0, prevsz = mx[0] - mn[0];
+    pos[0] = 0;
+    for (int i = 1; i < n; i++) {
+        float p = pos[i - 1] + mx[i - 1] + after[i - 1] + before[i];
+        if (fl & 0x100) {
+            float sh = f * (float)(st[i] + 1);
+            if (i != n - 1)
+                sh *= 0.5f;
+            carry += sh;
+            p += carry;
+            prevsz += carry;
+            carry = sh;
+        }
+        pos[i] = p - mn[i];
+        span += prevsz + after[i - 1] + before[i];
+        prevsz = mx[i] - mn[i];
+    }
+    span += prevsz;
+    if (!(fl & 0x7E))
+        return;
+    float off = 0;
+    if (fl & 4)
+        off = -mn[0] - span;
+    if (fl & 8)
+        off = -mn[0] - 0.5f * span;
+    for (int i = 0; i < n; i++)
+        pos[i] += off;
+}
+
+/* a sizer across (the menus' button rows): its items' boxes (hidden ones count) laid as sizer_row. Down and the
+ * across alignments 0x10 / 0x20 / 0x40 (no layout uses them) are not ported */
+static void sizer_lay(const Gui *g, Node *sz)
+{
+    enum { N = 16 };
+    float mn[N], mx[N], be[N], af[N], pos[N];
+    int st[N], n = 0;
+    Node *it[N];
+    if (!(sz->sflags & 1))
+        return;
+    for (Node *c = sz->child; c && n < N; c = c->next, n++) {
+        float k = c->m * c->sx;
+        node_span(g, c, &mn[n], &mx[n]);
+        mn[n] *= k;
+        mx[n] *= k;
+        be[n] = c->si[0];
+        af[n] = c->si[1];
+        st[n] = c->si_s;
+        it[n] = c;
+    }
+    if (!n)
+        return;
+    sizer_row(n, mn, mx, be, af, st, sz->sflags, sz->stretch, pos);
+    for (int i = 0; i < n; i++)
+        it[i]->p[0] = pos[i];
+}
+
+/* the GUI lays its sizers out every frame [R 0x248B80 with F 0x100] */
+static void layouts_lay(const Gui *g, Node *nd)
+{
+    for (; nd; nd = nd->next) {
+        if (nd->sizer)
+            sizer_lay(g, nd);
+        layouts_lay(g, nd->child);
+    }
+}
+
 static float text_h(const Gui *g, const Node *nd)
 {
     if (!nd || !nd->font)
@@ -4499,6 +4617,11 @@ void shell_update(Shell *s, float dt)
         effects_update(s->ifc[i]);
     effects_update(s->mc.L);
     effects_update(s->ld.L);
+    for (int i = 0; i < IF_COUNT; i++)
+        if (s->ifc[i])
+            layouts_lay(&s->gui, s->ifc[i]->root);
+    if (s->mc.L)
+        layouts_lay(&s->gui, s->mc.L->root);
 }
 
 int shell_events(Shell *s, ShellEvent *out, int max)

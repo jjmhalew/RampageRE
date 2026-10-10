@@ -207,9 +207,14 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   place_i−1 + max_i−1 + after_i−1 + before_i − min_i, `<si>` before (u16 +0), after (+2), stretch (byte +6); flag 4
   ends at 0, 8 centres; across 0x20 / 0x40 / 0x10 (horizontal) or 2 / 8 / 4; 0x100 spreads (stretch − total) / Σ(s +
   1) below `<stretch>` (0x2490D0); hidden children count. Checked: Cancel / Accept come at −161.7125 / −61.8375, the
-  layout's. The port lays out a sizer across (flags 1, 4, 8; hud.c `sizer_lay`): French's "Accepter" then ends at
-  the frame's edge as Accept does. Down, the spread and the across alignments are not needed by any layout and are
-  not ported.
+  layout's. In full [R 0x248B80]: sflags at +0x78, `<stretch>` at +0x7C; a child's `<si>` before / after are s16
+  (+0, +2), its stretch byte +6 (`s=`), its box (0x2491D0) its bounds joined with the origin through its matrix.
+  The first item sits at 0, each next at the last's origin + max + after + its before − its min. With 0x100 and the
+  boxes' total below S, f = (S − total) / Σ(s + 1) (never negative) and each item's f (s + 1) goes between the
+  items: the first's after it, the last's before it, a middle one's split half and half. Then, with any of 0x7E, 4
+  puts the last box's max at 0 (its after not counted) and 8 (over 4) centres the row. Down (0x248FA0) the row is
+  not shifted; 4 / 8 / 2 align across. Port: `sizer_row` / `sizer_lay` (hud.c, and the same in shell.c), across
+  only (no layout lays one down). French's "Accepter" then ends at the frame's edge as Accept does.
 - The line [R]: GuiLine (ctor 0x23BA10) is 3 wide by default (+0x228), drawn as a band ± width / 2 across its points
   (0x23A8E0); `<ep>` (0x22C0E0) copies two points, floats 0 .. 2 and 3 .. 5 after the count. As here (`<width>`, 3).
 - The slider steps: one per script frame, the world's step 1/30 s (the GuiManager's update in the tick 0x288340,

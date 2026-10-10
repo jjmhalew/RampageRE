@@ -530,6 +530,11 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 - **Focus** [R]: setFocus (0x238970) sends the old one 1024 (not when it is the new one), stores the slot, then sends
   the new one 512 even when it had it; as `cr_focus`. The idle timer's inputs are read (`shell_input_pad`).
 - **Attract mode:** its 5 s stand-in per movie in state 2 (above), and `startAttractGame`'s demo.
+- **Sizers** [R 0x248B80, PAUSE_NOTES.md]: the button rows (the main menu's, Options', MonsterSelect's,
+  MonsterSheet's, CitySelect's, the popup's) are laid out every `shell_update` (`layouts_lay`). English comes out
+  at the layouts' places for the main menu, Options, MonsterSheet and CitySelect; MonsterSelect's row and the popup's
+  were saved with the French texts (e.g. "Liste Des", "Sélectionner" fit them to 0.0005), so in English they now
+  move to where the game puts them: MonsterSelect's four spread evenly over its 550.
 - **Segments:** the layouts' segments 1, 2 and 7 (other languages or video modes); segment 0 is used. (The tag `se`,
   0x22C160, is a GuiLine's texture, not a segment.)
 - **Engine calls:** `restoreCheckpoint` and `restoreProfile` are left to the viewer.

@@ -508,8 +508,9 @@ typedef struct Node {
     float hl_d[2];
     int sel, pulse;
     unsigned la; float lsp;     /* list: <a> its flags (8 across), <sp> its spacing (setExtraSpacing replaces it) */
-    int sizer; unsigned sflags; /* <sz> (GuiSizer): <sflags>; an item's <si> room before and after it */
-    float si[2];
+    int sizer; unsigned sflags; /* <sz> (GuiSizer): <sflags>, <stretch>; an item's <si> room before and after it, */
+    float si[2], stretch;       /* and its stretch byte (s=) */
+    int si_s;
     int clip; float clip_x0, clip_x1;
     float ep[4]; int has_ep;    /* line (<l>): <ep> its first and last point (x y) */
     float lw;                   /* line: <width>, 3 without (GuiLine ctor 0x23BA10: +0x228) */
@@ -705,7 +706,12 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         nd->lw = w;
     } else if (strcmp(tag, "a") == 0) nd->la = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "sflags") == 0) nd->sflags = (unsigned)strtoul(text, NULL, 0);
-    else if (strcmp(tag, "si") == 0) parse_floats(text, nd->si, 2);
+    else if (strcmp(tag, "stretch") == 0) nd->stretch = strtof(text, NULL);
+    else if (strcmp(tag, "si") == 0) {
+        parse_floats(text, nd->si, 2);
+        for (int i = 0; i < na; i++)
+            if (strcmp(at[i].k, "s") == 0) nd->si_s = atoi(at[i].v);
+    }
     else if (strcmp(tag, "sp") == 0) nd->lsp = strtof(text, NULL);
     /* sc (script), f (entry function), R, growth, si / sflags / stretch (sizers), X / xf (child interfaces):
      * not needed for drawing */
@@ -958,41 +964,74 @@ static void node_span(const Gui *g, const Node *nd, float *x0, float *x1)
     *x1 = b;
 }
 
-/* a sizer across (sflags 1; Pause's buttons) [R 0x248B80]: each item's place = the last's + its max + its room
- * after + this one's room before - this one's min; flag 4 ends the last at 0, 8 centres the row, else it starts at 0.
- * Hidden items count. Down (no flag 1), the spread (0x100) and the across alignments are not needed here */
+/* GuiSizer's row across (sflags 1) [R 0x248B80]: n items with boxes [mn, mx] about their origins, room before /
+ * after (<si>, s16) and stretch bytes s; out: the origins. The first sits at 0 and each next one at the last's
+ * origin + max + after + its before - its min. With 0x100 and <stretch> S above the boxes' total, (S - total) /
+ * sum(s + 1) a unit goes between them: the first's share f (s + 1) after it, the last's before it, a middle one's
+ * split. Then (any of 0x7E) 4 ends the last box at 0 (its after not counted), 8 centres the row (8 over 4) */
+static void sizer_row(int n, const float *mn, const float *mx, const float *before, const float *after,
+                      const int *st, unsigned fl, float S, float *pos)
+{
+    float tot = 0, ssum = 0, f = 0;
+    for (int i = 0; i < n; i++) {
+        tot += mx[i] - mn[i];
+        ssum += (float)(st[i] + 1);
+    }
+    if ((fl & 0x100) && ssum > 0 && S > 0 && tot < S)
+        f = (S - tot) / ssum;
+    float carry = (fl & 0x100) ? f * (float)(st[0] + 1) : 0, span = 0, prevsz = mx[0] - mn[0];
+    pos[0] = 0;
+    for (int i = 1; i < n; i++) {
+        float p = pos[i - 1] + mx[i - 1] + after[i - 1] + before[i];
+        if (fl & 0x100) {
+            float sh = f * (float)(st[i] + 1);
+            if (i != n - 1)
+                sh *= 0.5f;
+            carry += sh;
+            p += carry;
+            prevsz += carry;
+            carry = sh;
+        }
+        pos[i] = p - mn[i];
+        span += prevsz + after[i - 1] + before[i];
+        prevsz = mx[i] - mn[i];
+    }
+    span += prevsz;
+    if (!(fl & 0x7E))
+        return;
+    float off = 0;
+    if (fl & 4)
+        off = -mn[0] - span;
+    if (fl & 8)
+        off = -mn[0] - 0.5f * span;
+    for (int i = 0; i < n; i++)
+        pos[i] += off;
+}
+
+/* a sizer across (Pause's buttons): its items' boxes (hidden ones count) laid as sizer_row. Down (no flag 1: no
+ * layout here needs it) and the across alignments 0x10 / 0x20 / 0x40 (none uses them) are not ported */
 static void sizer_lay(const Gui *g, Node *sz)
 {
+    enum { N = 16 };
+    float mn[N], mx[N], be[N], af[N], pos[N];
+    int st[N], n = 0;
+    Node *it[N];
     if (!(sz->sflags & 1))
         return;
-    float place = 0, prev_max = 0, prev_after = 0, start = 0;
-    int first = 1;
-    Node *last = NULL;
-    for (Node *c = sz->child; c; c = c->next) {
-        float c0, c1;
-        node_span(g, c, &c0, &c1);
-        c0 *= c->m;
-        c1 *= c->m;
-        if (first) {
-            place = c->si[0] - c0;
-            start = 0;
-            first = 0;
-        } else
-            place = place + prev_max + prev_after + c->si[0] - c0;
-        c->p[0] = place;
-        prev_max = c1;
-        prev_after = c->si[1];
-        last = c;
+    for (Node *c = sz->child; c && n < N; c = c->next, n++) {
+        node_span(g, c, &mn[n], &mx[n]);
+        mn[n] *= c->m;
+        mx[n] *= c->m;
+        be[n] = c->si[0];
+        af[n] = c->si[1];
+        st[n] = c->si_s;
+        it[n] = c;
     }
-    if (!last)
+    if (!n)
         return;
-    float end = last->p[0] + prev_max + prev_after, shift = 0;
-    if (sz->sflags & 4)
-        shift = -end;
-    else if (sz->sflags & 8)
-        shift = -0.5f * (start + end);
-    for (Node *c = sz->child; c; c = c->next)
-        c->p[0] += shift;
+    sizer_row(n, mn, mx, be, af, st, sz->sflags, sz->stretch, pos);
+    for (int i = 0; i < n; i++)
+        it[i]->p[0] = pos[i];
 }
 
 static void layouts_lay(const Gui *g, Node *nd)
