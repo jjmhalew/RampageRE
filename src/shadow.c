@@ -7,9 +7,9 @@
  * building_light_grid and city.c's building light, docs/BUILDING_LIGHT_NOTES.md).
  * [R] = read in that code, [G] = a guess or a stand-in where it matters.
  *
- * Colours: the game hands the GS bytes where 128 is 1.0. Vertex colours go through as they are [G: formats 0x42 and
- * 0x142 carry them unchanged]; a material colour (the monster blobs) is halved by the shader [G: as the water's is,
- * docs/WATER_NOTES.md]. So: the grid's alpha byte / 128, the object quads' (halved) bytes / 128, the blobs' / 255. */
+ * Colours: the game hands the GS bytes where 128 is 1.0. The grid's and the object quads' VU programs (0x3514D0,
+ * 0x357B50) store the vertex colour as it is [R]; the blobs' (0x354640) take none, but a constant: the material
+ * colour, rgb halved, alpha x 128/255 (colour mode 3, 0x265B28) [R]. So: the grid's alpha byte / 128, the object quads' (halved) bytes / 128, the blobs' / 255. */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>

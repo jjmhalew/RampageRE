@@ -449,8 +449,9 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
 
 /* the particles (fx.c): after the world, not writing depth, tested against it unless the effect says not to
  * (-TestZBuffer); additive or alpha blended; the colour times the texture (the game's 128 = 1) */
-/* the water surfaces (water.c; ROWater 0x339D00): unlit white x the EnvMap texture at the view's reflection, opaque,
- * fogged as the world */
+/* the water surfaces (water.c; ROWater 0x339D00): the EnvMap texture at the view's reflection, opaque, fogged as the
+ * world. Shader 0x7E's pass [R]: TCC 0, TFX 1 (DECAL: the texture's colour, the vertex alpha), no alpha test (TEST
+ * 0x50002), texture flags 0x11 (bit 0: CLAMP_1 REPEAT on S and T, 0x26AA20) */
 static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
 {
     static float *uv;
@@ -458,6 +459,8 @@ static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
     glDisable(GL_LIGHTING);
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
+    GLboolean atest = glIsEnabled(GL_ALPHA_TEST);
+    glDisable(GL_ALPHA_TEST);
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
     glEnableClientState(GL_VERTEX_ARRAY);
@@ -476,16 +479,15 @@ static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
         } else
             glDisable(GL_TEXTURE_2D);
         const uint32_t *tris = water_triangles(w, &ntris);
         glVertexPointer(3, GL_FLOAT, 0, water_positions(w));
         glTexCoordPointer(2, GL_FLOAT, 0, uv);
         glDrawElements(GL_TRIANGLES, 3 * ntris, GL_UNSIGNED_INT, tris);
-        if (id)
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     }
+    if (atest)
+        glEnable(GL_ALPHA_TEST);
     glEnable(GL_LIGHTING);
 }
 

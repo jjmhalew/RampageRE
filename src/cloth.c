@@ -322,7 +322,8 @@ static void skinned(const Cloth *c, int i, const float (*skin)[16], float *o)
 }
 
 /* a particle's place held by its bones, or by the object matrix m when it has none (a flag) [R]. Without a skeleton
- * a particle with bones goes by m as well [G]: the game always has one for those */
+ * a particle with bones goes by m as well, as the game's rest pose does (0x1D9BB4 -> 0x1DA2C0: bind x the object's
+ * matrix) [R]; every monster cloth has a skeleton and every particle boned, every flag none */
 static void held_place(const Cloth *c, int i, const float (*skin)[16], const float *m, float *o)
 {
     if (skin && c->nb[i])
@@ -468,8 +469,8 @@ static void substep(Cloth *c, int k, float h, const float (*skin)[16])
         }
     }
     if (p->is_stiff) {
-        /* IS_STIFF (the monsters): a spring of the particle's own stiffness (100 .. 500, rising away from the pins)
-         * to where its bones put it; the springs between particles only limit the stretch (0x1D8CA0) */
+        /* IS_STIFF (the monsters): a spring of the particle's own stiffness (baked in the file, 0 on pins, else in
+         * [MIN, MAX]: 100 .. 500, painted per vertex, not by its distance from the pins) to where its bones put it; the springs between particles only limit the stretch (0x1D8CA0) */
         for (int i = p->first; i < end; i++) {
             if (c->held[i])
                 continue;
@@ -692,8 +693,8 @@ void cloth_reset(Cloth *c, const float (*skin)[16])
 
 void cloth_step(Cloth *c, float dt, const float (*skin)[16], const float wind[3])
 {
-    if (!c || !(dt > 0))
-        return;                                      /* [G] with dt 0 the game would zero the velocities */
+    if (!c)
+        return;                                      /* dt <= 0: inv_dt 0 (0x1D93A8), no sub-step, velocities 0 */
     if (wind) {                                      /* 0x1D6740 */
         c->acc[0] += wind[0]; c->acc[1] += wind[1]; c->acc[2] += wind[2];
     }

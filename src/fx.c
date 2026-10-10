@@ -1589,7 +1589,8 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
             FxQuad q;
             memset(&q, 0, sizeof q);
             /* [R 0x22233C] a billboard's axes are size x size_mul along the camera's right and up: the effect's matrix
-             * (its scale) does not reach them; a relative flat quad's and a streak's do */
+             * (its scale) does not reach them; a relative flat quad's does, and a streak's length but not its width
+             * (0x1F769C: size x size_mul, laid in camera space after the transform) */
             float size = p->size * graph_eval(L, &d->g[G_SIZEMUL], tp), size_s = size * f->scale;
             float v[4];                                 /* the colour [R 0x21C5BC.., 0x222680..] */
             for (int i = 0; i < 4; i++)
@@ -1623,7 +1624,7 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
                     q.pos[i] += q.axis[0][i];
                 }
                 q.size[0] = 2 * half;
-                q.size[1] = size_s;
+                q.size[1] = size;
             } else if (d->pflags & PF_NOBILLBOARD) {
                 /* [R 0x222C08] DontBillboard: not relative, the world's x and y (the draw's model matrix), forward_axis
                  * unused; relative, rows 0 and 1 of the emitter's frame x B (forward_axis 2: identity; 1: rows (1, 0,
@@ -1691,8 +1692,8 @@ int fx_shape_meshes(const FxLib *L, int i, const BdpEntry **out, int max)
 }
 
 /* per particle [R 0x21B780..0x21BAA8]: s = size_mul(t) (t over the life with NormalizedSizeMultiplier); s <= 0 is not
- * drawn, else the renderer state at 0x4CB52C gets s [G: the shape's uniform scale, read by VU1; every XForm effect has
- * a constant size_mul of 1]; the turn = the tumble about its world-fixed axis by rate x age, after the start
+ * drawn, else the renderer state at 0x4CB52C gets s, which only scales the shape's culling sphere (0x16DDA8; its
+ * copy at 0x4CC040 never reaches VU1, the upload 0x263210 ending at 0x4CC03F), not the drawn matrix; the turn = the tumble about its world-fixed axis by rate x age, after the start
  * orientation (0x185A50 axis-angle, 0x105340 to a quaternion, 0x196F30 the product, 0x104BB0 to a matrix) [R];
  * the place the particle's; then the shape draws (its vtable +0x10, SimpleShape 0x184BB0). The particle size is only
  * the ground collision's radius. */
@@ -1721,7 +1722,7 @@ int fx_meshes(const FxWorld *w, FxMesh *out, int max)
                 for (int c = 0; c < 3; c++)
                     R[r][c] = T[r][0] * p->xr0[0][c] + T[r][1] * p->xr0[1][c] + T[r][2] * p->xr0[2][c];
             FxMesh *m = &out[n++];
-            s *= f->scale;
+            s = f->scale;                               /* the effect's own scale only */
             for (int c = 0; c < 3; c++) {
                 for (int r = 0; r < 3; r++)
                     m->m[4 * c + r] = R[r][c] * s;

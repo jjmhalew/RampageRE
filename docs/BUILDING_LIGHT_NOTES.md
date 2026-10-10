@@ -108,7 +108,9 @@ in the game darkens, burns or tints them by damage or by storey. Without normals
 show their baked colour × the texture, as the game's own 0x142 buffers (shader 0x51) do: its VU1 program (0x357B50,
 record 0x3B8398) transforms the place, makes STQ from the uv and stores the vertex colour straight into RGBAQ, never
 reading the light rows 13 … 16 (the lit 0x152 program 0x37A2A0 does); none of the 0x142 shaders' programs reads them
-[R]. That the GS multiplies it by the texture (TEX0.TFX modulate) is taken from the 0x80 = 1.0 convention [G].
+[R]. The GS multiplies it by the texture [R]: 0x51's pass is slot 0, state 1, TCC 1, TFX 0 (modulate), copied into
+TEX0 per draw (0x2598A0: 0x259AA8 .. 0x259AEC), so (texture × colour) >> 7, 0x80 = 1.0, up to 2× above it (the
+interiors' colours stop at 0x7F).
 
 ## The neighbours' shadows (0x31C8C0, 0x31C860, 0x31C7B0)
 

@@ -80,7 +80,11 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
 - **Scrolling title** (from 1.5 s): the block's name `format(localize("Results_CompletlyDestroyed"),
   localize(getBlockName(0)))` ("Downtown - COMPLETELY DESTROYED"), or, on the city's last block with buildings left,
   the block's `ResultsNIText`; two copies 150 apart move left at 150 a second between x 62 and 503 (the layout's
-  `M 0x310` boxes, a depth-only shader, are not drawn [R] and are taken to mask the ends [G: the text's depth]);
+  `M 0x310` boxes, a depth-only shader, are not drawn [R] and are taken to mask the ends [G]: the box's shader is
+  0x17D100's depth-only one (TEST 0x52001, ZB_ONLY) drawn with a bias of -0.001 off the projection's [3][2]
+  (0x17C180 .. 0x17C19C -> 0x25B410 / 0x25B4D4), the glyphs depth-tested GEQUAL (OFont +0x5C 0x10, 0x1B6590; code
+  0x14 -> ZTST GEQUAL, 0x25AD08), Z = 16777210 - 16777205 z_ndc (0x25B500 ..): read so, the box lies behind the
+  title's plane and would not cut it; the 2D camera's z and the depth range in force were not traced);
   "Live" blinks every 0.5 s.
 - **Count-up** (from 1.5 s): the lines destruction, people, vehicles, bonus, time bonus, challenge — the point
   categories 0..5 summed over the players — appear one by one, each counting from 0 in 0.5 s, the total with them

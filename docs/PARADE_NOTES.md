@@ -186,8 +186,10 @@ template's name is what the challenge counts (0x346780).
 - **The world's state 6** for the chains: the Actor's destructor tests state 6 and a current block ≥ 0 (0x30DFC0)
   [R]; the port takes it as always true. gAIMgr's clock is reset at the block's load (0x334C40) and runs only while
   it is activated (BeginBlockNI, 0x333D48) [R]: `parade_activate`.
-- **[G] Clip lengths**: from the host, else the bikers' as read from SanFrancisco.bdp (`Biker_Riding_Throw` 0.7 s,
-  `Biker_Held` 1.0 s), else 1 s.
+- **Clip lengths** [R]: `Duration` when the look gives one, else the anim's own (+0x1C), read as the anim updates
+  (0x30AAD0 setup, 0x30A850 update); a length of 0 never completes. Here: from the host, else the bikers' as read
+  from SanFrancisco.bdp (`Biker_Riding_Throw` 0.7 s KeyInterp, `Biker_Held` 1.0, `Biker_Riding` / `Biker_Bike` 0.1
+  RawAnims; the Biker template has no `Duration`), else 0.
 - **Not ported**: the riderless bike's `onMoverCallback` from a SphereMover (taken to come only from its line), `onBuildingDestruction` (never sent
   to these), which monster's slot gets the score with two players (the port says monster 0 / the one given).
 

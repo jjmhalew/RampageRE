@@ -199,6 +199,11 @@ it and are pulled onto it, so the fires sit about 8 from the centre, at z ≈ �
   (`setCallback`), `setFovTarg`, `enableInertia`, `setPosParms` … are not bound (no script calls them).
 - The walk (WalkToGoal 0x2F1F20) calls 0x2EDB40 with mode 0 and no avoidance: the stick along the flat direction,
   action 9 [R]; only the bots' callers avoid other monsters. 0x4D6A9A is a debug byte nothing writes [R].
-- **[G]** A play-move goal whose state is unknown ends at once. In the game (0x2D9890 → NULL, 0x2F1DB0) it never
-  begins and is forced every frame: no moveComplete, the queue stuck. Only `Ground_Shakeoff` is missing, asked by
-  Levels.scr only when frand comes out at exactly 1.0 (odds about 6e-8).
+- A play-move goal whose state is unknown ends at once here, a stand-in for the game's undefined behaviour. In the
+  game [R]: the init (0x2F1EE0) stores +0x20 = 0x2D9890(name) = NULL; the update (0x2F1DB0) finds it not begun and
+  calls 0x2F2B90(pad, NULL), which answers 0 at once (0x2F2BBC), so the force 0x2D9710(monster, NULL, 1, 0) and
+  0x2F21C0(goal, 0) ("keep", no callback). Climbing (+0xC644), 0x2D971C .. 0x2D9818 ignore the NULL and force slot
+  34's state every frame: it never begins, no moveComplete, the queue stuck. On the ground 0x2D9820 writes the start
+  record +0x118 = {1, NULL, 0} and, interruptible, +0x110 = &+0x118 and 0x2DA570; the next frame the controller
+  (0x2C0DC4 .. 0x2C0E44) installs the NULL state (0x2EBF50) and reads through it (`lw 0x4(NULL)`): undefined. Only
+  `Ground_Shakeoff` is missing, asked by Levels.scr only when frand comes out at exactly 1.0 (odds about 6e-8).

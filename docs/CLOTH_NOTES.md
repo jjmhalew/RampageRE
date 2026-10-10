@@ -62,7 +62,9 @@ A **spring** (24 bytes): u32 a, u32 b, f32 rest length, its square, f32 damping 
 A **bend** (32 bytes, flags only): u32 triangle t0, u32 triangle t1 (of the part), u32 p0, p1, p2, p3, f32 rest
 angle (0, a few ±0.0003), f32 k (20). FORMAT_BDP.md's "u32[4] particles, f32[3] 0" is this read off by two words.
 A **particle** (64 bytes): +0x18 is its stiffness toward the skinned rest shape (0 on pins and on the flags;
-between MIN_STIFFNESS and MAX_STIFFNESS, by its distance from the pins [G]), +0x36 u16 held (bit 0), +0x38 s16[4] collision sphere
+between MIN_STIFFNESS and MAX_STIFFNESS; baked, the code only reads it [R]. Across the 44 entries it is not
+monotone in the distance from the pins, straight or along the springs, and mirror pairs differ a little (185.22 /
+183.96): painted per vertex by an offline tool), +0x36 u16 held (bit 0), +0x38 s16[4] collision sphere
 indices (−1: the "8 × 0xFF").
 The entry's +0x44 / +0x48 are a count and array of 0x18-byte collision spheres {f32[3] offset, f32 radius?, f32, u32
 node} carried by skeleton nodes (0x1D9518): the count is 0 on all 44.
@@ -142,8 +144,10 @@ a triangle because a position can hold two or three particles — Amanda: 16 suc
 
 ## Port status
 
-Faithful: every step above, the reset/blend, the wind and its noise. Stand-ins [G]: the skin matrices come from the
-caller (the game builds them from the skeleton for the bone list only); without skin matrices a particle with bones
-goes by the object matrix (the game always has a skeleton for those; with a skeleton it puts bone-less particles at
-0); dt ≤ 0 is ignored (the
-game would zero the velocities); the collisions, the bounding sphere and the renderer's scale (+0x8C, 1) are left out.
+Faithful: every step above, the reset/blend, the wind and its noise. Without skin matrices a particle with bones
+goes by the object matrix, as the game's rest pose without a skeleton does (0x1D9BB4 -> 0x1DA2C0) [R]; with a
+skeleton the game puts a bone-less particle at 0 (0x1DA0AC, from the zero at 0x409FF8) [R], which no data has (the 17
+monster cloths bone every particle, the flags none). dt ≤ 0 is the game's: inv_dt = 0 (0x1D93A8 .. 0x1D93C4), the
+pins move with velocity 0, no sub-step runs, ADJUST_VEL zeroes the velocities [R]. Stand-ins: the
+skin matrices come from the caller (the game builds them from the skeleton for the bone list only); the collisions,
+the bounding sphere and the renderer's scale (+0x8C, 1; no use found in 0x1AA000 .. 0x1AC000) are left out.

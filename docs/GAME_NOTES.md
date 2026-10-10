@@ -263,9 +263,15 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
   centre building falls (flag 1), or Levels' ResultsNI (flag 2). Any other non-Levels script goes to the host's
   `script` callback, falling back to Levels.bsf's version.
 - `gWorld.frand` is Park-Miller (0x106BD0 on gWorld +0x828, seeded from GameStatus seed[0] at the world's reset,
-  0x2B74D0) [R]; the game's state is shared by every script, the port's modules each keep their own.
-- **[G]** What becomes of the block left behind's moving objects (0x2B6640 only re-attaches script objects to
-  buildings, 0x309E20).
+  0x2B74D0) [R]; one state shared by every script, as here (wrand.c).
+- The block left behind's moving objects [R]: every in-game activateNextBlock passes a1 = 1 (0x2AF260, 0x325054,
+  0x325258, 0x325924; only the world's reset 0x2B7568 passes 0), which first runs 0x2B66C0: 0x2A5370, the block
+  manager's unload 0x302800 (the buildings), 0x4D265C / 0x4D2660 = -1, then every object of RWorld's list (gWorld
+  +0x58, next +0x68) without flag 0x200000 gets the world's vtable +0x40 and 0x283BF0 (its destructor, vtable +8, and
+  the slot back to the pool 0x4D0000). 0x200000 is set only at 0x2D4EE8 (0x2D4C40, the monster's WeaponList objects,
+  from 0x2E8D8C): every vehicle, person, street, parade and army object goes, the monsters' weapons stay. Then
+  0x2B6640 re-attaches the new block's script objects to buildings (0x309E20). Here the whole scene is freed and
+  built again at GS_BEGIN_BLOCK (main.c `build`): the same end, a few frames later than GE_BLOCK.
 - The results screens are not drawn here: `src/hud.c` has them (hud_results; docs/SCREENS_NOTES.md), fed by these
   queries (game_points, game_kills, game_king, game_blocks_won, game_cities_won, game_blocks_to_win,
   game_cities_to_win, game_city_index, game_clock, game_clock_limit, game_block_name, game_city_destroyed ...).

@@ -396,7 +396,11 @@ at the first block's end.
     stores at 0x4D4E88, as GE_BLOCK's. The game keys the tube's slot by the storey table's entry for the floor
     (0x319128: building +0x200[floor]); the grid fills that table only for 0 .. its storey count (0x2D24A8:
     `table[k] = k`), so these tubes get the id of a storey the building lacks, and no broken cell lets them out,
-    in the game as in the port **[R]**. What lies past the table's filled part was not read **[G]**;
+    in the game as in the port **[R]**. Past the filled part [R]: the table is the grid's +0x48 words (the grid at
+    the Building's +0x1B8, so building +0x200; ctor 0x2BFA10 -> 0x2D31F0, which zeroes +0x44, +0x94, +0x98 .. +0xBC
+    and +0x658 .. +0x6EC but never +0x48 .. +0x93: room for 19), written only by that fill; the pool does not clear
+    a freed slot (0x283BF0 rewrites +0 .. +0xC), so past it the game holds stale memory and the tube's id is
+    undefined (it could by chance be a real storey's). The port's floor number is a stand-in for that;
   - what 0x2D40B0 / 0x2D3F90 do besides +0x109 and the world's list (0x2C1A80 / 0x2C1A90 on 0x4D3330 + 0x18).
 - **Building and banner details:**
   - `b.getPosition()` / `getSizeZ()` without the host's `building_place`;

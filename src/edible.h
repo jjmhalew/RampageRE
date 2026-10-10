@@ -60,7 +60,9 @@ typedef struct {
 } EdibleKind;
 
 typedef struct {                                     /* a window that hides an edible */
-    int building, storey, column, side;              /* storey: as built (the game's floor id, +0x200); side: +0xC */
+    int building, storey, column, side;              /* storey: as built (the game's floor id, +0x200; past the
+                                                      * table's filled part stale memory there, the floor here);
+                                                      * side: +0xC */
     int kind;                                        /* -1: none (eaten, gone) */
     int item;                                        /* its edible once revealed, -1 none */
 } EdibleSlot;

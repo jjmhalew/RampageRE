@@ -199,7 +199,8 @@ static void set_pulse(ParadeObj *o, float delay)
 
 /* ---------------------------------------------------------------- the actor's anim (0x30AAD0) */
 
-/* a look's one play when the host cannot say: the bikers' clips as read from SanFrancisco.bdp [R] */
+/* a look's one play when the host cannot say: the bikers' clips as read from SanFrancisco.bdp [R]; another is 0,
+ * which never completes (0x30A850: a length of 0 never ends the play) */
 static float known_length(const char *clip, const char *shape)
 {
     static const struct { const char *name; float len; } k[] = {
@@ -209,7 +210,7 @@ static float known_length(const char *clip, const char *shape)
     for (size_t i = 0; n && i < sizeof k / sizeof k[0]; i++)
         if (same_prefix(n, k[i].name) && strlen(n) == strlen(k[i].name))
             return k[i].len;
-    return 1.0f;                                     /* [G] */
+    return 0;
 }
 
 /* [R] startAnim / startAnimAtRandomOffset: the look ActorAnimShape|<name> (its Shape|ShapeName, else the template's,
@@ -909,7 +910,7 @@ static void obj_step(Parade *p, ParadeObj *o, float dt)
                 o->anim_time = fmodf(o->anim_time + dt, o->anim_len);
         } else if (!o->anim_done) {
             o->anim_time += dt;
-            if (o->anim_time >= o->anim_len) {
+            if (o->anim_len > 0 && o->anim_time >= o->anim_len) {
                 o->anim_time = o->anim_len;
                 o->anim_done = 1;
                 biker_anim_done(p, o);
@@ -1188,7 +1189,7 @@ void parade_hold(Parade *p, int obj, const float hand[16], int mirrored, float d
     if (o->kind == PAK_BIKER) {                      /* its anim goes on in the hand */
         if (o->anim_loop && o->anim_len > 0)
             o->anim_time = fmodf(o->anim_time + dt, o->anim_len);
-        else if (!o->anim_done && (o->anim_time += dt) >= o->anim_len) {
+        else if (!o->anim_done && (o->anim_time += dt) >= o->anim_len && o->anim_len > 0) {
             o->anim_time = o->anim_len;
             o->anim_done = 1;
             biker_anim_done(p, o);

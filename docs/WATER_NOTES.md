@@ -161,6 +161,9 @@ plays a part [R: nothing in 0x3368C0 .. 0x339DF0 reads them; they are read by 0x
   written), PRMODE 0x38 (shaded, textured, fogged, no blend): drawn opaque, depth tested and written, fogged, as here.
 - The port's own: the strip's joins between rows are left out (the game's rows run on in one strip with no
   degenerate triangles), two triangles per cell instead; k is held at 0.5 for a very long frame (the game has no
-  guard). **[G]** The texture wrap (not in that state; S repeats round, T stays in 0 .. 1 from above).
+  guard).
+- The pass [R]: slot 0, state 1, TCC 0, TFX 1 (DECAL: the pixel is the texture's colour and the vertex alpha, no
+  alpha test), texture flags 0x11: bit 0 makes CLAMP_1 REPEAT on S and T (0x265840 -> 0x26AA20); the material is built
+  in code, so no region override (material +0x80 zero). Here GL_REPEAT both ways, the alpha test off.
 - Not ported: the splash effects' spawning, the monster's water test (0x2D5F00) and its wading depth input; the
   LoadWhenDistant / LoadWhenWaiting choice of factory (0x3050F0, keys 0x3F5DA0 / 0x3F5DA4).

@@ -166,8 +166,9 @@ Colours: the GS's 128 is 1.0. Vertex colours reach it unchanged (the grid's alph
 [R]. The three shaders (records 0x35, 0x4D, 0x5A; 0x59 and 0x5A share a checksum) all blend with ALPHA 0x44, (Cs −
 Cd) · As + Cd [R]: 0x5A (the grid) state 0, PRMODE 0x68, untextured; 0x4D (the object quads) state 4, textured, no Z
 write (TEST 0x51001); 0x35 (the blobs) state 2, textured, alpha test GREATER 0, Z written (here the blob writes no
-depth). [G: that the vertex colours reach the GS unchanged is the VU programs', not read]. `src/shadow.c`
-gives GL-scale colours.
+depth). The VU1 programs [R]: 0x5A's (0x3514D0) and 0x4D's (0x357B50, 0x51's) store the vertex colour into RGBAQ as
+it is; 0x35's (0x354640) never reads one: RGBAQ is VU row 23, the colour mode 3 constant (material +0x40, rgb × 0.5,
+alpha × 128/255, 0x265B28 .. 0x265BC4). `src/shadow.c` gives GL-scale colours.
 
 - **Ground grid** (`SHADOW_PASS_GROUND`): right after the street, before buildings and objects. No texture,
   `glShadeModel(GL_SMOOTH)`, `GL_BLEND` `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`, depth test off, `glDepthMask(GL_FALSE)`,

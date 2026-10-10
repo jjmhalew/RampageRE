@@ -151,7 +151,8 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 - t = age / lifetime. Size = size × size_mul(t), the quad's full width: its two axes are size × size_mul(t) times the
   current camera's right (+0x30) and up (+0x3C) (0x22233C … 0x2223D8), the corners (±0.5, ±0.5) (0x3B2480) [R]. The
   effect's matrix never reaches these axes, so a scaled effect's billboards keep their size (only their places
-  scale). The ground test and the bounding box use half the size as the radius.
+  scale). A streak (0x1F7500) [R]: tail and head (+ length × direction) go through the matrix, so its length scales,
+  but its width is size × size_mul (0x1F769C), laid in camera space after the transform, so it does not. The ground test and the bounding box use half the size as the radius.
 - **DontBillboard** (0x222C08) [R]: not relative, the quad lies in the world's x y plane (the draw's model matrix ×
   size), forward_axis unused (Barf_pool, chocolate_pool, the Carbinator's glows); relative, rows 0 and 1 of (emitter
   × effect) × B, B by forward_axis: 2 identity, 1 rows (1, 0, 0), (0, 0, 1), (0, −1, 0), 0 rows (0, 1, 0), (−1, 0,
@@ -185,7 +186,9 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
   start_rot_distribution(r) (+0x68; at the emitter's cycle point with +XF_AgeNotDistribution).
 - **Drawing** (0x21B330 / 0x21DC20, the shape branch) [R]: per particle s = size_mul(t); s ≤ 0 is skipped; the
   renderer state at 0x4CB52C gets {flags, 1, s} (0x21B740; renderer +0xAC: u16 flags, bit 0 "clip needed", u16, float,
-  sent to VU1 at 0x4CC040) [G: a uniform scale, read only by the VU1 code; every XForm effect has size_mul 1]; the
+  copied to 0x4CC040) [R]: s only scales the shape's culling sphere (0x184BB0 -> 0x16DC90 -> 0x16DD30: state +0xAE = 1
+  from 0x21B74C multiplies the radius by +0xB0, 0x16DDA8) and skips s ≤ 0; 0x4CC040 is written and never read (the
+  matrix upload 0x263210 sends 0x4CBFC0 .. 0x4CC03F) and the particle's matrix carries no s; the
   matrix is quat(+0x4C) × quat(axis +0x5C, speed × age) with the particle's place (× the emitter's matrix when
   relative): B × RowRot(axis, rate × age), the tumble after the start turn about an axis fixed in the world
   (0x21B8EC … 0x21B914; the axis kept raw, 0x2119D0); then the shape's vtable +0x10 draws it (SimpleShape 0x184BB0: culled by its sphere, drawn like a

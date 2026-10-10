@@ -251,7 +251,9 @@ static int finish(DirAI *ai, DirGoal *g, int running)
 /* PlayMoveGoal::update (0x2F1DB0) [R] */
 static int play_update(DirAI *ai, DirGoal *g, const DirGraph *ag, MoveRunner *r, MoveCall call, void *ctx)
 {
-    if (g->state < 0 || g->state >= r->g->n) {      /* no such state: over at once [G: the game would wait forever] */
+    if (g->state < 0 || g->state >= r->g->n) {      /* no such state: over at once, a stand-in: the game installs the
+                                                      * NULL state (0x2C0E18) and is undefined; climbing it is stuck
+                                                      * forcing slot 34 (FLOW_NOTES.md) */
         if (g->notify)
             ai->done++;
         return 0;
