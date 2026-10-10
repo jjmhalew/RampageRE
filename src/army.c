@@ -1589,7 +1589,9 @@ static int tank_pulse(Army *a, ArmyUnit *u)
 {
     if (u->state == 0) {                             /* not yet on screen */
         float x = u->pos[0] > 0 ? u->pos[0] + 10 : u->pos[0] - 10;
-        if (x >= a->view[0] && x <= a->view[1]) {    /* gWorld.isSphereVisible(pos, 1) [G: the view's x range] */
+        float p[3] = { x, u->pos[1], u->pos[2] };
+        if (a->host.visible ? a->host.visible(a->host.ctx, p, 1) : x >= a->view[0] && x <= a->view[1]) {
+                                                     /* gWorld.isSphereVisible(pos, 1) */
             u->state = 1;
             attack_init(a, u);                       /* createAttackMover; gCameraMgr.addInterestObject */
         }

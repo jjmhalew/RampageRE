@@ -496,8 +496,8 @@ static int monster_female(Mon *mo)
     return g.at && group_num(g, "IsFemale", 0) != 0;
 }
 
-/* gWorld.isSphereVisible for people.c: the sphere inside the game camera's view (its fov across the 640 x 480 GUI
- * screen's height, 4:3 across) */
+/* gWorld.isSphereVisible (0x16C0A0, the camera's six planes) for people.c, army.c and boss.c: the sphere inside the
+ * game camera's view (its fov across the 640 x 480 GUI screen's height, 4:3 across) */
 static int people_visible(void *ctx, const float p[3], float radius)
 {
     const Viewer *v = ctx;
@@ -772,6 +772,7 @@ static void build(Viewer *v)
         host.clip_seconds = army_clip_seconds;
         host.shape_box = army_shape_box;
         host.shape_sphere = model_sphere;
+        host.visible = people_visible;
         host.node_world = army_node_world;
         host.ctx = v;
         v->army = army_new(&host);
@@ -952,6 +953,7 @@ static void build(Viewer *v)
         bh.clip_seconds = army_clip_seconds;
         bh.shape_box = army_shape_box;
         bh.shape_sphere = model_sphere;
+        bh.visible = people_visible;
         bh.weapon_make = boss_weapon_make;
         bh.weapon_tick = boss_weapon_tick;
         bh.ctx = v;
@@ -3237,7 +3239,7 @@ static void army_step(Viewer *v, float dt)
         boxes[nb].storeys = b->n;
         boxes[nb].gone = b->state == BUILDING_GONE;
     }
-    army_set_view(v->army, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the view's x range [G] */
+    army_set_view(v->army, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the camera's x (FlybySound), and the x range unhosted */
     army_update(v->army, dt, m, nm, boxes, nb);
     vehicle_step(v, dt, m, nm, boxes, nb);
     parade_step(v, dt, m, nm);

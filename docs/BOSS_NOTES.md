@@ -357,7 +357,6 @@ falling back one loses its barriers too.
   - `setWeaponFlags(-1, 16)` (Boss_Helicopter: not done);
   - AttackObject weapons being on from the start (the helicopter and blimp never call enableWeapons, yet fire).
 - **Odds and ends:**
-  - `isSphereVisible` (the view's x range, `boss_set_view`);
   - `adjustZRot` (taken as adding to the turn);
   - getFacing().z read back in (−π, π];
   - the numGenerators global and the play values (taken as starting again per block);

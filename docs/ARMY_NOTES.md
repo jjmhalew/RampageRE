@@ -165,8 +165,9 @@ at 0.
 **Tanks** (`Vehicle_Attack.bsf`, pulse 1/15 s):
 - **Arrival** [R]: from x = ±100, y = −7.5, along a LineMover at 12.
 - **The AttackMover** [R] (init 0x314B40, update 0x313F80) takes over once the tank is on screen
-  (`isSphereVisible`: gWorld id 0x40 → 0x16C0A0 on the camera, a six-plane frustum test [R]; here the view's x range,
-  `army_set_view` [G]):
+  (`isSphereVisible` of a point 10 beyond it, radius 1: gWorld id 0x40 → 0x16C0A0 on the camera, a six-plane
+  frustum test, four sides n·p + r ≥ d, then the depth along the view within near − r .. far + r [R]; here the host's
+  `visible`, the game camera's view at 4:3, main.c `people_visible`):
   - **Target:** the monster ahead nearest along x. It is the weapons' target too.
   - **Distance:** by dx² alone. Beyond `ApproachRange` (20) the tank speeds up at 8/s to `Velocity` (8) after a 2 s
     wait. Inside `FleeRange` (15) it backs off. In between it brakes.
@@ -311,7 +312,7 @@ Floating = 100
   follows the mover's x axis, the tilt stays.
 - **The weapon system:** the weapon node without the host's `node_world`; the monster's target point's x and y. Both the projectile's wobble (definition flag 8) and its spread (record flag 8)
   come from flags no book sets.
-- **Other:** `isSphereVisible` and the camera's place (`army_set_view`), the AttackObject hit wobble (+0x18C), the
+- **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject hit wobble (+0x18C), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).
 - **Not ported:** bosses, `Vehicle.bsf` (the `Humvee` and other street vehicles, plain `AK_OTHER` here), the news
   helicopters' cameras, Rocket / RocketBase. The `BradleyTroopCarrier` is a CombatTruck and is covered.

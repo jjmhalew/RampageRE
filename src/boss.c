@@ -1053,8 +1053,10 @@ static void horizontal_knock(float v[3], const float d[3], float across, float u
     scale3(v, across);
     v[2] = up;
 }
-static int visible(const Boss *b, const float p[3], float r)   /* [G] gWorld.isSphereVisible: the view's x range */
+static int visible(const Boss *b, const float p[3], float r)   /* gWorld.isSphereVisible (unset: the view's x range) */
 {
+    if (b->host.visible)
+        return b->host.visible(b->host.ctx, p, r);
     return p[0] + r >= b->view[0] && p[0] - r <= b->view[1];
 }
 /* a knocked-away path (Boss_Helicopter createKnockedAwayPath, Boss_Jumper doHitReaction, Boss_Chicago_Saucer

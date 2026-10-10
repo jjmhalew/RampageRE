@@ -86,6 +86,8 @@ typedef struct {
      * sphere of radius 1, collide_shape_pick) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
     int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
+    /* gWorld.isSphereVisible (id 0x40 -> 0x16C0A0): the sphere inside the camera's frustum; unset, the view's x range */
+    int (*visible)(void *ctx, const float p[3], float r);
     /* the army's weapons (army.c weapon_make over a template's Weapon| group, and one frame of weapon_tick with no
      * owning unit). Without them the bosses do not fire */
     int (*weapon_make)(void *ctx, ArmyWeapon *w, Group weapon_group);
