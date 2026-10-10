@@ -77,6 +77,7 @@ typedef struct {
     int mounted, rail, storey;   /* its building's face: the building (-1 none), the rail and storey there */
     int smash;               /* JUMP SMASH (upgrade flag 8) or the rage: the butt slam on a roof */
     float hp, half_width;    /* +0xA4C; MONSTER_DATA +0x198 x its scale */
+    float probe;             /* 0x2E4E40: (MONSTER_DATA +0x1A4 + the kept type-16 record's +0x10) x its scale */
     int self;                /* its slot in m */
     const DirBuilding *b; int nb;
     const DirMonster *m; int nm;

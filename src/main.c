@@ -125,6 +125,7 @@ typedef struct Mon {
         atk[MOVES_PARTS];
     unsigned atk_seq;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
+    float ev16;                                      /* the kept type-16 event record's +0x10 (+0xBAA0), 0 none */
     float sph_prev[64][3]; int sph_prev_n;           /* its collision spheres' centres last frame (+0x430, valid +0x688) */
     int reveal, shown;                               /* the cryotube's monster (Viewer.extra): out of the world
                                                       * (+0x108 / +0x109) until the reveal shows it */
@@ -326,6 +327,7 @@ static void play_state(Mon *mo)
             printf("  root of %s: %.2f %.2f %.2f\n", st->clip, rt[0], rt[1], rt[2]);
     }
     mo->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed, on the ground */
+    mo->ev16 = 0;                                     /* (and no event record kept) */
     mo->mode = MODE_GROUND;                           /* (its events set the mode it is in) */
     climb_clip_started(&mo->mount, st->name);
     mo->mirror = mo->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
@@ -1321,6 +1323,10 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     int set = 0, add = 0, relative = 0;
     if (e->type == 7) {                              /* 0x2E7DE0 */
         mo->mode = (int)e->value;
+        return;
+    }
+    if (e->type == 16) {                             /* the record kept at +0xBAA0 till the next clip (0x2E7F70) */
+        mo->ev16 = e->p[0];
         return;
     }
     if (e->type == 6) {                              /* a sound at the monster ({6, at, ?, name}) */
@@ -3568,6 +3574,7 @@ static void bot_views(Viewer *v, DirBuilding *db, DirMonster *dm, DirBotView *bv
         b->smash = (mo->power.abilities & 8) != 0 || mo->power.rage != 0;
         b->hp = mo->hp;
         b->half_width = dm[k].radius;
+        b->probe = ((mo->graph.probe[1]) + mo->ev16) * (mo->scale > 0 ? mo->scale : 1);
         b->self = k;
         b->b = db;
         b->nb = nb;

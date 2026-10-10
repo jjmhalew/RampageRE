@@ -87,7 +87,7 @@ not facing it: turn to it; else punch [R].
 building: a ray (IsBuilding, 0x2ED990) meeting another building steps out into the street (stick (0, −1)), or along it
 when already out at y < −5; another monster (not human) standing on the point is punched; one whose body circle
 overlaps (0.75 d < r + r') is passed in depth (the stick's y −1 for a player, a mounted one or one further back; else
-+1); a front-corner rule nudges it out round a building's front corner. Scripted walks (WalkToGoal) pass no building:
++1); a front-corner rule nudges it out round a building's front corner (below). Scripted walks (WalkToGoal) pass no building:
 they avoid nothing.
 
 The goal does not eat, does not seek the army or the edibles, and has no difficulty constants [R: none of its
@@ -209,8 +209,13 @@ Stand-ins and gaps:
   The ray (0x2ED990) runs from the bot along the flat way to the point without end, against the buildings (include
   0x2000): a first building other than bld sends it out into the street and walks at once [R]. The cooldown +0x64 is
   set (0x2EEBD0) when the monster's foot lock moved it (0x2E0F54) or its hands lifted it (0x2E1044) [R].
-- **[G]** The front-corner rule of the walk (0x2EE150 … 0x2EE374: D = R + √2 A, A the probe ahead with a per-state
-  offset not read) is not ported; the monster loop's tests are 2D here, 3D in the game, with radii from 0x2E4FA0.
+- The front-corner rule of the walk (0x2EE150 … 0x2EE374) [R]: with the point at or behind bld's front (its y ≥ the
+  box's +0x1E0) and the monster reaching past it (y + R > the point's y), D = R + √2 A, R = MONSTER_DATA +0x198 and
+  A = MONSTER_DATA +0x1A4 plus the kept type-16 event record's +0x10 (+0xBAA0: only the Transition_Ground clips and
+  Spider_Jump have one, and a clip's start drops it), both × the scale when +0xA74 is set (0x2E4D00, 0x2E4E40);
+  going right (the point's x > the monster's) with the box's left side D or more to its right, or left with the
+  right side D or more to its left, the stick less (0, 1, 0) (0x40A018), made 1 long ((1, 0, 0) when < 1e‑6). As
+  here (director.c `bot_walk`). The monster loop's tests are 2D here, 3D in the game, with radii from 0x2E4FA0.
 - A thrown object hitting a building clears its hitter (Building::hit 0x2BC150 keeps only a monster attacker), so
   nobody is paid for what it fells [R].
 - The camera (0x2D69A0) frames no monster that is hidden, dropping in, or human without a running streaker, alone

@@ -33,7 +33,8 @@ typedef struct {                                     /* a timed event of the sta
     uint32_t type;                                   /* 21 a script call, 7 the mode, 6 a sound, 0 an attack, ... */
     float at;                                        /* when, as a share of the clip's length */
     const char *name;                                /* 21: the script function, 6: the sound */
-    float p[4]; uint32_t value;                      /* 21: its four arguments; 7: the mode; 0: the body
+    float p[4]; uint32_t value;                      /* 21: its four arguments; 7: the mode; 15, 16: p[0] the
+                                                        record's +0x10 (kept at +0xBA9C / +0xBAA0); 0: the body
                                                         parts (bits), p[0] 1 arms / 0 disarms them, p[1..3] its
                                                         floats at +0x2C (5 a punch, 20 the kick), +0x30, +0x34 */
     uint32_t aflags, victims; int level;             /* 0: its flags (+0x14: 2 victims in front, 4 behind), the

@@ -586,7 +586,7 @@ static void bot_go_state(MoveRunner *r, const DirGraph *ag, int state, MoveCall 
 }
 
 /* walk 0x2EDB40 (pt, mode: 0 walk, 1 jump towards it; bld: the building it is after, -1 none): the stick towards
- * the point, kept off other buildings and other monsters, and the action [R; the front-corner rule not ported] */
+ * the point, kept off other buildings and other monsters, round bld's front corner, and the action [R] */
 static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotView *v, const float pt[3], int mode,
                      int bld, MoveCall call, void *ctx)
 {
@@ -674,6 +674,25 @@ static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
                     st[1] += 1;
                 float l = sqrtf(st[0] * st[0] + st[1] * st[1]);
                 if (l > 1e-6f) {
+                    st[0] /= l;
+                    st[1] /= l;
+                }
+            }
+        }
+        /* [R 0x2EE150 .. 0x2EE374] round bld's front corner: with the point at or behind its front and the bot
+         * reaching past that line (y + R > the point's y), D = R + sqrt(2) A (R the half width, A the probe); going
+         * right with its left side D or more to the right, or left with its right side D or more to the left, the
+         * stick less (0, 1), made 1 long ((1, 0) when nothing is left) */
+        const DirBuilding *b = bld < v->nb ? &v->b[bld] : NULL;
+        if (b && pt[1] >= b->min[1] && v->pos[1] + v->half_width > pt[1]) {
+            float D = v->half_width + sqrtf(2 * v->probe * v->probe);
+            if (dx > 0 ? b->min[0] - v->pos[0] >= D : b->max[0] - v->pos[0] <= -D) {
+                st[1] -= 1;
+                float l = sqrtf(st[0] * st[0] + st[1] * st[1]);
+                if (l * l < 1e-6f) {
+                    st[0] = 1;
+                    st[1] = 0;
+                } else {
                     st[0] /= l;
                     st[1] /= l;
                 }

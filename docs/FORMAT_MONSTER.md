@@ -146,7 +146,7 @@ type, table 0x4312F0):
 | 9 | {f32} | a camera shake of that strength (0x2F5AC0 → 0x1E7ED0: the monster's own `camshake.edf`; CAMERA.md "Shake"); 3 or 4 on the heavy punches and the butt slam |
 | 12 | {u16 slot, u16 effect, u32 on} | an effect of MONSTER_DATA's list (+0xA90) starts (1) or stops (0) in that slot: `Monster_Belch.edf` on the burp, `Charged_Punch.edf` on the charge punch, `Collapse_Floor_concrete_comp.edf` on the butt slam |
 | 23 | {column} | the slot column (+0xBAB4), see "Slots" |
-| 15, 16 | {..., f32 +0x10} | the record is kept at +0xBA9C / +0xBAA0 (on a building, −5.5; leaving it, −5 … −6.25); not traced |
+| 15, 16 | {..., f32 +0x10} | the record is kept at +0xBA9C / +0xBAA0 till the next clip (on a building, −5.5; leaving it, −5 … −6.25): 16's +0x10 adds to MONSTER_DATA +0x1A4 in 0x2E4E40 (the bots' corner rule) and 0x2E4D30; 15 (+0xBA9C) is read by 0x2E4E90; 15 on George's front, side, spider and React_ clips, 16 on the Transition_Ground clips and Spider_Jump |
 | 1, 3, 4, 5, 10, 11, 13, 14, 17, 19, 20, 22 | | handled (a list of four at +0xBA8C, disarming shapes, a throw, +0xAA2, +0xAA8, +0xBD00, ...) but used by no monster |
 
 Of the 38,002 events of all 30 monsters: 16,879 script calls, 7,612 sounds, 4,607 modes, 3,751 columns, 2,431 of
