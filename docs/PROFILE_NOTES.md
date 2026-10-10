@@ -58,7 +58,7 @@ played.
 |---|---|
 | +0x00 | u32 version 8 |
 | +0x04 | u32 size 0x128 (the popup copies this many bytes) |
-| +0x08 | the name (a new profile clears 16 bytes; the room up to +0x20 is **[G]**) |
+| +0x08 | the name, 16 bytes (a new profile clears 16; the popup writes it with strncpy 16, 0x344114 / 0x343DA8; the keyboard takes 15, 0x3408D0); +0x18 … +0x1F is padding **[R]** |
 | +0x20 | u64 a time stamp, set by the popup before each card operation (0x344434; 0x10D140, about ms since 2000) |
 | +0x28 | the profile's status record (`Profile.getGameStatus`) |
 | +0xE0 | u32 the cities' saved flags [7] (`Profile.getCityFlags(i)`; `isCityAvailable(i)` = & 0x80) |
@@ -176,7 +176,8 @@ host: same logic, but the profile now holds those flags.
   - +0xC4 −1 (the default card).
 
   It calls the popup 0x345950 with the block and the callback 0x33F230, which clears both changed bytes on success.
-  The popup writes only with its flag 4 (autosave) set; otherwise 0x345540(3) **[G: a message]**.
+  The popup writes only with its flag 4 (autosave) set; otherwise 0x345540(3): no message, the popup closed with
+  result 3 (no show-profile change), the profile not written and its changed bytes kept **[R 0x345950]**.
 - **Where it is called**:
   - Results.bsf, every block won: `updateProfile` and `saveProfile` 1.5 s into the screen;
   - Results.bsf's **save button**: it shows when a profile is loaded and autosave is off. Pressing it calls
@@ -269,7 +270,10 @@ The cheats are not in the saved block.
 
 ## The port (src/profile.c)
 - **Setup**:
-  - `profile_init`: zeros, the built-in ShellData rosters, then a new profile; the campaign; autosave on **[G]**;
+  - `profile_init`: zeros, the built-in ShellData rosters, then a new profile; the campaign; autosave on **[G: in the
+    game the popup's flag 4 starts clear and is set by setAllowSave, a successful load or create, or the card
+    watcher with a name held (0x2C3568, 0x34559C, 0x3454E0, 0x3459D8); the port's "on" opens the list on the first
+    MainMenu]**;
   - `profile_set_roster`: the rosters from the books.
 - **The shell**: `profile_create`, `profile_restore`, `profile_restore_checkpoint`.
 - **The game**:
@@ -292,10 +296,15 @@ The cheats are not in the saved block.
   - `profile_city_flags`, `profile_start_block`, and `profile_city_available` (CitySelect's lock).
 
 ## Not traced, or guessed [G]
-- The name's room in the block (+0x08 .. +0x20), and where the name screen writes it.
-- What the popup does with autosave off (0x345540(3)), and its message boxes.
-- The load's version check: none was seen. The port refuses anything but version 8.
-- The time stamp's exact value: the game feeds raw BCD clock bytes to mktime. The port stores what the host passes.
-- The viewer's file leaves the header's leftover bytes zero.
-- Cheats 4, 0x20000000 and 0x40000000.
-- Players 2 .. 4's own profiles (0x3077B0 / 0x307EE0) are kept as `player_flags` but nothing fills them.
+- The load checks the CRC and the file's data size, not the block's version or size (0x3445E0 … 0x3446B4) [R]; the
+  port the same.
+- The time stamp (0x10D140) [R]: (u64) difftime(now, epoch) × 1000, the epoch mktime of 1 Jan 2000 (tm_year 2000
+  itself), now sceCdReadClock's raw BCD bytes in a tm (the month without − 1, the year + 2000). The port stores what
+  the host passes.
+- The header's leftover bytes are heap leftovers in the game; the viewer's file leaves them zero.
+- Cheats [R]: 4 (986960) no monster can be hit (0x2D6A50 answers 0; the reaction bindings 0x2ABB18 / 0x2ABB70 do
+  nothing); 0x20000000 (000020) dead (0x1A61F0 is empty); 0x40000000 (071767) one-hit buildings (Building::hit
+  0x2BC1F0: a standing building collapses at its first hit). Not ported.
+- Players 2 .. 4's own profiles [R]: gShell.loadBuddyProfile (0x3077B0) loads one into a block of its own (0x4D5218,
+  no autosave) and 0x307EE0 copies its 30 monster flags (& 0xFF) into the player's bytes, [30] = 1. Kept as
+  `player_flags`; the viewer has one profile file, so nothing fills them.

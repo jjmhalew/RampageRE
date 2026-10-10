@@ -1062,6 +1062,8 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             continue;
         float nox = ox + sc * nd->p[0], noy = oy + sc * nd->p[1], nsc = sc * nd->m;
         float nz = z + nd->p[2] + nd->z, nf = fade * nd->fade;
+        if (nd->F & 0x400)                               /* [R 0x242950] 1 - (0.2 + 0.2 sin 2 pi t): 0.6 .. 1, 1 Hz */
+            nf *= 0.8f - 0.2f * sinf(2.0f * HUD_PI * g->time);
         int clip = e->clip;
         float cx0 = e->cx0, cx1 = e->cx1;
         if (nd->clip) {
@@ -1386,7 +1388,8 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
                                                           * numbers, here hud_set comes after hud_open] */
     h->lives = -1;
     h->blocks_won = -1;
-    h->set_sound = h->set_music = 0.75f;                 /* the sliders full [G: the profile's defaults not traced] */
+    h->set_sound = 0.5f;                                 /* a new profile's (0x33F630: 0.5, 0.25, on) [R] */
+    h->set_music = 0.25f;
     h->set_rumble = 1;
     /* Clock::doInterface */
     if (h->clock) {
@@ -3467,7 +3470,10 @@ static void pause_challenge(Hud *h, Screen *s)
     if (icon)
         icon->p[0] += ch->icon_shift;
     int goal = h->ch_required, count = h->ch_collected < goal ? h->ch_collected : goal;
-    show(layout_find(r, "completed"), goal == count);    /* and setFlags(1024) [G: not traced] */
+    Node *done = layout_find(r, "completed");
+    show(done, goal == count);
+    if (done)
+        done->F |= 0x400;                                /* setFlags(1024): the GUI's pulse (0x242950) */
     Node *go = layout_find(r, "selection_group");
     if (go) { go->p[0] = 0; go->p[1] = 20; go->p[2] = 0; }
     show(layout_find(r, "controller_group"), 1);
@@ -3690,7 +3696,9 @@ static void pause_options_tick(Hud *h, Screen *s)
     }
 }
 
-#define PAUSE_TICK (1.0f / 60.0f)                        /* the script's frame [G: 60 a second] */
+/* the script's frame: the GuiManager's update runs in the world's tick (0x288340, paused or not) with the world's step
+ * as its dt, 1/30 (RWorld 0x2B7A70, 0x2B7800) [R] */
+#define PAUSE_TICK (1.0f / 30.0f)
 
 static void pause_frame(Hud *h, Screen *s, float dt)
 {

@@ -1355,8 +1355,9 @@ static void effects_update(Layout *L)
     }
 }
 
-/* blinking (object flag 0x400: setFlags(1024) on "Press START", the caret, MonsterSheet's selection) [G: the rate] */
-static float blink(const Gui *g) { return 0.6f + 0.4f * cosf(2.0f * SH_PI * 1.25f * g->time); }
+/* object flag 0x400 (setFlags(1024) on "Press START", the caret, MonsterSheet's selection): the draw's alpha times the
+ * GuiManager's factor, 1 - (0.2 + 0.2 sin phase), the phase 2 pi a second (0x242950): 0.6 .. 1 at 1 Hz [R] */
+static float blink(const Gui *g) { return 0.8f - 0.2f * sinf(2.0f * SH_PI * g->time); }
 
 /* a list box whose items all stand at one place (MainMenu's nb_selection: the human / computer counts) shows its
  * selected item alone [G: GuiListBox's layout is not traced] */
@@ -4254,7 +4255,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     if (p) s->prof = *p;
     else {
         s->prof.allow_save = 1;
-        s->prof.sound = s->prof.music = 0.75f;
+        s->prof.sound = 0.5f;                            /* a new profile's (0x33F630) [R] */
+        s->prof.music = 0.25f;
         s->prof.rumble = 1;
         for (int k = 0; k < 4; k++) s->prof.monster_flags[k][0] = s->prof.monster_flags[k][1] = 0x80;
         s->prof.city_flags[0] = 0x80;

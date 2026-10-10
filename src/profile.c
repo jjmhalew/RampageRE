@@ -160,9 +160,9 @@ void profile_init(Profile *p)
 int profile_create(Profile *p, const char *name)
 {
     profile_block_new(&p->block);                    /* [R] 0x33E480 */
-    if (name) {                                      /* [G] the name screen's; the game's popup keeps its own */
-        strncpy(p->block.name, name, sizeof p->block.name - 1);
-        p->block.name[sizeof p->block.name - 1] = 0;
+    if (name) {                                      /* [R] 16 bytes at +0x08 (strncpy 16, 0x344114; the keyboard */
+        strncpy(p->block.name, name, 15);            /* takes 15, 0x3408D0); +0x18 .. +0x1F is padding */
+        p->block.name[15] = 0;
     }
     p->checkpoint = p->block.status;
     p->current = p->checkpoint;
@@ -421,8 +421,7 @@ void profile_pack(const ProfileBlock *b, uint8_t out[PROFILE_SIZE])
 
 int profile_unpack(ProfileBlock *b, const uint8_t in[PROFILE_SIZE])
 {
-    if (get32(in) != PROFILE_VERSION || get32(in + 4) != PROFILE_SIZE)   /* [G] the check the load makes */
-        return 0;
+    /* [R 0x3445E0] the load checks the CRC and the file's data size (profile_unpack_file), not the block's version */
     memset(b, 0, sizeof *b);
     b->version = get32(in + 0x00);
     b->size = get32(in + 0x04);

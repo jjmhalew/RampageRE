@@ -23,7 +23,8 @@ Addresses are in `RAMPAGE.ELF`.
   - flips bit 0x10 of App +0xA0 (the paused flag) and copies it into the byte 0x45ACAC;
   - pauses the sound events: SoundDevice 0x26B7F0 with mask 3 → the event player 0x4CFAB0, 0x272780, which sets each
     playing instance's +0x1D and pauses its voices;
-  - calls App +0xA4's vtable +0x24 (taken to be the game's timer [G]);
+  - calls App +0xA4's vtable +0x24: the active world's pause (RWorld 0x2B7A40), which clears its tick accumulator
+    (+0x608), so pausing or resuming drops the leftover time [R];
   - sets App +0x96 when +0x95 is set.
 - World code tests the flag (App +0xA0 & 0x10, or the vtable +0x3C), for example 0x2B6AF0 and 0x2C1CE0. The world and
   its clock stop.
@@ -162,8 +163,8 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   sliders move with the held left / right. The ON / OFF pair (side by side) changes with 4 / 2.
 - The same reading fits ConfirmQuit (No / Yes side by side: 4 / 2, with 8 / 16 folded into them), the main menu's
   cheat code (6 digits side by side: 4 / 2; a digit up with 8) and CitySelect.
-- So 2 is right, 4 left, 8 up, 16 down. `hud.h` had taken them the other way [G]. Its `HUD_EV_*` values are now
-  corrected. The screens that only treat up = left and down = right behave as before.
+- So 2 is right, 4 left, 8 up, 16 down (getButtons' names, 0x3F67C0) [R]. An earlier `hud.h` had them the other
+  way; its `HUD_EV_*` values are corrected. The screens that only treat up = left and down = right behave as before.
 
 ## The port (hud.c) [R unless marked]
 - `hud_pause_open(h, pad, &{city, block})` refuses in the attract mode, while a results screen is up, or while the
@@ -183,18 +184,21 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
 - `hud_pause_result` gives `HUD_PAUSE_RESUME` (Continue), `HUD_PAUSE_QUIT` (call `game_restart_shell`) or
   `HUD_PAUSE_SETTINGS` (the profile's settings changed).
 - `hud_paused()` is true while the menu shows.
-- `hud_set_settings` gives the menu the profile's volumes and vibration. Default 0.75, 0.75, on **[G: the profile's
-  defaults are not traced; the slider's full scale is 0.75]**.
+- `hud_set_settings` gives the menu the profile's volumes and vibration. Default a new profile's 0.5, 0.25, on
+  (0x33F630) [R]; the slider's full scale is 0.75.
 
 ## Not ported, or guessed [G]
 - The `<x>` matrix's turn: quads cannot turn, so the "COMPLETED" stamp is drawn level at its place and scale.
   Mirrors (the arrows) are kept.
-- `setFlags(1024)` on "COMPLETED", the list's `setExtraSpacing`, and the sizer's layout (its items stay where the
-  layout puts them).
+- `setFlags(1024)` on "COMPLETED" is the GUI's pulse: object flag 0x400 multiplies the alpha by 1 − (0.2 + 0.2 sin
+  phase), the phase 2π a second (0x242950): 0.6 … 1 at 1 Hz [R]. **[G]** The list's `setExtraSpacing` (0x254868 keeps
+  the byte at +0x11, added beside the list's spacing; where, not read) and the sizer's layout (its items stay where
+  the layout puts them).
 - The line's width (drawn 1 pixel) and `<ep>`'s layout (taken as a count, then x y z points).
-- The slider steps: one per 1/60 s of `hud_update` time (the script steps once a frame).
-- `getPlatform() == 2` is taken to be the PS2's, so the foreign boss card is used from French on.
+- The slider steps: one per script frame, the world's step 1/30 s (the GuiManager's update in the tick 0x288340,
+  paused or not, with gWorld +4 as dt) [R]: a full sweep in about 3.3 s.
+- `getPlatform()` answers 2 in this build (App case 0x28B1A0) [R], so the foreign boss card is used from French on.
 - After Quit the menu goes on the next `hud_update` (in the game it stays up while the world shuts down).
-- Which flag the menu's `pauseGame` stops in each world system, and App +0xA4 (taken to be the timer), are not
-  traced further.
+- `pauseGame`'s gate is the tick's (0x288340: App +0xA0 & 0x10 skips the world's update; the GUI and the drawing
+  run on) [R]; each system's own tests (0x2B6AF0, 0x2C1CE0) were not traced.
 - The music fade, the pausing of the sound events and the vibration belong to the viewer.
