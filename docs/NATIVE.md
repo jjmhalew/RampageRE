@@ -137,7 +137,8 @@ people's effects. The buildings' adornments hang where the game puts them (fire 
 trims: "Adornments"), ride their storeys down, fall off with their cells and are knocked off by attacks. A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
 and sinks, leaving its rubble (the camera shakes as each floor falls, and on the monsters' heavy blows: CAMERA.md
-"Shake") ("Collapse"; `--do "collapse"` destroys the building in front of the monster).
+"Shake") ("Collapse"; `--do "collapse"` destroys the building in front of the monster, `--do "hitcell b floor col"` hits one
+front cell).
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster
 pushed at a building's front mounts it, climbs with the stick (each stroke flipping the clip), hops along the front,
 swings round a corner onto a side unless a neighbour is flush with it, climbs down and steps off at the foot, or
@@ -178,9 +179,22 @@ player off a building is kept within 30 of the players' middle x and below 70 (t
 not; the respawns, lives, King block winners and the results screens are game.c's per player. `RAMPAGE_TRACE` marks
 the other monsters' lines `[2]` .. `[4]`.
 
+**The revealed monster** ([EDIBLE_NOTES.md](EDIBLE_NOTES.md) "The cryotube"): with one player in the campaign,
+the world's extra slot after the players gets the city's monster to reveal (`Viewer.extra`, 0x2B6BE0), hidden and
+out of the world. When its cryotube lands, it appears there at a tenth of its size, grows to full size in a second,
+taunts, and at 4.25 s runs off along the street to x ±100 (away from the camera) at 1.5 × speed, where it hides
+again (reveal.c's walk events: the AI's PlayMove and WalkTo goals, setDynamicScale, setSpeedScale). It is not the
+camera's, the HUD's or the game's, and has no push-out: 0x2E2C50 skips a slot past the players' count, which is
+why it can walk past the street's ±55. `--do "hitcell b floor col"` hits that front cell as a monster's attack
+would (a test: the tube's cell without climbing to it).
+
+**No grabbing another monster:** the game has none. No move graph has a state for being held (George's holds are
+people, objects and boulders), and the held / holder fields (+0xB9C0 / +0xB9C4) are only ever cleared
+([MULTIPLAYER_NOTES.md](MULTIPLAYER_NOTES.md)).
+
 ## Not there yet
-- the revealed monster walking on (the viewer has no extra monster for it), Boosy's unlock (the cities' saved flags);
-- grabbing another monster; the menus' 3D globe and effects.
+- Boosy's unlock (the cities' saved flags);
+- the menus' 3D globe and effects.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),

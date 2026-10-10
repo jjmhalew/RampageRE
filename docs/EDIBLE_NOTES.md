@@ -384,6 +384,12 @@ at the first block's end.
   - that RevealLoc's Building indexes the block's building list in BlockDef order (0x4D095C), as `edible_add_building`
     numbers them;
   - the object timer's first tick (taken as 0.25 s after it is installed);
+  - the walk-on in the viewer (main.c `reveal_events`): the monster shown at the tube's landing place (1 up: it drops
+    onto the street through its landing), playMove and walkTo as goals of its AI, the walk's end callback when the
+    WalkTo goal is done;
+  - some RevealLocs name a floor the building does not have as the viewer builds it (Las Vegas blocks 2 and 6, Los
+    Angeles 7, New York 9: floor 3 of a 1-storey building, 5 of 4, 4 of 3, 6 of 6); the tube is placed but no hit
+    reaches its cell [G: the building's storeys, or the loc's floor counted otherwise];
   - what 0x2D40B0 / 0x2D3F90 do besides +0x109 and the world's list (0x2C1A80 / 0x2C1A90 on 0x4D3330 + 0x18).
 - **Building and banner details:**
   - `b.getPosition()` / `getSizeZ()` without the host's `building_place`;

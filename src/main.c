@@ -121,6 +121,8 @@ typedef struct Mon {
      * ones it hit already (0x2E33A0: each once an attack) */
     struct { float damage, knock, knock_time; int level; uint32_t flags, victims, hit; } atk;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
+    int reveal, shown;                               /* the cryotube's monster (Viewer.extra): out of the world
+                                                      * (+0x108 / +0x109) until the reveal shows it */
 } Mon;
 
 typedef struct Viewer {
@@ -188,6 +190,9 @@ typedef struct Viewer {
     Reveal reveal; RevealRoster roster;              /* the cryotube's monster and the unlocks (reveal.c): the
                                                       * roster's flags stand for the profile's, from 0 */
     RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
+    int extra;                                       /* the slot after the players that holds the monster to reveal
+                                                      * (0x2B6BE0: players + 1 monsters, the last hidden), -1 none */
+    RevealWalk rwalk;                                /* its walk-on (Monsters::onRevealNITick) */
     Rubble rubble;                                   /* findPointInRubble's slots: the block left's buildings */
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
     int prof_on_card;                                /* its file exists (the shell's profile list) */
@@ -538,10 +543,11 @@ static void add_tubes(Viewer *v)
 {
     for (int i = 0; v->edibles && i < v->ntubes; i++)
         if (v->tubes[i].building >= 0 && v->tubes[i].building < (int)v->scene.nbuildings) {
-            edible_add_cryotube(v->edibles, v->tubes[i].building, v->tubes[i].floor, v->tubes[i].cell);
+            int s = edible_add_cryotube(v->edibles, v->tubes[i].building, v->tubes[i].floor, v->tubes[i].cell);
             if (getenv("RAMPAGE_TRACE"))
-                printf("  cryotube: building %d, floor %d, cell %d\n", v->tubes[i].building, v->tubes[i].floor,
-                       v->tubes[i].cell);
+                printf("  cryotube: building %d (%d storeys, %d wide), floor %d, cell %d: %s\n", v->tubes[i].building,
+                       v->scene.buildings[v->tubes[i].building].b.n, v->scene.buildings[v->tubes[i].building].b.width,
+                       v->tubes[i].floor, v->tubes[i].cell, s >= 0 ? "placed" : "no such cell");
         }
     v->ntubes = 0;
 }
@@ -608,12 +614,121 @@ static void huds_close(Viewer *v)
     v->hud = NULL;
 }
 
+static int monster_index(const Viewer *v, const char *name);
+
+/* 0x2B6BE0 / 0x2B72B0: the slot after the players gets the monster to reveal (roster index rm), hidden and out of
+ * the play (+0x108 = +0x109 = 1) until startReveal */
+static void extra_add(Viewer *v, int k, int rm)
+{
+    int mi = monster_index(v, v->roster.name[rm]);
+    if (k != v->nmon || k >= MONSTERS || mi < 0 || v->scene.nmon != k)
+        return;
+    Mon *mo = &v->mon[k];
+    mo->v = v;
+    mo->slot = k;
+    mo->monster = mi;
+    mo->bot = 0;
+    mo->drive = DRIVE_COMPUTER;
+    mo->hud = NULL;
+    mo->mx = 0; mo->my = -10; mo->mz = 0;
+    mo->heading = 180;
+    memset(&mo->pad, 0, sizeof mo->pad);
+    mo->human = mo->dropping = 0;
+    mo->streaker = -1;
+    mo->reveal = 1;
+    mo->shown = 0;
+    if (city_monster(v->city, &v->scene, v->monsters[mi], -1, mo->mx, mo->my, mo->heading) != k)
+        return;
+    start_moves(mo);
+    v->extra = k;
+    if (mon_in(mo))
+        mon_in(mo)->hidden = 1;
+}
+
+/* 0x2D3F90: the extra monster hides and leaves the world (stopReveal, the Continue) */
+static void extra_hide(Viewer *v, int k)
+{
+    if (k < 0 || k != v->extra)
+        return;
+    Mon *mo = &v->mon[k];
+    mo->shown = 0;
+    mo->is_ai = 0;
+    dir_ai_clear(&mo->ai);
+    mo->scale = mo->scale_to = 1;
+    mo->scale_left = 0;
+    edible_power_init(&mo->power);
+    if (mon_in(mo))
+        mon_in(mo)->hidden = 1;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  reveal: [%d] hidden\n", k + 1);
+}
+
+/* the monsters in the world: the players and bots, and the one being revealed while it shows */
+static int mon_world(const Viewer *v)
+{
+    return v->nmon + (v->extra >= 0 && v->mon[v->extra].shown);
+}
+
+/* the walk-on's calls (reveal.c's RevealEvents) on the extra monster */
+static void reveal_events(Viewer *v)
+{
+    RevealEvent ev[16];
+    int n = reveal_walk_events(&v->rwalk, ev, 16);
+    for (int i = 0; i < n; i++) {
+        const RevealEvent *e = &ev[i];
+        int k = e->type == RW_HIDE ? e->slot : v->rwalk.slot;
+        if (k < 0 || k != v->extra)
+            continue;
+        Mon *mo = &v->mon[k];
+        switch (e->type) {
+        case RW_SHOW:                                /* at the tube, facing pi (setFacingZ), into the world */
+            mo->mx = e->pos[0]; mo->my = e->pos[1]; mo->mz = e->pos[2];
+            mo->heading = e->v[0] * 57.2957795f;
+            mo->mode = MODE_GROUND;
+            memset(mo->vel, 0, sizeof mo->vel);
+            mo->shown = 1;
+            if (mon_in(mo))
+                mon_in(mo)->hidden = 0;
+            scene_monster_place(&v->scene, k, mo->mx, mo->my, mo->mz, mo->heading);
+            break;
+        case RW_AI: mo->is_ai = 1; break;
+        case RW_MOVE:
+            if (mo->have_graph && mo->have_ag)
+                dir_ai_play_move(&mo->ai, e->name ? moves_find(&mo->graph, e->name) : -1, 0);
+            break;
+        case RW_SCALE:                               /* setDynamicScale(scale, seconds) */
+            mo->scale_from = mo->scale;
+            mo->scale_to = e->v[0] > 0 ? e->v[0] : 1;
+            mo->scale_time = mo->scale_left = e->v[1] > 0 ? e->v[1] : 0;
+            if (mo->scale_left <= 0)
+                mo->scale = mo->scale_to;
+            break;
+        case RW_WALK: {                              /* walkTo(pos, radius, "", "Monsters::onRevealNIEnd") */
+            float to[3] = { e->pos[0], e->pos[1] + v->block_shift, e->pos[2] };
+            if (mo->have_ag)
+                dir_ai_walk_to(&mo->ai, to, e->v[0], 1);
+            break;
+        }
+        case RW_SPEED: edible_power_speed(&mo->power, e->v[0], e->v[1]); break;
+        case RW_HIDE: extra_hide(v, k); break;
+        }
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  reveal walk %d (%s) [%d] at %.1f %.1f %.1f\n", e->type, e->name ? e->name : "-", k + 1,
+                   e->pos[0], e->pos[1], e->pos[2]);
+    }
+}
+
 static void build(Viewer *v)
 {
     if (v->have_scene)
         scene_free(&v->scene);
     v->have_scene = city_build(v->city, v->blocks[v->block], v->night, &v->scene) == 0;
-    for (int k = 0; k < v->nmon; k++) {              /* the monsters, slot by slot (player 1's: none, none at all) */
+    if (!v->game_built) {                            /* a new world: its monster to reveal comes with reveal_load */
+        v->extra = -1;
+        memset(&v->rwalk, 0, sizeof v->rwalk);
+    }
+    for (int k = 0; k < v->nmon + (v->extra >= 0); k++) {   /* the monsters, slot by slot (player 1's: none, none at
+                                                      * all), and the one to reveal */
         Mon *mo = &v->mon[k];
         if (v->have_scene && have_monster(v) && mo->monster >= 0 &&
             city_monster(v->city, &v->scene, v->monsters[mo->monster], k ? -1 : v->clip, mo->mx, mo->my,
@@ -633,6 +748,8 @@ static void build(Viewer *v)
         if (getenv("RAMPAGE_TRACE") && mo->have_graph)
             printf("properties %s%s\n", mo->graph.props ? mo->graph.props : "-", monster_female(mo) ? ", female" : "");
     }
+    if (v->extra >= 0 && !v->mon[v->extra].shown && mon_in(&v->mon[v->extra]))
+        mon_in(&v->mon[v->extra])->hidden = 1;
     if (v->nmon && v->mon[0].have_graph)
         play_reset(v);
     if (v->have_scene && v->scene.music)            /* the block's music, looping (sound.c; silent unless started) */
@@ -863,8 +980,10 @@ static void build(Viewer *v)
             int rm = reveal_load(&v->reveal, world_data(v), (v->play_type ? v->play_type : GP_CAMPAIGN) == GP_CAMPAIGN,
                                  v->nmon, pm, &v->roster);
             v->ntubes = 0;
+            if (rm >= 0)                             /* with one player: the world's extra monster, hidden */
+                extra_add(v, reveal_extra_slot(&v->reveal, v->nmon), rm);
             if (getenv("RAMPAGE_TRACE"))
-                printf("reveal: %s\n", rm >= 0 ? v->roster.name[rm] : "-");
+                printf("reveal: %s%s\n", rm >= 0 ? v->roster.name[rm] : "-", v->extra >= 0 ? " (shown)" : "");
             GameConfig gc = { v->play_type ? v->play_type : GP_CAMPAIGN, v->nmon, v->num_bots,
                               campaign_index(CITIES[v->city_index]), 7,
                               city_block_index(v->city, v->blocks[v->block]), 1 };
@@ -1635,6 +1754,9 @@ static void impact_route(Viewer *v, int tag, int kind, const float at[3], float 
 static void push_out(Mon *mo)
 {
     Viewer *v = mo->v;
+    if (mo->slot >= v->nmon)                         /* 0x2E2C6C: a slot (+0xFC) past the players' count (0x4D7E28),
+                                                      * the revealed monster's: none of it, so it walks off the street */
+        return;
     float s = mo->scale > 0 ? mo->scale : 1;
     CollideMonster m = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->mode,
                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
@@ -1928,7 +2050,7 @@ static void shadow_frame(Viewer *v, float dt)
         float m12[12] = { m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10], m[12], m[13], m[14] };
         shadow_object(&v->shl, &v->slight, &d, m12);
     }
-    for (int k = 0; k < v->nmon; k++) {             /* each monster's */
+    for (int k = 0; k < mon_world(v); k++) {        /* each monster's */
         Mon *mo = &v->mon[k];
         if (mon_in(mo) && !mon_in(mo)->hidden && v->play) {
             float s = mo->scale > 0 ? mo->scale : 1, h = mo->heading / 57.2957795f, c = cosf(h), sn = sinf(h);
@@ -2357,7 +2479,7 @@ static void hud_frame(Viewer *v, int after)
         profile_new_city(&v->prof);
     }
     if (r == GR_CONTINUE && v->game && game_state(v->game) == GS_GAME_OVER && reveal_was_revealed(&v->reveal))
-        reveal_continue(&v->reveal);                 /* 0x323450: the tube comes back */
+        extra_hide(v, reveal_continue(&v->reveal));  /* 0x323450: the tube comes back, the monster hides */
     if (r && v->game)
         game_set_result(v->game, r);
     float sv, mv;
@@ -2516,7 +2638,10 @@ static void edible_step(Viewer *v, float dt)
                     hud_banner_reveal(v->hud, v->roster.name[i]);
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  revealed: %s\n", i >= 0 ? v->roster.name[i] : "-");
-                reveal_stop(&v->reveal);             /* [G stand-in] no second monster here to walk on */
+                if (i >= 0 && slot >= 0 && slot == v->extra)   /* shown: the walk-on (0x2D40B0) */
+                    reveal_walk_start(&v->rwalk, slot, e->pos);
+                else
+                    reveal_stop(&v->reveal);
                 break;
             }
             default: break;
@@ -3482,7 +3607,9 @@ static void mon_step(Mon *mo, float dt)
                                    dir_ai_step(&mo->ai, &mo->ag, &mo->run, root, cdt, answer, mo) :
                                    moves_step(&mo->run, in, cdt, answer, mo));
         for (; mo->is_ai && mo->ai.done > 0; mo->ai.done--)   /* Levels::moveComplete */
-            if (v->game)
+            if (mo->reveal)                          /* Monsters::onRevealNIEnd: stopReveal */
+                reveal_walk_arrived(&v->rwalk, &v->reveal);
+            else if (v->game)
                 game_move_done(v->game, mo->slot);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : mo->run.time;
         float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
@@ -3572,8 +3699,10 @@ static void mon_step(Mon *mo, float dt)
                 mo->my = place[1];
             }
         }
-        if (mo->mx < -75) mo->mx = -75;
-        if (mo->mx > 75) mo->mx = 75;
+        if (!mo->reveal) {                           /* (the revealed one walks off to x 100 [R]) */
+            if (mo->mx < -75) mo->mx = -75;
+            if (mo->mx > 75) mo->mx = 75;
+        }
         if (mo->my < -30) mo->my = -30;
         push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
         if (!mo->is_ai && !mo->mount.mounted) {   /* the camera's reach (0x336290): a player off a face stays
@@ -3640,8 +3769,14 @@ static void play_step(Viewer *v, float dt, float aspect)
     static DirMonster dm[MONSTERS];
     static DirBotView bv[MONSTERS];
     bot_views(v, db, dm, bv);
-    for (int k = 0; k < v->nmon; k++)
+    if (v->extra >= 0) {                             /* the revealed monster's 0.25 s timer, its calls */
+        reveal_walk_update(&v->rwalk, dt, v->mon[v->extra].mx, v->view.pos[0]);
+        reveal_events(v);
+    }
+    for (int k = 0; k < mon_world(v); k++)
         mon_step(&v->mon[k], dt);
+    if (v->extra >= 0)                               /* (it arrived: hidden) */
+        reveal_events(v);
     if (v->scene.folk) {                             /* the people, the ones in their hands, what they make happen */
         PeopleMonster pm[MONSTERS];
         for (int k = 0; k < v->nmon; k++) {
@@ -3759,7 +3894,7 @@ static void play_step(Viewer *v, float dt, float aspect)
     float at[MONSTERS][3];                           /* the camera's points: every monster's root */
     DirObject me[MONSTERS];                          /* the script camera's objects: the monsters by slot */
     int nat = 0;
-    for (int k = 0; k < v->nmon; k++) {
+    for (int k = 0; k < mon_world(v); k++) {
         Mon *mo = &v->mon[k];
         if (mo->have_graph) {                         /* the pose keeps what the monster did not take over */
             const MoveState *st = &mo->graph.states[mo->run.state];
@@ -3768,6 +3903,8 @@ static void play_step(Viewer *v, float dt, float aspect)
             scene_monster_root_motion(&v->scene, mo->slot, (st->flags & NODE_ROOT_X ? 1 : 0) |
                                       (st->flags & NODE_ROOT_Y ? 2 : 0), mo->entry_root, turn);
         }
+        if (k >= v->nmon)                            /* (the revealed monster: not the camera's) */
+            continue;
         me[k] = (DirObject){ { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
         if (cam_follows(mo)) {
             at[nat][0] = mo->mx; at[nat][1] = mo->my; at[nat][2] = mo->mz;
@@ -3936,7 +4073,8 @@ static void game_next_block(Viewer *v)
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
- * "fx name" starts that effect 6 units in front of the monster, 3 up; "p2" (p1 .. p4): the words after it play
+ * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
+ * building b as an attack would; "p2" (p1 .. p4): the words after it play
  * that player's monster (the others' keys idle meanwhile, the computer's monsters go on) */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
@@ -4028,6 +4166,26 @@ static void play_script(Viewer *v, const char *script, float aspect)
         if (_stricmp(word, "collapseall") == 0) {    /* every building of the block falls (the end of a block) */
             for (uint32_t i = 0; i < v->scene.nbuildings; i++)
                 building_destroy(&v->scene.buildings[i].b);
+            continue;
+        }
+        if (_stricmp(word, "hitcell") == 0) {        /* hitcell b floor col: a hit on that front cell (player 1's) */
+            char *end;
+            int bi = (int)seconds, o = (int)strtol(p, &end, 10);
+            p = end;
+            int col = (int)strtol(p, &end, 10);
+            p = end;
+            if (bi >= 0 && (uint32_t)bi < v->scene.nbuildings) {
+                SceneBuilding *sb = &v->scene.buildings[bi];
+                float w = (sb->b.max[0] - sb->b.min[0]) / (sb->b.width > 0 ? sb->b.width : 1);
+                /* the cell's middle: the ground floor 6 high, the storeys 3 (building.c) */
+                float at[3] = { sb->b.min[0] + w * ((float)col + 0.5f), sb->b.min[1], 6.0f + 3.0f * ((float)o + 0.5f) };
+                if (sb->b.state == BUILDING_STANDING)
+                    sb->hitter = 0;
+                int hit = building_hit(&sb->b, at, 2.0f);   /* (a monster attack's radius) */
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  hitcell %d %d %d at %.1f %.1f %.1f: %s (%d storeys, %.1f .. %.1f)\n", bi, o, col, at[0],
+                           at[1], at[2], hit ? "hit" : "no damage", sb->b.n, sb->b.min[2], sb->b.max[2]);
+            }
             continue;
         }
         if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
@@ -4272,7 +4430,9 @@ static void setup_players(Viewer *v, int n, int bots, const int *monster)
         mo->my = -18;
         mo->heading = 180;
         memset(&mo->pad, 0, sizeof mo->pad);
+        mo->reveal = mo->shown = 0;
     }
+    v->extra = -1;
 }
 
 /* gShell.startGame: the game the shell chose (GameStatus), the city opened at its block */

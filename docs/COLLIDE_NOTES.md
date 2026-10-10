@@ -145,7 +145,9 @@ centred on the object's position: an object whose origin is at its base rests r 
 
 ## Not traced
 - The two-body exchange in 0x285E90 (both moving), and box against box in 0x27F620 (which keeps its box).
-- The gate at the top of 0x2E2C50 (monster +0xFC against 0x4D7E28, byte 0x4D6A9A), +0x108, +0xB9C0, +0x258C,
+- The gate at the top of 0x2E2C50 in full: it returns at once when the monster's +0xFC (taken as its slot) is not
+  below 0x4D7E28 (the players' count: the revealed monster's slot, main.c `push_out`) or byte 0x4D6A9A is set
+  [R 0x2E2C6C .. 0x2E2C88]; what 0x4D6A9A is was not traced. Also +0x108, +0xB9C0, +0x258C,
   the move offset +0xBAA0, the building's +0x38C.
 - The order of 0x101A90 (the spin turning the matrix: taken about a world axis).
 - WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays): the viewer adds the spheres as sphere
