@@ -2727,7 +2727,8 @@ void boss_collide_add(Boss *b, CollideWorld *w)
         collide_matrix_from16(m, o->p.world);
         collide_add(w, &o->cshape, m, COLLIDE_F_WORLD | o->oflags, COLLIDE_TAG(COLLIDE_OWN_BOSS, i), 0);
     }
-    for (int i = 0; i < b->ntrig; i++) {             /* 0x3360F4: 0x400000, | PushOutMonsters with DoPushout */
+    for (int i = 0; i < b->ntrig; i++) {             /* 0x3360F4: 0x400000, | PushOutMonsters with DoPushout; 4 from
+                                                      * addObject (0x284CD0, from 0x2A67C0) as every world object's */
         const Trigger *t = &b->trig[i];
         if (!t->alive)
             continue;
@@ -2735,7 +2736,7 @@ void boss_collide_add(Boss *b, CollideWorld *w)
         float lo[3] = { -t->e[0], -t->e[1], -t->e[2] }, m[12];
         collide_shape_box(&sh, lo, t->e);
         collide_matrix(m, 0, t->c);
-        collide_add(w, &sh, m, COLLIDE_F_TRIGGER | (t->pushout ? COLLIDE_F_PUSHOUT : 0u),
+        collide_add(w, &sh, m, COLLIDE_F_WORLD | COLLIDE_F_TRIGGER | (t->pushout ? COLLIDE_F_PUSHOUT : 0u),
                     COLLIDE_TAG(COLLIDE_OWN_BOSS, i), 1);
     }
 }

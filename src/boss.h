@@ -195,8 +195,8 @@ void boss_arm(Boss *b, int monster);   /* a new attack of that monster: each par
 /* ---- the collision world (collide.c) */
 /* the parts and the VolumeTriggers put into the frame's world: each alive part with its shape (tag
  * COLLIDE_TAG(COLLIDE_OWN_BOSS, part), kind 0; flags 4 and its own: PushOutMonsters, IsObstacle, 8), each alive
- * trigger as its box (Center +- Extents; tag COLLIDE_TAG(COLLIDE_OWN_BOSS, trigger), kind 1; flags
- * COLLIDE_F_TRIGGER, | COLLIDE_F_PUSHOUT with DoPushout [R 0x3360F4]). collide_monster pushes the monster out of
+ * trigger as its box (Center +- Extents; tag COLLIDE_TAG(COLLIDE_OWN_BOSS, trigger), kind 1; flags 4 |
+ * COLLIDE_F_TRIGGER, | COLLIDE_F_PUSHOUT with DoPushout [R 0x3360F4, 0x284CD0]: a shot meets it). collide_monster pushes the monster out of
  * both and reports the triggers it touched */
 void boss_collide_add(Boss *b, CollideWorld *w);
 /* collide_monster's touch of trigger `trigger` (a kind 1 object's tag index) by monster `monster` with the normal:

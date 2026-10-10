@@ -3143,9 +3143,9 @@ void army_collide_add(Army *a, CollideWorld *w)
         collide_matrix_from16(m, u->world);
         uint32_t fl = COLLIDE_F_WORLD | (u->oflags & ~(uint32_t)(OF_HELD | OF_MONSTER));
         /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
-         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+         * meets it), flying objects and shots still do (flag 4 stays: no removeObject; a shot's own owner is no hit) */
         if (u->phase == AU_HELD)
-            fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+            fl &= ~(uint32_t)COLLIDE_F_PUSHOUT;
         u->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_ARMY, i), 0);
         if (u->mv.kind == 2 && u->cm_on)             /* flying: another flying object exchanges impulses with it (0x285E90) */
             collide_set_mover(w, u->cobj, &u->cm, u->cmat, u->vel);

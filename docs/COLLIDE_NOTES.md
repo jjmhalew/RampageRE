@@ -176,7 +176,6 @@ a thrown object rests r above the street [R].
 - WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays): the viewer adds the spheres as sphere
   objects flagged 4 | 0x40. Whether 0x27F620 meets it (a thrown object against its thrower) is not traced: the
   viewer's movers leave the monsters out (`collide_mover_step_ex`'s exclude).
-- Which objects carry flag 4 (a shot's default include): taken as every object but a VolumeTrigger.
 - Where the monster's touch damage (TakeDamage of type Collision, boss.c / rail.c) comes from: not 0x2E2C50.
 - `isSphereVisible` is the camera's, not the collision world's.
 
@@ -188,11 +187,14 @@ Each frame, before anything moves, main.c's `world_build` fills the Viewer's `Co
    the sphere's number), moved again with the monster before the modules update (`world_monster_moved`);
 3. each module's objects with their shapes (0x28FD70, `collide_shape_pick`, read once per object) and their own
    flags | 4: `army_collide_add`, `vehicle_collide_add`, `rail_collide_add`, `parade_collide_add`,
-   `streetobj_collide_add`, `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged
-   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). A held object stays in, as in the game: the grab
-   (0x2DA310) keeps it in the world with its shape (BeingHeld set, Pickupable and PushOutMonsters cleared), so the
-   monster's box no longer sees it but flying objects meet it (TakeImpact) [R]; here it is flagged RAYSKIP, so shots
-   pass it **[G: whether shots, include 4, meet it]**;
+   `streetobj_collide_add`, `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged 4 |
+   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). Flag 4 is "in the world's object list": World::addObject
+   (0x284CD0, gWorld vtable +0x3C) sets it on every object it adds, VolumeTriggers too (0x2A6710 adds them at 0x2A67C0
+   / 0x2A68D4), and removeObject (0x284B60, +0x40) clears it [R]. A held object stays in, as in the game: the grab
+   (0x2DA310: 0x2DA3F0 .. 0x2DA424) sets BeingHeld 0x20000 and clears Pickupable and PushOutMonsters (0x14000), with
+   no removeObject, so the monster's box no longer sees it but flying objects meet it (TakeImpact) and so do shots
+   and beams (include 4 / -1; bit 8 is only the beam's owner's during its cast, 0x2957E0 .. 0x295854); only a shot of
+   the held unit's own is no hit (its owner, 0x293CD8) [R];
 4. `collide_finish`.
 
 The tag (`COLLIDE_TAG(owner, index)`, `COLLIDE_TAG_OWNER`, `COLLIDE_TAG_INDEX`) names the module and its index; each

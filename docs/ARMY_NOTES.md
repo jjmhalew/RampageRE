@@ -294,8 +294,11 @@ Floating = 100
   (0x2B7800) [R].
 - **The collision world** (collide.c, the frame's world the viewer builds, `army_set_collide` /
   `army_collide_add`): the shots' and beams' rays and the flights are the game's. Left:
-  - flag 4 is taken as every object's but a VolumeTrigger's (so a shell stops at a soldier or a passing car), and a
-    shot's damage to what it hits other than a monster (0x292D20) is not ported;
+  - flag 4 is every world object's, VolumeTriggers and held objects too (addObject 0x284CD0, COLLIDE_NOTES.md) [R],
+    so a shell stops at a soldier, a passing car or a trigger's box; a shot's damage to what it hits other than a
+    monster (0x292D20: a thunk to the hit object's TakeDamage, vtable +0x34, with the shot's DamageType, its owner
+    unit, ImpactDamage, the point and the shot's direction, no knock [R]) is not ported: the scripts' TakeDamage
+    begin with coerceToMonster and ignore it, but Fountain.scr (ungated) and DamagingEffect.scr would not;
   - the beam's reach;
   - when a droppable meets the monster;
   - the units' shapes for the monster's attacks (actors: a sphere of `CollisionRadius` 2; objects: the host's model

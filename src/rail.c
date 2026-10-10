@@ -2209,9 +2209,9 @@ void rail_collide_add(Rail *r, CollideWorld *w)
         CollideObj c;
         obj_collide(r, o, &c);
         /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
-         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+         * meets it), flying objects and shots still do (flag 4 stays: no removeObject; a shot's own owner is no hit) */
         if (o->phase == RP_HELD)
-            c.flags = (c.flags & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+            c.flags &= ~(uint32_t)COLLIDE_F_PUSHOUT;
         o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_RAIL, i), 0);
         if (o->mv == MV_SPHERE && o->cm_on)          /* flying: another flying object exchanges impulses with it (0x285E90) */
             collide_set_mover(w, o->cobj, &o->cm, o->cmat, o->sphere.vel);

@@ -973,9 +973,9 @@ void streetobj_collide_add(StreetObjs *s, CollideWorld *w)
         CollideObj c;
         as_collide(o, &c);
         /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
-         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+         * meets it), flying objects and shots still do (flag 4 stays: no removeObject; a shot's own owner is no hit) */
         if (o->oflags & SF_HELD)
-            c.flags = (c.flags & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+            c.flags &= ~(uint32_t)COLLIDE_F_PUSHOUT;
         o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_STREET, i), 0);
     }
 }

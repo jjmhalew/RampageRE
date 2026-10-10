@@ -1265,9 +1265,9 @@ void parade_collide_add(Parade *p, CollideWorld *w)
         collide_matrix_from16(m, o->world);
         uint32_t fl = COLLIDE_F_WORLD | (o->oflags & ~(uint32_t)(PAF_HELD | PAF_COUNTED));
         /* [R 0x2DA310] a held object stays in the world with its shape: PushOutMonsters cleared (the monster's box no longer
-         * meets it), flying objects still do; flagged RAYSKIP so shots pass [G: whether shots (include 4) meet it] */
+         * meets it), flying objects and shots still do (flag 4 stays: no removeObject; a shot's own owner is no hit) */
         if (o->phase == PAP_HELD)
-            fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
+            fl &= ~(uint32_t)COLLIDE_F_PUSHOUT;
         o->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_PARADE, i), 0);
         if (o->sphere.on && o->cm_on)                /* flying: another flying object exchanges impulses with it (0x285E90) */
             collide_set_mover(w, o->cobj, &o->cm, o->cmat, o->sphere.vel);
