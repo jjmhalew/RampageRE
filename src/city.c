@@ -2342,12 +2342,20 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
 
 static int ends_with(const char *s, const char *tail);
 
-/* S k S, S the reflection of x: a node of the other side as the mirrored pose draws it */
-static Mat4 reflect_x(Mat4 k)
+/* a node of the other side as the mirrored pose has it [R 0x194BA0]: the game reflects the bone-local transforms
+ * (a pair swapped, each L' = Sz L Sz; Bip01 L' = Sx L Sy, Pelvis Sy L Sz, Lift_Node Sy L Sy), which composes in the
+ * model to M'_n = Sx M[mirror(n)] S_n: model x on the left, the bone's own y on the right for Bip01 and Lift_Node,
+ * its z for every other node. The place is Sx's alone (the same as S M S); the skin (S M IB S) agrees too */
+static int reflect_axis(const Instance *in, int n)
+{
+    const char *name = n >= 0 && (uint32_t)n < in->tree.n ? in->tree.nodes[n].name : "";
+    return ends_with(name, "Bip01") || ends_with(name, "Lift_Node") ? 1 : 2;
+}
+static Mat4 reflect_node(Mat4 k, int axis)
 {
     for (int c = 0; c < 4; c++) {
-        k.m[4 * c] = -k.m[4 * c];
-        k.m[c] = -k.m[c];
+        k.m[4 * c] = -k.m[4 * c];                    /* model x: row 0 */
+        k.m[4 * axis + c] = -k.m[4 * axis + c];      /* the bone's axis: its column */
     }
     return k;
 }
@@ -2381,7 +2389,7 @@ static void monster_ik(SceneMonster *s, Instance *in)
         }
         if (!ok)
             continue;
-        s->ik_anim[h] = in->mirrored ? reflect_x(in->node[c[2]]) : in->node[c[2]];
+        s->ik_anim[h] = in->mirrored ? reflect_node(in->node[c[2]], reflect_axis(in, c[2])) : in->node[c[2]];
         float len = 0;
         for (int k = 0; k < 2; k++) {                /* upper arm + forearm */
             float d2 = 0;
@@ -2398,11 +2406,11 @@ static void monster_ik(SceneMonster *s, Instance *in)
             continue;
         float p[3] = { s->ik_pos[h][0], s->ik_pos[h][1], s->ik_pos[h][2] }, r[9];
         memcpy(r, s->ik_rot[h], sizeof r);
-        if (in->mirrored) {
+        if (in->mirrored) {                          /* the drawn hand Sx N Sz back to the node N: Sx r Sz */
             p[0] = -p[0];
             for (int col = 0; col < 3; col++)
                 for (int k = 0; k < 3; k++)
-                    if ((k == 0) != (col == 0))
+                    if ((k == 0) != (col == 2))
                         r[3 * col + k] = -r[3 * col + k];
         }
         ik_arm(in->node, &in->tree, c, p, r, s->ik_w[h]);
@@ -2435,7 +2443,7 @@ int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world)
             int m = in->mirrored ? in->tree.nodes[i].mirror : (int)i;
             if (m < 0 || (uint32_t)m >= in->tree.n)
                 m = (int)i;
-            *world = mat_mul(in->base, in->mirrored ? reflect_x(in->node[m]) : in->node[m]);
+            *world = mat_mul(in->base, in->mirrored ? reflect_node(in->node[m], reflect_axis(in, m)) : in->node[m]);
             return 0;
         }
     return -1;

@@ -248,8 +248,15 @@ at once and the walk is as fast as without the IK.
 - The side convention [R]: the game's foot record is (f + 1) & 1 when mirrored, and the mirrored foot query
   0x33C290 swaps a request for +0x72C0 (L) to +0x72C4 (R) and back (0x33C418 .. 0x33C424), so the mirrored R is the
   clip's L chain, mirrored; the viewer's `foot_bone(0, 1)` ("Bip01 R Foot") through `scene_monster_node` (city.c) is
-  reflect(node[mirror(R)]), the clip's L reflected: the same partner. [G]: the reflection's plane (0x194BA0,
-  0x196F30 / 0x196E70 / 0x1859F0) against the viewer's `reflect_x`;
+  reflect(node[mirror(R)]), the clip's L reflected: the same partner. The reflection [R 0x194BA0, from 0x2FFF10 when
+  +0x72B9 is set]: the bone-local transforms are reflected (a pair swapped, each (−qx, −qy, qz, qw; tx, ty, −tz),
+  L' = Sz L Sz; Bip01 Sx L Sy through the constants 0x3B1790 .. 0x3B17B0; Pelvis Sy L Sz; Lift_Node Sy L Sy), so in
+  the model M'_n = Sx M[mirror(n)] S_n, S_n the bone's y for Bip01 and Lift_Node, its z for the rest. The place is
+  Sx's (the same as the viewer's old S M S), and so is the skin; the rotations differ by a half turn about the
+  bone's axis, which the viewer now has (city.c `reflect_node`): the mirrored IK hand's target is Sx r Sz, the root's
+  turn Sx R Sy (main.c `seen_root`). The root motion is mirrored with Bip01's rule (0x194A60 on the clip's start
+  root, from 0x2FFA00 / 0x2E6580 / 0x2DB130); 0x196F30 / 0x196E70 / 0x1859F0 only take the motion out of the
+  mirrored root;
   restarting a foot's effect (the game) versus starting a new one (the
   viewer) is the same for these one-shot effects; the 3-link's blend below the full share, read as 0x2F7E10's (the
   same blocks with one bone less, as ik_arm ports it) and not traced line by line; 0x1017F0 is a row Gram-Schmidt, a

@@ -278,12 +278,13 @@ static int root_at(Mon *mo, double t, float tr[3], float q[4])
     return scene_monster_root(&v->scene, mo->slot, t < 0 ? 0 : t, tr, q);
 }
 
-/* a root's place and rotation (rows of 3) in the monster's frame as drawn: mirrored, across x (S R S) */
+/* a root's place and rotation (rows of 3) in the monster's frame as drawn: mirrored, Sx R Sy, the place across x
+ * (Bip01's rule, 0x194DC0 / 0x194A60) [R] */
 static void seen_root(int mirrored, float p[3], const Mat4 *m, float r[3][3])
 {
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < 3; j++)
-            r[i][j] = m->m[4 * j + i] * (mirrored && (i == 0) != (j == 0) ? -1.0f : 1.0f);
+            r[i][j] = m->m[4 * j + i] * (mirrored && (i == 0) != (j == 1) ? -1.0f : 1.0f);
     if (mirrored)
         p[0] = -p[0];
 }
