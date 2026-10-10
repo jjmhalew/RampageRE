@@ -27,6 +27,7 @@ typedef struct {
     BdpEntry *entries; uint32_t nentries;
     int32_t *by_name;                                    /* per name index: entry index or -1 */
     int32_t *mat_by_name, *tex_by_name;                  /* the same for the materials and the textures alone */
+    const char *scope;                                   /* texture packs: its dump folder (texpack.c), set by the loader; NULL = Common */
 } Bundle;
 int bdp_load(Bundle *b, uint8_t *file, uint32_t size);   /* takes the buffer; 0 = ok */
 void bdp_free(Bundle *b);

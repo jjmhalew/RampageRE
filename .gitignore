@@ -13,3 +13,6 @@ rampage.exe
 shot_*.png
 tools/zig/
 *.pdb
+
+# Texture packs and dumps (docs/TEXTURES.md)
+mods/

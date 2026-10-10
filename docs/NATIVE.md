@@ -55,7 +55,9 @@ starts play in it. The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
-world). The fog is on (F toggles it, `--nofog` starts without).
+world). The fog is on (F toggles it, `--nofog` starts without). Texture packs: PNGs in `mods/textures/` replace the
+game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes
+([TEXTURES.md](TEXTURES.md)).
 
 ## Source
 | File | |
@@ -74,6 +76,7 @@ world). The fog is on (F toggles it, `--nofog` starts without).
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
+| `src/texpack.c` | texture packs: `mods/textures/` replacements and `--dumptex` (WoodyRE's, [TEXTURES.md](TEXTURES.md)); `src/stb/` stb_image and stb_image_write |
 | `src/main.c` | the viewer: arguments, camera, keys; the monsters in play (`Mon`), their pads and their world |
 | `src/director.c` | the game flow's choreography: the AI's goals (playMove, walkTo, the bots' DestroyBuildings) and the camera modes (docs/FLOW_NOTES.md, MULTIPLAYER_NOTES.md) |
 

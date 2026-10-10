@@ -91,8 +91,10 @@ static LoadedBook *load_book(City *c, const char *name)
     snprintf(file, sizeof file, "%s.bdp", name);
     uint32_t size;
     uint8_t *data = vol_read(c->vol, file, &size);
-    if (data && bdp_load(&lb->b, data, size) == 0 && book_open(&lb->book, &lb->b) == 0)
+    if (data && bdp_load(&lb->b, data, size) == 0 && book_open(&lb->book, &lb->b) == 0) {
         lb->ok = 1;
+        lb->b.scope = c->name;                           /* texture packs: dumped under the city (texpack.c) */
+    }
     else if (data && !lb->b.file)
         free(data);
     return lb->ok ? lb : NULL;
@@ -153,6 +155,7 @@ City *city_open(const Vol *vol, const char *name)
         free(c);
         return NULL;
     }
+    c->bundle.scope = c->name;
     prb_set_resolver(resolve, c);
     snprintf(props, sizeof props, "%s_Props", name);
     LoadedBook *lb = load_book(c, props);
@@ -2733,6 +2736,7 @@ static Bundle *own_bundle(const Vol *vol, Scene *s, const char *file)
         free(b);
         return NULL;
     }
+    b->scope = "Monsters";
     s->own[s->nown++] = b;
     return b;
 }

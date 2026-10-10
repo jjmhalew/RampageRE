@@ -1,6 +1,7 @@
 /* main.c - RampageRE's native viewer: draws the city blocks straight from RAMPAGE.VOL (the game's own archive),
  * with the game's layout, lights, traffic, people and a monster (city.c, anim.c, render_gl.c).
  *   rampage [RAMPAGE.VOL] [City] [block number] [--night] [--monster NAME] [--clip N] [--shot FILE.png] [--time T]
+ *   [--dumptex] (texture packs, texpack.c: every texture drawn to mods/dump/; mods/textures/ replaces them)
  * default build\disc\RAMPAGE.VOL, Chicago, 1. --shot draws one frame (at T seconds) as a PNG and quits; with a
  * monster in play the camera settles for 2 s, then the monster plays --do "right 1, cross, wait 1.5, ..." (held
  * stick directions and pressed buttons, each for its seconds; --walk S = "right S").
@@ -42,6 +43,7 @@
 #include "streetobj.h"
 #include "parade.h"
 #include "collide.h"
+#include "texpack.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -5180,6 +5182,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--night") == 0) night = 1;
         else if (strcmp(argv[i], "--nofog") == 0) v.fog = -1;
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
+        else if (strcmp(argv[i], "--dumptex") == 0) tp_set_dump(1);   /* mods/dump/<scope>/ (texpack.c) */
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
         else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
         else if (strcmp(argv[i], "--shell") == 0) v.shell_mode = 1;
@@ -5228,7 +5231,9 @@ int main(int argc, char **argv)
         uint32_t gsize = 0, csize = 0;                /* the HUD's: WorldGui.bdp and CommonGUI.bdp */
         uint8_t *gui = vol_read(&v.vol, "WorldGui.bdp", &gsize), *common = vol_read(&v.vol, "CommonGUI.bdp", &csize);
         v.have_gui = gui && common && bdp_load(&v.gui_world, gui, gsize) == 0 && bdp_load(&v.gui_common, common, csize) == 0;
+        v.gui_world.scope = v.gui_common.scope = "GUI";   /* texture packs: the dump folders (texpack.c) */
         if (data && bdp_load(&v.fx_bundle, data, size) == 0) {
+            v.fx_bundle.scope = "fx";
             char elf[512];
             snprintf(elf, sizeof elf, "%s", pos[0]);
             char *slash = strrchr(elf, '\\'), *fwd = strrchr(elf, '/');

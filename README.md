@@ -91,3 +91,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 
 ## License
 GPL-3.0, like PS2Recomp. See [LICENSE](LICENSE).
+
+Third party: `src/stb/` holds Sean Barrett's stb_image and stb_image_write (public domain or MIT, see the end of each
+file), used by the texture packs ([docs/TEXTURES.md](docs/TEXTURES.md)); `src/texpack.c` comes from
+[WoodyRE](https://github.com/jjmhalew/WoodyRE) (GPL-3.0-or-later).

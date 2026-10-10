@@ -2359,6 +2359,7 @@ static void show_loading(Shell *s, int shell)
     uint8_t *data = shell ? NULL : vol_read(s->vol, name, &size);
     l->have_b = data && bdp_load(&l->b, data, size) == 0;
     if (!l->have_b) free(data);
+    l->b.scope = "Shell";
     if (l->have_b && s->gui.nb < MAX_BUNDLES)
         s->gui.bundles[s->gui.nb++] = &l->b;
     l->L = l->have_b ? layout_load(&s->gui, &l->b, "loading.ifc", 0) : NULL;
@@ -4439,6 +4440,7 @@ static int load_bundle(const Vol *vol, const char *name, Bundle *b)
         free(data);
         return 0;
     }
+    b->scope = "Shell";                                  /* texture packs: dumped under mods/dump/Shell (texpack.c) */
     return 1;
 }
 

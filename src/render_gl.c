@@ -6,6 +6,7 @@
 #include "plat.h"
 #include <GL/gl.h>
 #include "render_gl.h"
+#include "texpack.h"
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -254,7 +255,15 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            /* port extra: a texture pack's PNG (texpack.c), named after the decoded mip 0; hashed only with a pack
+             * or --dumptex */
+            uint64_t hash = tp_active() ? tp_hash('T', rgba, (uint32_t)w * (uint32_t)h * 4, w, h) : 0;
+            if (!hash || !tp_replace(hash, TP_ASIS))
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            if (hash) {
+                tp_scope(b->scope);
+                tp_dump(hash, rgba, w, h);
+            }
             free(rgba);
             bt->tex[name] = id;
         }
