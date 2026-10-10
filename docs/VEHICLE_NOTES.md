@@ -228,8 +228,8 @@ reports every award with its template name, so the viewer can count challenge go
   - Building.getPosition (0x277C60) is +0x2C, y = 5 + the row's BackRowOffset [R]; here the middle of its footprint;
   - the turret's rates are radians a second (0x299640) [R];
   - firing when on target: the turn within π/50, the pitch within π/100 (0x29ADE0) [R];
-  - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; here
-    it meets only the monsters; `setWeaponFlags(-1, 16)` holds every weapon (0x29AB60: +0x38 |= 16, untargeted) [R];
+  - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; as here
+    (vehicle.c casts the collision world's ray beside the monsters'); `setWeaponFlags(-1, 16)` holds every weapon (0x29AB60: +0x38 |= 16, untargeted) [R];
   - the weapon node: the host's `node_world`, else 3 above the truck.
 - **WorldObject.rotate:** rot × Rz(e[2]) Rx(e[0]) Ry(e[1]), in its own frame (case 0xD, 0x278258) [R].
 - **The first fill** is done again after `vehicle_clear`. Whether a later block load resets it was not traced.

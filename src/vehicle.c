@@ -1090,6 +1090,26 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
             (void)tdist;                             /* [R 0x295750] the beam is not cut at its target */
             int mon;
             float t = reach > 0.001f ? ray_monster(v, from, dir, reach, &mon) : -1;
+            /* [R 0x295750] the beam's ray is the world's (include -1, exclude 8 with the truck flagged 8 while it is
+             * cast): the street, the buildings and every object stop it, the nearest wins */
+            if (v->cw && reach > 0.001f) {
+                int oo = collide_check(v->cw, o->cobj, COLLIDE_TAG(COLLIDE_OWN_VEHICLE, idx(v, o)), 0);
+                uint32_t keep = oo >= 0 ? v->cw->o[oo].flags : 0;
+                if (oo >= 0)
+                    v->cw->o[oo].flags |= COLLIDE_F_RAYSKIP;
+                CollideHit h;
+                int got = collide_ray(v->cw, from, dir, reach, 0xFFFFFFFFu, COLLIDE_F_RAYSKIP, 0, &h);
+                if (oo >= 0)
+                    v->cw->o[oo].flags = keep;
+                if (got && (t < 0 || h.t < t - 1e-4f)) {
+                    t = h.t;
+                    mon = -1;
+                    if (h.obj >= 0 && COLLIDE_TAG_OWNER(v->cw->o[h.obj].tag) == COLLIDE_OWN_MONSTER) {
+                        int m = COLLIDE_TAG_INDEX(v->cw->o[h.obj].tag);
+                        mon = m < v->nm ? m : -1;
+                    }
+                }
+            }
             o->beam.on = 1;
             memcpy(o->beam.from, from, sizeof from);
             memcpy(o->beam.dir, dir, sizeof dir);
