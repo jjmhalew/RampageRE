@@ -1768,7 +1768,7 @@ static void push_out(Mon *mo)
     float s = mo->scale > 0 ? mo->scale : 1;
     CollideMonster m = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->mode,
                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
-                         { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, 0, 0,
+                         { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, mo->is_ai, 0,
                          { mo->vel[0], mo->vel[1], mo->vel[2] }, { mo->air[0], mo->air[1], mo->air[2] } };
     CollideMonsterOut o;
     collide_monster(&v->cw, &m, &o);
@@ -1795,6 +1795,11 @@ static void push_out(Mon *mo)
     mo->my = m.pos[1];
     mo->vel[0] = m.vel[0]; mo->vel[1] = m.vel[1];
     mo->air[0] = m.stick[0]; mo->air[1] = m.stick[1];
+    if (o.feet_lift) {                               /* 0x33BE90: both feet lifted, no anchor */
+        foot_step(&mo->feet, 0, 0);
+        foot_step(&mo->feet, 1, 0);
+        mo->feet.anchor = -1;
+    }
 }
 
 /* NODE_STEER (0x2E8190): the turn towards the stick this frame, in degrees. The stick in the monster's own frame

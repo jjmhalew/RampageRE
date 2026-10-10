@@ -324,6 +324,8 @@ static void shape_world_centre(const CollideObj *o, float c[3]) { point_world(o-
 int collide_pair(const CollideObj *a, const CollideObj *b, float normal[3], float point[3], float *depth)
 {
     float c[3], push[3];
+    if (a->shape.type == COLLIDE_BOX && b->shape.type == COLLIDE_BOX)
+        return 0;                                    /* [R 0x27FD70 -> 0x27FF18] two boxes never meet */
     shape_world_centre(a, c);
     int hit;
     if (a->shape.type == COLLIDE_BOX && b->shape.type == COLLIDE_SPHERE) {   /* the sphere against the box, turned round */
@@ -339,7 +341,7 @@ int collide_pair(const CollideObj *a, const CollideObj *b, float normal[3], floa
         }
         return hit;
     }
-    hit = collide_obj_sphere(b, c, a->shape.radius, normal, point, push);   /* a's (bounding) sphere against b */
+    hit = collide_obj_sphere(b, c, a->shape.radius, normal, point, push);   /* a's sphere against b */
     if (hit) {
         float l = sqrtf(dot3(normal, normal));
         if (l > 0)
@@ -772,8 +774,8 @@ void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut
                 copy3(out->touch_normal[out->ntouch++], n);
             }
             moved = (o->flags & COLLIDE_F_PUSHOUT) && m->mode != 5;
-        } else
-            moved = !m->no_push;
+        } else if (!m->no_push)                      /* 0x2E2F88: the push, then the feet let go (0x33BE90) */
+            moved = out->feet_lift = 1;
         if (moved) {
             m->pos[0] += push[0];
             m->pos[1] += push[1];

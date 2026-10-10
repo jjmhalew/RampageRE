@@ -137,7 +137,8 @@ typedef struct {
     float half_w, half_h;                            /* MONSTER_DATA +0x198, +0x19C (3, 4.25), x scale */
     float probe[2];                                  /* MONSTER_DATA +0x1A0, +0x1A4 (0, 2.5) x scale: its body's centre */
     int wide;                                        /* +0xB9C0 set: the alleys' measure 5 more [G what it is] */
-    int no_push;                                     /* +0x108 set: PushOutMonsters objects do not push it */
+    int no_push;                                     /* +0x108 (setIsAI, 0x2E35C0) set: PushOutMonsters objects do
+                                                      * not push it */
     int dead;                                        /* +0xA4C <= 0: no building below */
     float vel[3], stick[3];                          /* +0xBD30, +0xA68: zeroed against a building it is pushed off */
 } CollideMonster;
@@ -149,6 +150,8 @@ typedef struct {
     int below;                                       /* the building it is over (0x2D6150), -1 */
     int on_roof;                                     /* kept on that roof (0x2A49C0) */
     int walled;                                      /* pushed by the buildings (0x2A35A0) */
+    int feet_lift;                                   /* a PushOutMonsters object pushed it: with foot IK (+0x258C)
+                                                      * both feet are let go, 0x33BE90 */
 } CollideMonsterOut;
 int collide_building_below(const CollideWorld *w, const CollideMonster *m);   /* 0x2D6150 */
 void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut *out);

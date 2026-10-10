@@ -65,8 +65,10 @@ with its +0xA2).
   the world. `collide_obj_box`.
 - **One shape against a sphere** (0x280470 → +0xC, 0x280FF0: sphere–sphere 0x2813F0, sphere–box 0x2815F0).
   `collide_obj_sphere` (streetobj.c's 0x280470).
-- **Two shapes** (0x27F620 → 0x27FD70): by type; the other one's bounding sphere against a box, or two spheres. Two
-  boxes: one is taken as its bounding sphere [G which]. `collide_pair`.
+- **Two shapes** (0x27F620 → 0x27FD70): the one of the higher type is tested in its own frame (its matrix inverted;
+  the push turned round when it was the second): a sphere against a box (0x2815F0), or two spheres (0x2813F0); two
+  boxes never meet (0x27FF18 → 0x27FFC0 returns 0), and a type 3 (the monsters' WCISpheres) meets nothing [R].
+  `collide_pair`.
 - **The buildings by place** (0x2A3D20, `gWorld.findBuildingByPosition`): with the direction (0, 0) the last building
   in the list whose footprint (x, y, edges included) holds the point, whatever its state or height; with a direction
   the nearest one that way beyond the building at the point (or the point), wholly past it, across the point's row
@@ -85,7 +87,9 @@ higher. The box query: include 0x404000 (VolumeTrigger | PushOutMonsters), exclu
 - a VolumeTrigger: 0x335BF0 fires it (when enabled, +0xA0, with a FireFunc, +0xA4, and its refire clock +0x98 run
   down: the script's FireFunc(monster, normal), the clock set to MinRefireTime +0x9C; 0x3361A0 runs the clock), and
   with DoPushout the monster moves by the push's x and y, unless it is on a building;
-- otherwise (PushOutMonsters): the push's x and y, unless +0x108 is set; then 0x33BE90(+0xC81C) when +0x258C [G].
+- otherwise (PushOutMonsters, 0x2E2F88): nothing when the monster's +0x108 (setIsAI, 0x2E35C0: the AI's monsters)
+  is set; else the push's x and y, then, with foot IK (+0x258C), 0x33BE90(+0xC81C) lets both feet go (each record
+  +0x24 &= ~3, +0 = 0; the anchor −1) [R].
   The pushes are each from the box as it was at the start.
 
 Then the buildings, from its body's centre (0x2E4D30: the feet + MONSTER_DATA +0x1A0 along its x axis and +0x1A4
@@ -137,14 +141,22 @@ repeats each sub-step while the shapes overlap.
 else j = −(1 + e) u·n / (1/m + n·((I⁻¹(r × n)) × r)), the tangents' impulses cancelling u's sliding, held to
 μ j (Coulomb); the impulse (0x28E0D0: v += J/m, ω += M I⁻¹ Mᵀ (r × J)). Objects meeting (0x285E90): one with a
 mover and one without — the same contact against the other's surface with its own restitution and friction (no
-pushing out); both with movers — an exchange between them [G: not ported; collide.c takes the other as static].
+pushing out); both with movers — an exchange between them (0x285E90) [R]: the relative velocity at the contact
+points u (each mover's velocity and spin, vtable +0x10); nothing when u·P ≥ 0; restitution and friction each
+0.7 × the lesser + 0.3 × the greater; the normal impulse j = (1 + e)(u·n)/K(n) and two tangent ones, together held to
+μ|j| by max + ½ min; the push shared by the masses (mB / (mA + mB) and −mA / (mA + mB)), dropped to a lift off the
+street when it would go under; both applied through vtable +0x24 (0x28E0D0). Every other mover class answers no spin
+and ignores the impulse (0x2873A0, 0x287390), held objects included. **Not ported: collide.c takes the other as
+static** (the impulse rule, max + ½ min, differs from the port's √(j1² + j2²) too).
 
 There is no rest and no rolling resistance in the mover: friction makes it roll, and it rolls on (the scripts stop
-or delete what they throw). [G] Whether the vehicles' and objects' origins are at their middle (the sphere is
-centred on the object's position: an object whose origin is at its base rests r above the street).
+or delete what they throw). The street test (0x28E6F4) takes the sphere about the mover's position, with no offset
+for the shape's centre, and the models' origins are at their base (the taxi's body centre 0.90 up, the bench's 0.37):
+a thrown object rests r above the street [R].
 
 ## Not traced
-- The two-body exchange in 0x285E90 (both moving), and box against box in 0x27F620 (which keeps its box).
+- What the other mover classes keep at +0x10 … +0x2C (mass, velocity, restitution, friction, inertia) for the
+  exchange.
 - The gate at the top of 0x2E2C50 in full: it returns at once when the monster's +0xFC (taken as its slot) is not
   below 0x4D7E28 (the players' count: the revealed monster's slot, main.c `push_out`) or byte 0x4D6A9A is set
   [R 0x2E2C6C .. 0x2E2C88]; what 0x4D6A9A is was not traced. Also +0x108, +0xB9C0, +0x258C,
@@ -166,7 +178,9 @@ Each frame, before anything moves, main.c's `world_build` fills the Viewer's `Co
 3. each module's objects with their shapes (0x28FD70, `collide_shape_pick`, read once per object) and their own
    flags | 4: `army_collide_add`, `vehicle_collide_add`, `rail_collide_add`, `parade_collide_add`,
    `streetobj_collide_add`, `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged
-   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). A held object is left out [G];
+   `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). A held object is left out **[G]**: in the game the
+   grab (0x2DA310) keeps it in the world with its shape (BeingHeld set, Pickupable and PushOutMonsters cleared), so
+   the monster's box no longer sees it but flying objects meet it (TakeImpact) and rays may [R];
 4. `collide_finish`.
 
 The tag (`COLLIDE_TAG(owner, index)`, `COLLIDE_TAG_OWNER`, `COLLIDE_TAG_INDEX`) names the module and its index; each
@@ -187,8 +201,10 @@ Who asks it:
   `rail_impact`, `streetobj_take_impact`, `army_impact`).
 - **The street objects' tests** (streetobj.c): a blow `collide_obj_sphere`, a touch `collide_obj_box`, against the
   object's shape.
-- [G] The world is built from where everything was at the end of the last frame; what moves this frame is seen by the
-  others next frame (the game's objects move one after another within its frame).
+- The world is built from where everything was at the end of the last frame; what moves this frame is seen by the
+  others next frame. The game has no such picture: each query walks RWorld's list (+0x58, next +0x68) and reads every
+  object's matrix and shape as it is then (0x2835B0), so those updated earlier in the frame are seen where they are
+  now (its objects move one after another within its frame) [R]. Here movers write their entry each sub-step.
 
 ## The API (collide.h)
 
