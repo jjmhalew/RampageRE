@@ -329,8 +329,11 @@ Floating = 100
   +0xA78 when byte +0xA74 is set, through the monster's matrix) plus M × the offset +0xBD54 (set only by the script
   binding `setTargetOffset`, id 76, which no script calls; zeroed at 0x2DA6CC, 0x2E805C, 0x2E9A34), its z then the
   feet's + 6: here Spine1's x and y (`ArmyMonster.target`). A shot's homing aims at the target's shape centre (+0x74,
-  +0xC, through its matrix: 0x293260 → 0x287F00); what that centre is for a monster was not resolved, here its box's
-  middle [G]. Both the projectile's wobble (definition flag 8) and its spread (record flag 8) come from flags no book
+  +0xC, through its matrix: 0x293260 → 0x287F00; no offset, no lead) [R]. A monster's shape is its own WCISpheres
+  (+0x68C, set up by the ctor 0x2EB6E0, +0x74 = it at 0x2EB8AC): 0x2DA9E0 places the collision spheres from the
+  posed bones (lazily, byte +0x92C) and 0x29A880 merges them in order (0x103770: a centre within 0.001 keeps the
+  larger, one inside the other the outer, else the sphere round both), so the centre is the spheres' bounding
+  sphere's and moves with the pose. As here (army.c `monster_centre`, from `ArmyMonster.spheres`). Both the projectile's wobble (definition flag 8) and its spread (record flag 8) come from flags no book
   sets.
 - **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject hit wobble (+0x18C), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).

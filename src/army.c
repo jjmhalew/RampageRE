@@ -244,8 +244,46 @@ static void monster_target(const ArmyMonster *m, float c[3])
     c[2] = m->pos[2] + 6;
 }
 
-static void monster_centre(const ArmyMonster *m, float c[3])   /* [G] a shot's homing: the box's middle */
+/* one sphere merged into another (0x103770; radii squared): a centre within 0.001 keeps the larger, one inside the
+ * other the outer, else the sphere round both */
+static void sphere_merge(float c[3], float *r2, const float b[3], float rb2)
 {
+    if (rb2 < 0)
+        return;
+    if (*r2 < 0) {
+        memcpy(c, b, 3 * sizeof *c);
+        *r2 = rb2;
+        return;
+    }
+    float d[3] = { b[0] - c[0], b[1] - c[1], b[2] - c[2] };
+    float dist = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), ra = sqrtf(*r2), rb = sqrtf(rb2);
+    if (dist < 0.001f) {
+        if (rb2 > *r2) *r2 = rb2;
+    } else if ((dist + rb) * (dist + rb) < *r2) {
+    } else if ((dist + ra) * (dist + ra) <= rb2) {
+        memcpy(c, b, 3 * sizeof *c);
+        *r2 = rb2;
+    } else {
+        float R = 0.5f * (dist + ra + rb), t = (R - ra) / dist;
+        if (t < 0) t = 0;
+        for (int k = 0; k < 3; k++)
+            c[k] += d[k] * t;
+        *r2 = R * R;
+    }
+}
+
+/* a shot's homing point: the target's shape centre (0x293260 -> 0x287F00). A monster's shape is its WCISpheres
+ * (+0x68C, ctor 0x2EB6E0): the bounding sphere of its collision spheres, merged in their order from the posed bones
+ * (0x2DA9E0 -> 0x29A880 -> 0x103770) [R]. Without spheres the box's middle stands in */
+static void monster_centre(const ArmyMonster *m, float c[3])
+{
+    if (m->nspheres > 0) {
+        float r2 = m->spheres[0][3] * m->spheres[0][3];
+        memcpy(c, m->spheres[0], 3 * sizeof *c);
+        for (int i = 1; i < m->nspheres; i++)
+            sphere_merge(c, &r2, m->spheres[i], m->spheres[i][3] * m->spheres[i][3]);
+        return;
+    }
     if (m->box_max[2] > m->box_min[2])
         for (int k = 0; k < 3; k++)
             c[k] = (m->box_min[k] + m->box_max[k]) / 2;
