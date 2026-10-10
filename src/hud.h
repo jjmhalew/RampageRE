@@ -264,6 +264,7 @@ typedef struct {
     float col[4];            /* rgba 0 .. 1, multiplies the texture */
     const Bundle *b;         /* the texture's bundle, NULL: an untextured quad */
     uint32_t tex;            /* name index of the texture in b */
+    float skew;              /* the top edge moved this far along x (a slanted glyph), 0 upright */
 } HudQuad;
 /* the quads back to front: the floating numbers (they are in the 3D world, under the GUI), then the interfaces in the
  * order they were loaded (the HUD, the clock, ChallengeStatus, ChallengeText, the banners, the results screen, the

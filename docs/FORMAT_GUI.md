@@ -32,29 +32,38 @@ box (GuiListBox), `X` child interface. Properties:
 |---|---|
 | `n` (attribute) | name (`findObject`) |
 | `p` | position x [y [z]] in the parent's frame **[R]** |
-| `m` | scale of the object's frame. It also scales the children **[R/G: the health and rage frames (104 and 90.25 wide at m 0.8) both end at x 136.2; a 100-wide slider fits inside the 104-wide frame only when scaled]**. Scripts call `setScale` |
+| `m` | scale of the object's frame: it multiplies the frame's 3×3 as it is when read (0x22DDF0), so it scales the children too **[R]**. Scripts call `setScale` |
 | `z` | the object's fade (+0x5C, the handler 0x22C450 of `fade`): it multiplies the fade of the object and its children, and at 0.01 or less nothing of it is drawn (0x2418A4) **[R]**. The bars' black backing (0.5) is half faded over the bar's frame; Rage's `Head` (0) is never seen |
 | `d` | size. When `d` is absent, a quad takes the used size of its texture |
 | `b` | texture (bitmap) name |
 | `c` | colour `0xRRGGBBAA`. It multiplies the texture **[R: Hud.scr's rageColor (1, 0.5, 0.25) = maskColor 0xFF8040FF]** |
 | `Q` | quad sprite flags. 0x2 centres the sprite across its origin and 0x4 centres it vertically (0x243C00 → 0x17C720 / 0x17C6D0 / 0x17C770) **[R]**. Without them the sprite spans from the origin to +d |
-| `F` | object flags. 0x1 marks objects that start hidden (`heads`/`blocks`, `numText`, `line2`, `challenge_group`) **[G]**. Interfaces carry 0x82 |
-| `v`, `L` | text: a literal string, or a `.loc` key (looked up in the bundles' string tables, `tools/loc.py`; a missing key shows itself **[G]**) |
-| `g` | font name, with attributes `j` (justify: `c` centre, `r` right, else left), `o` (origin: `m` middle, `b` bottom, else top), `s` (scale), `charspacing`, `linespacing`, `w` (word wrap width), `m`, `i` (not traced) **[G: the letter meanings; R: the three modes in the string draw]** |
-| `maxwidth` | the text shrinks uniformly when its unscaled width is greater (0x1B6350) **[R]** |
+| `F` | object flags (0x22B2F0: the u16 at +0x5A replaced). The draw skips `F & 0x201` (0x241770): 0x1 marks objects that start hidden (`heads`/`blocks`, `numText`, `line2`, `challenge_group`) **[R]**. Interfaces carry 0x82: 0x80 gives the interface the frame event even when it is not the focused one (0x2416E8) **[R]** |
+| `v`, `L` | text: a literal string, or a `.loc` key (0x235800): one starting with a digit is the text itself; else the string tables (LocalizationManager 0x1D4C60: the tables from the last loaded back, each a case-blind binary search, 0x1D5320; an empty text tries the next); a missing key shows `0x key x0` (0x4225C8) **[R]**. `gApp.localizeString` of a missing key gives "" |
+| `g` | font name (0x22D960: only the first letter of each attribute counts, either case; a fresh OFont each time) **[R]**. `j` and `o` share a parser (0x2350E0): `l`/`c`/`r` set the justify, `t`/`m`/`b` the origin (a longer value only as left, center, right, top, middle, bottom); `s` the scale (+0xC, applied in the font draw); `c` the char spacing, `l` the line spacing; `w` the word wrap width (+0x8); `i` the slant (+0x44, over the font's: the glyphs' top edge moves by it, an italic: 32 on the Pause, GameOver and Results titles, 21 CitySelect's, 4 MonsterSelect's); `m` (+0x7) how each line sits in the block: `l`, `c`, `r`, default 3 each line by `j` |
+| `maxwidth` | the text shrinks uniformly when its width after `s` is greater (0x1B6270, 0x1B6350): drawn min(s × w, maxwidth) **[R]** |
 | `val`, `hasMaskBar`, `barColor`, `maskColor` | slider properties |
-| `M` | 0x310 on Results' two white boxes at the scrolling title's ends: taken as masks that cut the title to x 62..503, not drawn **[G]**; 0x90 on a visible icon |
-| `st`, `ct`, `bkgdColor`, `bc`, `B`, `bbias`, `R` | rect: side and corner pictures (`FrameLine`, `FrameCorner` of CommonGUI.bdp), background, frame colour, frame width, its offset (−7: outside), flags |
+| `M` | sprite flags ORed in on a quad (0x22B210 → 0x17D0B0, the shader picked again by 0x17D100). 0x200 picks a depth-only shader (descriptor 0x410D50 / 0x4114E8: GS TEST 0x52001, alpha test NEVER with ZB_ONLY): not drawn **[R]**. 0x10 / 0x100 are renderer states 0 / 1, depth test and write; 0x400 depth ALWAYS for that sprite. 0x310 on Results' two white boxes at the scrolling title's ends: taken as masks that cut the title to x 62..503 **[G: the text's depth, against the boxes' GEQUAL, not read]**; 0x90 on a visible icon (the default shader) |
+| `st`, `ct`, `bkgdColor`, `bc`, `B`, `bbias`, `R` | rect: side and corner pictures (`FrameLine`, `FrameCorner` of CommonGUI.bdp), background, frame colour, frame width, the background's bias (−8: 4 in), flags |
 | `c` / `b` / `d` with `highlight`, `normal`, `disabled`, `selector`, `endcap`; `sp`, `a`, `growth` | list box: item colours (selected, others), the highlight bar's pictures (`HighlightSegment`, `HighlightEndcap`) and size, spacing, flags, its growth |
 
-### Rect and list box [G]
-Neither draw is traced. `hud.c` fills the rect's `d` from its origin in `bkgdColor`, then draws the frame `B` wide
-with its outer edge `bbias` from the rect's: `FrameCorner` (the top-left corner) mirrored to the four corners,
-`FrameLine` (its lower rows are the outside, matching the corner's arc) stretched between. A list box gives its
-selected item the highlight colour and the others the normal one, and draws the highlight bar (segment + end caps,
-`d highlight` tall, pulsing) behind the selected item's text. Word wrap: the text breaks at the last space that fits
-`w`, read in the text's parent frame (boss_message's x 20 + w 480 = its rect's 500; cq_title's 460 centred in 480; the
-Results lines' w = the list's width).
+### Rect and list box
+**GuiRect** [R] (vtable 0x447A00, ctor 0x245650, draw 0x244500, rebuild 0x2449F0): the outer box is `d` from the
+origin (`B`, default 5, would add 2 ΔB, but every layout gives `d` after `B`). The background (sprite +0x80) starts at
+−bbias / 2 with the size d + bbias (0x243840): with bbias −8, 4 in on each side. Four B × B corners at the outer
+corners, inside the box, `FrameCorner` turned 0°, 270°, 180° and 90° (0x3B3EC0, 0x3B3E90, 0x3B3E60; here mirrored
+**[G]**); four GuiLines B wide between (left and right at x = B/2 from B to H − B, top and bottom at y = B/2; drawn
+left, bottom, right, top). The order: the background, the rect's own text (none in any layout), two more lines
+(+0x178), the sides, the corners. **[G]** Which rows of `FrameLine` are the outside (the GuiLine draw), and the +0x178
+lines, were not read.
+
+**The list box** [G: GuiListBox (ctor 0x23E280) not read]: the selected item in the highlight colour, the others the
+normal one, the highlight bar (segment + end caps, `d highlight` tall, pulsing) behind the selected item's text.
+
+**Word wrap** [R 0x1B5AA0]: a line ends once Σ(a + w + c + spacing) × s reaches `w` (the trailing spacing counted, no
+slant): at the last break (a space, or just after a `-`), else before the character that overflows (one at least);
+the next line skips the spaces. `w` is read in the text's own frame after `s` (boss_message's x 20 + w 480 = its
+rect's 500; cq_title's 460 centred in 480; the Results lines' w = the list's width).
 
 ### Slider (GuiSlider, layout 0x24A310)
 Defaults: value 100, range 0..100, size 100 × 20 (constructor 0x24ACD0) **[R]**. The slider is always centred on its origin.
@@ -75,7 +84,8 @@ OFontData loader 0x1B7CD0, read **[R]**. Field-by-field layout is in `tools/gui.
 - Glyph u/v values are fractions of the bitmap's used size. The loader multiplies them by the texture's own UV scale.
   - The floats at texture +0x18 and +0x1C are used ÷ the GS's power-of-two size (156 / 256 for PointsBanner).
   - Over a decoded image of the header's width × height, the used part ends at used ÷ size.
-- Cell height (+0x24) = texture height ÷ rows at 0x304. ArialBlack24: 210 / 7 = 30, PointsBanner: 21 **[G: the used height]**.
+- Cell height (+0x24) = texture height ÷ rows at 0x304, the used height (0x26AA80 sets +0x20 / +0x24 from the entry's
+  +0x14 / +0x16; 0x1B801C) **[R]**. ArialBlack24: 210 / 7 = 30, PointsBanner: 21.
 - Average height (+0x28) = mean `h` of the digits and lower case, or of the capitals if there are none.
 - The OFont defaults (0x1B7200) come from the file: spacing, line spacing, shadow dx and dy, shadow colour, colour
   (`AABBGGRR`), slant, scales.
@@ -105,7 +115,7 @@ OFontData loader 0x1B7CD0, read **[R]**. Field-by-field layout is in `tools/gui.
   - Health slider = 100 · HP / max HP. The bar is bright green and the mask, dark green, covers what was lost.
   - Rage slider = 100 − 100 · energy / 100. Its bar is dark brown. The orange mask is the rage, growing from the right end.
   - `score` = `"%d"` of `player.getPoints(6)`. It has no thousands separator. It is right-justified on the bottom at
-    group + (86, −4), drawn at 0.8, and squeezed above 100 font pixels (6 digits and more).
+    group + (86, −4), drawn at 0.8, and squeezed above maxwidth 100 after the scale (125 font pixels).
   - At full energy, the mask colour flashes: lerp(rage, white, (1 + cos(30 t)) / 2), where t sums the frame times.
   - The bars do not ease; they jump to the value.
 - **Clock:**
@@ -131,10 +141,10 @@ OFontData loader 0x1B7CD0, read **[R]**. Field-by-field layout is in `tools/gui.
   - PointsBanner spacing is 2.
 
 ## Not traced
-- The letters of `j`/`o`, and `F` 0x20 (an icon quad: drawn only with a picture). `F` 0x1 is hidden and 0x4 is never
-  tested **[R: SHELL_NOTES.md "The GUI's 3D objects"]**.
+- `F` 0x20 (an icon quad: drawn only with a picture). `F` 0x1 is hidden and 0x4 is never tested **[R: SHELL_NOTES.md
+  "The GUI's 3D objects"]**.
 - The GUI draws each interface in tree order, the object, then its children, without a sort **[R 0x241770]**.
-- The game's word wrap (OFont +0x8), the slant (0 in every font), Shift-JIS glyphs and the special glyph images
+- Shift-JIS glyphs and the special glyph images
   (OFont +0x25C: the `.loc` texts' `\v1.25Controller_Back\v` pictures, drawn here as a square the cell's height times
   the number).
 - The mapping of the 640 × 480 screen to the PAL/NTSC frame buffer.

@@ -22,13 +22,14 @@ code or the files, **[G]** a guess or a stand-in.
   list at +0x0, its count at +0x8) named (+0x38) `Removeable`, the vtable call +0x44 (0x22A3B0, `flags +0x5A |= arg`)
   with 1. Flag 0x1 is what `GuiObject.isVisible` tests (0x256C64: `!(flags & 1)`): the banners are hidden, not
   unloaded. `StreetObject::TakeDamage` calls it when a monster takes the challenge's upgrade, just before its own
-  banner (the upgrade's TextID, white, `v_upgrade`), which is therefore not hidden. **[G]** The hidden banners' scripts
-  are taken to run on and unload themselves as usual (the GUI manager's frame events to hidden interfaces are not
-  traced). Ported as `hud_hide_challenge_completion`.
+  banner (the upgrade's TextID, white, `v_upgrade`), which is therefore not hidden. The hidden banners' scripts run
+  on and unload themselves [R]: the screen's update (0x233850) runs the pending unloads, then every interface's tree
+  update (0x2415E0), which never tests F 0x1; Rage.ifc's F 0x80 sends the frame event whether focused or not
+  (0x2416E8). Ported as `hud_hide_challenge_completion`.
 - **The name**: `localizeString(name)`; if it begins with `#` the text is the rest, as is (the reveal builds its
   text itself). The texts are in `Game.loc` (WorldGui.bdp): `InstantRampage` "Instant\nRampage", `SpeedIncrease`
   "Speed\nBoost", `Challenge_Met` "CHALLENGE MET!", `MonsterRevealed` "%s Unlocked", `RAMPAGE`. Keys ignore case
-  [G]. `Edible.scr` turns the first `\n` (two characters) of its Message into a line break first.
+  [R: LocalizationManager 0x1D4C60, a strcasecmp binary search per table]. `Edible.scr` turns the first `\n` (two characters) of its Message into a line break first.
 - **Motion** (`Rage::doInterface`, from its second frame; the first sets up):
   - setup: the text, colour, scale; 15 copies of the text (with `line2`), fades 0, 1/15 .. 14/15; the text hidden;
     the sound played.
@@ -79,7 +80,8 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
 - **Scrolling title** (from 1.5 s): the block's name `format(localize("Results_CompletlyDestroyed"),
   localize(getBlockName(0)))` ("Downtown - COMPLETELY DESTROYED"), or, on the city's last block with buildings left,
   the block's `ResultsNIText`; two copies 150 apart move left at 150 a second between x 62 and 503 (the layout's
-  `M 0x310` boxes mask the ends [G]); "Live" blinks every 0.5 s.
+  `M 0x310` boxes, a depth-only shader, are not drawn [R] and are taken to mask the ends [G: the text's depth]);
+  "Live" blinks every 0.5 s.
 - **Count-up** (from 1.5 s): the lines destruction, people, vehicles, bonus, time bonus, challenge — the point
   categories 0..5 summed over the players — appear one by one, each counting from 0 in 0.5 s, the total with them
   (`%i,%03i` from 1000). People and vehicles show the kills. On the last block the challenge line reads "Boss
@@ -90,8 +92,9 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
   (Back) — the ConfirmQuit dialog, Yes → result 4. Change Monster and Quit are hidden once the city is destroyed.
 - **The end**: after the walkout, result 1 (DONE), 5 s more on screen, a 0.5 s fade, `endResults`. The game goes on
   to the next block meanwhile (game.c moves on at DONE).
-- The script's `processIntro(dt, niFlag)` only works if `niFlag` is passed by reference (by value, `bDoIntro`
-  would never clear and no button would be taken) **[G]**.
+- The script's `processIntro(dt, niFlag)` clears `bDoIntro` through its reference: the PP interpreter passes a
+  writable variable uncopied (0x1B9870 / 0x1B9A20 copy only constants and temporaries; 0x1C3270), and assignment
+  writes through it (0x1BBAC8) [R].
 - Buttons are PS2-coloured by `fixButtonColors` (ButtonSetup.h): (0, 186, 255), (190, 45, 39), (220, 108, 194).
 
 ### LevelResults (the campaign's city) [R LevelResults.scr]
@@ -114,7 +117,7 @@ WorldResults, KingBlockResults, KingCityResults, KingWorldResults and TimedRunRe
 `setupIntroItem(name)` takes an object's place, scale and fade as both ends (fade 1), the script then sets the start
 and end time and the ends it changes; `setupIntro` puts each intro item at its start. `processIntro` moves the items of
 the state's list (`niState` 0 the intro, then the walkout; KingBlockResults has more, below) and, when all are done,
-`niState++`. Like Results.scr's it takes its flag by value, so taken by reference here **[G]**. The walkout's items
+`niState++`. Like Results.scr's its flag is passed by reference (above) [R]. The walkout's items
 are set up at the start, so they start where the objects were at the intro's start, not where the intro left them.
 The King screens and TimedRunResults reuse Results' news flash: the same first ten intro items (title bars, "Rampage
 Alert", "CHANNEL 3", the grey field, the orange band, "Live", the buttons, the scrolling title from 1.25 s), the same
@@ -150,8 +153,9 @@ Block will be replayed" and the Replay button instead.
 DESTROYED", the standings: "CITY STANDINGS" (blocks won of `getNumBlocksToWin`) or, in King of the World, "WORLD
 STANDINGS" (cities won of `getNumCitiesToWin`), the rows sorted by blocks won in both. X: King of the City → result
 4 at once (to the menus; no walkout); King of the World → "MOVING ON TO <getCityName(getCityIdx() + 1)>", the
-walkout, result 1. Quit hidden in King of the City or with a King of the World. **[G]** A city that ran out of blocks
-without a King (the King of the City's last block won by nobody alone) would show "P0: " (no monster).
+walkout, result 1. Quit hidden in King of the City or with a King of the World. A city never runs out of blocks
+without a King: with 6 − players to win and ties replayed, p players share at most p(5 − p) ≤ 6 decisive blocks,
+and every city has 8 to 10 [R].
 
 ### KingWorldResults (state 11, King modes) [R KingWorldResults.scr]
 "THE WORLD COMPLETELY DESTROYED" scrolling, "P2: Lizzie" (the script asks `getKingOfCity()`, the last city's King,

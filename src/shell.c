@@ -16,6 +16,7 @@
  * layouts are listed for the viewer to draw in 3D (shell_3d), their lights with them (the scripts find all of them by
  * name); and objects outside a 2D root (<DD>) are the GUI's 3D objects, whose positions are in screen widths (below). Unchanged from hud.c otherwise: if hud.c's core
  * moves into a module of its own one day, this copy can go. */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -235,6 +236,7 @@ typedef struct {
     const struct Node **d3; const void **l3; int n3, max3;   /* the 3D objects in the order of their markers, and their
                                                       * layouts (shell_3d) */
     const void *layout;                              /* the layout being emitted */
+    float skew;                                      /* the top edge moved along x (a slanted glyph) */
 } Emit;
 
 /* a picture: the rectangle (x0, y0) .. (x1, y1) of frame f with the texture's (u0, v0) .. (u1, v1) on it */
@@ -244,8 +246,8 @@ static void emit_quad(Emit *e, const Frame *f, float x0, float y0, float x1, flo
     if (e->n >= e->max || col[3] <= 0.0f)
         return;
     ShellQuad *q = &e->q[e->n++];
-    fr_apply(f, x0, y0, &q->x[0], &q->y[0]);
-    fr_apply(f, x1, y0, &q->x[1], &q->y[1]);
+    fr_apply(f, x0 + e->skew, y0, &q->x[0], &q->y[0]);
+    fr_apply(f, x1 + e->skew, y0, &q->x[1], &q->y[1]);
     fr_apply(f, x1, y1, &q->x[2], &q->y[2]);
     fr_apply(f, x0, y1, &q->x[3], &q->y[3]);
     q->u[0] = u0; q->v[0] = v0; q->u[1] = u1; q->v[1] = v0;
@@ -273,7 +275,8 @@ static int text_icon(const Gui *g, const Font *f, const char *s, int n, TexRef *
     return i;
 }
 
-static void run_measure(const Gui *g, const Font *f, const char *s, int n, int spacing, float *w_out, float *h_out)
+static void run_measure(const Gui *g, const Font *f, const char *s, int n, int spacing, float slant, float *w_out,
+                        float *h_out)
 {
     float w = 0, h = 0;
     int any = 0;
@@ -296,11 +299,16 @@ static void run_measure(const Gui *g, const Font *f, const char *s, int n, int s
         if (gl->h > h) h = gl->h;
         any = 1;
     }
-    *w_out = any ? w + (float)(f->slant - spacing) : 0;
+    *w_out = any ? w + slant - (float)spacing : 0;
     *h_out = any && h > 0 ? h : f->avg_h;
 }
 
-static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, float wrap, TLine *L, int max)
+/* the lines of a text (0x1B5AA0) [R]: its '\n's, and with a wrap width (OFont +0x8, in font pixels after s) a line ends
+ * once the sum of a + w + c + spacing reaches it: at the last break before (a space, or just after a '-'), else
+ * before the character that overflows (one at least); the next line skips the spaces. The width of a line is its
+ * measure (run_measure, with the slant) */
+static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, float slant, float wrap, TLine *L,
+                      int max)
 {
     int nl = 0;
     const char *p = s;
@@ -309,31 +317,40 @@ static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, f
         int n = q ? (int)(q - p) : (int)strlen(p), start = 0;
         do {
             int end = n;
-            float w, h;
             if (wrap > 0) {
-                run_measure(g, f, p + start, n - start, spacing, &w, &h);
-                if (w > wrap) {
-                    int brk = -1;
-                    for (int i = start + 1; i < n; i++) {
-                        if (p[i] != ' ')
-                            continue;
-                        run_measure(g, f, p + start, i - start, spacing, &w, &h);
-                        if (w > wrap)
-                            break;
-                        brk = i;
+                float acc = 0;
+                int brk = -1;
+                for (int i = start; i < n;) {
+                    int j = i;
+                    float adv = 0;
+                    if (p[i] == '\v') {
+                        TexRef t;
+                        int ok;
+                        float size;
+                        i += text_icon(g, f, p + i, n - i, &t, &ok, &size);
+                        adv = size + (float)spacing;
+                    } else {
+                        const Glyph *gl = &f->g[(unsigned char)p[i++]];
+                        if (gl->ok)
+                            adv = gl->a + gl->w + gl->c + (float)spacing;
                     }
-                    if (brk < 0)
-                        for (brk = start + 1; brk < n && p[brk] != ' '; brk++) {}
-                    end = brk;
+                    if (p[j] == ' ')
+                        brk = j;
+                    acc += adv;
+                    if (acc >= wrap && (brk > start || j > start)) {
+                        end = brk > start ? brk : j;
+                        break;
+                    }
+                    if (p[j] == '-')
+                        brk = i;
                 }
             }
             TLine *l = &L[nl++];
             l->s = p + start;
             l->n = end - start;
-            run_measure(g, f, l->s, l->n, spacing, &l->w, &l->h);
+            run_measure(g, f, l->s, l->n, spacing, slant, &l->w, &l->h);
             start = end;
-            if (start < n)
-                while (start < n && p[start] == ' ') start++;
+            while (start < n && p[start] == ' ') start++;
         } while (start < n && nl < max);
         if (!q)
             break;
@@ -344,14 +361,14 @@ static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, f
 
 typedef struct {
     const Font *f;
-    int justify, origin, spacing, linesp;
-    float maxwidth, wrap;
+    int justify, origin, spacing, mode;
+    float linesp, maxwidth, wrap, slant;            /* in font pixels (linesp, maxwidth: before s) */
 } TextStyle;
 
 static void text_extent(const Gui *g, const TextStyle *ts, const char *s, float *w, float *h)
 {
     TLine L[MAX_LINES];
-    int nl = text_lines(g, ts->f, s, ts->spacing, ts->wrap, L, MAX_LINES);
+    int nl = text_lines(g, ts->f, s, ts->spacing, ts->slant, ts->wrap, L, MAX_LINES);
     float wmax = 0, hsum = 0;
     for (int i = 0; i < nl; i++) {
         if (L[i].w > wmax) wmax = L[i].w;
@@ -359,7 +376,7 @@ static void text_extent(const Gui *g, const TextStyle *ts, const char *s, float 
     }
     float k = ts->maxwidth > 0 && wmax > ts->maxwidth ? ts->maxwidth / wmax : 1.0f;
     *w = wmax * k;
-    *h = hsum * k + (float)(ts->linesp * (nl - 1));
+    *h = hsum * k + ts->linesp * (float)(nl - 1);
 }
 
 /* the string draw (0x1B6A80, glyphs 0x1B64B0) [R hud.c], in frame f (font pixels) */
@@ -370,7 +387,7 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
     if (!fo || !fo->ok || !s || !*s)
         return;
     TLine L[MAX_LINES];
-    int nl = text_lines(g, fo, s, ts->spacing, ts->wrap, L, MAX_LINES);
+    int nl = text_lines(g, fo, s, ts->spacing, ts->slant, ts->wrap, L, MAX_LINES);
     float wmax = 0, hsum = 0;
     for (int i = 0; i < nl; i++) {
         if (L[i].w > wmax) wmax = L[i].w;
@@ -379,14 +396,20 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
     float k = 1.0f;
     if (ts->maxwidth > 0 && wmax > ts->maxwidth)
         k = ts->maxwidth / wmax;
-    float total_h = hsum * k + (float)(ts->linesp * (nl - 1));
+    float total_h = hsum * k + ts->linesp * (float)(nl - 1);
     float y = ts->origin == 1 ? -0.5f * total_h : ts->origin == 2 ? -total_h : 0.0f;
-    float cell = fo->cell_h * k, slant = (float)fo->slant * k, spacing = (float)ts->spacing;
+    float cell = fo->cell_h * k, slant = ts->slant * k, spacing = (float)ts->spacing;
     for (int l = 0; l < nl; l++) {
         float h = L[l].h * k;
         y += h - cell;
         float yoff = h <= cell ? 0.0f : 0.5f * (fo->avg_h * k - h);
-        float x = ts->justify == 1 ? -0.5f * L[l].w * k : ts->justify == 2 ? -L[l].w * k : 0.0f;
+        /* [R 0x1B6CB4 .. 0x1B6E18] j places the block (W its widest line), m each line in it; m 3: each line by j */
+        float W = wmax * k, lw = L[l].w * k, x;
+        if (ts->mode == 3)
+            x = ts->justify == 1 ? -0.5f * lw : ts->justify == 2 ? -lw : 0.0f;
+        else
+            x = (ts->justify == 1 ? -0.5f * W : ts->justify == 2 ? -W : 0.0f) +
+                (ts->mode == 1 ? 0.5f * (W - lw) : ts->mode == 2 ? W - lw : 0.0f);
         if (slant < 0)
             x -= slant;
         for (int pass = 0; pass < 2; pass++) {
@@ -422,12 +445,14 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
                     continue;
                 }
                 cx += gl->a * k;
+                e->skew = slant;                         /* the slant moves the top edge (an italic) */
                 emit_quad(e, f, cx, top, cx + gl->w * k, bot, gl->u0, gl->v0, gl->u1, gl->v1, c, fo->tex.b,
                           fo->tex.name);
+                e->skew = 0;
                 cx += k * (spacing + gl->w + gl->c);
             }
         }
-        y += cell + (float)ts->linesp;
+        y += cell + ts->linesp;
     }
 }
 
@@ -450,6 +475,7 @@ typedef struct Node {
     const Font *font;
     int justify, origin, spacing, has_spacing, linesp, has_linesp;
     float tscale, maxwidth, wrap;
+    int tmode, has_tslant; float tslant;   /* <g> m (3: each line by j) and i */
     float tcol[4]; int has_tcol;
     float shadow[4]; int sh_dx, sh_dy, has_shadow;   /* <sh>: a text's own shadow (colour AABBGGRR [G], dx, dy) */
     float val, vmin, vmax;
@@ -532,18 +558,58 @@ static void node_text(Node *nd, const char *s)
 /* GuiText.localizeString: a key without a text keeps the key [G] */
 static void node_localize(const Gui *g, Node *nd, const char *key)
 {
+    /* [R 0x235800] a key starting with a digit is the text itself; one the strings lack shows "0x key x0" */
+    if (key && isdigit((unsigned char)key[0])) {
+        node_text(nd, key);
+        return;
+    }
     const char *s = loc_find(g, key);
-    node_text(nd, s ? s : key);
+    if (s) {
+        node_text(nd, s);
+        return;
+    }
+    char buf[MAX_TEXT];
+    snprintf(buf, sizeof buf, "0x %s x0", key ? key : "");
+    node_text(nd, buf);
 }
 
+/* the <g> attributes (0x22D960) [R]: only the first letter counts, either case; a fresh OFont each time. j and o
+ * share one parser (0x2350E0): l / c / r set the justify (+0x4), t / m / b the origin (+0x5), a longer value only as
+ * left, center, right, top, middle, bottom; s the scale (+0xC); c the char spacing (+0x10), l the line spacing
+ * (+0x11); w the word wrap's width (+0x8); i the slant (+0x44, over the font's); m how each line sits in the block
+ * (+0x7: l 0, c 1, r 2; 3 each line by j) */
+static int g_word(const char *v, const char *word)
+{
+    if (!v[1])
+        return tolower((unsigned char)v[0]) == word[0];
+    for (; *v && *word; v++, word++)
+        if (tolower((unsigned char)*v) != *word)
+            return 0;
+    return !*v && !*word;
+}
 static void apply_g(Node *nd, const char *attr, const char *val)
 {
-    if (strcmp(attr, "j") == 0) nd->justify = val[0] == 'c' ? 1 : val[0] == 'r' ? 2 : 0;
-    else if (strcmp(attr, "o") == 0) nd->origin = val[0] == 'm' ? 1 : val[0] == 'b' ? 2 : 0;
-    else if (strcmp(attr, "s") == 0) nd->tscale = strtof(val, NULL);
-    else if (strcmp(attr, "charspacing") == 0) { nd->spacing = atoi(val); nd->has_spacing = 1; }
-    else if (strcmp(attr, "linespacing") == 0) { nd->linesp = atoi(val); nd->has_linesp = 1; }
-    else if (strcmp(attr, "w") == 0) nd->wrap = strtof(val, NULL);
+    static const char *const H[3] = { "left", "center", "right" }, *const V[3] = { "top", "middle", "bottom" };
+    switch (tolower((unsigned char)attr[0])) {
+    case 'j':
+    case 'o':
+        for (int k = 0; k < 3; k++) {
+            if (g_word(val, H[k])) { nd->justify = k; break; }
+            if (g_word(val, V[k])) { nd->origin = k; break; }
+        }
+        break;
+    case 's': nd->tscale = strtof(val, NULL); break;
+    case 'c': nd->spacing = atoi(val); nd->has_spacing = 1; break;
+    case 'l': nd->linesp = atoi(val); nd->has_linesp = 1; break;
+    case 'w': nd->wrap = strtof(val, NULL); break;
+    case 'i': nd->tslant = strtof(val, NULL); nd->has_tslant = 1; break;
+    case 'm': {
+        int c = tolower((unsigned char)val[0]);
+        nd->tmode = c == 'l' ? 0 : c == 'c' ? 1 : c == 'r' ? 2 : 3;
+        break;
+    }
+    default: break;
+    }
 }
 
 /* GuiObject.yaw(a): the object's turn about the screen's normal, replacing the one it had [G: the scripts give the
@@ -699,6 +765,7 @@ static Node *node_new(Layout *L, int kind)
     nd->m = 1;
     nd->sx = 1;
     nd->tscale = 1;
+    nd->tmode = 3;
     for (int i = 0; i < 4; i++) nd->col[i] = nd->bar_col[i] = nd->mask_col[i] = nd->border[i] = 1;
     nd->val = 100;
     nd->vmax = 100;
@@ -955,8 +1022,12 @@ static void text_style(const Node *nd, TextStyle *ts)
     ts->justify = nd->justify;
     ts->origin = nd->origin;
     ts->spacing = nd->has_spacing ? nd->spacing : nd->font ? nd->font->spacing : 0;
-    ts->linesp = nd->has_linesp ? nd->linesp : nd->font ? nd->font->linespacing : 0;
-    ts->maxwidth = nd->maxwidth;
+    float tsc = nd->tscale > 0 ? nd->tscale : 1;
+    /* [R] the line spacing is added unscaled (0x1B6F58), maxwidth is held against the width after s (0x1B6270) */
+    ts->linesp = (float)(nd->has_linesp ? nd->linesp : nd->font ? nd->font->linespacing : 0) / tsc;
+    ts->maxwidth = nd->maxwidth / tsc;
+    ts->mode = nd->tmode;
+    ts->slant = nd->has_tslant ? nd->tslant : nd->font ? (float)nd->font->slant : 0;
     ts->wrap = nd->wrap > 0 && nd->tscale > 0 ? nd->wrap / nd->tscale : 0;
 }
 /* GuiText.width() / height(): by the text's own scale s [hud.c] */
@@ -1034,9 +1105,9 @@ static int list_enabled(Node *l, int i)
 }
 
 /* ---------------------------------------------------------------- drawing a layout */
-/* GuiRect [G hud.c]: the background over d, then the frame: the corner picture mirrored to each corner, the side
- * picture between (the left and right sides as one-pixel strips of it); a rect with no pictures (MonsterSelect's
- * highlights) gets plain bars B wide [G] */
+/* GuiRect [R hud.c]: the background inset by -bbias / 2 within d, then the frame inside d: the corner picture
+ * mirrored to each corner, the side picture between (the left and right sides as one-pixel strips of it); a rect with
+ * no pictures (MonsterSelect's highlights) gets plain bars B wide [G] */
 static void rect_emit(Emit *e, const Node *nd, const Frame *f, float fade)
 {
     float w = nd->has_d ? nd->d[0] : 0, h = nd->has_d ? nd->d[1] : 0;
@@ -1044,11 +1115,12 @@ static void rect_emit(Emit *e, const Node *nd, const Frame *f, float fade)
     float bc[4] = { nd->border[0], nd->border[1], nd->border[2], nd->border[3] * fade };
     if (w <= 0 || h <= 0)
         return;
-    emit_quad(e, f, 0, 0, w, h, 0, 0, 1, 1, bg, NULL, 0);
+    float bb = -0.5f * nd->bbias;
+    emit_quad(e, f, bb, bb, w - bb, h - bb, 0, 0, 1, 1, bg, NULL, 0);
     float B = nd->B;
     if (B <= 0)
         return;
-    float x0 = nd->bbias, y0 = nd->bbias, x1 = w - nd->bbias, y1 = h - nd->bbias;
+    float x0 = 0, y0 = 0, x1 = w, y1 = h;
     if (x1 - x0 < 2 * B) x1 = x0 + 2 * B;
     if (y1 - y0 < 2 * B) y1 = y0 + 2 * B;
     if (!nd->has_corner && !nd->has_side) {
@@ -4581,6 +4653,13 @@ int shell_quads(const Shell *s, HudQuad *out, int max)
         }
         h->x0 = x0; h->y0 = y0; h->x1 = x1; h->y1 = y1;
         h->u0 = q->u[tl]; h->v0 = q->v[tl]; h->u1 = q->u[br]; h->v1 = q->v[br];
+        h->skew = 0;
+        if (q->y[0] == q->y[1] && q->y[2] == q->y[3] && q->y[0] < q->y[3] && q->x[0] != q->x[3] &&
+            fabsf((q->x[1] - q->x[0]) - (q->x[2] - q->x[3])) < 1e-3f) {   /* a slanted glyph: its bottom, its lean */
+            h->x0 = q->x[3]; h->x1 = q->x[2];
+            h->skew = q->x[0] - q->x[3];
+            h->u0 = q->u[0]; h->v0 = q->v[0]; h->u1 = q->u[2]; h->v1 = q->v[2];
+        }
         memcpy(h->col, q->col, sizeof h->col);
         h->b = q->b;
         h->tex = q->tex;

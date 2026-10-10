@@ -19,6 +19,7 @@
  * 0x243C00), a slider is always centred (0x24A310), a text sits on its origin by its justification. A script holds
  * the objects it found by name and changes their position, scale, fade, colour, text and visibility; here each
  * interface is its own copy of its layout tree, changed the same way. */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -205,7 +206,8 @@ static const Font *find_font(Gui *g, const char *name)
 
 /* gApp.localizeString(key): the .loc tables (type 23) of the bundles [R tools/loc.py: 0x24 u32 count, 0x28 u32[11]
  * column offsets: the keys, then one column per language; each column count x u32 string offsets]. Keys are looked
- * up ignoring case ("Rampage" is the table's "RAMPAGE") [G: the game hashes them]. */
+ * up ignoring case ("Rampage" is the table's "RAMPAGE") [R 0x1D4C60: the tables from the last loaded back, each a
+ * strcasecmp binary search (0x1D5320); an empty text tries the next]. */
 static const char *loc_find(const Gui *g, const char *key)
 {
     if (!key || !*key)
@@ -232,7 +234,7 @@ static const char *loc_find(const Gui *g, const char *key)
 }
 
 /* ---------------------------------------------------------------- the draw list */
-typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; } Emit;
+typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; float skew; } Emit;
 
 static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                       const float col[4], const Bundle *b, uint32_t tex, float z)
@@ -248,6 +250,7 @@ static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0,
     HudQuad *q = &e->q[e->n];
     q->x0 = x0; q->y0 = y0; q->x1 = x1; q->y1 = y1;
     q->u0 = u0; q->v0 = v0; q->u1 = u1; q->v1 = v1;
+    q->skew = e->skew;
     memcpy(q->col, col, sizeof q->col);
     q->b = b;
     q->tex = tex;
@@ -279,7 +282,8 @@ static int text_icon(const Gui *g, const Font *f, const char *s, int n, TexRef *
 
 /* the line measure (0x1B5AA0): width = the glyphs' a + w + c + spacing, less one spacing, plus the slant; a character
  * without a glyph adds nothing; height = the tallest glyph's h, a line without glyphs the font's average */
-static void run_measure(const Gui *g, const Font *f, const char *s, int n, int spacing, float *w_out, float *h_out)
+static void run_measure(const Gui *g, const Font *f, const char *s, int n, int spacing, float slant, float *w_out,
+                        float *h_out)
 {
     float w = 0, h = 0;
     int any = 0;
@@ -302,13 +306,16 @@ static void run_measure(const Gui *g, const Font *f, const char *s, int n, int s
         if (gl->h > h) h = gl->h;
         any = 1;
     }
-    *w_out = any ? w + (float)(f->slant - spacing) : 0;
+    *w_out = any ? w + slant - (float)spacing : 0;
     *h_out = any && h > 0 ? h : f->avg_h;
 }
 
-/* the lines of a text: its '\n's, and a wrap at `wrap` font pixels (0: none) at the last space that fits [G: the
- * game's word wrap (OFont +0x8) is not traced] */
-static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, float wrap, TLine *L, int max)
+/* the lines of a text (0x1B5AA0) [R]: its '\n's, and with a wrap width (OFont +0x8, in font pixels after s) a line ends
+ * once the sum of a + w + c + spacing reaches it: at the last break before (a space, or just after a '-'), else
+ * before the character that overflows (one at least); the next line skips the spaces. The width of a line is its
+ * measure (run_measure, with the slant) */
+static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, float slant, float wrap, TLine *L,
+                      int max)
 {
     int nl = 0;
     const char *p = s;
@@ -317,31 +324,40 @@ static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, f
         int n = q ? (int)(q - p) : (int)strlen(p), start = 0;
         do {
             int end = n;
-            float w, h;
             if (wrap > 0) {
-                run_measure(g, f, p + start, n - start, spacing, &w, &h);
-                if (w > wrap) {
-                    int brk = -1;
-                    for (int i = start + 1; i < n; i++) {
-                        if (p[i] != ' ')
-                            continue;
-                        run_measure(g, f, p + start, i - start, spacing, &w, &h);
-                        if (w > wrap)
-                            break;
-                        brk = i;
+                float acc = 0;
+                int brk = -1;
+                for (int i = start; i < n;) {
+                    int j = i;
+                    float adv = 0;
+                    if (p[i] == '\v') {
+                        TexRef t;
+                        int ok;
+                        float size;
+                        i += text_icon(g, f, p + i, n - i, &t, &ok, &size);
+                        adv = size + (float)spacing;
+                    } else {
+                        const Glyph *gl = &f->g[(unsigned char)p[i++]];
+                        if (gl->ok)
+                            adv = gl->a + gl->w + gl->c + (float)spacing;
                     }
-                    if (brk < 0)                         /* one word wider than the wrap */
-                        for (brk = start + 1; brk < n && p[brk] != ' '; brk++) {}
-                    end = brk;
+                    if (p[j] == ' ')
+                        brk = j;
+                    acc += adv;
+                    if (acc >= wrap && (brk > start || j > start)) {
+                        end = brk > start ? brk : j;
+                        break;
+                    }
+                    if (p[j] == '-')
+                        brk = i;
                 }
             }
             TLine *l = &L[nl++];
             l->s = p + start;
             l->n = end - start;
-            run_measure(g, f, l->s, l->n, spacing, &l->w, &l->h);
+            run_measure(g, f, l->s, l->n, spacing, slant, &l->w, &l->h);
             start = end;
-            if (start < n)
-                while (start < n && p[start] == ' ') start++;
+            while (start < n && p[start] == ' ') start++;
         } while (start < n && nl < max);
         if (!q)
             break;
@@ -352,8 +368,8 @@ static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, f
 
 typedef struct {
     const Font *f;
-    int justify, origin, spacing, linesp;
-    float maxwidth, wrap;                               /* wrap in font pixels */
+    int justify, origin, spacing, mode;
+    float linesp, maxwidth, wrap, slant;            /* in font pixels (linesp, maxwidth: before s) */
 } TextStyle;
 
 /* the size of a text in font pixels, after the maxwidth squeeze (GuiText's width() and height() [G: by the text's own
@@ -361,7 +377,7 @@ typedef struct {
 static void text_extent(const Gui *g, const TextStyle *ts, const char *s, float *w, float *h)
 {
     TLine L[MAX_LINES];
-    int nl = text_lines(g, ts->f, s, ts->spacing, ts->wrap, L, MAX_LINES);
+    int nl = text_lines(g, ts->f, s, ts->spacing, ts->slant, ts->wrap, L, MAX_LINES);
     float wmax = 0, hsum = 0;
     for (int i = 0; i < nl; i++) {
         if (L[i].w > wmax) wmax = L[i].w;
@@ -369,7 +385,7 @@ static void text_extent(const Gui *g, const TextStyle *ts, const char *s, float 
     }
     float k = ts->maxwidth > 0 && wmax > ts->maxwidth ? ts->maxwidth / wmax : 1.0f;
     *w = wmax * k;
-    *h = hsum * k + (float)(ts->linesp * (nl - 1));
+    *h = hsum * k + ts->linesp * (float)(nl - 1);
 }
 
 /* a string in font space mapped to the screen by (ox + sc * x, oy + sc * y). The game measures each line, shrinks the
@@ -384,7 +400,7 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
     if (!f || !f->ok || !s || !*s)
         return;
     TLine L[MAX_LINES];
-    int nl = text_lines(g, f, s, ts->spacing, ts->wrap, L, MAX_LINES);
+    int nl = text_lines(g, f, s, ts->spacing, ts->slant, ts->wrap, L, MAX_LINES);
     float wmax = 0, hsum = 0;
     for (int i = 0; i < nl; i++) {
         if (L[i].w > wmax) wmax = L[i].w;
@@ -393,14 +409,20 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
     float k = 1.0f;                                     /* OFont +0xC x +0x48 / +0x4C are 1 in every font file */
     if (ts->maxwidth > 0 && wmax > ts->maxwidth)
         k = ts->maxwidth / wmax;
-    float total_h = hsum * k + (float)(ts->linesp * (nl - 1));
+    float total_h = hsum * k + ts->linesp * (float)(nl - 1);
     float y = ts->origin == 1 ? -0.5f * total_h : ts->origin == 2 ? -total_h : 0.0f;
-    float cell = f->cell_h * k, slant = (float)f->slant * k, spacing = (float)ts->spacing;
+    float cell = f->cell_h * k, slant = ts->slant * k, spacing = (float)ts->spacing;
     for (int l = 0; l < nl; l++) {
         float h = L[l].h * k;
         y += h - cell;                                  /* [R 0x1B6CB0] */
         float yoff = h <= cell ? 0.0f : 0.5f * (f->avg_h * k - h);
-        float x = ts->justify == 1 ? -0.5f * L[l].w * k : ts->justify == 2 ? -L[l].w * k : 0.0f;
+        /* [R 0x1B6CB4 .. 0x1B6E18] j places the block (W its widest line), m each line in it; m 3: each line by j */
+        float W = wmax * k, lw = L[l].w * k, x;
+        if (ts->mode == 3)
+            x = ts->justify == 1 ? -0.5f * lw : ts->justify == 2 ? -lw : 0.0f;
+        else
+            x = (ts->justify == 1 ? -0.5f * W : ts->justify == 2 ? -W : 0.0f) +
+                (ts->mode == 1 ? 0.5f * (W - lw) : ts->mode == 2 ? W - lw : 0.0f);
         if (slant < 0)
             x -= slant;
         for (int pass = 0; pass < 2; pass++) {
@@ -440,13 +462,14 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
                 }
                 cx += gl->a * k;
                 float x1 = cx + gl->w * k;
-                /* the slant leans the top edge; the quads here stay upright (every font file has slant 0) */
+                e->skew = sc * slant;                    /* the slant moves the top edge (an italic) */
                 emit_quad(e, ox + sc * cx, oy + sc * top, ox + sc * x1, oy + sc * bot, gl->u0, gl->v0, gl->u1, gl->v1,
                           c, f->tex.b, f->tex.name, z);
+                e->skew = 0;
                 cx += k * (spacing + gl->w + gl->c);
             }
         }
-        y += cell + (float)ts->linesp;                  /* [R 0x1B6F58] */
+        y += cell + ts->linesp;                  /* [R 0x1B6F58] */
     }
 }
 
@@ -466,6 +489,7 @@ typedef struct Node {
     const Font *font;
     int justify, origin, spacing, has_spacing, linesp, has_linesp;
     float tscale, maxwidth, wrap;
+    int tmode, has_tslant; float tslant;   /* <g> m (3: each line by j) and i */
     float tcol[4]; int has_tcol;
     /* slider: <val>, <hasMaskBar>, <barColor>, <maskColor>; min 0 max 100 [R ctor 0x24ACD0] */
     float val, vmin, vmax;
@@ -534,22 +558,58 @@ static void node_text(Node *nd, const char *s)
 }
 static void node_localize(const Gui *g, Node *nd, const char *key)
 {
+    /* [R 0x235800] a key starting with a digit is the text itself; one the strings lack shows "0x key x0" */
+    if (key && isdigit((unsigned char)key[0])) {
+        node_text(nd, key);
+        return;
+    }
     const char *s = loc_find(g, key);
-    node_text(nd, s ? s : key);
+    if (s) {
+        node_text(nd, s);
+        return;
+    }
+    char buf[MAX_TEXT];
+    snprintf(buf, sizeof buf, "0x %s x0", key ? key : "");
+    node_text(nd, buf);
 }
 
-/* the <g> attributes [G: the letters' meanings; R: the three justify and origin modes in the string draw] */
+/* the <g> attributes (0x22D960) [R]: only the first letter counts, either case; a fresh OFont each time. j and o
+ * share one parser (0x2350E0): l / c / r set the justify (+0x4), t / m / b the origin (+0x5), a longer value only as
+ * left, center, right, top, middle, bottom; s the scale (+0xC); c the char spacing (+0x10), l the line spacing
+ * (+0x11); w the word wrap's width (+0x8); i the slant (+0x44, over the font's); m how each line sits in the block
+ * (+0x7: l 0, c 1, r 2; 3 each line by j) */
+static int g_word(const char *v, const char *word)
+{
+    if (!v[1])
+        return tolower((unsigned char)v[0]) == word[0];
+    for (; *v && *word; v++, word++)
+        if (tolower((unsigned char)*v) != *word)
+            return 0;
+    return !*v && !*word;
+}
 static void apply_g(Node *nd, const char *attr, const char *val)
 {
-    if (strcmp(attr, "j") == 0) nd->justify = val[0] == 'c' ? 1 : val[0] == 'r' ? 2 : 0;
-    else if (strcmp(attr, "o") == 0) nd->origin = val[0] == 'm' ? 1 : val[0] == 'b' ? 2 : 0;
-    else if (strcmp(attr, "s") == 0) nd->tscale = strtof(val, NULL);
-    else if (strcmp(attr, "charspacing") == 0) { nd->spacing = atoi(val); nd->has_spacing = 1; }
-    else if (strcmp(attr, "linespacing") == 0) { nd->linesp = atoi(val); nd->has_linesp = 1; }
-    /* w: the word wrap's width, in the text's parent frame [G: boss_message's p.x 20 + w 480 = its rect's 500,
-     * cq_title's 460 centred in 480, the Results lines' w = the list's width] */
-    else if (strcmp(attr, "w") == 0) nd->wrap = strtof(val, NULL);
-    /* m (l / c), i: not traced */
+    static const char *const H[3] = { "left", "center", "right" }, *const V[3] = { "top", "middle", "bottom" };
+    switch (tolower((unsigned char)attr[0])) {
+    case 'j':
+    case 'o':
+        for (int k = 0; k < 3; k++) {
+            if (g_word(val, H[k])) { nd->justify = k; break; }
+            if (g_word(val, V[k])) { nd->origin = k; break; }
+        }
+        break;
+    case 's': nd->tscale = strtof(val, NULL); break;
+    case 'c': nd->spacing = atoi(val); nd->has_spacing = 1; break;
+    case 'l': nd->linesp = atoi(val); nd->has_linesp = 1; break;
+    case 'w': nd->wrap = strtof(val, NULL); break;
+    case 'i': nd->tslant = strtof(val, NULL); nd->has_tslant = 1; break;
+    case 'm': {
+        int c = tolower((unsigned char)val[0]);
+        nd->tmode = c == 'l' ? 0 : c == 'c' ? 1 : c == 'r' ? 2 : 3;
+        break;
+    }
+    default: break;
+    }
 }
 
 /* one property of node nd: tag with its text and attributes */
@@ -661,6 +721,7 @@ static Node *node_new(Layout *L, int kind)
     nd->kind = kind;
     nd->m = 1;
     nd->tscale = 1;
+    nd->tmode = 3;
     for (int i = 0; i < 4; i++) nd->col[i] = nd->bar_col[i] = nd->mask_col[i] = nd->border[i] = 1;
     nd->val = 100;                                       /* [R 0x24AD94: value 100, min 0, max 100, 100 x 20] */
     nd->vmax = 100;
@@ -822,8 +883,12 @@ static void text_style(const Node *nd, TextStyle *ts)
     ts->justify = nd->justify;
     ts->origin = nd->origin;
     ts->spacing = nd->has_spacing ? nd->spacing : nd->font ? nd->font->spacing : 0;
-    ts->linesp = nd->has_linesp ? nd->linesp : nd->font ? nd->font->linespacing : 0;
-    ts->maxwidth = nd->maxwidth;
+    float tsc = nd->tscale > 0 ? nd->tscale : 1;
+    /* [R] the line spacing is added unscaled (0x1B6F58), maxwidth is held against the width after s (0x1B6270) */
+    ts->linesp = (float)(nd->has_linesp ? nd->linesp : nd->font ? nd->font->linespacing : 0) / tsc;
+    ts->maxwidth = nd->maxwidth / tsc;
+    ts->mode = nd->tmode;
+    ts->slant = nd->has_tslant ? nd->tslant : nd->font ? (float)nd->font->slant : 0;
     ts->wrap = nd->wrap > 0 && nd->tscale > 0 ? nd->wrap / nd->tscale : 0;
 }
 /* GuiText.width() / height(): the text's size by its own scale s, not the object's m [G: Results::setupButtons
@@ -909,11 +974,12 @@ static void list_increment_wrap(Node *l, int delta)
 }
 
 /* ---------------------------------------------------------------- drawing a layout */
-/* GuiRect [G: its draw is not traced]: the background (bkgdColor) over d from the origin, then a frame in bc: the
- * corner picture (FrameCorner, the top-left one) mirrored to each corner, the side picture (FrameLine, its lower rows
- * the outside) stretched between, B wide, its outer edge bbias from the rect's (-7: outside). The left and right
- * sides need the side picture turned, which a quad cannot do: they are drawn as one-pixel strips, each the colour of
- * one row of it. */
+/* GuiRect (vtable 0x447A00, draw 0x244500, rebuild 0x2449F0) [R]: the outer box is d from the origin; the background
+ * (bkgdColor, sprite +0x80) from -bbias / 2 with the size d + bbias (bbias -8: 4 in on each side, 0x243840); then the
+ * frame in bc inside the box: B wide sides (GuiLines, FrameLine) and B x B corners (FrameCorner, turned 0, 270, 180
+ * and 90 degrees: here mirrored [G: the same for a symmetric corner]). The left and right sides need the side picture
+ * turned, which a quad cannot do: they are drawn as one-pixel strips, each the colour of one row of it [G: which rows
+ * of FrameLine are the outside, the GuiLine draw not read]. */
 static void rect_emit(Emit *e, const Node *nd, float ox, float oy, float sc, float z, float fade)
 {
     float w = nd->has_d ? nd->d[0] : 0, h = nd->has_d ? nd->d[1] : 0;
@@ -921,11 +987,12 @@ static void rect_emit(Emit *e, const Node *nd, float ox, float oy, float sc, flo
     float bc[4] = { nd->border[0], nd->border[1], nd->border[2], nd->border[3] * fade };
     if (w <= 0 || h <= 0)
         return;
-    emit_quad(e, ox, oy, ox + sc * w, oy + sc * h, 0, 0, 1, 1, bg, NULL, 0, z);
+    float bb = -0.5f * nd->bbias;
+    emit_quad(e, ox + sc * bb, oy + sc * bb, ox + sc * (w - bb), oy + sc * (h - bb), 0, 0, 1, 1, bg, NULL, 0, z);
     float B = nd->B;
     if (B <= 0)
         return;
-    float x0 = nd->bbias, y0 = nd->bbias, x1 = w - nd->bbias, y1 = h - nd->bbias;
+    float x0 = 0, y0 = 0, x1 = w, y1 = h;
     if (x1 - x0 < 2 * B) x1 = x0 + 2 * B;
     if (y1 - y0 < 2 * B) y1 = y0 + 2 * B;
 #define RX(v) (ox + sc * (v))
@@ -2270,8 +2337,8 @@ static void results_start(Hud *h, Screen *s)
     cq_init(s);
 }
 
-/* Results::processIntro: returns its flag (the script's by-reference niFlag [G: by value, bDoIntro would never clear
- * and no button would ever be taken]) */
+/* Results::processIntro: returns its flag (the script's niFlag, passed by reference: the PP interpreter passes a
+ * writable variable uncopied, 0x1B9870 / 0x1C3270 [R]); cleared before its early return */
 static int results_intro(Hud *h, Screen *s, float dt)
 {
     float prev = s->intro_t;
@@ -2280,7 +2347,7 @@ static int results_intro(Hud *h, Screen *s, float dt)
     Intro *items;
     if (s->ni_state == 0) { items = s->intro; count = s->nintro; }
     else if (s->ni_state == 1) { items = s->walk; count = s->nwalk; }
-    else return 1;
+    else return 0;
     for (int i = 0; i < count; i++) {
         Intro *it = &items[i];
         if (it->done)

@@ -388,9 +388,10 @@ static. It is widened in four ways:
 **Pad events:**
 - Pad events go to the popup when it is up, else to the focused interface if `setupControllerTable` lets the pad
   talk.
-- The frame event goes to the focused interface only [R]: the tree update (0x2415E0) stacks each interface, and
-  GuiObject's update (0x2416C0) sends 0x800 only without F 0x80 and while the stack's top is the screen's focused
-  interface (GuiManager vtbl +0x30, 0x231440).
+- The frame event goes to the focused interface only, unless the object has F 0x80 [R]: the tree update (0x2415E0)
+  stacks each interface, and GuiObject's update (0x2416C0) sends 0x800 to an object with a script when it has F 0x80
+  (0x2416E8), else while the stack's top is the screen's focused interface (GuiManager vtbl +0x30, 0x231440). The
+  shell's menus have no 0x80; Loading and ControlRoom (0x82) run alone.
 
 ## The GUI's 3D objects [R]
 
@@ -452,7 +453,7 @@ renderer's sign: the direction the light travels]**. `setAmbient` / `setDiffuse`
   (0x247280, 0x24D8C0), turning with the globe.
 
 **Drawing:** each screen draws its interfaces in order, each in tree order (0x241770): an object with F & 0x201, or
-fade × z ≤ 0.01, is skipped; F 0x40 draws its children alone. F 0x1 is hidden, 0x80 no frame event, 0x100 an update
+fade × z ≤ 0.01, is skipped; F 0x40 draws its children alone. F 0x1 is hidden, 0x80 the frame event even unfocused (0x2416E8), 0x100 an update
 after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears the screen (0x25C610, flags 7, depth
 1.0), turns the lights off (0x16E320), sets the draw scale state 0x4CB52C to 1 and switches to its view (0x16DEE0)
 **[R]**; it sets no depth test or write of its own. Gui2D's draw (0x2361E0) only sets its pixel view (0x2363F0 /
