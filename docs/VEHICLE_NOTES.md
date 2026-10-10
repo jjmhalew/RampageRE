@@ -219,17 +219,19 @@ reports every award with its template name, so the viewer can count challenge go
   the model's box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres) [R; here the box's
   bounding sphere, G]), read once. The traffic is PushOutMonsters: the
   monster is pushed out of a car's box (collide_monster).
-- **A blow's shape:** the model's box (AutoCollisionBox) from the host, else the `ShadowRect` 2.5 high.
-- **The hold:** the HeldObjectMover's `MajorAxis` frame is not ported; the object takes the hand's turn. A thrown
-  object keeps the hand's turn and does not spin.
+- **A blow's shape:** the model's box (AutoCollisionBox) from the host, else the `ShadowRect` 2.5 high; the game
+  tests the monster's spheres against the object's collision shape (0x2E22B0 → 0x280470) [R].
+- **The hold:** the HeldObjectMover's `MajorAxis` frame (0x310ED0) [R]: the cars and the fire truck have MajorAxis 1
+  (x = −hand x, y = hand z, z = hand y). A thrown object keeps the held turn and does not spin (0x2D9DC0) [R].
 - **The fire truck:**
-  - getRandomBuilding: any standing building;
-  - Building.getPosition: the middle of its footprint;
-  - the turret's units (radians a second);
-  - firing when within 0.02 rad of the target;
-  - the stream stops at its target; `setWeaponFlags(-1, 16)` taken as all weapons off;
+  - getRandomBuilding (0x2AEC40): from (int)(n × frand) round the list, the first not gone [R];
+  - Building.getPosition (0x277C60) is +0x2C, y = 5 + the row's BackRowOffset [R]; here the middle of its footprint;
+  - the turret's rates are radians a second (0x299640) [R];
+  - firing when on target: the turn within π/50, the pitch within π/100 (0x29ADE0) [R];
+  - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; here
+    it meets only the monsters; `setWeaponFlags(-1, 16)` holds every weapon (0x29AB60: +0x38 |= 16, untargeted) [R];
   - the weapon node: the host's `node_world`, else 3 above the truck.
-- **WorldObject.rotate:** turns about the object's own x, then y, then z.
+- **WorldObject.rotate:** rot × Rz(e[2]) Rx(e[0]) Ry(e[1]), in its own frame (case 0xD, 0x278258) [R].
 - **The first fill** is done again after `vehicle_clear`. Whether a later block load resets it was not traced.
 - **Not ported:** the news helicopters' cameras (army), and what the 0x80000 / 0x8000000 object flags do in the engine.
 
