@@ -147,8 +147,21 @@ otherwise.
   (0x295650) releases the handle at once: the reach ends the frame the firing stops. Machinegun_fire and Autocannon_fire (Rifle, PulseCannon): 150 a
   second, 44.55 long; Blimp_Laser_Fire (BlimpBeam, FireEngineStream) 500, 125; Cyclone_Lightning (LightingZap 0 .. 2)
   2000, 2000; Roar_Beam (BreathWeapon) 25, 8.75. MaxFiringRange only gates the firing. Here as so (fx.c `fx_rod`,
-  the host's `rod`, the stream in `ArmyShot.head` / `tail`); the rod's axis is taken as the weapon's direction the
-  effect is placed along [G: the WeaponNodes' frames were not compared with that direction].
+  the host's `rod`, the stream in `ArmyShot.head` / `tail`).
+- **The firing frame** [R]: +0xBC is the matrix the weapon is made with (0x2978D0), the identity at gp−0x70F0 from
+  the cluster (0x29A020), so an object's firing frame is its WeaponNode's world (0x2971A0, the node from the owner's
+  vtable +0x4C). An actor's weapon has no node of its own: the actor's aim (0x30EC10, each frame) takes the node's
+  world (else the actor's), points its aimed axis at the target (lifted for a fall, 0x293050) with 0x100F50 and
+  writes that to +0xBC. The aimed axis is the Weapon group's `Direction`, its first letter − 'X' (0x30F1F0, default
+  X). 0x100F50 sets row k to the aim, row k + 1 to the world's x (its y when the aim's x is above 0.7), row k + 2 =
+  row k × row k + 1 made 1 long, then row k + 1 = row k + 2 × row k. The stream's effect is placed in the firing
+  frame every frame while it fires (0x2975A4: vtable +0x8C the place, +0x90 the matrix). Rifle and PulseCannon say
+  `Direction X`, like their effects' rods, so a soldier's beam runs straight at its target; the helicopters'
+  Weapon_0 has +X along the unit's front. Here (`army_frame_point`, `army_beam_axis`): the beam's axis is the rod
+  through the firing frame and its effect is placed in that frame (fx_spawn_frame, fx_place), for the army, the
+  bosses and the fire truck. A cluster's turn is applied to the node's frame about the unit's right and the world's
+  z (`army_frame_turn`) [G: the port's nodes are drawn without the turret's turn; how the cluster turns its node was
+  not read]. A boss weapon without a node gets a frame with the rod's main axis along its aim.
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.

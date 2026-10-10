@@ -963,8 +963,15 @@ static void obj_weapons_tick(Boss *b, Obj *o, float dt)
     }
     for (int i = 0; i < o->nw; i++) {
         ArmyWeapon *w = &o->w[i];
-        float node[16], from[3], dir[3];
+        float node[16], from[3], dir[3], F[3][3];
         int have_node = b->host.node_world && w->node && b->host.node_world(b->host.ctx, &o->p, w->node, node);
+        for (int r = 0; r < 3 && have_node; r++) {   /* [R 0x2971A0] the firing frame: the node's world */
+            copy3(F[r], node + 4 * r);
+            float l = sqrtf(F[r][0] * F[r][0] + F[r][1] * F[r][1] + F[r][2] * F[r][2]);
+            if (l > 1e-6f)
+                for (int k = 0; k < 3; k++)
+                    F[r][k] /= l;
+        }
         if (have_node)
             copy3(from, node + 12);
         else
@@ -996,9 +1003,12 @@ static void obj_weapons_tick(Boss *b, Obj *o, float dt)
                     (!o->need_elev[i] || fabsf(want_pitch - w->pitch) < 0.05f);
             float h = o->p.facing[2] + w->yaw;
             set3(dir, -sinf(h) * cosf(w->pitch), cosf(h) * cosf(w->pitch), sinf(w->pitch));
+            if (have_node)
+                army_frame_turn(F, o->p.facing[2], w->yaw, w->pitch);
         }
         int may = has && o->weapons_on && aimed && dist3(from, tp) <= w->range;
-        b->host.weapon_tick(b->host.ctx, w, may, from, dir, o->has_point ? -1 : o->target, dt);
+        b->host.weapon_tick(b->host.ctx, w, may, from, dir, have_node ? (const float (*)[3])F : NULL,
+                            o->has_point ? -1 : o->target, dt);
     }
 }
 

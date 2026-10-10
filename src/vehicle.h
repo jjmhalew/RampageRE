@@ -43,7 +43,7 @@ typedef struct {
     /* optional: the effect's collision rod (fx_rod, 0x1F9290): a beam's reach. Its speed, length, the emitter's
      * cycle and whether it loops; 0 = none (the beam then meets nothing). Unset: the weapon's Velocity up to its
      * MaxFiringRange stands in */
-    int (*rod)(void *ctx, const char *effect, float *speed, float *length, float *cycle, int *loops);
+    int (*rod)(void *ctx, const char *effect, float dir[3], float *speed, float *length, float *cycle, int *loops);
     void *ctx;
 } VehicleHost;
 
@@ -81,7 +81,7 @@ struct VehObj {
     int building;                                    /* a rocket: the building it stands on (the caller's index), -1 */
     int parent, child[2];                            /* a rocket's parts and back, -1 none */
     /* beam: the fire truck's stream while it runs, from along dir, length long (its look is the FireEffect event) */
-    struct { int on; float from[3], dir[3], length; } beam;
+    struct { int on; float from[3], dir[3], length, R[3][3]; } beam;   /* R: the nozzle's firing frame (rows) */
     /* ---- the rest is the module's own */
     float pulse_delay, pulse_timer;
     float state_time, fly_duration;

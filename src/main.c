@@ -528,8 +528,8 @@ static int edible_cell_where(void *ctx, int building, int storey, int column, fl
 static int edible_call(Mon *mo, const char *call, const float *xyz);
 static void monster_stats(Mon *mo, float health, float energy);
 static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g);
-static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target,
-                             float dt);
+static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+                             const float frame[3][3], int target, float dt);
 
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
 static Group rubble_tmpl(void *ctx, const char *name)
@@ -575,12 +575,14 @@ static int army_shape_box(void *ctx, const char *shape, float min[3], float max[
     return city_shape_box(((Viewer *)ctx)->city, shape, min, max) == 0;
 }
 /* a FireEffect's collision rod (fx.c fx_rod, 0x1F9290): the beams' reach */
-static int effect_rod(void *ctx, const char *effect, float *speed, float *length, float *cycle, int *loops)
+static int effect_rod(void *ctx, const char *effect, float dir[3], float *speed, float *length, float *cycle,
+                      int *loops)
 {
     const Viewer *v = ctx;
     FxRod r;
     if (!v->fxlib || !fx_rod(v->fxlib, effect, &r))
         return 0;
+    memcpy(dir, r.dir, sizeof r.dir);
     *speed = r.speed;
     *length = r.length;
     *cycle = r.cycle;
@@ -2278,12 +2280,12 @@ static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g)
     Viewer *v = ctx;
     return v->army ? army_weapon_make(v->army, w, g) : 0;
 }
-static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target,
-                             float dt)
+static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+                             const float frame[3][3], int target, float dt)
 {
     Viewer *v = ctx;
     if (v->army)
-        army_weapon_tick(v->army, w, may, from, dir, target, dt);
+        army_weapon_tick(v->army, w, may, from, dir, frame, target, dt);
 }
 
 /* the monster an event names (its slot), else player 1's (a module's event for "the monster") */
@@ -2905,9 +2907,11 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
             switch (e->type) {
             case VE_EFFECT:
                 if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    const VehObj *o = e->obj >= 0 ? vehicle_obj(v->veh, e->obj) : NULL;
+                    int beam = o && o->beam_fx == e->id;     /* the stream: in the nozzle's firing frame */
+                    int id = beam ? fx_spawn_frame(v->fxw, e->name, e->pos, o->beam.R, 1) :
+                                    fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
                     if (id >= 0 && v->nvfx < 64) {   /* to follow its object, or to stop by its handle */
-                        const VehObj *o = e->obj >= 0 ? vehicle_obj(v->veh, e->obj) : NULL;
                         v->vfx[v->nvfx].id = e->id;
                         v->vfx[v->nvfx].fx = id;
                         v->vfx[v->nvfx].obj = o ? e->obj : -1;
@@ -2959,7 +2963,10 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
             continue;
         }
         float at[3] = { o->pos[0] + v->vfx[k].off[0], o->pos[1] + v->vfx[k].off[1], o->pos[2] + v->vfx[k].off[2] };
-        fx_move(v->fxw, v->vfx[k].fx, at);
+        if (o->beam_fx == v->vfx[k].id)
+            fx_place(v->fxw, v->vfx[k].fx, at, o->beam.R);
+        else
+            fx_move(v->fxw, v->vfx[k].fx, at);
     }
     for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand */
         Mon *mo = &v->mon[k];
@@ -3380,7 +3387,12 @@ static void army_step(Viewer *v, float dt)
             switch (e->type) {
             case AE_EFFECT:
                 if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    const ArmyShot *bs = NULL;       /* a beam's look: in the weapon's firing frame (0x2975A4) */
+                    for (int j = 0, n = e->shot >= 0 ? army_shots(v->army) : 0; j < n && !bs; j++)
+                        if (army_shot(v->army, j)->id == e->shot && army_shot(v->army, j)->beam)
+                            bs = army_shot(v->army, j);
+                    int id = bs ? fx_spawn_frame(v->fxw, e->name, e->pos, bs->R, 1) :
+                                  fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
                     if (id >= 0 && (e->unit >= 0 || e->shot >= 0) && v->nfxa < 128) {
                         v->fxa[v->nfxa].id = e->id;
                         v->fxa[v->nfxa].fx = id;
@@ -3444,6 +3456,10 @@ static void army_step(Viewer *v, float dt)
             if (!sh) {
                 fx_stop(v->fxw, v->fxa[k].fx);
                 v->fxa[k--] = v->fxa[--v->nfxa];
+                continue;
+            }
+            if (sh->beam) {                          /* [R 0x2975A4] placed in the firing frame each frame */
+                fx_place(v->fxw, v->fxa[k].fx, sh->pos, sh->R);
                 continue;
             }
             memcpy(at, sh->pos, sizeof at);

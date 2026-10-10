@@ -91,8 +91,8 @@ typedef struct {
     /* the army's weapons (army.c weapon_make over a template's Weapon| group, and one frame of weapon_tick with no
      * owning unit). Without them the bosses do not fire */
     int (*weapon_make)(void *ctx, ArmyWeapon *w, Group weapon_group);
-    void (*weapon_tick)(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target,
-                        float dt);
+    void (*weapon_tick)(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+                        const float frame[3][3], int target, float dt);   /* frame: the firing frame, or NULL */
     void *ctx;
 } BossHost;
 

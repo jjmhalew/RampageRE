@@ -95,6 +95,58 @@ static void norm3(float v[3])
         v[2] /= l;
     }
 }
+
+void army_frame_point(float F[3][3], const float v[3], int k)
+{
+    int i = (k + 1) % 3, j = (k + 2) % 3;
+    memcpy(F[k], v, sizeof F[k]);
+    F[i][0] = fabsf(v[0]) <= 0.7f ? 1.0f : 0.0f;    /* 0x40A008 (1, 0, 0), else 0x40A018 (0, 1, 0) */
+    F[i][1] = 1 - F[i][0];
+    F[i][2] = 0;
+    F[j][0] = F[k][1] * F[i][2] - F[k][2] * F[i][1];
+    F[j][1] = F[k][2] * F[i][0] - F[k][0] * F[i][2];
+    F[j][2] = F[k][0] * F[i][1] - F[k][1] * F[i][0];
+    norm3(F[j]);
+    F[i][0] = F[j][1] * F[k][2] - F[j][2] * F[k][1];
+    F[i][1] = F[j][2] * F[k][0] - F[j][0] * F[k][2];
+    F[i][2] = F[j][0] * F[k][1] - F[j][1] * F[k][0];
+}
+
+void army_frame_turn(float F[3][3], float facing, float yaw, float pitch)
+{
+    float cf = cosf(-facing), sf = sinf(-facing), cp = cosf(pitch), sp = sinf(pitch);
+    float h = facing + yaw, ch = cosf(h), sh = sinf(h);
+    for (int r = 0; r < 3; r++) {
+        float x = F[r][0] * cf - F[r][1] * sf, y = F[r][0] * sf + F[r][1] * cf, z = F[r][2];
+        float y2 = y * cp - z * sp, z2 = y * sp + z * cp;
+        F[r][0] = x * ch - y2 * sh;
+        F[r][1] = x * sh + y2 * ch;
+        F[r][2] = z2;
+    }
+}
+
+void army_beam_axis(float F[3][3], int have_frame, const float dir[3], const float *rod, float out[3])
+{
+    float r[3] = { 1, 0, 0 };
+    if (rod)
+        memcpy(r, rod, sizeof r);
+    if (!have_frame) {
+        int k = 0;
+        for (int c = 1; c < 3; c++)
+            if (fabsf(r[c]) > fabsf(r[k]))
+                k = c;
+        float d[3] = { dir[0], dir[1], dir[2] };
+        norm3(d);
+        if (r[k] < 0)
+            for (int c = 0; c < 3; c++)
+                d[c] = -d[c];
+        army_frame_point(F, d, k);
+    }
+    for (int c = 0; c < 3; c++)
+        out[c] = r[0] * F[0][c] + r[1] * F[1][c] + r[2] * F[2][c];
+    norm3(out);
+}
+
 static float dist3(const float p[3], const float q[3])
 {
     float d[3] = { p[0] - q[0], p[1] - q[1], p[2] - q[2] };
@@ -374,6 +426,10 @@ static void weapon_read(ArmyWeapon *w, Group g)
                 w->damage_type = i;
     if ((s = group_str(g, "WeaponNode")) != NULL)
         w->node = s;
+    if ((s = group_str(g, "Direction")) != NULL) {   /* [R 0x30F4B4] the actor's aim: the first letter - 'X' */
+        int c = (*s == '-' ? s[1] : *s) & ~0x20;
+        w->aim_axis = c >= 'X' && c <= 'Z' ? c - 'X' : 0;
+    }
     if ((s = gstr(g, "FireEffect")) != NULL)
         w->fire_fx = s;
     if ((s = gstr(g, "ChargeEffect")) != NULL)
@@ -679,12 +735,12 @@ static void shot_update(Army *a, ArmyShot *s, float dt)
         s->pos[k] += v[k] * dt;
 }
 
-/* the beam while it fires (0x295750): [R] from the weapon along its direction, the first thing met: the beam stops
- * there (0x226DF0), and a hit object takes, on the beam's first touch (+0x1B8), ImpactDamage x the damage scale,
- * after that DamagePerSec x dt each frame (if DamagePerSec > 0), through the impact 0x33B440; the ImpactEffect
- * sits where it touches. [G] The beam's own reach is its effect's (a stream, 0x226950): taken as growing at
- * Velocity per second up to MaxFiringRange */
-static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3], const float dir[3], float dt)
+/* the beam while it fires (0x295750): [R] from the weapon along its rod through the firing frame, the first thing
+ * met: the beam stops there (0x226DF0), and a hit object takes, on the beam's first touch (+0x1B8), ImpactDamage x
+ * the damage scale, after that DamagePerSec x dt each frame (if DamagePerSec > 0), through the impact 0x33B440; the
+ * ImpactEffect sits where it touches. frame: the weapon's firing frame (NULL: made from dir) */
+static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3], const float dir[3],
+                        const float frame[3][3], float dt)
 {
     ArmyShot *s = NULL;
     for (int i = 0; i < a->nshots; i++)
@@ -693,8 +749,6 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     if (!s)
         return;
     memcpy(s->pos, from, sizeof s->pos);
-    memcpy(s->dir, dir, sizeof s->dir);
-    norm3(s->dir);
     s->age += dt;
     /* [R 0x2270A0, 0x226CC0, 0x226DF0, 0x295750] the reach is the FireEffect's collision rod, a stream kept from
      * frame to frame: the clock (the age) runs on; the tail stays at 0 while the clock is within the emitter's cycle,
@@ -702,14 +756,18 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
      * the head grows by the speed up to the rod's length; a tail at the head ends the stream for the burst (both 0).
      * The cast runs from the tail, head - tail long when that is more than 0.001, and a hit at t cuts the head to
      * tail + t, so it grows again from there. The axis: the rod's direction through the weapon's firing matrix
-     * (0x2971A0), here the weapon's direction the effect is placed along [G: the WeaponNodes' frames not compared].
-     * No rod, no cast. MaxFiringRange only gates the firing */
+     * (0x226950 with 0x2971A0's frame, which the effect is placed in too, 0x2975A4). No rod, no cast.
+     * MaxFiringRange only gates the firing */
     float head, tail;
-    float speed, length, cycle;
-    int loops;
+    float speed, length, cycle, rd[3];
+    int loops, rod = a->host.rod && w->fire_fx && a->host.rod(a->host.ctx, w->fire_fx, rd, &speed, &length, &cycle,
+                                                               &loops);
+    if (frame)
+        memcpy(s->R, frame, sizeof s->R);
+    army_beam_axis(s->R, frame != NULL, dir, rod ? rd : NULL, s->dir);
     if (a->host.rod) {
         head = tail = 0;
-        if (w->fire_fx && a->host.rod(a->host.ctx, w->fire_fx, &speed, &length, &cycle, &loops)) {
+        if (rod) {
             tail = s->age <= cycle ? 0 : s->tail + speed * dt;
             head = fminf(s->head + speed * dt, length);
             if (tail >= head)
@@ -757,7 +815,7 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
  * may: [G] what the weapon system (WeaponCluster, not read) allows: a target within MaxFiringRange, the turret
  * turned onto it */
 static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const float from[3], const float dir[3],
-                        int target, float dt)
+                        const float frame[3][3], int target, float dt)
 {
     if (w->type == 2)
         return;
@@ -771,7 +829,7 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
                     a->shot[i].alive = 0;
             w->shot = -1;
         } else
-            beam_update(a, u, w, from, dir, dt);
+            beam_update(a, u, w, from, dir, frame, dt);
     }
     if (w->ammo > 0 || !(w->def_flags & 2)) {
         w->timer -= w->scale * dt;
@@ -806,13 +864,19 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
             s->target = target;
             s->duration = w->duration;
             memcpy(s->pos, from, sizeof s->pos);
-            memcpy(s->dir, dir, sizeof s->dir);
+            /* [R 0x2975A4] its effect placed in the firing frame, the beam along the rod through it */
+            float rd[3], speed, length, cycle;
+            int loops, rod = a->host.rod && w->fire_fx &&
+                             a->host.rod(a->host.ctx, w->fire_fx, rd, &speed, &length, &cycle, &loops);
+            if (frame)
+                memcpy(s->R, frame, sizeof s->R);
+            army_beam_axis(s->R, frame != NULL, dir, rod ? rd : NULL, s->dir);
             w->shot = s->id;
             if (s->effect) {
                 ArmyEvent *e = emit(a, AE_EFFECT, -1, s->effect, from);
                 e->shot = s->id;
                 e->id = a->next_fx++;
-                memcpy(e->dir, dir, sizeof e->dir);
+                memcpy(e->dir, s->dir, sizeof e->dir);
             }
         }
     }
@@ -835,7 +899,7 @@ static void lob(const float p[3], const float t[3], float v, float g, float dir[
  * second within the ranges); actors and stand-ins aim straight at the target (a lob for shots that fall) [G].
  * Returns whether the turret is on the target */
 static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], int has_target, float from[3],
-                      float dir[3], float dt)
+                      float dir[3], float F[3][3], float dt)
 {
     float node[16];
     int have_node = a->host.node_world && w->node && a->host.node_world(a->host.ctx, u, w->node, node);
@@ -846,6 +910,13 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
         from[1] = u->pos[1];
         from[2] = u->pos[2] + (u->kind == AK_TROOP || u->kind == AK_WINDOW ? 1.5f : 2.0f);
     }
+    /* [R 0x2971A0] the firing frame: the identity (+0xBC, gp-0x70F0) times the WeaponNode's world; an actor's is the
+     * node's world (its own, else the actor's) with its aimed axis turned onto the target (0x30EC10) */
+    const float *m = have_node ? node : u->world;
+    for (int r = 0; r < 3; r++) {
+        memcpy(F[r], m + 4 * r, sizeof F[r]);
+        norm3(F[r]);
+    }
     int actor = u->kind == AK_TROOP || u->kind == AK_WINDOW || u->kind == AK_OTHER;
     if (actor || u->kind == AK_TURRET) {
         if (!has_target) {
@@ -855,6 +926,7 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
             return 0;
         }
         lob(from, tp, w->velocity, 9.81f * w->gravity, dir);
+        army_frame_point(F, dir, w->aim_axis);       /* [R 0x30F010] */
         return 1;
     }
     if (w->axis_neg && w->axis == 2) {              /* bombs: straight down from their node */
@@ -896,7 +968,8 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
     if (have_node && !w->rot_rate && !w->elev_rate) {
         for (int k = 0; k < 3; k++)
             dir[k] = node[4 * w->axis + k] * (w->axis_neg ? -1.0f : 1.0f);
-    }
+    } else
+        army_frame_turn(F, u->facing, w->yaw, w->pitch);
     return on;
 }
 
@@ -914,10 +987,10 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
     }
     for (int i = 0; i < u->nw; i++) {
         ArmyWeapon *w = &u->w[i];
-        float from[3], dir[3];
-        int aimed = weapon_aim(a, u, w, tp, has, from, dir, dt);
+        float from[3], dir[3], F[3][3];
+        int aimed = weapon_aim(a, u, w, tp, has, from, dir, F, dt);
         int may = has && u->weapons_on && w->on && aimed && dist3(from, tp) <= w->range;
-        weapon_tick(a, u, w, may, from, dir, point ? -1 : u->target, dt);
+        weapon_tick(a, u, w, may, from, dir, (const float (*)[3])F, point ? -1 : u->target, dt);
     }
 }
 
@@ -1156,9 +1229,10 @@ int army_load_block(Army *a, Group block_def)
 }
 
 int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group) { return weapon_make(a, w, weapon_group); }
-void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target, float dt)
+void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+                      const float frame[3][3], int target, float dt)
 {
-    weapon_tick(a, NULL, w, may, from, dir, target, dt);
+    weapon_tick(a, NULL, w, may, from, dir, frame, target, dt);
 }
 
 void army_activate(Army *a, int on) { a->active = on; }   /* [R] 0x2A6208: bit 8 of the manager's flags */
@@ -3361,7 +3435,7 @@ static void persons_update(Army *a, float dt)
         if (m >= 0)
             monster_target(&a->m[m], tp);
         lob(from, tp, g->w.velocity, 9.81f * g->w.gravity, dir);   /* the throw's aim: see weapon_aim */
-        weapon_tick(a, NULL, &g->w, m >= 0 && dist3(from, tp) <= g->w.range, from, dir, m, dt);
+        weapon_tick(a, NULL, &g->w, m >= 0 && dist3(from, tp) <= g->w.range, from, dir, NULL, m, dt);
     }
 }
 

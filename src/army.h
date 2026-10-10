@@ -46,10 +46,10 @@ typedef struct {
     int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     /* gWorld.isSphereVisible (id 0x40 -> 0x16C0A0): the sphere inside the camera's frustum; unset, the view's x range */
     int (*visible)(void *ctx, const float p[3], float r);
-    /* optional: the effect's collision rod (fx_rod, 0x1F9290): a beam's reach. Its speed, length, the emitter's
-     * cycle and whether it loops; 0 = none (the beam then meets nothing). Unset: the weapon's Velocity up to its
-     * MaxFiringRange stands in */
-    int (*rod)(void *ctx, const char *effect, float *speed, float *length, float *cycle, int *loops);
+    /* optional: the effect's collision rod (fx_rod, 0x1F9290): a beam's reach. Its direction in the effect's frame
+     * (1 long), speed, length, the emitter's cycle and whether it loops; 0 = none (the beam then meets nothing).
+     * Unset: the weapon's Velocity up to its MaxFiringRange stands in */
+    int (*rod)(void *ctx, const char *effect, float dir[3], float *speed, float *length, float *cycle, int *loops);
     void *ctx;
 } ArmyHost;
 
@@ -87,6 +87,7 @@ typedef struct {                                     /* one weapon (a Weapon| gr
     int type;                                        /* 0 RProjectileWeapon, 1 RBeamWeapon, 2 other (Shockwave: not fired) */
     const char *node;                                /* WeaponNode */
     int ammo_max, start_ammo, axis, axis_neg, damage_type, reaction;
+    int aim_axis;                                    /* an actor's aimed axis (0x30F1F0 +0x20): Direction's letter - 'X', 0 */
     float firing_offset, refire, charge_time, gravity, velocity, range, duration, damage, impact_delay, vis_range,
           mobility, accel, init_vel, dps, radius, h_knock, v_knock;
     const char *fire_fx, *charge_fx, *impact_fx;
@@ -145,6 +146,7 @@ typedef struct {                                     /* a shot in the air, or a 
     int owner;                                       /* the unit, -1 (a person's) */
     float pos[3], dir[3], speed, age, length;        /* a beam: from pos along dir, length long */
     float head, tail;                                /* a beam's stream (0x226CC0's +0x30 / +0x34) */
+    float R[3][3];                                   /* a beam: the weapon's firing frame (rows x, y, z), its effect's */
     float damage, gravity, duration, mobility, accel, velocity, h_knock, v_knock, vis_range, impact_delay;   /* +0xF0 .. */
     int damage_type, reaction, target;
     uint32_t flags;
@@ -181,7 +183,18 @@ Army *army_new(const ArmyHost *host);
 /* the weapons for others (boss.c): one made over a template's Weapon| group, and one frame of it with no owning unit
  * (the shots, beams and hits stay the army's) */
 int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group);
-void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3], int target, float dt);
+/* frame: the weapon's firing frame (rows x, y, z in the world), NULL: one made with its beam axis along dir */
+void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+                      const float frame[3][3], int target, float dt);
+/* [R 0x100F50] row k of F made v (1 long), the other two square to it: row k + 1 (mod 3) from the world's x (its y
+ * when v is within 45.6 degrees of x), row k + 2 = row k x row k + 1 made 1 long, then row k + 1 = row k + 2 x row k */
+void army_frame_point(float F[3][3], const float v[3], int k);
+/* the frame F (rows) as a weapon cluster turns it [G: the cluster's turn of its node not read]: about the unit's
+ * right by pitch, then about the world's z by yaw, from the unit's front (facing) */
+void army_frame_turn(float F[3][3], float facing, float yaw, float pitch);
+/* a beam's axis (0x226950): the rod's direction through the firing frame F; with no frame, F is made with the rod's
+ * main axis along dir (army_frame_point) and that is the axis. rod NULL: +x */
+void army_beam_axis(float F[3][3], int have_frame, const float dir[3], const float *rod, float out[3]);
 void army_free(Army *a);
 /* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
 void army_set_view(Army *a, float xmin, float xmax);

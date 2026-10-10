@@ -1056,7 +1056,8 @@ static float ray_monster(const Vehicles *v, const float p[3], const float d[3], 
 static void ft_weapon(Vehicles *v, VehObj *o, float dt)
 {
     float from[3], nw[16];
-    if (v->host.node_world && o->w.node && v->host.node_world(v->host.ctx, o, o->w.node, nw)) {
+    int have_node = v->host.node_world && o->w.node && v->host.node_world(v->host.ctx, o, o->w.node, nw);
+    if (have_node) {
         from[0] = nw[12]; from[1] = nw[13]; from[2] = nw[14];
     } else {
         from[0] = o->pos[0]; from[1] = o->pos[1]; from[2] = o->pos[2] + 3;
@@ -1079,6 +1080,19 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
     }
     float yaw = o->facing + o->ft_yaw, cp = cosf(o->ft_pitch);
     float dir[3] = { -sinf(yaw) * cp, cosf(yaw) * cp, sinf(o->ft_pitch) };
+    /* [R 0x2971A0, 0x226950] the firing frame is the WeaponNode's world (the identity at +0xBC), the cluster's turn
+     * in it (army_frame_turn); the beam runs along the rod's direction through it and the effect is placed in it */
+    const float *m = have_node ? nw : o->world;
+    for (int r = 0; r < 3; r++) {
+        memcpy(o->beam.R[r], m + 4 * r, sizeof o->beam.R[r]);
+        norm3(o->beam.R[r]);
+    }
+    army_frame_turn(o->beam.R, o->facing, o->ft_yaw, o->ft_pitch);
+    float rd[3], speed, length, cycle;
+    int loops, rod = v->host.rod && o->w.fire_fx &&
+                     v->host.rod(v->host.ctx, o->w.fire_fx, rd, &speed, &length, &cycle, &loops);
+    float bdir[3];
+    army_beam_axis(o->beam.R, 1, dir, rod ? rd : NULL, bdir);
     if (o->w.firing) {
         o->w.left -= dt;
         if (o->w.left <= 0) {
@@ -1093,11 +1107,10 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
              * to frame (army.c's beam_update): the tail 0 within the cycle, then growing by the speed; the head growing
              * up to the length, cut to tail + t at a hit; tail at head: the stream is done for the burst; no rod, no
              * cast */
-            float reach, tail = 0, speed, length, cycle;
-            int loops;
+            float reach, tail = 0;
             if (v->host.rod) {
                 reach = 0;
-                if (o->w.fire_fx && v->host.rod(v->host.ctx, o->w.fire_fx, &speed, &length, &cycle, &loops)) {
+                if (rod) {
                     tail = o->w.age <= cycle ? 0 : o->w.tail + speed * dt;
                     reach = fminf(o->w.head + speed * dt, length);
                     if (tail >= reach)
@@ -1107,6 +1120,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
                 o->w.head = reach;
             } else
                 reach = fminf(o->w.velocity > 0 ? o->w.velocity * o->w.age : o->w.range, o->w.range);
+            memcpy(dir, bdir, sizeof dir);
             for (int k = 0; k < 3; k++)
                 from[k] += dir[k] * tail;
             reach -= tail;
@@ -1178,7 +1192,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
     o->w.head = o->w.tail = 0;
     if (o->w.fire_fx) {
         VehicleEvent *e = emit(v, VE_EFFECT, idx(v, o), o->w.fire_fx, from);
-        memcpy(e->dir, dir, sizeof e->dir);
+        memcpy(e->dir, bdir, sizeof e->dir);
         o->beam_fx = e->id = v->next_fx++;
     }
 }
