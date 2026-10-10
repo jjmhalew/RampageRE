@@ -257,7 +257,8 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
   the pause (hud.c, PAUSE_NOTES.md), findPointInRubble (reveal.c, GE_RUBBLE_FX).
 - The bots' `destroyBuildings` AI is director.c's (MULTIPLAYER_NOTES.md).
 - Cheat 874098 (flags 0x10000 | 0x20000): 0x324930 wins a block at once while it is not the last [R]. 0x10000 alone
-  also seeds gWorld +0x828 / +0x82C from GameStatus at each activateNextBlock (0x2B65B4); not ported.
+  also seeds gWorld +0x828 / +0x82C from GameStatus at each activateNextBlock (0x2B65B4: +0x828 = seed[0],
+  0x1069C0(+0x82C, seed[1]); the 0x33F720 after it is empty) [R]; as here (game.c `activate_next_block`).
 - `NewYork::BossResultsNI` is ported from NewYork.scr: the monsters taunt on the Empire State's roof until the
   centre building falls (flag 1), or Levels' ResultsNI (flag 2). Any other non-Levels script goes to the host's
   `script` callback, falling back to Levels.bsf's version.

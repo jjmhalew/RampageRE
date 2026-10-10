@@ -1009,7 +1009,7 @@ static void build(Viewer *v)
             GameConfig gc = { v->play_type ? v->play_type : GP_CAMPAIGN, v->nmon, v->num_bots,
                               campaign_index(CITIES[v->city_index]), 7,
                               city_block_index(v->city, v->blocks[v->block]), v->prof.current.seed[0],
-                              v->prof.cheats };
+                              v->prof.cheats, v->prof.current.seed[1] };
             v->game = game_new(&gh, &gc);
             dir_ai_seed(v->prof.current.seed[1]);   /* RWorld's reset: gWorld +0x82C */
             building_set_one_hit((v->prof.cheats & PCH_40000000) != 0);

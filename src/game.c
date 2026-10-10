@@ -336,10 +336,16 @@ static void cancel_respawn(Game *g, int slot, int full)
 
 /* ---------------------------------------------------------------- the blocks */
 
-/* activateNextBlock (0x2B6580): the world's block index (+0x878) goes on by one, the start block follows it, the
- * block manager makes it the current one (0x302AF0) and the clock reads its TimeBonus (0x347ED0) [R] */
+/* activateNextBlock (0x2B6580): with cheat 0x10000 (0x33D740) the world's random states start again from
+ * GameStatus' seeds (+0x828 = seed[0], 0x1069C0(+0x82C, seed[1])); the world's block index (+0x878) goes on by one,
+ * the start block follows it, the block manager makes it the current one (0x302AF0) and the clock reads its
+ * TimeBonus (0x347ED0) [R] */
 static void activate_next_block(Game *g)
 {
+    if (g->cfg.cheats & 0x10000u) {
+        wrand_seed_pm(g->cfg.seed);
+        wrand_seed_lf(g->cfg.seed1);
+    }
     g->cur++;
     g->start_block = g->cur;
     clock_block(g);

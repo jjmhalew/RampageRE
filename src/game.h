@@ -99,7 +99,8 @@ typedef struct {
     int start_block;                                 /* GameStatus +0x210 (0: the city's BlockStart) */
     uint32_t seed;                                   /* gWorld +0x828: GameStatus seed[0] (RWorld reset 0x2B74D0) */
     uint32_t cheats;                                 /* gCommon.getCheatFlags (0x4D7E68): 0x10000 | 0x20000 skip a
-                                                      * block (0x324930) */
+                                                      * block (0x324930); 0x10000 reseeds the world each block */
+    uint32_t seed1;                                  /* gWorld +0x82C's seed: GameStatus seed[1] */
 } GameConfig;
 
 /* ---- what the module is told each frame */
