@@ -275,12 +275,17 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
   and the EndBlockNI walk; only its rubble (0x303C90, the RubbleShapes) and its GroundShape at (0, −41, 0)
   (0x303BB0) are left, and 0x302AF0 lays the new block out at once in slot 0 (y 0; slot 1 at 41, 0x302F0C; slot 2 at
   82, 0x303044). 0x325054 is a tied King block played again, 0x325258 Game Over's Continue (both the same block,
-  loaded fresh), 0x2AF260 the script binding (NewYork's CrossParkNI). Here [main.c `block_left`, at GE_BLOCK (b = 1
-  in the game)]: the old block's people, traffic, street, parade, rail and edible objects and the army's units go,
-  the effects following them stop, its buildings are left as their rubble (city.c `scene_block_left`, flat for the
-  collision), and the traffic of the blocks ahead is loaded again; the scene keeps the old frame (the new block at
-  slot 1, +41) until GS_BEGIN_BLOCK builds the new one, so the new block's own people and objects come then. The
-  same block again rebuilds it at once. The bosses stay [G: the ambient ones belong to the blocks behind].
+  loaded fresh), 0x2AF260 the script binding (NewYork's CrossParkNI). 0x302AF0 then builds the whole new block at
+  once: its buildings (0x3059D0), all its objects (0x3050F0), its actors (0x304450), edibles and tubes (0x304150),
+  the AI manager's load (0x334C40), its traffic (0x334240), the challenge (0x3468F0) and the block clock (0x347ED0);
+  the bosses, RWorld objects without 0x200000, went with the rest. A tied King block is two activations in a row:
+  the next block (0x325924), then the same one again (0x325054). Here [main.c, at GE_BLOCK with b = 1]: `block_left`
+  drops what follows the old block (the monsters' held objects, the effects) and the whole scene is built anew for
+  the new block once that frame is over (`game_next_block`: the monsters and the cameras 41 back, so the game's
+  frame from then on), with the block left's GroundShape at (0, −41, 0) and its buildings' RubbleShapes
+  (city.c `city_build_left`, models only: the rubble's points are reveal.c's). The world's reset (b = 0) still
+  builds at GS_BEGIN_BLOCK. The monsters' models and move graphs are made again with the scene [G: the game keeps
+  its monsters; their places, goals and AI are kept here].
 - The results screens are not drawn here: `src/hud.c` has them (hud_results; docs/SCREENS_NOTES.md), fed by these
   queries (game_points, game_kills, game_king, game_blocks_won, game_cities_won, game_blocks_to_win,
   game_cities_to_win, game_city_index, game_clock, game_clock_limit, game_block_name, game_city_destroyed ...).

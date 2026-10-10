@@ -159,6 +159,7 @@ typedef struct Viewer {
     /* the bosses' effects that follow (monster: the monster slot followed, -1 none) */
     struct { int id, fx, obj, monster; float off[3]; } bfx[64]; int nbfx;
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
+    int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
     struct { int fx, edible; float off[3]; } efx[32]; int nefx;   /* the edibles' effects that follow them */
     struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
@@ -759,6 +760,8 @@ static void build(Viewer *v)
     if (v->have_scene)
         scene_free(&v->scene);
     v->have_scene = city_build(v->city, v->blocks[v->block], v->night, &v->scene) == 0;
+    if (v->have_scene && v->game_built && v->left_block >= 0)
+        city_build_left(v->city, v->blocks[v->left_block], &v->scene);
     if (!v->game_built) {                            /* a new world: its monster to reveal comes with reveal_load */
         v->extra = -1;
         memset(&v->rwalk, 0, sizeof v->rwalk);
@@ -2457,12 +2460,12 @@ static void game_step(Viewer *v, float dt)
             const GameEvent *e = &ev[i];
             Mon *mo = ev_mon(v, e->slot);            /* the monster slot it is for (the monster events) */
             switch (e->type) {
-            case GE_BLOCK: {                         /* the next block: built when it begins (GS_BEGIN_BLOCK) */
+            case GE_BLOCK: {                         /* the next block: in the game at once, else when it begins */
                 int k = -1;
                 for (uint32_t i = 0; e->name && i < v->nblocks; i++)
                     if (!_stricmp(v->blocks[i], e->name))
                         k = (int)i;
-                if (k >= 0 && k != (int)v->block) {
+                if (k >= 0 && k != (int)v->block && !e->b) {
                     v->next_block = k;
                     v->block_shift = 41;             /* [R 0x302F0C: slot 1 at y 41, 0x303BB0 the block left at -41] */
                 }
@@ -2475,9 +2478,16 @@ static void game_step(Viewer *v, float dt)
                 rh.shape_box = rubble_box;
                 rh.ctx = v;
                 rubble_load(&v->rubble, v->scene.block, k >= 0 && k != (int)v->block, &rh);
-                if (k >= 0 && k != (int)v->block)
+                if (k >= 0 && k != (int)v->block && e->b) {
+                    /* [R 0x2B66C0, 0x302AF0] in the game the block left is torn down and the new one laid out at
+                     * once, as the results start: built at slot 0 once this frame is over (the monsters and the
+                     * cameras 41 back), the block left's ground and rubble at -41 */
                     block_left(v);
-                else if (k >= 0 && e->b) {           /* the same block again in the game (a tied King block
+                    v->next_block = -1;
+                    v->block_shift = 41;
+                    v->game_block = k;
+                    v->left_block = (int)v->block;
+                } else if (k >= 0 && e->b) {           /* the same block again in the game (a tied King block
                                                       * 0x325054, Game Over's Continue 0x325258): torn down and
                                                       * loaded fresh at once */
                     v->next_block = -1;
@@ -4332,6 +4342,7 @@ static void game_next_block(Viewer *v)
     v->game_built = 1;
     build(v);
     v->game_built = 0;
+    v->left_block = -1;
 }
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
@@ -5141,6 +5152,7 @@ int main(int argc, char **argv)
     float view[5] = { 0 };
     v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
     v.card_free_kb = -1;
+    v.left_block = -1;
     int newprofile = 0;
     const char *cheat = NULL;
     double shot_time = 0;

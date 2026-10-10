@@ -233,6 +233,9 @@ City *city_open(const Vol *vol, const char *name);   /* NULL if the city's bundl
 void city_close(City *c);
 uint32_t city_blocks(City *c, const char **names, uint32_t max);   /* the block list, without repeats */
 int city_build(City *c, const char *block, int night, Scene *s);    /* 0 = ok */
+/* the block left behind, after city_build of the next (0x303BB0, 0x303C90): its GroundShape at (0, -41, 0) and the
+ * RubbleShape of each of its buildings with -50 <= LeftEdgeXPos < 50 where the building stood, as models only */
+void city_build_left(City *c, const char *block, Scene *s);
 /* a monster in the street at (x, y), turned deg about Z, playing its clip number `clip` (-1: its idle), in the next
  * slot (Scene.mon[Scene.nmon]); its slot, -1 = not made. The scene_monster_* functions take the slot k */
 int city_monster(City *c, Scene *s, const char *monster, int clip, float x, float y, float deg);

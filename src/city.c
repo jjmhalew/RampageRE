@@ -2670,6 +2670,36 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     return 0;
 }
 
+void city_build_left(City *c, const char *block_name, Scene *s)
+{
+    char key[96];
+    snprintf(key, sizeof key, "BlockDef|%s", block_name ? block_name : "");
+    Group b = group_sub(group_sub(c->world, "BlockData"), key), where;
+    if (!b.at)
+        return;
+    const char *g = group_str(b, "Shape|GroundShape");
+    if (g)
+        place_model(c, s, g, mat_trs_z(0, -41, 0, 0), -1);
+    float back = group_num(b, "BackRowOffset", 10);
+    static Record r[MAX_REC];
+    uint32_t n = group_values(b, "BuildingInstance|", &where, r, MAX_REC);
+    for (uint32_t i = 0; i < n; i++) {
+        Group inst = record_group(where, r[i]), t = template_of(c, group_str(inst, "TemplateName"));
+        float left = group_num(inst, "LeftEdgeXPos", 0);
+        if (!t.at || left < -50.0f || !(left < 50.0f))   /* [R 0x303EB4 .. 0x303EF0] */
+            continue;
+        const char *shape = group_str(t, "Shape|RubbleShape");
+        if (!shape)
+            shape = group_str(t, "RubbleShape");
+        if (!shape)
+            continue;
+        float w = group_num(t, "Width", 0);          /* [R 0x303C90] where the building stood, 41 behind */
+        place_model(c, s, shape, mat_trs_z(left + 0.5f * CELL * w, -36 + (group_num(inst, "Row", 0) != 0 ? back : 0),
+                                           0, 0), -1);
+    }
+    update(s, 0, 1);
+}
+
 /* ---------------------------------------------------------------- monsters */
 
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max)
