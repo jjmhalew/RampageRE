@@ -136,7 +136,9 @@ x ±75 and y −30.
 
 ## Not there yet
 - the revealed monster walking on (the viewer has no second monster), Boosy's unlock (the cities' saved flags);
-- the game's collision world (every module has its stand-in), PushOutMonsters, TakeImpact's callers;
+- the collision world (collide.c, [COLLIDE_NOTES.md](COLLIDE_NOTES.md)) moves the monster against the buildings; the
+  shots' rays, the thrown objects' SpherePhysicsMover with TakeImpact, the triggers and PushOutMonsters still use the
+  modules' stand-ins;
 - more than one player, the front end.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people

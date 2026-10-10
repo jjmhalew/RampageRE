@@ -38,6 +38,7 @@
 #include "boss.h"
 #include "streetobj.h"
 #include "parade.h"
+#include "collide.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -1313,27 +1314,31 @@ static float ground_at(const Viewer *v, float x, float y, float z)
     return g;
 }
 
-/* the box out of the buildings it went into, the shorter way across (the game's response, 0x2801A0, is not read);
- * within a step (1) of a roof it is on the roof */
+/* the monster's box against the buildings, as the game moves it (0x2E2C50); roofs are landed on by ground_at */
 static void push_out(Viewer *v)
 {
+    /* the game's response (collide.c, 0x2E2C50): the box query against the buildings (fronts, alley walls and
+     * corners), held on a roof, the street's limits */
+    static CollideWorld w;
+    collide_begin(&w, -1);
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
-        if (b->max[2] <= b->min[2] + 0.01f || v->mz >= b->max[2] - 1.0f || v->mz + MONSTER_HEIGHT <= b->min[2])
-            continue;
-        float dl = v->mx + MONSTER_HALF_WIDTH - b->min[0], dr = b->max[0] - (v->mx - MONSTER_HALF_WIDTH);
-        float df = v->my + MONSTER_HALF_WIDTH - b->min[1], db = b->max[1] - (v->my - MONSTER_HALF_WIDTH);
-        if (dl <= 0 || dr <= 0 || df <= 0 || db <= 0)
-            continue;
-        float dx = dl < dr ? -dl : dr, dy = df < db ? -df : db;
-        if (fabsf(dx) < fabsf(dy)) {
-            v->mx += dx;
-            v->air[0] = 0;
-        } else {
-            v->my += dy;
-            v->air[1] = 0;
-        }
+        collide_add_building(&w, b->min, b->max, b->row, b->state, b->collapse != -1, (int)i);
     }
+    collide_finish(&w);
+    float s = v->scale > 0 ? v->scale : 1;
+    CollideMonster m = { { v->mx, v->my, v->mz }, v->heading, v->mode,
+                         (v->graph.box[0] > 0 ? v->graph.box[0] : 3) * s, (v->graph.box[1] > 0 ? v->graph.box[1] : 4.25f) * s,
+                         { v->graph.probe[0] * s, v->graph.probe[1] * s }, 0, 0, 0,
+                         { v->vel[0], v->vel[1], v->vel[2] }, { v->air[0], v->air[1], v->air[2] } };
+    CollideMonsterOut o;
+    collide_monster(&w, &m, &o);
+    if (getenv("RAMPAGE_TRACE") && (m.pos[0] != v->mx || m.pos[1] != v->my))
+        printf("  collide: %.2f %.2f -> %.2f %.2f (below %d roof %d walled %d)\n", v->mx, v->my, m.pos[0], m.pos[1], o.below, o.on_roof, o.walled);
+    v->mx = m.pos[0];
+    v->my = m.pos[1];
+    v->vel[0] = m.vel[0]; v->vel[1] = m.vel[1];
+    v->air[0] = m.stick[0]; v->air[1] = m.stick[1];
 }
 
 /* NODE_STEER (0x2E8190): the turn towards the stick this frame, in degrees. The stick in the monster's own frame
