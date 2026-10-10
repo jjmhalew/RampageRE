@@ -387,9 +387,13 @@ at the first block's end.
   - the walk-on in the viewer (main.c `reveal_events`): the monster shown at the tube's landing place (1 up: it drops
     onto the street through its landing), playMove and walkTo as goals of its AI, the walk's end callback when the
     WalkTo goal is done;
-  - some RevealLocs name a floor the building does not have as the viewer builds it (Las Vegas blocks 2 and 6, Los
-    Angeles 7, New York 9: floor 3 of a 1-storey building, 5 of 4, 4 of 3, 6 of 6); the tube is placed but no hit
-    reaches its cell [G: the building's storeys, or the loc's floor counted otherwise];
+  - four RevealLocs name a floor their building does not have (Las Vegas blocks 2 and 6, Los Angeles 7, New York 9:
+    floor 3 of a 1-storey building, 5 of 4, 4 of 3, 6 of 6). The port builds those buildings as the game does (one
+    storey per `Floor|` entry but the last, empty one), and the Block is the world's index +0x878 that 0x302AF0
+    stores at 0x4D4E88, as GE_BLOCK's. The game keys the tube's slot by the storey table's entry for the floor
+    (0x319128: building +0x200[floor]); the grid fills that table only for 0 .. its storey count (0x2D24A8:
+    `table[k] = k`), so these tubes get the id of a storey the building lacks, and no broken cell lets them out,
+    in the game as in the port **[R]**. What lies past the table's filled part was not read **[G]**;
   - what 0x2D40B0 / 0x2D3F90 do besides +0x109 and the world's list (0x2C1A80 / 0x2C1A90 on 0x4D3330 + 0x18).
 - **Building and banner details:**
   - `b.getPosition()` / `getSizeZ()` without the host's `building_place`;
