@@ -9,7 +9,8 @@
  * block, 1-7 the city, N day / night, F fog, M the next monster (none, then the 30), K / L its clips, F12 a screenshot
  * (shot_NNN.png), Esc quit. With a monster, G switches to play: the monster runs its own move graph (MONSTER_DATA,
  * moves.c) from a pad made of keys - W A S D / the arrows the left stick, Space Cross (jump), J Square (punch),
- * K Triangle (kick), L Circle (grab), R R2 (roar) - and the game's own camera (camera.c) follows it. */
+ * K Triangle (kick), L Circle (grab), R R2 (roar) - and the game's own camera (camera.c) follows it. Controllers
+ * (pad.h) play too, one a player, and rumble where the game does (docs/NATIVE.md "Input"). */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,7 @@
 #include "parade.h"
 #include "collide.h"
 #include "texpack.h"
+#include "pad.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -64,9 +66,9 @@ typedef struct {
     uint8_t pressed[MV_COUNT], held[MV_COUNT];
 } Pad;
 
-/* how a monster is driven (docs/MULTIPLAYER_NOTES.md): player 1's keys, player 2's keys, or the computer (the bots,
- * and the players without keys of their own: 3 and 4) */
-enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2 };
+/* how a monster is driven (docs/MULTIPLAYER_NOTES.md): player 1's keys (and pad 0), player 2's keys (and pad 1), the
+ * computer (the bots, and players 3 and 4 without a pad), or players 3 and 4's own pads (pad.h slot 2, 3) */
+enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2, DRIVE_PAD = 3 };
 
 #define MONSTERS 4                                   /* the game's players and bots together (Common 0x4D7E28) */
 
@@ -221,6 +223,12 @@ typedef struct Viewer {
                                                       * before anything moves, asked by the monsters and the modules */
     float mid_x;                                     /* the middle of the players' x this frame (0x336360) */
     uint32_t bot_seed;                               /* the bots' rand01 */
+    /* the controllers (pad.h; never opened by a --shot run: pads_live 0): this frame's and the last one's per slot, the
+     * slots that have one, the menus' repeat clocks (up, down, left, right) */
+    int pads_live; unsigned pads_on;
+    PadState pads[PAD_SLOTS], pads_prev[PAD_SLOTS];
+    float pad_rep[PAD_SLOTS][4];
+    int vibrate;                                     /* gCommon.setEnableRumble's answer: the pad's +0xC84 [R 0x1A5020] */
 } Viewer;
 
 /* the monster's instance in the scene, NULL none */
@@ -250,6 +258,14 @@ static int others_full(const Mon *mo)
 static CamShake *mon_shake(Mon *mo)
 {
     return &mo->v->shakes[mo->slot == 0 ? 0 : 7 + mo->slot];
+}
+
+/* the game's pad effects (PS2ControllerPack vtable +0x28, 0x1A5020 (pad, ms) [R]: with the vibration on, the big motor
+ * at 0xC0 and the small one off for that long), on the monster's pad (+0xFC); never a computer's monster (+0x108) */
+static void mon_rumble(const Mon *mo, int ms)
+{
+    if (mo->v->pads_live && mo->v->vibrate && !mo->is_ai && mo->drive != DRIVE_COMPUTER)
+        pad_rumble(mo->slot, 0xC0 / 255.0f, ms / 1000.0f);
 }
 
 static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3]);
@@ -1070,6 +1086,8 @@ static void build(Viewer *v)
                 hud_set_language(mo->hud, v->lang);
                 hud_set_settings(mo->hud, profile_sound_volume(&v->prof), profile_music_volume(&v->prof),
                                  profile_rumble(&v->prof));
+                if (k == 0)                          /* the pads vibrate as the profile says [G] */
+                    v->vibrate = profile_set_rumble(&v->prof, profile_rumble(&v->prof), 0);
                 hud_add_bundle(mo->hud, v->scene.city);   /* <City>.loc: the block names, the challenge texts */
                 hud_results_auto(mo->hud, v->unattended ? 2.0f : 0);
             }
@@ -1278,6 +1296,18 @@ static void hit_building_front(Mon *mo, const float *p)
         printf(" (state %d, %d storeys, HP %d)\n", best->b.state, best->b.n, best->b.hp);
 }
 
+/* the building under the monster's body (0x2D6150: the one at its probe point, its top no more than 5 above the
+ * feet), -1 none */
+static int mon_building_below(const Mon *mo)
+{
+    float s = mo->scale > 0 ? mo->scale : 1;
+    CollideMonster cm = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->mode,
+                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
+                          { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, 0, mo->defeated || mo->hp <= 0,
+                          { 0, 0, 0 }, { 0, 0, 0 } };
+    return collide_building_below(&mo->v->cw, &cm);
+}
+
 /* Monsters.bsf's damageRoof (the roof punch, a jump's landing, a fall's, the butt slam's six beats; its arguments
  * unused): monster.hitBuildingRoof(bone, 1, 2.0), Monster method 0x6F (descriptor 0x42B9C0, dispatcher case 0x2AB620):
  * the bone's place in the world (vtable +0x48 0x2E54A0 by name, +0x4C 0x2E4FF0 its matrix), the building under the
@@ -1288,12 +1318,7 @@ static void hit_building_front(Mon *mo, const float *p)
 static void hit_building_roof(Mon *mo, const char *bone)
 {
     Viewer *v = mo->v;
-    float s = mo->scale > 0 ? mo->scale : 1;
-    CollideMonster cm = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->mode,
-                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
-                          { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, 0, mo->defeated || mo->hp <= 0,
-                          { 0, 0, 0 }, { 0, 0, 0 } };
-    int bi = collide_building_below(&v->cw, &cm);
+    int bi = mon_building_below(mo);
     Mat4 w;
     float at[3] = { mo->mx, mo->my, mo->mz };
     if (scene_monster_node(&v->scene, mo->slot, bone, &w) == 0) {   /* the named bone, as the game's mirrored pose has it */
@@ -2687,7 +2712,7 @@ static void hud_frame(Viewer *v, int after)
         hud_settings(v->hud, &sv, &mv, &rumble);
         profile_set_sound_volume(&v->prof, sv);      /* written with the next Results */
         profile_set_music_volume(&v->prof, mv);
-        profile_set_rumble(&v->prof, rumble, 1);
+        v->vibrate = profile_set_rumble(&v->prof, rumble, 1);
         v->sfx_vol = sv / 0.75f;
         v->music_vol = v->music_now = mv / 0.75f;
         sound_volume(v->sfx_vol, v->music_now);
@@ -2704,10 +2729,17 @@ static void hud_frame(Viewer *v, int after)
             hud_settings(v->hud, &sv, &mv, &rumble);
             profile_set_sound_volume(&v->prof, sv);
             profile_set_music_volume(&v->prof, mv);
-            profile_set_rumble(&v->prof, rumble, 1);
+            v->vibrate = profile_set_rumble(&v->prof, rumble, 1);
             v->sfx_vol = sv / 0.75f;
             v->music_vol = v->music_now = mv / 0.75f;
             sound_volume(v->sfx_vol, v->music_now);
+            break;
+        case HUD_CALL_RUMBLE:                        /* setEnableRumble(on, save) */
+            v->vibrate = profile_set_rumble(&v->prof, calls[i].value != 0, calls[i].arg);
+            break;
+        case HUD_CALL_RUMBLE_PULSE:                  /* gCommon.rumble(ms): pad 0 [R 0x2C34C8] */
+            if (v->pads_live && v->vibrate)
+                pad_rumble(0, 0xC0 / 255.0f, calls[i].arg / 1000.0f);
             break;
         case HUD_CALL_PLAY_MUSIC:
             if (!music_playing() && v->scene.music)
@@ -2721,7 +2753,7 @@ static void hud_frame(Viewer *v, int after)
                 printf("could not write the profile %s\n", v->prof_path);
             break;
         case HUD_CALL_ALLOW_SAVE: v->prof.allow_save = 1; break;   /* setAllowSave(1): flag 4 alone */
-        default: break;                              /* the vibration, the cheats: no pad here */
+        default: break;                              /* the cheats: nothing here */
         }
     HudSound hs[16];
     int n = hud_sounds(v->hud, hs, 16);
@@ -2895,6 +2927,8 @@ static void monster_hit(Mon *mo, const char *name, float amount, int level, cons
         mo->friction = monster_knock_shot(mo->vel, knock);   /* 0x2D9650: per axis the larger of knock and velocity */
         mo->pending_slot = slot;
     }
+    if (level == 1 || level == 2)                    /* the pad: 400 ms at level 1, 800 at 2 [R 0x2D8BE4, 0x2D8C14] */
+        mon_rumble(mo, level == 1 ? 400 : 800);
     if (mo->hp <= 0) {                                /* 0x2D9364: at 0 HP slot 67, React_Defeated */
         mo->defeated = 1;
         mo->pending_slot = 67;
@@ -3758,6 +3792,8 @@ static void mon_step(Mon *mo, float dt)
                 }
                 if (mo->mode == MODE_AIRBORNE)
                     mo->dropping = 0;                /* (0x2E1A14: in the camera again) */
+                if (mo->mode == MODE_AIRBORNE)       /* from the air (modes 1 / 2): the pad 400 ms [R 0x2DC9F4] */
+                    mon_rumble(mo, 400);
                 if (mo->mode == MODE_AIRBORNE) {      /* landed (0x2DC450): slot 56 in the current column */
                     int to = moves_slot(&mo->graph, SLOT_LAND, mo->column);
                     if (to >= 0) {
@@ -4069,7 +4105,20 @@ static void play_step(Viewer *v, float dt, float aspect)
                 printf("  people event %d (%s) from %d\n", ev[i].type, ev[i].name ? ev[i].name : "-", ev[i].who);
         }
     }
+    uint8_t was[256];                                /* the buildings' states before their step (the pads only) */
+    uint32_t nbw = v->pads_live ? (v->scene.nbuildings < 256 ? v->scene.nbuildings : 256) : 0;
+    for (uint32_t i = 0; i < nbw; i++)
+        was[i] = (uint8_t)v->scene.buildings[i].b.state;
     scene_buildings_update(&v->scene, dt);
+    for (uint32_t i = 0; i < nbw; i++)               /* the front has cracked (0x2BD7D0: state 5, Building_Pre_Collapse):
+                                                      * 2 s on the pads of the monsters on it, or on its face [R 0x2BD9A0] */
+        if (was[i] == BUILDING_CRACKING && v->scene.buildings[i].b.state == BUILDING_SHAKING)
+            for (int k = 0; k < v->nmon; k++) {
+                Mon *mo = &v->mon[k];
+                if (mon_in(mo) && !mo->is_ai && (mon_building_below(mo) == (int)i ||
+                                                 (mo->mount.mounted && mo->mount.at.building == (int)i)))
+                    mon_rumble(mo, 2000);
+            }
     street_step(v, dt);
     army_step(v, dt);
     fx_step(v, dt);
@@ -4252,11 +4301,11 @@ static void power_from_profile(Mon *mo)
     v->upgrades[mo->monster & 63] = profile_monster_flags(&v->prof, 0, pm) & 0xF;
 }
 
-/* Start: the Pause menu (WorldGuiDriver::process, event 128) */
-static int pause_open(Viewer *v)
+/* Start on pad `pad` (0 = player 1): the Pause menu (WorldGuiDriver::process, event 128) */
+static int pause_open(Viewer *v, int pad)
 {
     HudPause p = { CITIES[v->city_index], v->game ? game_block_name(v->game, 1) : NULL };
-    return v->hud && hud_pause_open(v->hud, 0, &p);
+    return v->hud && hud_pause_open(v->hud, pad, &p);
 }
 
 /* each monster's clip at its state's time (clip_at), for a posing at time t (the scene's clock); how many have their
@@ -4424,7 +4473,7 @@ static void play_script(Viewer *v, const char *script, float aspect)
             continue;
         }
         if (_stricmp(word, "pause") == 0) {          /* Start: the Pause menu */
-            pause_open(v);
+            pause_open(v, 0);
             continue;
         }
         if (_stricmp(word, "menu") == 0) {           /* menu up / down / left / right / accept / back / start, b0 /
@@ -4904,11 +4953,16 @@ static int shell_answer(Viewer *v)
                 break;
             case SHELL_EVT_MUSIC_VOLUME: v->music_now = e->value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
             case SHELL_EVT_SFX_VOLUME: v->sfx_vol = e->value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+            case SHELL_EVT_RUMBLE: v->vibrate = profile_set_rumble(&v->prof, e->arg != 0, 0); break;
+            case SHELL_EVT_RUMBLE_PULSE:             /* gCommon.rumble(ms): pad 0 [R 0x2C34C8] */
+                if (v->pads_live && v->vibrate)
+                    pad_rumble(0, 0xC0 / 255.0f, e->arg / 1000.0f);
+                break;
             case SHELL_EVT_SAVE_SETTINGS:            /* Options' Accept: into the profile, saved */
                 shell_settings(v->shell, &sv, &mv, &rumble);
                 profile_set_sound_volume(&v->prof, sv);
                 profile_set_music_volume(&v->prof, mv);
-                profile_set_rumble(&v->prof, rumble, 1);
+                v->vibrate = profile_set_rumble(&v->prof, rumble, 1);
                 v->sfx_vol = sv / 0.75f;
                 v->music_vol = v->music_now = mv / 0.75f;
                 sound_volume(v->sfx_vol, v->music_now);
@@ -4960,7 +5014,8 @@ static int monster_index(const Viewer *v, const char *name)
 }
 
 /* the players and bots of a game: n monsters (monster[k] of Viewer.monsters each), the last `bots` of them the
- * computer's. Player 1 plays on the first keys, player 2 (not a bot) on the second; the computer drives the rest.
+ * computer's. Player 1 plays on the first keys, player 2 (not a bot) on the second, players 3 and 4 on their
+ * controllers (pad.h slots 2, 3) when there are ones as the game starts; the computer drives the rest.
  * They stand in the street as BeginLevelNI puts them: x = -17 (n - 1) / 2 + 17 i, facing the camera */
 static void setup_players(Viewer *v, int n, int bots, const int *monster)
 {
@@ -4972,7 +5027,8 @@ static void setup_players(Viewer *v, int n, int bots, const int *monster)
         mo->slot = k;
         mo->monster = k < v->nmon ? monster[k] : -1;
         mo->bot = k < v->nmon && k >= v->nmon - v->num_bots;
-        mo->drive = mo->bot || k >= 2 ? DRIVE_COMPUTER : k == 1 ? DRIVE_KEYS2 : DRIVE_KEYS1;
+        mo->drive = mo->bot ? DRIVE_COMPUTER : k == 0 ? DRIVE_KEYS1 : k == 1 ? DRIVE_KEYS2 :
+                    v->pads_on >> k & 1 ? DRIVE_PAD : DRIVE_COMPUTER;
         mo->mx = -17.0f * (float)(v->nmon - 1) / 2 + 17.0f * (float)k;
         mo->my = -18;
         mo->heading = 180;
@@ -5030,8 +5086,115 @@ static void card_free(Viewer *v, float dt)
         shell_set_card_free(v->shell, kb > 0x7FFFFFFF ? 0x7FFFFFFF : (int)kb);
 }
 
+/* ---- the controllers (pad.h) as the PS2's pads ---- */
+
+/* an axis through the dead zone, the rest scaled to 0 .. 1 (the PS2 pack does it per axis, 0x1A6050 [R]; its zone
+ * and curve sit in the pack object, not traced: 0.2 and straight here [G]) */
+static float pad_axis(float v)
+{
+    const float DZ = 0.2f;
+    return v > DZ ? (v - DZ) / (1 - DZ) : v < -DZ ? (v + DZ) / (1 - DZ) : 0;
+}
+
+/* a controller onto the game's pad, over what the keys put there (keys_pad): each button in the slot the PS2 pack's
+ * table gives it [R 0x3B18B0], held, and pressed when it was up the frame before; each stick the larger of the keys'
+ * and the pad's. The pressures (28 R2, 29 L2) are not read by the port's move graphs */
+static void pad_to_pad(const PadState *p, const PadState *prev, Pad *pd)
+{
+    static const struct { int pad, mv; } MAP[] = {
+        { PAD_UP, MV_UP }, { PAD_DOWN, MV_DOWN }, { PAD_LEFT, MV_LEFT }, { PAD_RIGHT, MV_RIGHT },
+        { PAD_START, MV_START }, { PAD_BACK, MV_SELECT }, { PAD_RT, MV_R2 }, { PAD_LT, MV_L2 }, { PAD_RB, MV_R1 },
+        { PAD_LB, MV_L1 }, { PAD_A, MV_CROSS }, { PAD_B, MV_CIRCLE }, { PAD_X, MV_SQUARE }, { PAD_Y, MV_TRIANGLE },
+        { PAD_RS, MV_R3 }, { PAD_LS, MV_L3 } };
+    for (size_t k = 0; k < sizeof MAP / sizeof *MAP; k++) {
+        int down = p->buttons >> MAP[k].pad & 1, was = prev->buttons >> MAP[k].pad & 1;
+        pd->held[MAP[k].mv] |= (uint8_t)down;
+        pd->pressed[MAP[k].mv] |= (uint8_t)(down && !was);
+    }
+    float lx = pad_axis(p->lx), ly = pad_axis(p->ly), rx = pad_axis(p->rx), ry = pad_axis(p->ry);
+    if (lx * lx + ly * ly > pd->lx * pd->lx + pd->ly * pd->ly) {
+        pd->lx = lx;
+        pd->ly = ly;
+    }
+    if (rx * rx + ry * ry > pd->rx * pd->rx + pd->ry * pd->ry) {
+        pd->rx = rx;
+        pd->ry = ry;
+    }
+}
+
+/* the menus' bits of a controller: HUD_EV_* for the d-pad or the left stick past 0.5, Cross (accept), Circle (the
+ * GUI's Back: CommonGUI's Controller_Back is a circle [R]) and Start; PADM_B0 / B1 / B4 for Square, Triangle and R2
+ * (HUD_EV_BUTTON 0, 1, 4) */
+enum { PADM_B0 = 1 << 16, PADM_B1 = 1 << 17, PADM_B4 = 1 << 18 };
+static int pad_menu_bits(const PadState *p)
+{
+    uint32_t b = p->buttons;
+    int m = 0;
+    if (b >> PAD_UP & 1 || p->ly < -0.5f) m |= HUD_EV_UP;
+    if (b >> PAD_DOWN & 1 || p->ly > 0.5f) m |= HUD_EV_DOWN;
+    if (b >> PAD_LEFT & 1 || p->lx < -0.5f) m |= HUD_EV_LEFT;
+    if (b >> PAD_RIGHT & 1 || p->lx > 0.5f) m |= HUD_EV_RIGHT;
+    if (b >> PAD_A & 1) m |= HUD_EV_ACCEPT;
+    if (b >> PAD_B & 1) m |= HUD_EV_BACK;
+    if (b >> PAD_START & 1) m |= HUD_EV_START;
+    if (b >> PAD_X & 1) m |= PADM_B0;
+    if (b >> PAD_Y & 1) m |= PADM_B1;
+    if (b >> PAD_RT & 1) m |= PADM_B4;
+    return m;
+}
+static const struct { int bit, ev, button; } PAD_MENU_EV[] = {
+    { HUD_EV_UP, HUD_EV_UP, 0 }, { HUD_EV_DOWN, HUD_EV_DOWN, 0 }, { HUD_EV_LEFT, HUD_EV_LEFT, 0 },
+    { HUD_EV_RIGHT, HUD_EV_RIGHT, 0 }, { HUD_EV_ACCEPT, HUD_EV_ACCEPT, 0 }, { HUD_EV_BACK, HUD_EV_BACK, 0 },
+    { HUD_EV_START, HUD_EV_START, 0 }, { PADM_B0, HUD_EV_BUTTON, 0 }, { PADM_B1, HUD_EV_BUTTON, 1 },
+    { PADM_B4, HUD_EV_BUTTON, 4 } };
+
+/* pad slot k's menu events this frame (pad_menu_bits): what went down, and a direction held again after 0.4 s, then
+ * every 0.1 s (a port convenience) */
+static int pad_menu(Viewer *v, int k, float dt)
+{
+    static const int DIRS[4] = { HUD_EV_UP, HUD_EV_DOWN, HUD_EV_LEFT, HUD_EV_RIGHT };
+    if (!v->pads_live || !(v->pads_on >> k & 1))
+        return 0;
+    int now = pad_menu_bits(&v->pads[k]), m = now & ~pad_menu_bits(&v->pads_prev[k]);
+    for (int d = 0; d < 4; d++)
+        if (m & DIRS[d])
+            v->pad_rep[k][d] = 0.4f;
+        else if ((now & DIRS[d]) && (v->pad_rep[k][d] -= dt) <= 0) {
+            m |= DIRS[d];
+            v->pad_rep[k][d] += 0.1f;
+        }
+    return m;
+}
+
+/* pad slot k's button went down this frame */
+static int pad_went_down(const Viewer *v, int k, int button)
+{
+    return v->pads_live && (v->pads_on >> k & 1) && (v->pads[k].buttons >> button & 1) &&
+           !(v->pads_prev[k].buttons >> button & 1);
+}
+
+/* pad 0 held (gGuiMgr.getController(0)): its stick across, and getButtons' bits from the d-pad, Start, Select and the
+ * triggers (shell.h SHELL_HELD_*) */
+static float pad0_x(const Viewer *v)
+{
+    return v->pads_live && (v->pads_on & 1) ? pad_axis(v->pads[0].lx) : 0;
+}
+static int pad0_held(const Viewer *v)
+{
+    static const struct { int pad, held; } MAP[] = {
+        { PAD_UP, SHELL_HELD_UP }, { PAD_DOWN, SHELL_HELD_DOWN }, { PAD_LEFT, SHELL_HELD_LEFT },
+        { PAD_RIGHT, SHELL_HELD_RIGHT }, { PAD_START, SHELL_HELD_START }, { PAD_BACK, SHELL_HELD_BACK },
+        { PAD_RT, SHELL_HELD_R2 }, { PAD_LT, SHELL_HELD_L2 } };
+    int h = 0;
+    for (size_t k = 0; v->pads_live && (v->pads_on & 1) && k < sizeof MAP / sizeof *MAP; k++)
+        if (v->pads[0].buttons >> MAP[k].pad & 1)
+            h |= MAP[k].held;
+    return h;
+}
+
 /* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,
- * letters and digits into the name entry, F2 L2 + R2 held for the cheat entry), its time, its answers */
+ * letters and digits into the name entry, F2 L2 + R2 held for the cheat entry; each controller as its own pad), its
+ * time, its answers */
 static void shell_frame(Viewer *v, const Window *w, float dt)
 {
     static const struct { int key, ev, button; } KEYS[] = {
@@ -5054,9 +5217,15 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
         if (w->pressed[KEYS[k].key] && !(typing && ((KEYS[k].key >= 'A' && KEYS[k].key <= 'Z') ||
                                                     KEYS[k].key == VK_RETURN || KEYS[k].key == VK_BACK)))
             shell_input(v->shell, KEYS[k].ev, KEYS[k].button);
+    for (int k = 0; k < PAD_SLOTS; k++) {            /* GuiEvent.getController(): the controller's slot */
+        int m = pad_menu(v, k, dt);
+        for (size_t i = 0; m && i < sizeof PAD_MENU_EV / sizeof *PAD_MENU_EV; i++)
+            if (m & PAD_MENU_EV[i].bit)
+                shell_input_pad(v->shell, PAD_MENU_EV[i].ev, PAD_MENU_EV[i].button, k);
+    }
     int held = (w->keys[VK_LEFT] ? SHELL_HELD_LEFT : 0) | (w->keys[VK_RIGHT] ? SHELL_HELD_RIGHT : 0) |
-               (w->keys[VK_F2] ? SHELL_HELD_L2 | SHELL_HELD_R2 : 0);
-    shell_pad_held(v->shell, 0, held);
+               (w->keys[VK_F2] ? SHELL_HELD_L2 | SHELL_HELD_R2 : 0) | pad0_held(v);
+    shell_pad_held(v->shell, pad0_x(v), held);
     card_free(v, dt);
     shell_update(v->shell, dt);
     gui3d_step(v, dt);
@@ -5142,7 +5311,8 @@ static void keys_pad(const Window *w, int drive, Pad *pd)
             pd->pressed[PAD2[k].button] = w->pressed[PAD2[k].key];
             pd->held[PAD2[k].button] = w->keys[PAD2[k].key];
         }
-    }
+    } else if (drive == DRIVE_PAD)                   /* no keys: the controller alone (pad_to_pad) */
+        pd->lx = pd->ly = pd->rx = pd->ry = 0;
 }
 
 int main(int argc, char **argv)
@@ -5222,6 +5392,11 @@ int main(int argc, char **argv)
         plat_message("Cannot open an OpenGL window.", 1);
         return 1;
     }
+    if (!shot) {                                     /* the controllers: never for a --shot run (no light, no motor,
+                                                      * the --do words alone drive it) */
+        v.pads_live = 1;
+        v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
+    }
     v.fog = v.fog < 0 ? 0 : 1;                       /* the game's fog (LightingData FogStart / FogEnd), F toggles it */
     v.rnd = rnd_create();
     /* the game's sound (sound.c: Rampage.uber / .samp, the .mic music); the output only for a window of one's own,
@@ -5281,6 +5456,7 @@ int main(int argc, char **argv)
     profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
     if (cheat && !profile_cheat_code(&v.prof, cheat))
         printf("no cheat %s\n", cheat);
+    v.vibrate = profile_set_rumble(&v.prof, profile_rumble(&v.prof), 0);   /* the pads vibrate as the profile says [G] */
     v.sfx_vol = profile_sound_volume(&v.prof) / 0.75f;
     v.music_vol = v.music_now = profile_music_volume(&v.prof) / 0.75f;
     sound_volume(v.sfx_vol, v.music_now);
@@ -5346,6 +5522,11 @@ int main(int argc, char **argv)
         double now = win_time();
         float dt = (float)(now - last);
         last = now;
+        if (v.pads_live) {                           /* this frame's controllers, the vibration on them */
+            memcpy(v.pads_prev, v.pads, sizeof v.pads);
+            v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
+            pad_set_strength(v.vibrate ? 1.0f : 0.0f);
+        }
         if (w.pressed[VK_ESCAPE]) w.quit = 1;
         if (v.shell) {                               /* the front end has the screen and the pad */
             if (v.shell_go) {                        /* the loading screen was drawn: the game */
@@ -5380,6 +5561,12 @@ int main(int argc, char **argv)
             for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
                 if (w.pressed[KEYS[k].key])
                     hud_input(v.hud, KEYS[k].ev, KEYS[k].button);
+            for (int k = 0; k < PAD_SLOTS; k++) {    /* and the controllers, each as its own pad */
+                int m = pad_menu(&v, k, dt > 0.1f ? 0.1f : dt);
+                for (size_t i = 0; m && i < sizeof PAD_MENU_EV / sizeof *PAD_MENU_EV; i++)
+                    if (m & PAD_MENU_EV[i].bit)
+                        hud_input_pad(v.hud, PAD_MENU_EV[i].ev, PAD_MENU_EV[i].button, k);
+            }
         } else if (v.hud && hud_pause_showing(v.hud)) {   /* the Pause menu has the pad: the arrows choose, Enter /
                                                       * Space take, Backspace back, P (Start) takes too */
             static const struct { int key, ev; } KEYS[] = {
@@ -5389,9 +5576,21 @@ int main(int argc, char **argv)
             for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
                 if (w.pressed[KEYS[k].key])
                     hud_input(v.hud, KEYS[k].ev, 0);
-            hud_pad_held(v.hud, 0, w.keys[VK_LEFT] != 0, w.keys[VK_RIGHT] != 0);
+            for (int k = 0; k < PAD_SLOTS; k++) {    /* and the controllers (its Options page answers pad 0) */
+                int m = pad_menu(&v, k, dt > 0.1f ? 0.1f : dt);
+                for (size_t i = 0; m && i < sizeof PAD_MENU_EV / sizeof *PAD_MENU_EV; i++)
+                    if (m & PAD_MENU_EV[i].bit)
+                        hud_input_pad(v.hud, PAD_MENU_EV[i].ev, PAD_MENU_EV[i].button, k);
+            }
+            int held = pad0_held(&v);
+            hud_pad_held(v.hud, pad0_x(&v), w.keys[VK_LEFT] || (held & SHELL_HELD_LEFT),
+                         w.keys[VK_RIGHT] || (held & SHELL_HELD_RIGHT));
         } else if (v.hud && v.play && (w.pressed['P'] || w.pressed[VK_RETURN]))   /* Start: the Pause menu */
-            pause_open(&v);
+            pause_open(&v, 0);
+        else if (v.hud && v.play)                    /* or a controller's Start, that pad's */
+            for (int k = 0; k < PAD_SLOTS; k++)
+                if (pad_went_down(&v, k, PAD_START) && pause_open(&v, k))
+                    break;
         if (v.exit_game) {                           /* back to the shell (--shell), or the viewer ends */
             v.exit_game = 0;
             if (v.shell_mode) {
@@ -5449,9 +5648,13 @@ int main(int argc, char **argv)
             settled = 1;
             if (v.exit_game)                         /* the script quit the game: the shell's turn */
                 continue;
-            for (int k = 0; k < v.nmon; k++)         /* the pads of the players on keys */
-                if (v.mon[k].drive != DRIVE_COMPUTER)
+            for (int k = 0; k < v.nmon; k++)         /* the pads of the players on keys and controllers (player k
+                                                      * on slot k) */
+                if (v.mon[k].drive != DRIVE_COMPUTER) {
                     keys_pad(&w, v.mon[k].drive, &v.mon[k].pad);
+                    if (v.pads_live && k < PAD_SLOTS && (v.pads_on >> k & 1))
+                        pad_to_pad(&v.pads[k], &v.pads_prev[k], &v.mon[k].pad);
+                }
             play_step(&v, shot ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
             pose_monsters(&v, shot ? shot_time : now - start);   /* the clips at the states' times (clip_at) */
             memcpy(cam.pos, v.view.pos, sizeof cam.pos);

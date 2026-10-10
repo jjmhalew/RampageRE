@@ -212,7 +212,8 @@ node +0x7DB0, through the matrix as above); p.z = the water's +0x34 with a water
 (+0x158), the same way as a step. In the same function: mode 4, the landing slot, the water pressed 1.25 × the radius
 across (0x2DCA94 → 0x2E2BD0, WATER_NOTES.md), the fall's damage (+0xBA88), and, coming from modes 1 / 2 and unless
 +0x108, a call on the object at gp−0x6F5C (vtable +0x28, with +0xFC and 400): the pad's rumble, a
-PS2ControllerPack (0x488700, static initializer 0x4372C0; 0x1A5020 → scePadSetActDirect) [R]; not ported.
+PS2ControllerPack (0x488700, static initializer 0x4372C0; 0x1A5020 → scePadSetActDirect) [R]; the port rumbles the
+player's controller there (main.c `mon_rumble`, NATIVE.md "Input").
 
 ## Where there are none
 - Climbing (mode 5): the climb clips send no footPlant. The mantle onto a roof (`Side_L_Transition_Mantle` at 0.625

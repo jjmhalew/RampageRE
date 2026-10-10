@@ -122,7 +122,8 @@ void shell_input_pad(Shell *s, int ev, int button, int pad);   /* GuiEvent.getCo
  * nothing else, on the main menu open the cheat entry [R MainMenu::updateCheatActivation; the bits: getButtons
  * 0x16A180 over the names at 0x3F67C0 (Up 1, Down 2, Left 4, Right 8, Start 16, Back 32, RTrigger 64, LTrigger 128,
  * ...), the PS2 pad's L2 / R2 the triggers (0x1A5220, table 0x3B18B0)] */
-enum { SHELL_HELD_LEFT = 4, SHELL_HELD_RIGHT = 8, SHELL_HELD_R2 = 64, SHELL_HELD_L2 = 128 };
+enum { SHELL_HELD_UP = 1, SHELL_HELD_DOWN = 2, SHELL_HELD_LEFT = 4, SHELL_HELD_RIGHT = 8, SHELL_HELD_START = 16,
+       SHELL_HELD_BACK = 32, SHELL_HELD_R2 = 64, SHELL_HELD_L2 = 128 };
 void shell_pad_held(Shell *s, float stick_x, int buttons);
 /* a convenience the game does not have: a character typed into the profile name entry ('\b' rubs one out, '\r' is
  * DONE) when it shows; returns 1 when it took it */

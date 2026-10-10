@@ -36,8 +36,9 @@ buildings; `pause` opens the Pause menu and `menu down` / `menu accept` / ... dr
 that template for the block's challenge; `p2` (`p1` .. `p4`): the words after it play that player's monster, the
 other players on keys idle meanwhile; `--walk S` is `right S`). `--players N` (1 .. 4) plays N monsters, the last
 `--bots B` of them the computer's; `--monster2 Name` .. `--monster4 Name` pick players 2 .. 4's monsters (without
-one: George, Lizzie, Ralph or Boosy, the first not taken). Players 3 and 4 and the bots are computer-driven
-(below, "Several monsters"); the front end (`--shell`) hands its players, bots and monsters over the same way. `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
+one: George, Lizzie, Ralph or Boosy, the first not taken). Controllers play too ("Input"): player 1 also on the
+first one, player 2 on the second, players 3 and 4 on the third and fourth; without one, players 3 and 4 and the bots
+are computer-driven (below, "Several monsters"); the front end (`--shell`) hands its players, bots and monsters over the same way. `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
 (its results screens). `--lang N` picks the texts' language (the .loc column: 0 English, 1 English 2, 2 Japanese,
 3 French, 4 German, 5 Italian, 6 Spanish, 7 Dutch, 8 Portuguese); `--card-free-kb N` the "memory card"'s free room
 (a save needs 140; else the drive's). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
@@ -87,6 +88,68 @@ The disc is extracted on Windows (`build.ps1`); copy `build/disc/RAMPAGE.VOL` an
 path. A shot on Mesa's llvmpipe differs from the Windows one only in rounding (under 0.1 % of the pixels by more
 than 8 of 255).
 
+## Input
+Keys as above, and today's controllers (port extra, WoodyRE's pad code: `src/pad.h`, `src/pad.c` on Windows,
+`src/pad_sdl.c` elsewhere):
+
+| | Windows (`pad.c`) | Linux and the rest (`pad_sdl.c`) |
+|---|---|---|
+| Sony | DualShock 4, DualSense, DualSense Edge as raw HID (hid.dll, setupapi; USB and Bluetooth, the Bluetooth reports with their CRC-32): no driver, no Steam | SDL's game controllers (its hidapi drivers) |
+| Xbox and the rest | XInput (xinput1_4 / 1_3 / 9_1_0, loaded at run time), empty slots asked every 2 s and on a device change | the same SDL API |
+| Nintendo | only what shows as XInput (Steam Input) | by place, not label (`SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS` 0): the bottom button is Cross |
+
+**Players.** Up to four controllers, each in a slot of its own: a controller takes the lowest free slot when it is
+plugged in (at start: in the order found) and keeps it until it goes, which frees the slot for the next one. Player 1
+plays on the keys and the controller in slot 0, player 2 on the keypad and slot 1, players 3 and 4 on slots 2 and 3
+when those have a controller as the game starts (else the computer drives them, as before; bots are always the
+computer's). Steam Input and DS4Windows show a Sony pad twice (its HID device and an XInput one): while a Sony pad is
+open on Windows, XInput is not read (`RAMPAGE_PADXINPUT=1` reads both). Input and rumble pause while the window is not
+in front. `RAMPAGE_PADLOG=1` prints every rumble.
+
+**The mapping**, the PS2 pad's buttons in the slots its pack gives them [R table 0x3B18B0] (keys_pad's keys still
+fill the same pad; buttons add up, the stick pushed further wins):
+
+| PS2 | game variable (MV) | Xbox / SDL name | menus (shell, Pause, results) |
+|---|---|---|---|
+| left stick | LX, LY 0, 1 | left stick | past 0.5: up / down / left / right; pad 0's x moves the sliders |
+| right stick | RX, RY 2, 3 (the head) | right stick | |
+| d-pad | UP .. RIGHT 4 .. 7 | d-pad | up / down / left / right (held: again after 0.4 s, then every 0.1 s) |
+| Start | START 8 | Start / Options / + | Start (in play: the Pause menu, from that pad) |
+| Select | SELECT 9 | Back / Share / Create / − | |
+| R2, L2 | R2 10, L2 11 | RT, LT (from a quarter of their travel) | R2 = button 4; L2 + R2 held on pad 0 alone: the main menu's cheat entry (F2 on the keys) |
+| R1, L1 | R1 12, L1 13 | RB, LB | |
+| Cross | CROSS 14 (jump) | A / Cross / the bottom button | accept |
+| Circle | CIRCLE 15 (grab) | B / Circle | back (CommonGUI's `Controller_Back` is a circle) |
+| Square | SQUARE 16 (punch) | X / Square | button 0 |
+| Triangle | TRIANGLE 17 (kick) | Y / Triangle | button 1 |
+| R3, L3 | R3 20, L3 21 | RS, LS | |
+
+The sticks go through a dead zone of 0.2 per axis, the rest scaled to full (the PS2 pack does it per axis, 0x1A6050;
+its own zone was not traced). The pressures (variables 28, 29) are not read by the port's move graphs, so the
+triggers' travel is not passed on. Each controller sends its menu events as its own pad (`shell_input_pad`,
+`hud_input_pad`: the shell's player screens and the Pause menu's Options, pad 0's, tell them apart as the game does);
+the held state (`shell_pad_held`, `hud_pad_held`: getController(0)) is pad 0's and the keys'.
+
+**Rumble**, where the game makes it (PS2ControllerPack vtable +0x28 = 0x1A5020 (pad, ms): with the vibration on, the
+big motor at 0xC0 of 255 and the small one off [R]); here the low-frequency motor at 0xC0 / 255 of the player's
+controller, never for a computer-driven monster (+0x108):
+
+| What | ms | Where (port) |
+|---|---|---|
+| a hit on the monster, level 1 / level 2 (0x2D8BE4 / 0x2D8C14, in 0x2D6A50's hit) | 400 / 800 | `monster_hit` |
+| a landing from the air (0x2DC9F4, in 0x2DC450) | 400 | `mon_step`'s landing |
+| the front of the building the monster stands on (0x2D6150) or climbs (+0xC640 while +0xC644) has cracked, the shake before the fall (0x2BD9A0, in 0x2BD7D0) | 2000 | `play_step`, around `scene_buildings_update` |
+| `gCommon.rumble(250)` (0x2C34C8; Options.scr / Pause.scr when the vibration is turned on), pad 0 | 250 | `HUD_CALL_RUMBLE_PULSE`, `SHELL_EVT_RUMBLE_PULSE` |
+
+The vibration is `gCommon.setEnableRumble` (0x2C34AC, the pack's vtable +0x34; off while the Pause menu shows, off
+with cheat 082864): `HUD_CALL_RUMBLE`, `SHELL_EVT_RUMBLE` and the settings' saves set it, and it scales every motor at
+once. Light: the light bar takes the player's colour (PlayStation's blue, red, green, pink for players 1 .. 4) and the
+DualSense its player lights; SDL builds set the player index, which does the same (`RAMPAGE_PADNOLIGHT=1` leaves the
+lights alone). At exit the motors stop and the DualSense's light goes back to the system's.
+
+**Tests.** A `--shot` run never opens a controller (no light, no motor, nothing read): the `--do` words drive the
+monsters' pads directly, so every shot is the same with and without controllers attached.
+
 ## Source
 | File | |
 |---|---|
@@ -104,6 +167,7 @@ than 8 of 255).
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms") |
+| `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
 | `src/texpack.c` | texture packs: `mods/textures/` replacements and `--dumptex` (WoodyRE's, [TEXTURES.md](TEXTURES.md)); `src/stb/` stb_image and stb_image_write |
 | `src/main.c` | the viewer: arguments, camera, keys; the monsters in play (`Mon`), their pads and their world |
@@ -204,11 +268,11 @@ event, `impact_route`: a building is hit with radius Mass / 1000), and the stree
 **Several monsters** ([MULTIPLAYER_NOTES.md](MULTIPLAYER_NOTES.md)): main.c keeps each monster's own state in a
 `Mon` (`Viewer.mon[4]`, `nmon`; slot k is the scene's `Scene.mon[k]` with its own skeleton, clips, skin, head turn, arm
 and foot IK, the army's, the game's player k and the HUD `Hud<k>.ifc`), the world's in `Viewer`. Each frame every
-monster steps from its pad (`Mon.pad`: player 1's keys, player 2's, `--do`, or the computer's), then the world
+monster steps from its pad (`Mon.pad`: player 1's keys, player 2's, the controllers, `--do`, or the computer's), then the world
 around them (people, buildings, street, army, vehicles, rail, parade, edibles, bosses, the game) sees them all; the
 modules' events go to the monster they name. The bots get the game's DestroyBuildings goal (director.c `DG_DESTROY`:
 the nearest standing building of the front row, mounted on a side, punched cell by cell, climbed, its roof stomped;
-with none left, the nearest monster), and so do players 3 and 4, who have no keys. Monsters' attacks hit each other
+with none left, the nearest monster), and so do players 3 and 4 without a controller. Monsters' attacks hit each other
 (each attack once a victim, its damage and ReactionLevel, no points); a building's points go to the monster that hit it
 last; the camera frames every monster still in play (not a human whose streaker is gone, not one dropping in); a
 player off a building is kept within 30 of the players' middle x and below 70 (the camera's reach), the bots are

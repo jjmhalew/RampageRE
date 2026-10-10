@@ -1,7 +1,8 @@
 @echo off
 rem build_viewer.bat - builds rampage.exe, RampageRE's native viewer (src\), the WoodyRE way: one C99 compile with Zig.
 rem   build_viewer.bat          rampage.exe (console window: it prints what each block holds)
-rem Linux: build_viewer.sh (SDL2), the same SRC list plus src\plat_sdl.c; keep the two in step.
+rem Linux: build_viewer.sh (SDL2), the same SRC list plus src\plat_sdl.c, and src\pad_sdl.c for src\pad.c; keep the two
+rem in step.
 rem Run it from the repository root once build.ps1 has extracted the disc: rampage.exe [RAMPAGE.VOL] [City] [block].
 rem The C compiler is Zig (ziglang.org): tools\zig, a zig on PATH or "pip install ziglang" is used when there,
 rem otherwise the official Windows build is downloaded once into tools\zig and checked against its SHA-256.
@@ -11,8 +12,8 @@ cd /d "%~dp0"
 set "ZIG_VER=0.16.0"
 set "ZIG_SHA=68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"
 set "ZIG_NAME=zig-x86_64-windows-%ZIG_VER%"
-set "SRC=src\main.c src\shot.c src\render_gl.c src\city.c src\vol.c src\bundle.c src\tex.c src\mesh.c src\prb.c src\tree.c src\anim.c src\camera.c src\moves.c src\building.c src\climb.c src\ik.c src\people.c src\fx.c src\cloth.c src\sound.c src\army.c src\hud.c src\vehicle.c src\water.c src\edible.c src\game.c src\boss.c src\look.c src\shadow.c src\director.c src\footstep.c src\challenge.c src\reveal.c src\rail.c src\parade.c src\streetobj.c src\profile.c src\collide.c src\shell.c src\movie.c src\wrand.c src\texpack.c"
-set "LIBS=-lopengl32 -lgdi32 -luser32"
+set "SRC=src\main.c src\shot.c src\render_gl.c src\city.c src\vol.c src\bundle.c src\tex.c src\mesh.c src\prb.c src\tree.c src\anim.c src\camera.c src\moves.c src\building.c src\climb.c src\ik.c src\people.c src\fx.c src\cloth.c src\sound.c src\army.c src\hud.c src\vehicle.c src\water.c src\edible.c src\game.c src\boss.c src\look.c src\shadow.c src\director.c src\footstep.c src\challenge.c src\reveal.c src\rail.c src\parade.c src\streetobj.c src\profile.c src\collide.c src\shell.c src\movie.c src\wrand.c src\texpack.c src\pad.c"
+set "LIBS=-lopengl32 -lgdi32 -luser32 -lhid -lsetupapi"
 rem Plain x86-64, so the exe runs on older CPUs too.
 set "CPU=-target x86_64-windows-gnu -mcpu=baseline"
 
