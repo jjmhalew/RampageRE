@@ -192,8 +192,12 @@ would (a test: the tube's cell without climbing to it).
 people, objects and boulders), and the held / holder fields (+0xB9C0 / +0xB9C4) are only ever cleared
 ([MULTIPLAYER_NOTES.md](MULTIPLAYER_NOTES.md)).
 
+**Boosy** unlocks as the game has it: at a block's end with every monster of the city's MonsterRevealDef unlocked,
+the city gets flag 8, and when every city's saved flags (the profile's record, this city's | 8) have 1, 2, 4 and 8,
+Boosy's flags get 0x80 (profile.c `profile_reveal_boosy`, [PROFILE_NOTES.md](PROFILE_NOTES.md)); the city's end
+also unlocks him with Philbert and Eyegore (`profile_update`).
+
 ## Not there yet
-- Boosy's unlock (the cities' saved flags);
 - the menus' 3D globe and effects.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people

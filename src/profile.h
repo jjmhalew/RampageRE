@@ -151,9 +151,10 @@ int profile_city_start(Profile *p, int city, int night, int cheat_block);
 /* 0x33DB90's status part alone (the world's start, and the GameOver's Continue after restoreCheckpoint, 0x3250B0):
  * nothing unless current.start_block is 0; then by play type as above */
 void profile_new_city(Profile *p);
-/* the checkpoint (0x33E290): the campaign only. Merges the current game into it (0x33F730: city_done keeps its
- * city and start block, the monster flags are ORed), then current.changed = 0 */
-void profile_save_checkpoint(Profile *p, int city_done);
+/* the checkpoint (0x33E290): the campaign only. Merges the current game into it (0x33F730: keep_head keeps its
+ * seeds, night, city and start block unless the current game is further on; the monster flags are ORed), then
+ * current.changed = 0 */
+void profile_save_checkpoint(Profile *p, int keep_head);
 /* the block won (0x3255B0, the profile's part), after the game set its flags: current.city_flags = flags (the
  * game's 1 / 2 / 4 / 8 and 0x80), city_score, start_block (the BlockList index of the next block, or of the last when
  * the city is done), isCityDestroyed = city_done; with flag 8 Boosy's rule (profile_reveal_boosy); the checkpoint.

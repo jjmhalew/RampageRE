@@ -189,7 +189,8 @@ next block.
 6. **Flags**:
    - city done and city total ≥ ParScore: city flag 2;
    - city done: city flag 1 and `isCityDestroyed`;
-   - **[G]** 0x323240 (the monster reveal) can set flag 8 and unlock Boosy;
+   - 0x323240 (every monster of the city's MonsterRevealDef unlocked) sets flag 8; then, when every city's saved
+     flags (this one's | 8) have 1, 2, 4 and 8, Boosy is unlocked (0x3259E4, [PROFILE_NOTES.md](PROFILE_NOTES.md));
    - the checkpoint is saved;
    - the campaign's last city done: world done (0x4D7E4F).
 7. **The screen**: Results (campaign), TimedRunResults or KingBlockResults; `ResultsNI` runs.

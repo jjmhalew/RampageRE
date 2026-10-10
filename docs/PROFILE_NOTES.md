@@ -116,7 +116,8 @@ name screen; the popup keeps its own copy at +0x25C, which replaces the descript
 - **The checkpoint** (0x33E290, campaign only): merge(checkpoint, current, keep_head), then current.changed = 0. It
   runs:
   - when the shell starts the world (0x3088F0, keep_head 0), after drawing the seeds;
-  - at each block won (0x325AC8), with keep_head = the city is done.
+  - at each block won (0x325AC8), with keep_head = the city is **not** done (`xori 1` in the call's delay slot,
+    0x325ACC): within a city the head moves only forwards; at the city's end it is copied.
 - **A city's start** (0x33DB90, from the world's start 0x2B7D40 and the Continue). It does nothing unless the start
   block is 0. Then:
   - the campaign: flags 0x84 and total 0 (changed when they were not), three lives;

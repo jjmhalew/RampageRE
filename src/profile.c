@@ -221,11 +221,11 @@ int profile_city_start(Profile *p, int city, int night, int cheat_block)
     return p->current.start_block;
 }
 
-void profile_save_checkpoint(Profile *p, int city_done)
+void profile_save_checkpoint(Profile *p, int keep_head)
 {
     if (p->play_type != CAMPAIGN)                    /* [R] 0x33E290 */
         return;
-    status_merge(&p->checkpoint, &p->current, city_done != 0);
+    status_merge(&p->checkpoint, &p->current, keep_head != 0);
     p->current.changed = 0;
 }
 
@@ -250,7 +250,7 @@ int profile_block_won(Profile *p, uint32_t city_flags, int city_score, int start
     p->current.start_block = start_block;            /* activateNextBlock's 0x4D7BA0 */
     int boosy = (city_flags & PC_REVEAL) ? profile_reveal_boosy(p) : 0;
     p->city_destroyed = city_done != 0;              /* 0x4D7E4C */
-    profile_save_checkpoint(p, city_done);           /* 0x325AC8: 0x33E290(.., city done) */
+    profile_save_checkpoint(p, !city_done);          /* [R] 0x325AC4: 0x33E290(.., (done != 0) ^ 1) */
     return boosy;
 }
 

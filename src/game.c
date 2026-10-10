@@ -726,8 +726,8 @@ static void block_won(Game *g)
         activate_next_block(g);
     if (g->level_done && g->city_total >= g->par_score)
         g->city_flags |= 2;
-    /* isAtCheckpoint is always 1 (0x3030B0); 0x323240: every monster of the city revealed, flag 8 (Boosy's unlock,
-     * 0x323240's second half, needs the cities' saved flags: not kept here) */
+    /* isAtCheckpoint is always 1 (0x3030B0); 0x323240: every monster of the city revealed, flag 8 (Boosy's unlock
+     * after it, 0x3259E4, needs every city's saved flags: the host's profile, profile_block_won) */
     if (g->host.all_revealed && g->host.all_revealed(g->host.ctx))
         g->city_flags |= 8;
     g->city_destroyed = g->level_done;
