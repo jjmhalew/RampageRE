@@ -143,7 +143,7 @@ static void rotate_local(StreetObj *o, const float e[3])
     update_world(o);
     o->moved = 1;
 }
-/* WorldObject.setFacing(e): rot = Rz(e[2]) x Rx(e[0]) x Ry(e[1]) [G: the order] */
+/* WorldObject.setFacing(e): rot = Rz(e[2]) x Rx(e[0]) x Ry(e[1]) [R 0x277E78 -> 0x101330(m, z, x, y)] */
 static void set_facing(StreetObj *o, const float e[3])
 {
     float rz[9], rx[9], ry[9];

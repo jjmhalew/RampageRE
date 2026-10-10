@@ -247,9 +247,9 @@ static void unit_matrix(ArmyUnit *u)
 {
     float h = u->facing, ax = u->tilt[0], ay = u->tilt[1];
     float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
-    float r[9] = { ch * cy, sh * cy, -sy,
-                   ch * sy * sx - sh * cx, sh * sy * sx + ch * cx, cy * sx,
-                   ch * sy * cx + sh * sx, sh * sy * cx - ch * sx, cy * cx };
+    float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,   /* Rz(h) Rx(ax) Ry(ay) */
+                   -sh * cx, ch * cx, sx,
+                   ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
     for (int c = 0; c < 3; c++) {
         for (int k = 0; k < 3; k++)
             u->world[4 * c + k] = r[3 * c + k];

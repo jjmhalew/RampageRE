@@ -88,26 +88,15 @@ static void rot_z(float r[9], float a)
     r[3] = -s; r[4] = c; r[5] = 0;
     r[6] = 0; r[7] = 0; r[8] = 1;
 }
-static void mul33(const float a[9], const float b[9], float out[9])
-{
-    float t[9];
-    for (int c = 0; c < 3; c++)
-        for (int k = 0; k < 3; k++)
-            t[c * 3 + k] = a[k] * b[c * 3] + a[3 + k] * b[c * 3 + 1] + a[6 + k] * b[c * 3 + 2];
-    memcpy(out, t, sizeof t);
-}
-/* setFacing(x, y, z): [G] Rz(z) x Ry(y) x Rx(x), the heading last; only the freighter's sway uses x and y */
+/* setFacing(x, y, z): Rz(z) x Rx(x) x Ry(y) [R 0x277E78 -> 0x101330(m, z, x, y)]; only the freighter's sway uses x
+ * and y. rot's rows are the object's axes */
 static void rot_of_facing(float rot[9], const float f[3])
 {
-    rot_z(rot, f[2]);
-    if (f[0] != 0 || f[1] != 0) {
-        float e[3] = { f[0], f[1], 0 }, ry[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-        float cy = cosf(e[1]), sy = sinf(e[1]), cx = cosf(e[0]), sx = sinf(e[0]);
-        float y[9] = { cy, 0, -sy, 0, 1, 0, sy, 0, cy }, x[9] = { 1, 0, 0, 0, cx, sx, 0, -sx, cx };
-        mul33(ry, y, ry);
-        mul33(ry, x, ry);
-        mul33(rot, ry, rot);
-    }
+    float ch = cosf(f[2]), sh = sinf(f[2]), cx = cosf(f[0]), sx = sinf(f[0]), cy = cosf(f[1]), sy = sinf(f[1]);
+    float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,
+                   -sh * cx, ch * cx, sx,
+                   ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
+    memcpy(rot, r, sizeof r);
 }
 
 static void update_world(RailObj *o)
@@ -247,16 +236,16 @@ static int effect_at(Rail *r, const char *name, const float pos[3])
     return e->id = r->next_fx++;
 }
 /* FollowEffect.createAndStartAttached(object, name) / ...WithOffset(object, name, offset): [G] at the object's
- * place + offset (in the world: the scripts' offsets are along x, the way the trains run), following it; turn_off is
+ * place + offset (in its frame [R 0x27A990, 0x291440]), following it; turn_off is
  * setTurnOffWhenObjectDies(1): it stops when the object goes */
 static int effect_on(Rail *r, RailObj *o, const char *name, const float off[3], int turn_off)
 {
     if (!name)
         return -1;
     float at[3] = { o->pos[0], o->pos[1], o->pos[2] };
-    if (off)
+    if (off)                                         /* [R 0x27A990, 0x291440] the offset in the object's frame */
         for (int k = 0; k < 3; k++)
-            at[k] += off[k];
+            at[k] += off[0] * o->rot[k] + off[1] * o->rot[3 + k] + off[2] * o->rot[6 + k];
     RailEvent *e = emit(r, RE_EFFECT, idx(r, o), name, at);
     copy3(e->dir, o->rot + 3);                       /* [G] it takes the object's turn: its +Y along the object's */
     e->id = r->next_fx++;
@@ -353,12 +342,12 @@ static int nearest_monster(const Rail *r, const float p[3])
     return best;
 }
 
-/* gWorld.findBuildingByPosition (0x2AEAA0 -> 0x2A3D20 on the world's tree at 0x4D0900) [G: the building whose
- * footprint holds the point, whatever its height and state: the trains ask at their own height, z 10, and need a
- * destroyed building to be found]; -1 none */
+/* gWorld.findBuildingByPosition (0x2AEAA0 -> 0x2A3D20 on the world's list at 0x4D0900, a zero direction) [R]: the
+ * last building whose box holds the point in x and y, ends included, whatever its height and state (the trains ask
+ * at their own height, z 10, and need a destroyed building to be found); -1 none */
 static int building_at(const Rail *r, const float p[3])
 {
-    for (int i = 0; i < r->nb; i++) {
+    for (int i = r->nb - 1; i >= 0; i--) {
         const RailBox *b = &r->b[i];
         if (p[0] >= b->min[0] && p[0] <= b->max[0] && p[1] >= b->min[1] && p[1] <= b->max[1])
             return i;
@@ -650,9 +639,8 @@ static void sphere_step(Rail *r, RailObj *o, float dt)
         collide_mover_init(&o->cm, rad, tnum(o, "Gravity", 9.81f), tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
                            tnum(o, "SlidingFriction", 0.4f), tnum(o, "InertiaSolidity", 1));
         float w[3];
-        for (int k = 0; k < 3; k++)                  /* setRotation's rates about its own axes, in the world */
-            w[k] = o->sphere.tumble ? o->rot[k] * o->sphere.spin[0] + o->rot[3 + k] * o->sphere.spin[1] +
-                                      o->rot[6 + k] * o->sphere.spin[2] : 0;
+        for (int k = 0; k < 3; k++)                  /* [R 0x28DD80, 0x28E440] setRotation(r): |r| radians a second */
+            w[k] = o->sphere.tumble ? o->sphere.spin[k] : 0;   /* about the world axis r / |r| */
         collide_mover_spin(&o->cm, w);
         memcpy(o->cmat, o->rot, sizeof o->rot);
         copy3(o->cmat + 9, o->pos);
@@ -2143,13 +2131,15 @@ static void obj_step(Rail *r, RailObj *o)
     }
     if (o->kind == RK_ETRAIN)
         et_process(r, o);
-    o->pulse_timer += TIMESTEP;                      /* onPulse once pulseDelay has gone by since the last (0: each frame) */
-    if (o->pulse_timer >= o->pulse_delay - 1e-5f) {
-        o->pulse_timer = o->pulse_delay > 0 ? o->pulse_timer - o->pulse_delay : 0;
-        if (o->pulse_timer < 0 || o->pulse_timer >= o->pulse_delay)
-            o->pulse_timer = 0;
-        if (on_pulse(r, o))
-            return;
+    /* [R 0x309BA0] onPulse once pulseDelay has gone by since the last; a delay below 0.01 neither runs the clock nor
+     * pulses (setPulseDelay(0) stops them) */
+    if (o->pulse_delay >= 0.01f) {
+        o->pulse_timer += TIMESTEP;
+        if (o->pulse_timer >= o->pulse_delay) {
+            o->pulse_timer -= o->pulse_delay;
+            if (on_pulse(r, o))
+                return;
+        }
     }
     if (o->phase == RP_GONE)
         return;
@@ -2273,9 +2263,20 @@ void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored)
     if (g.at && group_items(g, rec, 3) == 3)
         for (int k = 0; k < 3; k++)
             off[k] = record_num(rec[k]);
-    for (int c = 0; c < 3; c++)
-        for (int k = 0; k < 3; k++)
-            o->rot[c * 3 + k] = hand_world[c * 4 + k];
+    /* [R 0x310ED0] the turn kept in the hand: the MajorAxis row is the hand's z, the next its y, the third their cross
+     * (the trains and cable cars have MajorAxis 1: x = -hand x, y = hand z, z = hand y) */
+    int major = (int)tnum(o, "MajorAxis", 2);
+    if (major < 0 || major > 2)
+        major = 2;
+    int i1 = (major + 1) % 3, i2 = (major + 2) % 3;
+    float *ax = o->rot;
+    for (int k = 0; k < 3; k++) {
+        ax[major * 3 + k] = hand_world[8 + k];
+        ax[i1 * 3 + k] = hand_world[4 + k];
+    }
+    ax[i2 * 3 + 0] = ax[major * 3 + 1] * ax[i1 * 3 + 2] - ax[major * 3 + 2] * ax[i1 * 3 + 1];
+    ax[i2 * 3 + 1] = ax[major * 3 + 2] * ax[i1 * 3 + 0] - ax[major * 3 + 0] * ax[i1 * 3 + 2];
+    ax[i2 * 3 + 2] = ax[major * 3 + 0] * ax[i1 * 3 + 1] - ax[major * 3 + 1] * ax[i1 * 3 + 0];
     for (int k = 0; k < 3; k++)
         o->pos[k] = hand_world[12 + k] + hand_world[k] * off[0] + hand_world[4 + k] * off[1] + hand_world[8 + k] * off[2];
     update_world(o);

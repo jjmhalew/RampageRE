@@ -757,12 +757,12 @@ static void obj_matrix(Obj *o)
             w[4 + k] = f[k];
             w[8 + k] = z[k];
         }
-    } else {                                         /* [G] setFacing(x, y, z): turned about z, then tilted (army.c) */
+    } else {                                         /* setFacing(x, y, z): Rz(z) Rx(x) Ry(y) [R 0x101330] */
         float h = o->p.facing[2], ax = o->p.facing[0], ay = o->p.facing[1];
         float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
-        float r[9] = { ch * cy, sh * cy, -sy,
-                       ch * sy * sx - sh * cx, sh * sy * sx + ch * cx, cy * sx,
-                       ch * sy * cx + sh * sx, sh * sy * cx - ch * sx, cy * cx };
+        float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,   /* Rz(h) Rx(ax) Ry(ay) */
+                       -sh * cx, ch * cx, sx,
+                       ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
         for (int c = 0; c < 3; c++)
             for (int k = 0; k < 3; k++)
                 w[4 * c + k] = r[3 * c + k];

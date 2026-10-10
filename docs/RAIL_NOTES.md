@@ -50,21 +50,29 @@ its shape (√ of the box's max x, as the game reads it). OnHitGround every sub-
 (a track building's roof or front, the back row's fronts) or another object it meets is a contact with the
 restitution and friction, and TakeImpact on both (0x287430): ours on our own objects, `RE_IMPACT` for another
 module's (a building is hit with radius Mass / 1000 = 12, every sub-step it touches it). No rest: it rolls on until
-its script ends it. [G] `setRotation(r)` is taken as radians a second about the object's own x, y, z; the monsters
-are left out of what it meets.
+its script ends it. `setRotation(r)` (SphereMover id 8 → 0x28DD80) is an angular velocity in the world: |r| radians
+a second about the world axis r / |r| (axis +0x3C, rate +0x48; each sub-step 0x28E440 turns the object's axes by
+R(axis, rate × h)) [R]. The monsters are left out of what it meets: a monster's shape is its WCISpheres (type 3,
+0x29A9F0), which 0x27FD70 never meets (0x27F620 passes the higher type first) [R].
 
 **The hold** [R] (0x2DA310, HeldObjectMover 0x310ED0, as vehicle.c): BeingHeld, neither Pickupable nor
-PushOutMonsters, `HoldOffset` (0, 1, 0) or `MirroredHoldOffset` (0, −0.5, 0) along the hand's axes. [G] The object
-takes the hand's turn; the throw is a SphereMover keeping it.
+PushOutMonsters, `HoldOffset` (0, 1, 0) or `MirroredHoldOffset` (0, −0.5, 0) along the hand's axes. Its turn is fixed
+in the hand by `MajorAxis` (0x310ED0): that row is the hand's z, the next the hand's y, the third their cross; the
+trains and cable cars have MajorAxis 1, so x = −hand x, y = hand z, z = hand y [R]. The throw (0x2D9DC0) makes a
+SphereMover with only init (spin axis z, rate 0) and the throw's velocity: it keeps the held turn [R].
 
 **Buildings** [R]: `Building.isDestroyed` is +0x14C = 0 (case 0x2AD780: BUILDING_GONE, only the rubble left);
 `Building.isFalling` is grid +0x1CC ≠ 0x7FFFFFFF (0x2CE230: building.h's `collapse` ≠ −1, a storey falling or the
 whole collapse). `gWorld.findBuildingByPosition` is case 0x2AEAA0 of the World dispatcher: 0x2A3D20 on the world's
-tree (0x4D0900) with the Building class. [G] It is taken as the building whose footprint holds the point, whatever
-its height and state: the trains ask at their own height (z 10, above the box) and need a destroyed building found.
+tree (0x4D0900) with the Building class and a zero direction: the last building in the world's list whose box holds
+the point in x and y, ends included, whatever its height and state [R] (the trains ask at their own height, z 10,
+above the box, and need a destroyed building found).
 
-**Script calls** [R]: `onPulse` once `setPulseDelay` has gone by (0: every frame); a handler returning 4 | 8 | 16
-deletes its object. `Process` runs every frame [G]. `getStringProp` / `getFloatProp` / `getIntProp` read the instance
+**Script calls** [R]: the ScriptObject frame (0x309AC0) runs the mover (its answers 2, 3, 4 to onMoverCallback), then
+`Process` every frame (0x309B94), then the pulse: with a delay of at least 0.01 its clock grows by dt and at the delay
+the delay is taken off and `onPulse` runs, once a frame; below 0.01 neither (setPulseDelay(0) stops the pulses;
+0x309BA0). `setPulseDelay` (id 0x2F) only sets the delay, `setPulseTime` (0x30) the clock. A handler returning
+4 | 8 | 16 deletes its object. `getStringProp` / `getFloatProp` / `getIntProp` read the instance
 book (the ObjectInstance or AIInstance group) first, then the template; `getTemplate*Prop` the template only.
 `isValid` of a deleted object is false.
 
@@ -115,10 +123,11 @@ given" (the script's globals `hasGivenStatsLeftGroup` / `RightGroup`).
 **The slow-down path** [R] (createPathSlowDown): a SplineMover from where it is to 50 ahead (speeding) or 15 (slow),
 the points at 0 and 3, at 0.08 × its speed: 2.1 s or 3.75 s. A speeding train runs on into the gap.
 
-**The sparks** [R]: the template's `SparksEffect` (Train_Sparks), 0.6 up and, running to +x, 2 along x [G: the
-offset taken in the world], turned off when the train goes.
+**The sparks** [R]: the template's `SparksEffect` (Train_Sparks), 0.6 up and 2 along the train's own x (the offset
+is in the object's frame: createAndStartAttachedWithOffset 0x27A990, the follow 0x291440 = offset × the object's
+matrix), turned off when the train goes.
 
-**Process** [R], [G: every frame]: running, braking or stopped, a car checks 3 behind and 3 ahead along x; the first
+**Process** [R], every frame: running, braking or stopped, a car checks 3 behind and 3 ahead along x; the first
 point within x −49 … 49 decides: no building is good, a destroyed or falling one is not. Then it crashes.
 
 **crashTrain** [R]: a SphereMover at (10 or 18 the way it runs, −7.5 … −15 towards the front, 0), turning π/8 … π/4
@@ -238,25 +247,24 @@ starting at a random share; at its end it starts again from that side. No block 
 
 ## Not traced (stand-ins in rail.c)
 - **Random numbers and time:** an LCG of its own; the scripts at a fixed 1/60 frame.
-- **setPulseDelay:** taken to change the interval, the clock since the last pulse running on (a cable car calls it at
-  every touch of the street; restarting the clock would hold its dying off while it slides).
-- **Process:** every frame.
-- **The SphereMover:** `setRotation`'s units (above); the meeting of two flying objects (collide.c takes the other as
-  static).
-- **findBuildingByPosition:** the footprint test above.
-- **The contacts:** an object without OnlyHitWithEffNodes that a monster's box meets (collide.c `collide_obj_box`,
-  0x2801A0, against the object's shape) takes TakeDamage(monster, 0, Collision (1)) every frame (as boss.c): where the
-  game's touch comes from is not traced. The knock-downs repeat every frame while the monster's move still says
+- **The SphereMover:** the meeting of two flying objects (collide.c takes the other as static).
+- **The contacts:** the game's are the monster's (0x2E22B0): its spheres against the object's shape (0x280470); an
+  unarmed one gives TakeDamage(monster, 2.0, Collision (1)) every frame to an object without OnlyHitWithEffNodes, an
+  armed one the attack's damage, type 0 (Concussive), the sphere search ending at the first blow [R]. Here a monster's
+  box that meets the object (collide.c `collide_obj_box`, 0x2801A0) stands for the touch, and rail_hit runs per armed
+  sphere. The knock-downs repeat every frame while the monster's move still says
   `Ground`: the viewer starts a reaction at its next clip event, not at once. A PushOutMonsters object's push is the
   game's (collide_monster, 0x2E2C50: out of the object's box along its least overlap; a train pushes a monster on
   its track ahead of it).
 - **An object's shape** (0x28FD70, `collide_shape_pick`): its `CollisionBox` (the New York engine's), else
   `CollisionRadius`, else `AutoCollisionBox` (every car here) with the model's box from the host, then the
-  instance's; else the model's bounding sphere [G: the box's; the freighter]. A blow is tested on the shape's box.
-- **Attached effects:** at the object's place + the offset, in the world, their +Y along the object's; they follow
-  it. Its 3D sounds end when it goes.
-- **A monster's blow** is TakeDamage of type 0 (Concussive) [G, as boss.c].
-- **The freighter's sway:** setFacing(x, y, z) as Rz(z) × Ry(y) × Rx(x).
+  instance's; else the sphere the model keeps (0x184CB0: centre +0x38, radius +0x44, made at load as the union of
+  its parts' spheres from the file, 0x185AA0) [R]; the port takes the box's bounding sphere [G: the freighter's hull
+  keeps (0, −0.53, 1.69) r 8.03, the box's would be (0, −0.44, 2.68) r 8.75]. A blow is tested on the shape's box.
+- **Attached effects:** at the object's place + the offset in its frame, their +Y along the object's; they follow
+  its place (the game re-turns the offset with the object each frame; here it is turned once). Its 3D sounds end when
+  it goes.
+- **The freighter's sway:** setFacing(x, y, z) is Rz(z) × Rx(x) × Ry(y) (0x277E78 → 0x101330(m, z, x, y)) [R].
 - Not ported: the freighter's `ClothBit` flag (cloth.c's), the object flags 0x2000000 and 0x10000000, MajorAxis.
 
 ## Driving it from the viewer

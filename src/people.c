@@ -130,10 +130,10 @@ static void place_matrix(float w[16], const float pos[3], float heading, const f
 {
     float h = heading / DEG + (rot ? rot[2] : 0), ax = rot ? rot[0] : 0, ay = rot ? rot[1] : 0;
     float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
-    /* R = Rz(h) Ry(ay) Rx(ax) */
-    float r[9] = { ch * cy, sh * cy, -sy,
-                   ch * sy * sx - sh * cx, sh * sy * sx + ch * cx, cy * sx,
-                   ch * sy * cx + sh * sx, sh * sy * cx - ch * sx, cy * cx };
+    /* R = Rz(h) Rx(ax) Ry(ay): setFacing (0x277E78 -> 0x101330(m, z, x, y)) [R] */
+    float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,   /* Rz(h) Rx(ax) Ry(ay) */
+                   -sh * cx, ch * cx, sx,
+                   ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
     for (int c = 0; c < 3; c++) {
         for (int k = 0; k < 3; k++)
             w[4 * c + k] = r[3 * c + k];
