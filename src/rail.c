@@ -2211,6 +2211,8 @@ void rail_collide_add(Rail *r, CollideWorld *w)
         if (o->phase == RP_HELD)
             c.flags = (c.flags & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
         o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_RAIL, i), 0);
+        if (o->mv == MV_SPHERE && o->cm_on)          /* flying: another flying object exchanges impulses with it (0x285E90) */
+            collide_set_mover(w, o->cobj, &o->cm, o->cmat, o->sphere.vel);
     }
 }
 

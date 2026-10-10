@@ -52,6 +52,8 @@ typedef struct {
     uint32_t flags;                                  /* +0x4C */
     int tag, kind;                                   /* the viewer's: which module and which of its objects */
     int building;                                    /* a building's own box: its index in CollideWorld.b, else -1 */
+    struct CollideMover *mv;                         /* +0x84: its SpherePhysicsMover while it flies, else NULL */
+    float *mvm, *mvel;                               /* that mover's matrix, and where its module keeps the velocity */
 } CollideObj;
 
 typedef struct {
@@ -157,7 +159,7 @@ int collide_building_below(const CollideWorld *w, const CollideMonster *m);   /*
 void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut *out);
 
 /* ---- the SpherePhysicsMover (vtable 0x449500) */
-typedef struct {
+typedef struct CollideMover {
     float vel[3];                                    /* +0x10 */
     float axis[3], rate;                             /* +0x3C, +0x48: the spin, in the world */
     float gravity, mass, restitution, friction;      /* +0x8, +0xC, +0x1C, +0x20 (0x28F220: 9.81, 1, 0.8, 0.4) */
@@ -177,8 +179,8 @@ void collide_mover_contact(CollideMover *mv, const float m[12], const float p[3]
  * else the object index met (TakeImpact, event 10, on both: the thrown one and the one it meets) */
 typedef void (*CollideContactFn)(void *user, int other, const float point[3], const float normal[3]);
 /* one frame (vtable +0x30, 0x28E440): sub-steps of at most 0.75 r of travel; each moves and turns m, falls, meets
- * the street (pushed out, impulse, fn(-1)) and then the objects its shape reaches (impulse off a static one, fn(i);
- * 0x287430). self: its own index in w (its shape and m are read there and its m kept up), -1 none (then only the
+ * the street (pushed out, impulse, fn(-1)) and then the objects its shape reaches (impulse off a static one, an
+ * exchange with a flying one (collide_set_mover), fn(i); 0x287430). self: its own index in w (its shape and m are read there and its m kept up), -1 none (then only the
  * street). Returns the number of street contacts */
 int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, CollideContactFn fn,
                        void *user);
@@ -187,6 +189,9 @@ int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self,
  * own shape, WCISpheres, against a thrown object in 0x27F620 is not traced] */
 int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, uint32_t exclude,
                           CollideContactFn fn, void *user);
+/* the object obj of the frame's world flies on mv (its matrix m, its module's velocity vel, which the exchange keeps
+ * up): another flying object meeting it exchanges an impulse with it (0x285E90) instead of meeting it as static */
+void collide_set_mover(CollideWorld *w, int obj, CollideMover *mv, float m[12], float vel[3]);
 
 /* ---- the viewer's side: who owns an object of the frame's world */
 #define COLLIDE_F_WORLD 0x4u                         /* every object in the world (the queries' "4") */

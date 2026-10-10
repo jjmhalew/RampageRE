@@ -3148,6 +3148,8 @@ void army_collide_add(Army *a, CollideWorld *w)
         if (u->phase == AU_HELD)
             fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
         u->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_ARMY, i), 0);
+        if (u->mv.kind == 2 && u->cm_on)             /* flying: another flying object exchanges impulses with it (0x285E90) */
+            collide_set_mover(w, u->cobj, &u->cm, u->cmat, u->vel);
     }
 }
 

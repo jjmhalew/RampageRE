@@ -1270,6 +1270,8 @@ void parade_collide_add(Parade *p, CollideWorld *w)
         if (o->phase == PAP_HELD)
             fl = (fl & ~(uint32_t)COLLIDE_F_PUSHOUT) | COLLIDE_F_RAYSKIP;
         o->cobj = collide_add(w, &sh, m, fl, COLLIDE_TAG(COLLIDE_OWN_PARADE, i), 0);
+        if (o->sphere.on && o->cm_on)                /* flying: another flying object exchanges impulses with it (0x285E90) */
+            collide_set_mover(w, o->cobj, &o->cm, o->cmat, o->sphere.vel);
     }
 }
 

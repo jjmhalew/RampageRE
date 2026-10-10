@@ -372,6 +372,8 @@ int collide_add(CollideWorld *w, const CollideShape *s, const float m[12], uint3
     o->tag = tag;
     o->kind = kind;
     o->building = -1;
+    o->mv = NULL;
+    o->mvm = o->mvel = NULL;
     return w->no++;
 }
 
@@ -917,6 +919,147 @@ void collide_mover_contact(CollideMover *mv, const float m[12], const float p[3]
     collide_mover_impulse(mv, m, jw, p);
 }
 
+void collide_set_mover(CollideWorld *w, int obj, CollideMover *mv, float m[12], float vel[3])
+{
+    if (!w || obj < 0 || obj >= w->no)
+        return;
+    w->o[obj].mv = mv;
+    w->o[obj].mvm = m;
+    w->o[obj].mvel = vel;
+}
+
+/* the world inverse inertia (R diag(1 / I) R^T, 0x286418) of the object at m times v */
+static void inv_inertia(const CollideMover *mv, const float m[12], const float v[3], float o[3])
+{
+    float l[3];
+    to_local(m, v, l);
+    for (int k = 0; k < 3; k++)
+        l[k] /= mv->inertia[k];
+    to_world_dir(m, l, o);
+}
+
+/* 0x103E90: of (-n.x, n.y, n.z), (n.y, n.x, n.z), (n.z, n.y, n.x) the one least along n (the first on a tie) */
+static void tangent_seed(const float n[3], float c[3])
+{
+    const float cand[3][3] = { { -n[0], n[1], n[2] }, { n[1], n[0], n[2] }, { n[2], n[1], n[0] } };
+    float best = 3.4e38f;
+    for (int i = 0; i < 3; i++) {
+        float d = dot3(cand[i], n);
+        if (d * d < best) {
+            best = d * d;
+            copy3(c, cand[i]);
+        }
+    }
+}
+
+static void unit_or_x(float v[3])
+{
+    float l2 = dot3(v, v);
+    if (l2 < 1e-6f) {
+        v[0] = 1;
+        v[1] = v[2] = 0;
+        return;
+    }
+    float l = sqrtf(l2);
+    for (int k = 0; k < 3; k++)
+        v[k] /= l;
+}
+
+/* RSceneryMgr vtable +0x30 (0x282330): a push that would take the shape's sphere under the street becomes a lift to
+ * just above it (d + 0.001 r, measured where the push took it) */
+static void street_push(const CollideObj *o, const float m[12], float push[3])
+{
+    const float *c = o->shape.centre;
+    float zc = c[0] * m[2] + c[1] * m[5] + c[2] * m[8] + m[11] + push[2], d = o->shape.radius - zc;
+    if (d > 0) {
+        push[0] = push[1] = 0;
+        push[2] = d + 0.001f * o->shape.radius;
+    }
+}
+
+/* KV(d): (I_A^-1 (rA x d)) x rA + (I_A^-1 (rB x d)) x rB: the game takes A's tensor for both (0x286530: B's own is
+ * made from A's and never read) [R] */
+static float exchange_k(const CollideMover *a, const float ma[12], const float ra[3], const float rb[3],
+                        const float d[3])
+{
+    float x[3], y[3], z[3], s[3];
+    cross3(ra, d, x);
+    inv_inertia(a, ma, x, y);
+    cross3(y, ra, s);
+    cross3(rb, d, x);
+    inv_inertia(a, ma, x, y);
+    cross3(y, rb, z);
+    for (int k = 0; k < 3; k++)
+        s[k] += z[k];
+    return dot3(d, s);
+}
+
+/* 0x285E90, both with movers: the exchange between A (the one met) and B (the one moving), N the push that takes A
+ * out of B, P1 the contact on A's surface, P2 on B's. The relative velocity at the contacts; nothing when they part
+ * (u.N >= 0); the restitution and friction 0.7 x the lesser + 0.3 x the greater; the normal impulse and two tangent
+ * ones, held to mu |jn| by max + 1/2 min of theirs; the push shared by the masses, a lift off the street where it
+ * would go under; then each its impulse (0x28E0D0: the velocity, the push, the spin about its own inertia) [R] */
+static void exchange(CollideObj *oa, CollideObj *ob, CollideMover *b, float mb[12], const float N[3],
+                     const float P1[3], const float P2[3])
+{
+    CollideMover *a = oa->mv;
+    float *ma = oa->mvm;
+    float wa[3], wb[3], ra[3], rb[3], u[3], x[3];
+    spin_vec(a, wa);
+    spin_vec(b, wb);
+    for (int k = 0; k < 3; k++) {
+        ra[k] = P1[k] - ma[9 + k];
+        rb[k] = P2[k] - mb[9 + k];
+        u[k] = a->vel[k] - b->vel[k];
+    }
+    cross3(wa, ra, x);
+    for (int k = 0; k < 3; k++)
+        u[k] += x[k];
+    cross3(wb, rb, x);
+    for (int k = 0; k < 3; k++)
+        u[k] -= x[k];
+    if (!(dot3(u, N) < 0))
+        return;
+    float mu = 0.7f * fminf(a->friction, b->friction) + 0.3f * fmaxf(a->friction, b->friction);
+    float e = 0.7f * fminf(a->restitution, b->restitution) + 0.3f * fmaxf(a->restitution, b->restitution);
+    float n[3] = { -N[0], -N[1], -N[2] }, c[3], t1[3], t2[3];
+    unit_or_x(n);
+    tangent_seed(n, c);
+    cross3(c, n, t1);
+    unit_or_x(t1);
+    cross3(n, t1, t2);
+    float im = 1 / a->mass + 1 / b->mass;
+    float jn = dot3(u, n) / (im + exchange_k(a, ma, ra, rb, n)) * (1 + e);
+    if (jn < 0)
+        return;
+    float j1 = dot3(u, t1) / (im + exchange_k(a, ma, ra, rb, t1));
+    float j2 = dot3(u, t2) / (im + exchange_k(a, ma, ra, rb, t2));
+    float a1 = fabsf(j1), a2 = fabsf(j2), sum = a1 < a2 ? a2 + 0.5f * a1 : a1 + 0.5f * a2, lim = mu * fabsf(jn);
+    if (!(sum <= lim)) {
+        float s = lim / sum;
+        j1 *= s;
+        j2 *= s;
+    }
+    float J[3], nJ[3], fb = b->mass / (a->mass + b->mass), pa[3], pb[3];
+    for (int k = 0; k < 3; k++) {
+        J[k] = jn * n[k] + j1 * t1[k] + j2 * t2[k];
+        nJ[k] = -J[k];
+        pa[k] = fb * N[k];
+        pb[k] = -(1 - fb) * N[k];
+    }
+    street_push(oa, ma, pa);
+    street_push(ob, mb, pb);
+    for (int k = 0; k < 3; k++) {
+        ma[9 + k] += pa[k];
+        mb[9 + k] += pb[k];
+    }
+    collide_mover_impulse(a, ma, nJ, P1);
+    collide_mover_impulse(b, mb, J, P2);
+    memcpy(oa->m, ma, sizeof oa->m);                 /* the one met: its world shape and its module's velocity */
+    if (oa->mvel)
+        memcpy(oa->mvel, a->vel, sizeof a->vel);
+}
+
 static void rotate_axis(float m[12], const float a[3], float ang)   /* 0x1014D0 / 0x101A90: about a world axis */
 {
     float c = cosf(ang), s = sinf(ang);
@@ -997,9 +1140,19 @@ int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int se
                 if (near[i] == self)
                     continue;
                 float n[3], p[3], depth;
-                if (!collide_pair(o, &w->o[near[i]], n, p, &depth) || depth * depth <= 1e-5f)
+                CollideObj *other = &w->o[near[i]];
+                if (!collide_pair(o, other, n, p, &depth) || depth * depth <= 1e-5f)
                     continue;
-                collide_mover_contact(mv, m, p, n);  /* [G] the other taken as static (0x285E90's one-mover case) */
+                if (other->mv && other->mv != mv && other->mvm) {   /* both fly: the exchange (0x285E90) */
+                    float N[3], p2[3];                 /* N takes it out of us; p on its surface, p2 on ours */
+                    for (int k = 0; k < 3; k++) {
+                        N[k] = -n[k] * depth;
+                        p2[k] = p[k] - n[k] * depth;
+                    }
+                    exchange(other, o, mv, m, N, p, p2);
+                    memcpy(o->m, m, sizeof o->m);
+                } else
+                    collide_mover_contact(mv, m, p, n);   /* off a static one, as 0x285E90's one-mover case */
                 if (fn)
                     fn(user, near[i], p, n);         /* TakeImpact (vtable +0x38) on both */
             }

@@ -141,13 +141,24 @@ repeats each sub-step while the shapes overlap.
 else j = −(1 + e) u·n / (1/m + n·((I⁻¹(r × n)) × r)), the tangents' impulses cancelling u's sliding, held to
 μ j (Coulomb); the impulse (0x28E0D0: v += J/m, ω += M I⁻¹ Mᵀ (r × J)). Objects meeting (0x285E90): one with a
 mover and one without — the same contact against the other's surface with its own restitution and friction (no
-pushing out); both with movers — an exchange between them (0x285E90) [R]: the relative velocity at the contact
-points u (each mover's velocity and spin, vtable +0x10); nothing when u·P ≥ 0; restitution and friction each
-0.7 × the lesser + 0.3 × the greater; the normal impulse j = (1 + e)(u·n)/K(n) and two tangent ones, together held to
-μ|j| by max + ½ min; the push shared by the masses (mB / (mA + mB) and −mA / (mA + mB)), dropped to a lift off the
-street when it would go under; both applied through vtable +0x24 (0x28E0D0). Every other mover class answers no spin
-and ignores the impulse (0x2873A0, 0x287390), held objects included. **Not ported: collide.c takes the other as
-static** (the impulse rule, max + ½ min, differs from the port's √(j1² + j2²) too).
+pushing out); both with movers — an exchange between them (0x285E90) [R]. A is the one met, B the one moving
+(0x2875F4), N the push that takes A out of B, P1 the contact on A's surface, P2 on B's:
+- u = (vA − vB) + ωA × (P1 − A) − ωB × (P2 − B) (each mover's velocity and spin, vtable +0x10); nothing unless u·N < 0;
+- e and μ each 0.7 × the lesser + 0.3 × the greater;
+- n = −N/|N|; the tangents t1 = c × n made unit, t2 = n × t1, c from 0x103E90 (of (−n.x, n.y, n.z), (n.y, n.x, n.z),
+  (n.z, n.y, n.x) the one with the least (c·n)², the first on a tie);
+- K(d) = 1/mA + 1/mB + d·((I⁻¹(rA × d)) × rA + (I⁻¹(rB × d)) × rB) with **A's world inverse inertia for both** (B's
+  own is made from A's and never read, 0x286530); jn = (1 + e) u·n / K(n), nothing if jn < 0; j1 = u·t1 / K(t1),
+  j2 = u·t2 / K(t2) (with the first u: the spins the normal impulse changes are dead stores);
+- the friction held per axis: S = max(|j1|, |j2|) + ½ min(...), scaled by μ|jn| / S when S > μ|jn|;
+- J = jn n + j1 t1 + j2 t2; the push mB / (mA + mB) N to A and −mA / (mA + mB) N to B, each replaced by a lift
+  (0, 0, d + 0.001 r) when its shape's sphere would be d under the street where it is pushed to (0x282330);
+- A takes −J at P1, B +J at P2 (0x28E0D0: v += J / m, the push, then ω += R I⁻¹ Rᵀ (r × J) about its own inertia).
+Every other mover class answers no spin and ignores the impulse (0x2873A0, 0x287390), held objects included. Here
+(collide.c `exchange`) for two flying objects, each module naming its flying ones' movers (`collide_set_mover`); P2
+is taken as P1 − n × depth (0x27FD70 leaves the second point of a sphere against a box unwritten); an object on
+another mover (a Line or Spline mover: a car driving) is met as static, where the game would read that mover's fields
+as a SpherePhysicsMover's.
 
 There is no rest and no rolling resistance in the mover: friction makes it roll, and it rolls on (the scripts stop
 or delete what they throw). The street test (0x28E6F4) takes the sphere about the mover's position, with no offset
