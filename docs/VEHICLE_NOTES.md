@@ -216,8 +216,8 @@ reports every award with its template name, so the viewer can count challenge go
   a car on the street rests one radius up; the mover leaves the monsters out (their spheres are type 3, met by
   nothing: 0x27FD70) [R]. The meeting of two flying objects takes the other as static (collide.c).
 - **The shape** in the world: 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox with
-  the model's box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres) [R; here the box's
-  bounding sphere, G]), read once. The traffic is PushOutMonsters: the
+  the model's box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres) [R]; here
+  the union of its meshes' header spheres, city.c `city_shape_sphere`), read once. The traffic is PushOutMonsters: the
   monster is pushed out of a car's box (collide_monster).
 - **A blow's shape:** the model's box (AutoCollisionBox) from the host, else the `ShadowRect` 2.5 high; the game
   tests the monster's spheres against the object's collision shape (0x2E22B0 → 0x280470) [R].

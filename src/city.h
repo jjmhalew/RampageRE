@@ -304,6 +304,8 @@ Group city_book_group(City *c, const char *book, const char *name);
 int city_block_index(City *c, const char *name);
 /* a model's bounds in its own frame (its meshes' vertices); 0 = ok */
 int city_shape_box(City *c, const char *shape, float min[3], float max[3]);
+/* the sphere the model keeps (the union of its meshes' header spheres); 0 = ok */
+int city_shape_sphere(City *c, const char *shape, float centre[3], float *radius);
 /* an army unit's node (a weapon's WeaponNode) in the world as its look is drawn now; 0 = ok */
 int scene_unit_node(const Scene *s, int unit, const char *node, float out[16]);           /* camera.bdp's TwoTilts group; 0 = ok */
 void scene_free(Scene *s);

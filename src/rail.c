@@ -2030,6 +2030,9 @@ static void obj_shape_read(const Rail *r, const RailObj *o, CollideShape *s)
         }
         rad = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
+    /* [R 0x28FD70 -> 0x184CB0] the sphere the model keeps, the union of its parts' spheres (0x185AA0) */
+    if (have && r->host.shape_sphere)
+        r->host.shape_sphere(r->host.ctx, o->shape, c, &rad);
     Group in = o->inst;
     collide_shape_pick(s, have ? c : NULL, rad, o->tmpl.at ? book_box(o->tmpl, tb) : NULL, tnum(o, "CollisionRadius", -1),
                        tnum(o, "AutoCollisionBox", 0) != 0, in.at ? book_box(in, ib) : NULL,

@@ -645,6 +645,52 @@ int city_shape_box(City *c, const char *shape, float min[3], float max[3])
     return found ? 0 : -1;
 }
 
+/* the sphere a model keeps (SimpleShape 0x184CB0: centre +0x38, radius +0x44): at load the union (0x103770) of its
+ * parts' spheres (0x185AA0), each a type-0 mesh's header sphere (+0x4 the centre, +0x10 r^2) [R] */
+int city_shape_sphere(City *c, const char *shape, float centre[3], float *radius)
+{
+    char key[64];
+    size_t n = 0;
+    for (; shape && shape[n] && n < 63; n++)
+        key[n] = (char)tolower((unsigned char)shape[n]);
+    key[n] = 0;
+    if (n > 4 && strcmp(key + n - 4, ".pwk") == 0)
+        key[n - 4] = 0;
+    int found = 0;
+    float sc[3] = { 0, 0, 0 }, sr = 0;
+    for (uint32_t i = 0; i < c->bundle.nentries; i++) {
+        const BdpEntry *e = &c->bundle.entries[i];
+        if (e->type != ET_MESH || !c->model_key[i][0] || strcmp(c->model_key[i], key) != 0 || e->size < 0x14)
+            continue;
+        float b[4];
+        memcpy(b, e->data + 4, sizeof b);
+        float r = b[3] > 0 ? sqrtf(b[3]) : 0;
+        if (!found) {
+            memcpy(sc, b, sizeof sc);
+            sr = r;
+            found = 1;
+            continue;
+        }
+        float d[3] = { b[0] - sc[0], b[1] - sc[1], b[2] - sc[2] }, l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (l + r <= sr)                             /* inside the one so far */
+            continue;
+        if (l + sr <= r) {                           /* holds the one so far */
+            memcpy(sc, b, sizeof sc);
+            sr = r;
+            continue;
+        }
+        float nr = (l + sr + r) / 2;                 /* the sphere round both */
+        for (int k = 0; k < 3; k++)
+            sc[k] += d[k] * (nr - sr) / l;
+        sr = nr;
+    }
+    if (!found)
+        return -1;
+    memcpy(centre, sc, sizeof sc);
+    *radius = sr;
+    return 0;
+}
+
 static Group people_template(void *ctx, const char *name) { return template_of(ctx, name); }
 Group city_template(City *c, const char *name) { return template_of(c, name); }
 static float people_clip_seconds(void *ctx, const char *anim, const char *shape);

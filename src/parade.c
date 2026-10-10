@@ -331,6 +331,9 @@ static void obj_shape_read(const Parade *p, const ParadeObj *o, CollideShape *s)
         }
         r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
+    /* [R 0x28FD70 -> 0x184CB0] the sphere the model keeps, the union of its parts' spheres (0x185AA0) */
+    if (have && p->host.shape_sphere)
+        p->host.shape_sphere(p->host.ctx, o->shape, c, &r);
     collide_shape_pick(s, have ? c : NULL, r, o->tmpl.at ? book_box(o->tmpl, tb) : NULL, tnum(o, "CollisionRadius", -1),
                        tnum(o, "AutoCollisionBox", 0) != 0, NULL, -1, 0, have ? mb : NULL);
 }

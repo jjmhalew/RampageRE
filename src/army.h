@@ -43,6 +43,7 @@ typedef struct {
     int (*node_world)(void *ctx, const ArmyUnit *u, const char *node, float out[16]);
     /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (4 x 6 x 3 stands in) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
+    int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     void *ctx;
 } ArmyHost;
 

@@ -562,6 +562,10 @@ static int army_shape_box(void *ctx, const char *shape, float min[3], float max[
 {
     return city_shape_box(((Viewer *)ctx)->city, shape, min, max) == 0;
 }
+static int model_sphere(void *ctx, const char *shape, float centre[3], float *radius)
+{
+    return city_shape_sphere(((Viewer *)ctx)->city, shape, centre, radius) == 0;
+}
 static int army_node_world(void *ctx, const ArmyUnit *u, const char *node, float out[16])
 {
     Viewer *v = ctx;                                 /* the weapon's node on the unit's look as drawn */
@@ -767,6 +771,7 @@ static void build(Viewer *v)
         host.find = army_find;
         host.clip_seconds = army_clip_seconds;
         host.shape_box = army_shape_box;
+        host.shape_sphere = model_sphere;
         host.node_world = army_node_world;
         host.ctx = v;
         v->army = army_new(&host);
@@ -787,6 +792,7 @@ static void build(Viewer *v)
         static VehicleHost vh;
         vh.find = army_find;
         vh.shape_box = army_shape_box;
+        vh.shape_sphere = model_sphere;
         vh.ctx = v;
         v->veh = vehicle_new(&vh);
         if (v->veh)
@@ -810,6 +816,7 @@ static void build(Viewer *v)
     if (v->have_scene) {
         static StreetHost sh;
         sh.shape_box = army_shape_box;
+        sh.shape_sphere = model_sphere;
         sh.ctx = v;
         v->sobj = streetobj_new(&sh);
         static StreetBuilding sbs[64];
@@ -839,6 +846,7 @@ static void build(Viewer *v)
         static ParadeHost ph;
         ph.find = army_find;
         ph.shape_box = army_shape_box;
+        ph.shape_sphere = model_sphere;
         ph.clip_seconds = parade_clip_seconds;
         ph.ctx = v;
         v->parade = parade_new(&ph);
@@ -859,6 +867,7 @@ static void build(Viewer *v)
         static RailHost rh;
         rh.find = army_find;
         rh.shape_box = army_shape_box;
+        rh.shape_sphere = model_sphere;
         rh.ctx = v;
         v->rail = rail_new(&rh);
         if (v->rail)
@@ -942,6 +951,7 @@ static void build(Viewer *v)
         bh.find = army_find;
         bh.clip_seconds = army_clip_seconds;
         bh.shape_box = army_shape_box;
+        bh.shape_sphere = model_sphere;
         bh.weapon_make = boss_weapon_make;
         bh.weapon_tick = boss_weapon_tick;
         bh.ctx = v;

@@ -194,8 +194,8 @@ leans away, held while the monster stays within 7.
   (0x280470, `collide_obj_sphere`), and so is a touch, each of the monster's collision spheres armed or not (0x2E22B0;
   main.c `mon_spheres`) [R]; the monster's box is only the push-out's (0x2E2C50). The shape is 0x28FD70's
   (`collide_shape_pick`: the template's then the instance's `CollisionBox`, `CollisionRadius` or `AutoCollisionBox`
-  with the model's box; else the sphere the model keeps (0x184CB0) [R; taken here as the box's, so a
-  `TelephonePole1`, which sets none, is a sphere of 6.1]), read when the object is added; `box_min` / `box_max` hold
+  with the model's box; else the sphere the model keeps (0x184CB0) [R], here the union of its meshes' header spheres, city.c `city_shape_sphere`), read when the object is
+  added; `box_min` / `box_max` hold
   its box. One hit list for the whole attack (the game keeps one per body part's attack record, 8 ids at +0x6,
   0x2E33A0).
 - `setPulseDelay` only sets the delay (0x2AA2A0) and the clock runs on: with a delay of 0.01 or more it grows by the

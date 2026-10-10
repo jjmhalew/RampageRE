@@ -1321,6 +1321,9 @@ static void unit_shape_read(const Army *a, const ArmyUnit *u, CollideShape *s)
         }
         r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
+    /* [R 0x28FD70 -> 0x184CB0] the sphere the model keeps, the union of its parts' spheres (0x185AA0) */
+    if (have && a->host.shape_sphere)
+        a->host.shape_sphere(a->host.ctx, u->shape, c, &r);
     Group t = u->tmpl, in = u->inst;
     collide_shape_pick(s, have ? c : NULL, r, t.at ? book_box(t, tb) : NULL, t.at ? gnum(t, "CollisionRadius", -1) : -1,
                        t.at && gnum(t, "AutoCollisionBox", 0) != 0, in.at ? book_box(in, ib) : NULL,

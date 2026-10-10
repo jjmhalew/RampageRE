@@ -298,7 +298,7 @@ Floating = 100
   - the units' shapes for the monster's attacks (actors: a sphere of `CollisionRadius` 2; objects: the host's model
     box, else 4 × 6 × 3). In the collision world a unit has its shape by 0x28FD70 (`collide_shape_pick`:
     CollisionBox, CollisionRadius, AutoCollisionBox, else the sphere the model keeps (0x184CB0, stored apart from
-    its box, 0x184940) [R]; here the box's bounding sphere [G].
+    its box, 0x184940) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`.
 - **Movers:** the SplineMover's curve and the HeldObjectMover's axis turn (the unit takes the hand's matrix). A flight
   (`mv.kind` 2: a wreck knocked away, a smashed actor, a thrown vehicle, a falling bomber) is the game's
   SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) with the template's `Gravity` (DefObjectProps 35,

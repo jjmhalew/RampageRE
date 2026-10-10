@@ -43,6 +43,7 @@ typedef struct StreetObjs StreetObjs;
 typedef struct {
     /* optional: a model's bounds in its own frame (AutoCollisionBox); nonzero = found (army_shape_box's convention) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
+    int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     void *ctx;
 } StreetHost;
 

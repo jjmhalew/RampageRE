@@ -260,8 +260,8 @@ starting at a random share; at its end it starts again from that side. No block 
 - **An object's shape** (0x28FD70, `collide_shape_pick`): its `CollisionBox` (the New York engine's), else
   `CollisionRadius`, else `AutoCollisionBox` (every car here) with the model's box from the host, then the
   instance's; else the sphere the model keeps (0x184CB0: centre +0x38, radius +0x44, made at load as the union of
-  its parts' spheres from the file, 0x185AA0) [R]; the port takes the box's bounding sphere [G: the freighter's hull
-  keeps (0, −0.53, 1.69) r 8.03, the box's would be (0, −0.44, 2.68) r 8.75]. A blow is tested on the shape's box.
+  its parts' spheres from the file, 0x185AA0) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere` (the freighter's hull
+  keeps (0, −0.53, 1.69) r 8.03, where its box's would be (0, −0.44, 2.68) r 8.75). A blow is tested on the shape's box.
 - **Attached effects:** at the object's place + the offset in its frame, their +Y along the object's; they follow
   its place (the game re-turns the offset with the object each frame; here it is turned once). Its 3D sounds end when
   it goes.

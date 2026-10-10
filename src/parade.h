@@ -41,6 +41,7 @@ typedef struct {
     /* optional: a model's bounds in its own frame (a balloon's AutoCollisionBox); 0 = unknown (its ShadowRect in x
      * and y, -3 .. 3 in z, stands in) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
+    int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     /* optional: node `node` of a model's tree at its rest pose, in the model's frame (getNodePosition: the food's
      * place on its stand); 0 = unknown (the stands' node 1 as read from the bundles, else 3.6 up, the script's own) */
     int (*shape_node)(void *ctx, const char *shape, int node, float out[3]);

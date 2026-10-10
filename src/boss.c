@@ -990,6 +990,9 @@ static Obj *obj_new(Boss *b, const char *name, Group tmpl, Group inst, const flo
             }
             rr = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
         }
+        /* [R 0x28FD70 -> 0x184CB0] the sphere the model keeps, the union of its parts' spheres (0x185AA0) */
+        if (have && b->host.shape_sphere)
+            b->host.shape_sphere(b->host.ctx, o->p.shape, c, &rr);
         collide_shape_pick(&o->cshape, have ? c : NULL, rr, book_box(tmpl, tb), group_num(tmpl, "CollisionRadius", -1),
                            group_num(tmpl, "AutoCollisionBox", 0) != 0, inst.at ? book_box(inst, ib) : NULL,
                            inst.at ? group_num(inst, "CollisionRadius", -1) : -1,

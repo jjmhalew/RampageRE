@@ -764,6 +764,9 @@ static void object_box(StreetObjs *s, StreetObj *o)
         }
         r = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
     }
+    /* [R 0x28FD70 -> 0x184CB0] the sphere the model keeps, the union of its parts' spheres (0x185AA0) */
+    if (have && s->host.shape_sphere)
+        s->host.shape_sphere(s->host.ctx, o->shape, c, &r);
     Group t = o->tmpl, in = o->inst;
     collide_shape_pick(&o->cshape, have ? c : NULL, r, t.at ? book_box(t, tb) : NULL,
                        t.at ? group_num(t, "CollisionRadius", -1) : -1, t.at && group_num(t, "AutoCollisionBox", 0) != 0,

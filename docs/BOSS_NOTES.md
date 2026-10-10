@@ -348,7 +348,7 @@ falling back one loses its barriers too.
     part's shape (0x280470);
   - the parts' shapes (0x28FD70, `collide_shape_pick`: CollisionBox (the generators'), CollisionRadius or
     AutoCollisionBox (the blimp) with the model's box, else the sphere the model gives (its vtable +0x14, at
-    0x290384) [G: taken as the box's bounding sphere; the model class's +0x14 was not read].
+    0x290384): SimpleShape's 0x184CB0, the union of its parts' spheres (0x185AA0) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`.
 - **Movers:**
   - the LineMover's pitch along a leg (the port turns the yaw only).
 - **Weapons:**

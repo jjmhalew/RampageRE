@@ -37,6 +37,7 @@ typedef struct {
     Group (*find)(void *ctx, const char *book, const char *name);
     /* optional: a model's bounds in its own frame (AutoCollisionBox); 0 = unknown (the ShadowRect stands in) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
+    int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
     /* optional: node of the object as drawn now, in the world (the fire truck's WeaponNode_Y); 0 = unknown */
     int (*node_world)(void *ctx, const VehObj *o, const char *node, float out[16]);
     void *ctx;

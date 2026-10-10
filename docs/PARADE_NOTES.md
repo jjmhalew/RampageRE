@@ -179,7 +179,7 @@ template's name is what the challenge counts (0x346780).
 - **The shapes in the world** (0x28FD70, `collide_shape_pick`): the template's CollisionBox, CollisionRadius (the
   bikers' 2, the carts' food 3 and 2.5, about the model's middle) or AutoCollisionBox (the balloons) with the model's
   box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres from the file, 0x185AA0), read
-  once [R; the port takes the box's bounding sphere, G]. The carts and balloons are PushOutMonsters: the
+  once [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`. The carts and balloons are PushOutMonsters: the
   monster is pushed out of them (collide_monster).
 - **Pulses** [R]: setPulseDelay only sets the delay; the count runs on (0x309BA4, the Actor's 0x30CEA0).
   `getTimeStep` is gWorld +4, the world's fixed step: 1/30 (RWorld's init 0x2B7800; FLOW_NOTES.md) [R]; `frand` is Park-Miller (0x106BD0) [R], here a generator of its own.
