@@ -116,7 +116,7 @@ typedef struct {
     int upgrade;             /* getChallengeUpgrade(): 0, or the upgrade (1 2 4 8: "Upgrade<n>") */
     int required;            /* getChallengeItemRequired(): -1 no challenge */
     float pause_scale;       /* getChallengeIconScale(1): the ChallengeDef's PauseScale, else its Scale [R 0x2AF488]
-                              * (the Pause menu's icon); 0 = icon_scale */
+                              * (the Pause menu's icon) */
 } HudChallenge;
 /* a block was activated (Levels::onActivateBlock -> ChallengeStatus::updateBossStatus, setupUI) [R]: the boss bar
  * shows on the last block in the campaign and the Timed Run, the item count on the others */

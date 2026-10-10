@@ -46,7 +46,8 @@ the dispatcher 0x2AE3D0 via the jump table 0x42DD70):
 
 The four book getters read the current block's `ChallengeDef` every time (0x303160 on the block manager). They do
 this whatever the play type and whether or not goals were loaded. Scale and ShiftX must be float records. A missing
-key writes nothing into the answer **[G: 1 for the scale, 0 for the shift]**. (`wasMonsterRevealed`, id 0x47, sits
+key writes nothing into the answer, which the float type made 0.0 first (gp −0x6EF0, TypePFloat 0x1CE830:
+`sw zero, 4(a1)`), so a missing Scale or ShiftX is 0 [R]. (`wasMonsterRevealed`, id 0x47, sits
 next to them: 0x4D6A6C ≠ 0.)
 
 ## The data
@@ -306,7 +307,10 @@ starts again from 0 whenever the block is loaded again (a Continue, a King tie).
   - 4 challenges;
   - 8 reveal.
 - **The start.** A new campaign city (0x33DB90, the start block +0x210 still 0) sets them to **0x84**. Flag 4 starts
-  set, and so does 0x80 **[G: what 0x80 means]**.
+  set, and so does 0x80: the "city available" bit of the profile's city flags, which the city's destruction ORs the
+  checkpoint's flags into (0x33DE10 at 0x33DF04), so it changes nothing there; flag 4 becomes the challenge star [R].
+  A city started at a later block keeps the record's flags as restored or checkpointed, so a challenge missed earlier
+  stays missed [R].
 - **The checkpoint.** Restoring it (0x33D820 / 0x33D910, a Continue) copies them back from +0x1F4. Saving it at
   each block won (0x33E290) stores them.
 - **The block won** (0x3255B0, entering state 7) runs in this order:
@@ -335,14 +339,17 @@ starts again from 0 whenever the block is loaded again (a Continue, a King tie).
 - The block's end: `challenge_block_won(c, play_type, seconds_left)` ("Clock", then the check; 0 = clear flag 4).
 
 ## Not traced / guessed
-- **[G]** A missing Scale / PauseScale / ShiftX: the binding writes nothing, and the port answers 1 / 0.
-- **[G]** TextColor (200, 0, 0) is taken as 0 … 255.
-- **[G]** The blow's reach on the upgrade object: the attack sphere's radius plus CollisionRadius 1, centre to
-  centre.
-- **[G]** The flags a new profile gives a monster (whether the four moves start locked) were not traced. The viewer's
-  edible.c takes all four as unlocked, which would mean no upgrade is ever offered.
-- **[G]** City flag 0x80, and a new city that starts at a later block (0x33DB90 skips the 0x84 when the start block is
-  not 0).
+- A missing Scale / PauseScale / ShiftX answers 0.0 (above) [R]; the Pause menu uses PauseScale, else Scale, as it
+  comes (Pause.scr).
+- TextColor (200, 0, 0): getTemplateColorProp (0x278C38 → 0x27B4F0) wants 3 or 4 float records, truncates each to a
+  byte (& 0xFF, alpha 255 with three) and gives them back × 1/255 (0x1C97F0) [R]: (0.784, 0, 0, 1).
+- The upgrade object is reached by the monster's object test (0x2E22B0): each collision sphere against its shape,
+  CollisionRadius 1 about InvisShape's middle (its place), so radius + 1 centre to centre [R]. The object has no
+  0x8000, so an unarmed sphere's touch (TakeDamage type 1, 2.0, every frame) takes it too, and StreetObject.scr's
+  branch ignores the type. **[G]** Here the body's touch is a sphere about the monster's box (main.c), not its
+  collision spheres.
+- A new profile's monsters start with their moves locked: 0x33F630 writes 0x80 into each of monsters 0 … 5 [R]
+  (PROFILE_NOTES.md); the viewer reads them from the profile, edible.c's 0xF only for a monster the roster lacks.
 - The unused blocks HK06_Towers ("Load this block", 2 × StreetLampChina) and HK09_Gardens ("Find this location", 20)
   are test data, and so is CG07_Block8 (not in Chicago's BlockList).
 - In the game the next block's challenge is loaded while the results screen is up (state 7). Anything counted from

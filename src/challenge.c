@@ -66,7 +66,7 @@ static void props_default(ChallengeUpgradeProps *p)
     p->radius = 1;
     p->effect = "Powerup_Upgrade";
     p->text = "MonsterUpgrade";
-    p->colour[0] = 200 / 255.0f;                     /* [G] the colour's scale */
+    p->colour[0] = 200 / 255.0f;                     /* [R 0x27B4F0] bytes, x 1/255 (0x1C97F0) */
     p->colour[1] = 0;
     p->colour[2] = 0;
     p->colour[3] = 1;
@@ -210,8 +210,8 @@ int challenge_load(Challenge *c, Group block_def, int play_type, int last_block,
 }
 
 /* [R] 0x2B4970 / 0x2B47C0 / the cases 0x2AF488 and 0x2AF5C8: the current block's ChallengeDef (0x303160 on the block
- * manager, then "ChallengeDef" a group record), its key read every call; a missing key leaves the answer as it was
- * [G: "", 1, 0] */
+ * manager, then "ChallengeDef" a group record), its key read every call; a missing key leaves the answer as made:
+ * the floats 0.0 (PFloat's constructor 0x1CE830) [R], the strings "" [G] */
 const char *challenge_identifier(const Challenge *c)
 {
     const char *s = c->def.at ? group_str(c->def, "Name") : NULL;
@@ -235,7 +235,7 @@ static int float_key(Group g, const char *key, float *out)   /* [R] the cases wa
 
 float challenge_icon_scale(const Challenge *c, int pause)
 {
-    float v = 1;
+    float v = 0;
     if (pause && float_key(c->def, "PauseScale", &v))
         return v;
     float_key(c->def, "Scale", &v);

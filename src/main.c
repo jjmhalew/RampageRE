@@ -4004,10 +4004,12 @@ static void challenge_stats(Viewer *v, const char *name, int points)
 }
 
 /* a monster's damage on the MonsterUpgrade object (StreetObject.bsf TakeDamage: any type, so a blow or its body's
- * touch): once its delay is over, the move is the monster's (aquireUpgrade), the "Monster Upgrade" banner */
-static void upgrade_touch(Mon *mo, const float centre[3], float radius)
+ * touch): once its delay is over, the move is player 1's monster's, whoever touched it (aquireUpgrade 0x2A62B8: into
+ * GameStatus +0x234 + 4 x player 1's monster), the "Monster Upgrade" banner */
+static void upgrade_touch(Mon *toucher, const float centre[3], float radius)
 {
-    Viewer *v = mo->v;
+    Viewer *v = toucher->v;
+    Mon *mo = &v->mon[0];
     if (v->challenge.up_state != CU_WAITING || mo->monster < 0)
         return;
     uint32_t mv = challenge_upgrade_hit(&v->challenge, centre, radius, &v->upgrades[mo->monster & 63]);

@@ -3382,7 +3382,7 @@ static void pause_icon(Hud *h, Node *icon)
         return;
     const HudChallenge *ch = &h->ch;
     icon->has_tex = tex_find(&h->gui, ch->icon, &icon->tex);
-    icon->m = ch->pause_scale > 0 ? ch->pause_scale : ch->icon_scale > 0 ? ch->icon_scale : 1.0f;
+    icon->m = ch->pause_scale;                       /* Pause.scr: as it comes (PauseScale, else Scale, else 0) */
     icon->visible = 1;
 }
 
