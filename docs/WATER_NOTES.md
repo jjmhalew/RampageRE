@@ -155,10 +155,12 @@ plays a part [R: nothing in 0x3368C0 .. 0x339DF0 reads them; they are read by 0x
 - Faithful [R]: the reader, the grid, the waves and their scaling, the pressing rectangles and loops, the wave
   equation and its order, the normals and their byte quantising for the reflection, the swap, the monster's push
   (water_disturb), the floor, the flat far-off quad, the env-map texture coordinates, white x texture.
-- Stand-ins [G]: the strip's joins between rows (the game's rows run on in one strip with no degenerate triangles)
-  are left out, two triangles per cell instead; k is held at 0.5 for a very long frame (the game has no guard; at
-  1/60 s k is 0.007); blending, depth and fog state come from the shader's pass record and GS registers that were not
-  decoded: drawn opaque (the texture's alpha is all 0x80 and the colour's alpha is 128, so blending would change
-  nothing), depth tested and written, fogged; texture wrap not decoded (S repeats round, T stays in 0 .. 1 from above).
+- The step: the water's update (0x338180 → 0x336DC0) runs in the world's object update (0x284E40) once a world step,
+  its dt gWorld +4 = 1/30 s (0x336DE4) [R]; the port steps it at 1/30 too, so k is about 0.028.
+- The state [R]: shader 0x7E's pass is state 1 of 0x3B4240 (0x265840): TEST 0x50002 (no alpha test, Z test, Z
+  written), PRMODE 0x38 (shaded, textured, fogged, no blend): drawn opaque, depth tested and written, fogged, as here.
+- The port's own: the strip's joins between rows are left out (the game's rows run on in one strip with no
+  degenerate triangles), two triangles per cell instead; k is held at 0.5 for a very long frame (the game has no
+  guard). **[G]** The texture wrap (not in that state; S repeats round, T stays in 0 .. 1 from above).
 - Not ported: the splash effects' spawning, the monster's water test (0x2D5F00) and its wading depth input; the
   LoadWhenDistant / LoadWhenWaiting choice of factory (0x3050F0, keys 0x3F5DA0 / 0x3F5DA4).

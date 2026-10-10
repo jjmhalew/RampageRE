@@ -311,7 +311,7 @@ void water_step(Water *w, float dt)
         return;
     run_waves(w, w->time);                           /* 0x337C40 at the clock's +0x30 [R] */
     /* k = WaveSpeed^2 dt^2 / TileSize^2 (dt: the clock's +0x4) [R 0x336DE4]; the scheme blows up past 0.5, which
-     * the game's 1/60 s never nears (0.007); held there for a long frame [G] */
+     * the game's 1/30 s step never nears (about 0.028); held there for a long frame (the port's) */
     float k = w->speed * w->speed * dt * dt / (w->tile * w->tile);
     if (k > 0.5f)
         k = 0.5f;

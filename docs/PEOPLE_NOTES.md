@@ -198,7 +198,9 @@ This works on an actor, or on an object of class 0x4D0720.
   - the shape of the hold blend (taken as linear);
   - the attack-sphere test against people (0x2D4390): `CollisionRadius` 2 about the person, 1 up.
 - **Occupant spawning**: the timing and rates (+0x44 … +0x50), the view check (0x318390) and the cell check
-  (0x31AD00: the cell not hidden, 0x400 by 0x2BE580, then a building search 0x2A3D20 from a point 10 lower [G]).
+  (0x31AD00 [R]: not on the ground storey (its record +0x10 is 0), the cell not hidden (0x400 by 0x2BE580), then
+  the last building whose box holds the point 10 out in front of the cell (y − 10; 0x2A3D20) must have fewer standing
+  storeys than the cell's live storey: a building in front does not hide it; city.c's spawn does both).
   A grabbed occupant's slot is not retired.
 - **The windows** (city.c's spawner opens them, `scene_window_close` / `_at` shut them): the port's `closeWindow` is
   for people.c and army.c to call (by the cell people_add_window got, or by the occupant's place); until they do, a

@@ -92,10 +92,12 @@ viewer asks for that picture after each `shell_update`; a `--shot` run's `wait` 
 it with the movie's texture (`rnd_video`, uploaded when the picture changes). "Press START" still blinks over it
 (state 2).
 
-**The sound:** the mixer pulls it (`sound_stream`), at the music's gain **[G: the game's movie volume is not
-read]**. With no audio output (`--mute`) the mixer still moves on in real time and drops it. A `--shot` run keeps at
+**The sound:** the mixer pulls it (`sound_stream`) at full scale: the audio start (0x1AF5C0) sets the master and
+the stream's volumes to constants (MVOL 0x3FFF, BVOL 0x7FFF, the voices 0x3FFF), never the music setting [R]. With no audio output (`--mute`) the mixer still moves on in real time and drops it. A `--shot` run keeps at
 most 4 MB of it.
 
 **Not played:** the PAL and other languages' versions (the shell names the NTSC ones).
-**[G]** the sound and the pictures are not synchronised by the PTS: both start at the movie's start, the pictures by
-the shell's clock.
+The sound and the pictures are not synchronised by the PTS [R]: 0x1A6990 decodes up to the picture (timer − start)
+× rate / the timer's frequency + 1, at most 2 past the current one, the start set when the first picture is out and
+the sound starts (0x1A6C90; a pause moves it on, 0x1A6620); the sound streams on its own. Here both start at the
+movie's start, the pictures by the shell's clock.

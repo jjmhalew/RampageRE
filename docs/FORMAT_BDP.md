@@ -302,8 +302,10 @@ Army van 355 of 394 vertices 0, 30 near 1; the red minivan 256 of 280 at 0; the 
 tanker car 275 of 432. On some the rgb is the alpha again (the Army van, the city bus, the Sedan, the Hummer, the
 red and blue Minis: black where the layer is 0, a burnt shell), on the others white (the minivan stays red with
 metal on its dents). The viewer draws it so (src/render_gl.c draw_mesh: the part opaque without the alpha test, then
-`material_damage_layer`'s texture over it by the vertex alpha) [G: GL's source alpha, `DestroyedGeneric`'s x the
-vertex's, stands for the GS's destination alpha; the same while both textures are opaque].
+`material_damage_layer`'s texture over it by the vertex alpha). Record 0x7A [R]: pass 0 state 1 (no blend: it writes
+the destination alpha, the texture's × the vertex's), pass 1 state 0x14 (ALPHA 0x54, × Ad). GL's source alpha stands
+for that destination alpha, the same while both textures are opaque [G: the frame buffer's PSM / FBMSK not read; a
+24-bit one would make Ad 0x80].
 
 Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees, cloth, teeth), bit 1 see-through
 (fog masks, skylines, tree cards), 0xC the monsters' own; 0x100 on 78 city materials, not decoded.
@@ -602,7 +604,8 @@ one: an edible stays behind the glass until its cell breaks). [R]
 
 The port: `building_window_open` / `building_window_is_open` and the list in building.c (by template storey, the rect
 in cell units), the `Openable`s in city.c's `sheet_columns`, the drawing as part 4 of the facade mesh (city.c
-`open_windows`, every frame: in the facade's frame, so it sways with it [G: the game's quads are in world units]),
+`open_windows`, every frame: in the facade's frame, so it sways with it; the game's 0x2BECC0 takes the per-building
+vector the facade draws get too (0x320280), which holds its shake (0x2BAD50) [R]),
 and `scene_window_close` / `scene_window_close_at` for the occupants' `closeWindow`. Not ported: a mirrored cell
 (flag bit 0) mirrors the rect (0x2CC420), as the port mirrors no cells.
 

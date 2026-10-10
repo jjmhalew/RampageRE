@@ -145,5 +145,5 @@ a triangle because a position can hold two or three particles — Amanda: 16 suc
 Faithful: every step above, the reset/blend, the wind and its noise. Stand-ins [G]: the skin matrices come from the
 caller (the game builds them from the skeleton for the bone list only); without skin matrices a particle with bones
 goes by the object matrix (the game always has a skeleton for those; with a skeleton it puts bone-less particles at
-0); the inverse of the object matrix is a general affine one (0x174B80 .. 0x174A90 not read); dt ≤ 0 is ignored (the
+0); dt ≤ 0 is ignored (the
 game would zero the velocities); the collisions, the bounding sphere and the renderer's scale (+0x8C, 1) are left out.

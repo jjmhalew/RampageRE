@@ -1102,9 +1102,21 @@ void scene_people_spawn(Scene *s, float dt)
         SceneBuilding *sb = &s->buildings[ws->building];
         const Building *b = &sb->b;
         int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
-        if (b->state != BUILDING_STANDING || ls < 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
+        if (b->state != BUILDING_STANDING || ls <= 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
             people_window_at(s->folk, ws->building, ls, ws->column) >= 0)
-            continue;
+            continue;                                /* [R 0x31AD00] the ground storey (its record +0x10 is 0) none */
+        {                                            /* [R 0x31AD00] 10 out in front of the cell, the last building
+                                                      * whose box holds it (0x2A3D20) must stand lower than it */
+            float px = b->min[0] + CELL * ((float)ws->column + 0.5f), py = b->min[1] - 10;
+            int front = -1;
+            for (uint32_t k = 0; k < s->nbuildings; k++) {
+                const Building *o = &s->buildings[k].b;
+                if (px >= o->min[0] && px <= o->max[0] && py >= o->min[1] && py <= o->max[1])
+                    front = (int)k;
+            }
+            if (front >= 0 && s->buildings[front].b.n >= ls)
+                continue;
+        }
         /* 0x2BE660: the bottom middle of the slot's Openable (0x2CFF30), on the front */
         int tile = b->cell[ws->storey][ci].tile & 3;
         const float *ol = sb->openable[tile][ws->lr];
@@ -3015,12 +3027,12 @@ static const char *hitter_move(const Scene *s, const SceneBuilding *sb)
 
 void scene_buildings_update(Scene *s, float dt)
 {
-    s->water_acc += dt;                              /* the water, a game frame at a time (0x336DC0) */
-    if (s->water_acc > 0.25f)
+    s->water_acc += dt;                              /* the water, a world step at a time: 0x338180 -> 0x336DC0 in */
+    if (s->water_acc > 0.25f)                        /* the world's object update (0x284E40), dt gWorld +4 = 1/30 [R] */
         s->water_acc = 0.25f;
-    for (; s->water_acc >= 1.0f / 60; s->water_acc -= 1.0f / 60)
+    for (; s->water_acc >= 1.0f / 30; s->water_acc -= 1.0f / 30)
         for (int k = 0; k < s->nwater; k++)
-            water_step(s->water[k], 1.0f / 60);
+            water_step(s->water[k], 1.0f / 30);
     s->light_frame++;                                /* 0x2B8F80: the queue's frame; no grant yet */
     s->light_granted = 0;
     for (uint32_t i = 0; i < s->nbuildings; i++) {

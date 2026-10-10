@@ -95,15 +95,13 @@ static void mat_mul(const float *a, const float *b, float *o)   /* o = a b (b fi
     memcpy(o, r, sizeof r);
 }
 
-static void mat_inverse_affine(const float *m, float *o)       /* the 3x3 part inverted, then the translation */
+/* [R 0x1D9208 .. 0x1D9268] a rigid inverse: the 3x3 transposed (0x174B20), the translation -R^T t (0x174A90) */
+static void mat_inverse_affine(const float *m, float *o)
 {
-    float a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6], i = m[10];
-    float A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
-    float det = a * A + b * B + c * C, s = det != 0 ? 1 / det : 0;
     float r[16];
-    r[0] = A * s;                  r[4] = (c * h - b * i) * s;  r[8] = (b * f - c * e) * s;
-    r[1] = B * s;                  r[5] = (a * i - c * g) * s;  r[9] = (c * d - a * f) * s;
-    r[2] = C * s;                  r[6] = (b * g - a * h) * s;  r[10] = (a * e - b * d) * s;
+    r[0] = m[0]; r[4] = m[1]; r[8] = m[2];
+    r[1] = m[4]; r[5] = m[5]; r[9] = m[6];
+    r[2] = m[8]; r[6] = m[9]; r[10] = m[10];
     r[3] = r[7] = r[11] = 0; r[15] = 1;
     for (int k = 0; k < 3; k++)
         r[12 + k] = -(r[k] * m[12] + r[4 + k] * m[13] + r[8 + k] * m[14]);
@@ -598,7 +596,7 @@ static void start_blend(Cloth *c, int resume, float t)
 }
 
 /* 0x1D89C0: the kept positions carried along with the object (D = this frame's matrix x the last one's inverse:
- * 0x174B80 .. 0x174A90 invert it [G] as a general affine matrix), each free particle a mix of its rest place and the
+ * 0x174B80 .. 0x174A90 invert it as a rigid one, R^T and -R^T t [R]), each free particle a mix of its rest place and the
  * kept one, the kept one's share the blend time left */
 static void blend(Cloth *c, const float *D)
 {

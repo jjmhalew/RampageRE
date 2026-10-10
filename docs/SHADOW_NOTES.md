@@ -162,8 +162,11 @@ building light, not shadows.
 ## Drawing it (OpenGL 1.1)
 
 Colours: the GS's 128 is 1.0. Vertex colours reach it unchanged (the grid's alpha 87 → 0.68; the object quads' 43 →
-0.34) and the blobs' material colour is halved by its shader (204 → 0.8) [G: the formats and shaders 0x35 / 0x4D /
-0x5A were not decoded to the GS registers; the ALPHA blend is taken as the usual (Cs − Cd) · As + Cd]. `src/shadow.c`
+0.34) and the blobs' material colour is halved by its shader (204 → 102 → 0.8: colour mode 3, rgb × 0.5, 0x265AD8)
+[R]. The three shaders (records 0x35, 0x4D, 0x5A; 0x59 and 0x5A share a checksum) all blend with ALPHA 0x44, (Cs −
+Cd) · As + Cd [R]: 0x5A (the grid) state 0, PRMODE 0x68, untextured; 0x4D (the object quads) state 4, textured, no Z
+write (TEST 0x51001); 0x35 (the blobs) state 2, textured, alpha test GREATER 0, Z written (here the blob writes no
+depth). [G: that the vertex colours reach the GS unchanged is the VU programs', not read]. `src/shadow.c`
 gives GL-scale colours.
 
 - **Ground grid** (`SHADOW_PASS_GROUND`): right after the street, before buildings and objects. No texture,
@@ -176,4 +179,4 @@ gives GL-scale colours.
   off (as the game). If the monster is drawn first, use depth test `GL_LEQUAL` with a polygon offset instead.
 - **Facade darkening** has no pass of its own: it is in the buildings' vertex colours, drawn unlit
   ([BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)).
-- Fog: as the scene's [G].
+- Fog: as the scene's: all three states have FGE set (cleared only when 0x4CB9B4 is 0xB) [R].

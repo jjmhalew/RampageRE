@@ -889,7 +889,7 @@ static void mix_block(float *out, int frames)
         static int16_t st[2 * 1024];
         S.pull(S.pull_ctx, st, frames);
         for (int i = 0; i < 2 * frames; i++)
-            out[i] += st[i] * S.music_gain;
+            out[i] += st[i];                         /* full scale (0x1AF5C0: MVOL 0x3FFF, BVOL 0x7FFF) [R] */
     }
 }
 

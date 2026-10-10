@@ -216,8 +216,8 @@ Ported in `src/reveal.c` / `reveal.h`. The World bindings are `startReveal` (id 
 
 **The roster.** GameStatus +0x10 holds 12-byte records with the name at +8. Its count is at +0x18 (`getNumMonsters`).
 0x33DAF0 finds a name, ignoring case. The order is ShellData's `MonsterData.Monster0 .. 29`: George 0, Lizzie 1,
-Ralph 2, … Crock 8, … Venus 13, … Boosy 29, as MonsterSelect's `getMonsterName` reads them **[G: the table's own
-loader was not read]**. A monster's flags are at GameStatus +0x234 + 4 × index. `0x80` means it can be selected
+Ralph 2, … Crock 8, … Venus 13, … Boosy 29, as MonsterSelect's `getMonsterName` reads them: the loader 0x33E850
+walks the MonsterData keys starting "mons", the index atoi(key + 7), at most 30 [R]. A monster's flags are at GameStatus +0x234 + 4 × index. `0x80` means it can be selected
 (MonsterSelect's `isMonsterAvailable` tests `flags & 128`). 1, 2, 4 and 8 are the upgrades.
 
 **The load** (0x3236F0, at the world's start from 0x2B6BE0):
@@ -307,7 +307,9 @@ it. Then:
    - at 5.0, the timer is removed.
 3. `onRevealNIEnd` calls `gWorld.stopReveal()`: the monster is hidden again.
 
-With the first tick 0.25 s after the start **[G]**, the taunt comes at 0.75 s and the run at 4.25 s.
+`installObjectTimer(0.25, 0.0, 0)` (0x28A4A0; ticked by 0x28A780 each world step: acc += 1/30, at the period acc =
+min(acc − period, 1) and it fires, once a step) [R]: the first tick on the 8th step (0.267 s), the taunt (tick 3)
+about 0.77 s and the run (tick 17) about 4.27 s.
 
 So the monster bursts out of the tube on the street, taunts, and runs off to the side. With two or more players it
 does not appear; only the banner shows and the profile changes. The HUD shows only Cryotube.bsf's banner: `"#" +
