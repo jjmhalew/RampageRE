@@ -101,9 +101,21 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   mcNoSpace (Retry / Don't Save); any other status: mcNoCard ("At least %dKB") with Retry / Don't Save. Retry waits:
   the card watcher (0x345100) starts state 12 again when the status changes; Don't Save goes to state 2, which with
   flag 4 clear closes at once (close(3)) [R].
-- The port shows the notice and goes on once it is accepted: a writable host, status 0 [R]. Not ported: the no-room
-  case (the host's free space is not the card's 8 MB); no card and unformatted have no host meaning, and corruption
-  is checked at the load (error 18).
+- **The room** [R]: a save needs 140 KB, a fixed sum (0x345BC0 → +0x48, 0x1A1120: 1 for icon.sys, 134 for the
+  disc's RAMPAGE.ICN, 1 for the 0x128-byte data, + (files + 3) / 2 + 2), kept at popup +0x17C and in 0x4D7FFC, which
+  every popup text gets through sprintf (0x33FECC: mcNoCard and mcNoSpace say "At least 140KB"). The card's free KB
+  is +0x4C (0x1A11E0, sceMcGetInfo's free; 0 without a card); the saves counted are this game's (+0x8C). State 12:
+  status 20, or 0 with saves, closes; else room is 0 < 140 < free (strict), closing, or mcNoSpace with Retry / Don't
+  Save; status 5 can never reach mcNoCard (the branch tests 21, which +0x5C never answers). Retry waits for the
+  card's status to change (the watcher restarts state 12); Don't Save goes to state 2, which with autosave off
+  closes (close(3)). The list's Create New Profile runs the same test first (0x343D38): mcNoSpace with Continue alone
+  (op 3), which tests again. A write fails below 140 free (0x1A2E00, error 11): mcNoSpace with Retry (the write
+  again) / Don't Save (a create back to the list, else state 2).
+- The port: the notice, then the room test against `shell_set_card_free` (the viewer: `--card-free-kb N`, else the
+  free room of the drive the profile file is on, capped at 8000 [G: an empty card's], looked at once a second;
+  unset or nothing written: room enough). Retry at the boot runs the test again [G: the host's room comes back
+  without a status change]. No card and unformatted have no host meaning; corruption is checked at the load (error
+  18). An autosave from the game (Results) that finds no room is not shown: nothing is written.
 - Neither state sets autosave (flag 4), so the main menu that follows restores the profile and does not open the
   list (MainMenu.scr:207 asks `getShowProfile() && getAllowSave()`); the list opens from Back ("Profiles") [R].
 

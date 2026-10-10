@@ -39,7 +39,8 @@ other players on keys idle meanwhile; `--walk S` is `right S`). `--players N` (1
 one: George, Lizzie, Ralph or Boosy, the first not taken). Players 3 and 4 and the bots are computer-driven
 (below, "Several monsters"); the front end (`--shell`) hands its players, bots and monsters over the same way. `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
 (its results screens). `--lang N` picks the texts' language (the .loc column: 0 English, 1 English 2, 2 Japanese,
-3 French, 4 German, 5 Italian, 6 Spanish, 7 Dutch, 8 Portuguese). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
+3 French, 4 German, 5 Italian, 6 Spanish, 7 Dutch, 8 Portuguese); `--card-free-kb N` the "memory card"'s free room
+(a save needs 140; else the drive's). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
 upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the

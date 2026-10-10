@@ -202,6 +202,8 @@ typedef struct Viewer {
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
     int prof_on_card;                                /* its file exists (the shell's profile list) */
     char card_name[16];                              /* the name in it */
+    int card_free_kb;                                /* --card-free-kb: the "card"'s free room; -1: the drive's */
+    float card_poll;                                 /* seconds to the next look at the drive */
     int results_update;                              /* the Results' updateProfile is the campaign's */
     Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
     struct GuiDraw *gd;                              /* its 3D objects: models, effects, this frame's layers */
@@ -4722,6 +4724,7 @@ static void shell_enter(Viewer *v, const ShellStart *st)
     ShellProfile sp;
     shell_profile(v, &sp);
     v->shell = shell_open(&v->vol, st, &sp);
+    v->card_poll = 0;
     static Scene empty;                              /* nothing but the screens, black around their 4:3 */
     memset(&empty, 0, sizeof empty);
     empty.fog_end = 1;
@@ -4914,6 +4917,24 @@ static void shell_start_game(Viewer *v)
     open_city(v, city, (uint32_t)(v->last_game.start_block > 0 ? v->last_game.start_block : 0));   /* (g is gone) */
 }
 
+/* the "card"'s free room for the shell's room tests: --card-free-kb, else the drive the profile file is on, a look a
+ * second, capped at what an empty 8 MB card has [G: 8000]; nothing written (a --shot run): room enough */
+static void card_free(Viewer *v, float dt)
+{
+    if (!v->shell)
+        return;
+    if (v->card_free_kb >= 0) {
+        shell_set_card_free(v->shell, v->card_free_kb);
+        return;
+    }
+    if (!v->prof_write || (v->card_poll -= dt) > 0)
+        return;
+    v->card_poll = 1;
+    long long kb = plat_free_kb(v->prof_path);
+    if (kb >= 0)
+        shell_set_card_free(v->shell, kb > 8000 ? 8000 : (int)kb);
+}
+
 /* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,
  * letters and digits into the name entry, F2 L2 + R2 held for the cheat entry), its time, its answers */
 static void shell_frame(Viewer *v, const Window *w, float dt)
@@ -4941,6 +4962,7 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
     int held = (w->keys[VK_LEFT] ? SHELL_HELD_LEFT : 0) | (w->keys[VK_RIGHT] ? SHELL_HELD_RIGHT : 0) |
                (w->keys[VK_F2] ? SHELL_HELD_L2 | SHELL_HELD_R2 : 0);
     shell_pad_held(v->shell, 0, held);
+    card_free(v, dt);
     shell_update(v->shell, dt);
     gui3d_step(v, dt);
     if (shell_answer(v))
@@ -4967,6 +4989,7 @@ static const char *shell_script(Viewer *v, const char *script)
         arg[k] = 0;
         if (!_stricmp(word, "wait"))
             for (int f = 0, frames = (int)(atof(arg) * 60 + 0.5); f < frames && !v->shell_go; f++) {
+                card_free(v, 1.0f / 60);
                 shell_update(v->shell, 1.0f / 60);
                 gui3d_step(v, 1.0f / 60);
                 if (shell_answer(v))
@@ -4984,6 +5007,7 @@ static const char *shell_script(Viewer *v, const char *script)
         else if (!_stricmp(word, "type"))
             for (const char *c = arg; *c; c++)
                 shell_type(v->shell, toupper((unsigned char)*c));
+        card_free(v, 1.0f / 60);
         shell_update(v->shell, 1.0f / 60);
         gui3d_step(v, 1.0f / 60);
         if (shell_answer(v))
@@ -5035,6 +5059,7 @@ int main(int argc, char **argv)
     int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0, players = 1, bots = 0;
     float view[5] = { 0 };
     v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
+    v.card_free_kb = -1;
     int newprofile = 0;
     const char *cheat = NULL;
     double shot_time = 0;
@@ -5065,6 +5090,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
         else if (strcmp(argv[i], "--shell") == 0) v.shell_mode = 1;
         else if (strcmp(argv[i], "--lang") == 0 && i + 1 < argc) v.lang = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--card-free-kb") == 0 && i + 1 < argc) v.card_free_kb = atoi(argv[++i]);
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) v.prof_path = argv[++i];
         else if (strcmp(argv[i], "--cheat") == 0 && i + 1 < argc) cheat = argv[++i];
         else if (strcmp(argv[i], "--play") == 0 && i + 1 < argc) {   /* campaign, kingcity, kingworld, timed */

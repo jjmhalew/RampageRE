@@ -1722,7 +1722,8 @@ typedef struct {
 
 /* the SaveGame popup's panels [R 0x341880: +0x2D0 1 the profile list, 2 the name entry, 3 the messages] */
 enum { MC_OFF, MC_LIST, MC_KEYBOARD, MC_MESSAGE };
-enum { MSG_AUTOSAVE, MSG_WARN_CONTINUE, MSG_DUPLICATE, MSG_OVERWRITE };
+enum { MSG_AUTOSAVE, MSG_WARN_CONTINUE, MSG_DUPLICATE, MSG_OVERWRITE, MSG_NOSPACE_BOOT, MSG_NOSPACE_LIST,
+       MSG_NOSPACE_SAVE };
 enum { MCP_BOOT, MCP_LOAD, MCP_BUDDY };
 typedef struct {
     Layout *L;
@@ -1740,6 +1741,7 @@ typedef struct {
     float col_normal[4], col_selected[4];
     char name[16];
     int boot_done;                                       /* gShell.isBootCheckDone */
+    int card_free;                                       /* the card's free KB (shell_set_card_free); -1 plenty */
 } MemCard;
 
 typedef struct {
@@ -1943,14 +1945,35 @@ static void mc_message(Shell *s, int msg)
         sel = "MC_BUTTON_NO";
         can = "MC_BUTTON_YES";
     }
+    else if (msg == MSG_NOSPACE_BOOT || msg == MSG_NOSPACE_SAVE) {   /* [R 0x343408, 0x342038] */
+        title = "mcErrorTitle";
+        text = "mcNoSpace";
+        sel = "MC_BUTTON_RETRY";
+        can = "MC_BUTTON_DONTSAVE";
+    } else if (msg == MSG_NOSPACE_LIST) {                /* [R 0x342038 with op 3, the list: Continue alone] */
+        title = "mcErrorTitle";
+        text = "mcNoSpace";
+        sel = "MC_BUTTON_CONTINUE";
+    }
     if (title) {
         node_localize(&s->gui, m->title, title);
         node_localize(&s->gui, m->text, text);
         node_localize(&s->gui, m->btn_select, sel);
-        node_localize(&s->gui, m->btn_cancel, can);
+        if (can)
+            node_localize(&s->gui, m->btn_cancel, can);
         show(m->btn_select, 1);
-        show(m->btn_cancel, 1);
+        show(m->btn_cancel, can != NULL);
         show(m->btn_button0, 0);
+        /* [R 0x33FECC] every text goes through sprintf with the KB a save needs (0x4D7FFC: 140) */
+        for (int i = 0; i < 2; i++) {
+            Node *t = i ? m->text : m->title;
+            const char *at = t ? strstr(t->text, "%d") : NULL;
+            if (at) {
+                char buf[MAX_TEXT];
+                snprintf(buf, sizeof buf, "%.*s%d%s", (int)(at - t->text), t->text, SHELL_CARD_NEED_KB, at + 2);
+                node_text(t, buf);
+            }
+        }
     }
 }
 
@@ -2053,10 +2076,20 @@ static void mc_name_changed(Shell *s)
         m->caret->p[0] = text_w(&s->gui, m->kb_name);
 }
 
-/* the name written as a new profile (state 5's write; close(1) in op 5: flags 4 and 8 stay as they are) */
+/* the room tests [R]: the boot's and the list's new profile (0x3432E0, 0x343D38) want more than the 140 KB a save
+ * needs (0 < need < free); the write (0x1A2E00) fails below it (error 11) */
+static int mc_room(const Shell *s) { return s->mc.card_free < 0 || SHELL_CARD_NEED_KB < s->mc.card_free; }
+static int mc_fits(const Shell *s) { return s->mc.card_free < 0 || s->mc.card_free >= SHELL_CARD_NEED_KB; }
+
+/* the name written as a new profile (state 5's write; close(1) in op 5: flags 4 and 8 stay as they are); no room:
+ * error 11, mcNoSpace with Retry / Don't Save (0x342038) */
 static void mc_create(Shell *s)
 {
     MemCard *m = &s->mc;
+    if (!mc_fits(s)) {
+        mc_message(s, MSG_NOSPACE_SAVE);
+        return;
+    }
     event(s, SHELL_EVT_PROFILE_CREATE, m->name, m->purpose == MCP_BUDDY ? m->buddy : 0, 0);
     mc_close(s, 1);
 }
@@ -2161,7 +2194,9 @@ static void mc_list_input(Shell *s, int ev)
     } else if (ev == EV_ACCEPT) {
         sound(s, "Click");
         int sel = m->list ? m->list->sel : 0;
-        if (sel <= 0)
+        if (sel <= 0 && !mc_room(s))
+            mc_message(s, MSG_NOSPACE_LIST);             /* [R 0x343D38: the room test first] */
+        else if (sel <= 0)
             mc_open_keyboard(s);                         /* state 7: create */
         else {                                           /* state 8: load */
             event(s, m->purpose == MCP_BUDDY ? SHELL_EVT_BUDDY_PROFILE : SHELL_EVT_PROFILE_LOAD,
@@ -2191,9 +2226,13 @@ static void mc_message_input(Shell *s, int ev, int button)
     if (!ok && !back)
         return;
     sound(s, "Click");
-    if (m->msg == MSG_AUTOSAVE) {
-        m->boot_done = 1;
-        mc_close(s, 1);
+    if (m->msg == MSG_AUTOSAVE) {                        /* then state 12, the card check (0x3432E0): saves there,
+                                                          * or room for one, closes; else mcNoSpace */
+        if (s->prof.nprofiles > 0 || mc_room(s)) {
+            m->boot_done = 1;
+            mc_close(s, 1);
+        } else
+            mc_message(s, MSG_NOSPACE_BOOT);
     } else if (m->msg == MSG_WARN_CONTINUE) {
         if (back) {                                      /* [R 0x343B00] Continue / Don't Save: flags 4 and 8 off */
             s->prof.allow_save = s->prof.was_saving = 0;
@@ -2212,6 +2251,22 @@ static void mc_message_input(Shell *s, int ev, int button)
             mc_create(s);
         else
             mc_open_list(s, m->purpose, m->buddy);       /* NO: state 3 */
+    } else if (m->msg == MSG_NOSPACE_BOOT) {             /* [R 0x3434C0] */
+        if (back || mc_room(s)) {                        /* Don't Save: state 2, flag 4 clear: close(3) at once.
+                                                          * Retry: the game waits for the card's status to change
+                                                          * (0x345100); here the check runs again [G: a host's room
+                                                          * comes back without a status change] */
+            m->boot_done = 1;
+            mc_close(s, back ? 3 : 1);
+        }
+    } else if (m->msg == MSG_NOSPACE_LIST) {             /* Continue: the room test again (0x342D08 with +0x2C4 11) */
+        if (mc_room(s))
+            mc_open_keyboard(s);
+    } else if (m->msg == MSG_NOSPACE_SAVE) {
+        if (back)                                        /* Don't Save: a list request's create goes back to it */
+            mc_open_list(s, m->purpose, m->buddy);
+        else
+            mc_create(s);                                /* Retry: the write again */
     }
 }
 
@@ -2228,6 +2283,7 @@ static void mc_load(Shell *s)
     MemCard *m = &s->mc;
     if (!s->have_mc)
         return;
+    m->card_free = -1;
     m->L = layout_load(&s->gui, &s->b_mc, "MemoryCard.ifc", 32);
     if (!m->L)
         return;
@@ -4504,6 +4560,7 @@ void shell_set_profile(Shell *s, const ShellProfile *p)
 }
 
 void shell_set_movie_time(Shell *s, float seconds) { if (s) s->movie_time = seconds > 0 ? seconds : 0; }
+void shell_set_card_free(Shell *s, int kb) { if (s) s->mc.card_free = kb < 0 ? 0 : kb; }
 
 /* the playing movie's time left (Victory's or the attract mode's), NULL none */
 static float *movie_left(Shell *s)

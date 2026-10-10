@@ -101,6 +101,10 @@ void shell_set_profile(Shell *s, const ShellProfile *p);
 int shell_profile_shown(const Shell *s);
 /* seconds a movie "plays" (a black screen) where the game would play a .pss; 0 (default): skipped at once */
 void shell_set_movie_time(Shell *s, float seconds);
+/* the memory card's free room in KB (PS2MemoryCardManager +0x4C: sceMcGetInfo's free), 0 none; a save needs 140
+ * (SHELL_CARD_NEED_KB). Unset: room enough */
+void shell_set_card_free(Shell *s, int kb);
+#define SHELL_CARD_NEED_KB 140
 /* the movie SHELL_EVT_MOVIE named is played: it lasts until shell_movie_end (or the pad skips it) */
 void shell_movie_hold(Shell *s);
 void shell_movie_end(Shell *s);              /* it is over (Video.status() 3): the shell goes on */
