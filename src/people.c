@@ -377,7 +377,8 @@ static int window_anim_done(People *p, Person *q)
         }
     } else if (q->state == 3) {
         q->state = 0;
-        leave_window(q);                             /* closeWindow */
+        emit(p, PE_WINDOW_CLOSE, (int)(q - p->v), NULL, NULL, q->pos, 0, 1);   /* closeWindow: it shuts */
+        leave_window(q);
         int drop = 0;                                /* a droppable falls on a monster well below, from storey 4 up */
         for (int i = 0; i < p->nm; i++)
             if (fabsf(q->pos[0] - p->m[i].pos[0]) < 5.0f * 2.0f && q->pos[2] > p->m[i].pos[2] + 15)

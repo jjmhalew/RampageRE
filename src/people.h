@@ -85,7 +85,9 @@ enum {
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */
     PE_MONSTER_KNOCK,                                /* the monster: setVel(v, world) and setReaction(2) */
     PE_MONSTER_HP,                                   /* the monster: addHitPoints(amount) */
-    PE_MONSTER_FART                                  /* Monsters::doFart: Expression_Smile, the Fart effect, +20 up */
+    PE_MONSTER_FART,                                 /* Monsters::doFart: Expression_Smile, the Fart effect, +20 up */
+    PE_WINDOW_CLOSE                                  /* closeWindow (0x30C3F0, WindowReEnter's end): the window at v
+                                                      * shuts over 0.5 s (city.h scene_window_close_at) */
 };
 typedef struct { int type, who, on; const char *name, *node; float v[3], amount; } PeopleEvent;
 typedef struct { float health, energy, points; int priest; } PeopleEaten;

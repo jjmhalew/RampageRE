@@ -2350,7 +2350,8 @@ static int window_anim_done(Army *a, ArmyUnit *u)
         }
     } else if (u->state == 3) {
         u->state = 0;
-        return DELETE_ME;                            /* closeWindow */
+        emit(a, AE_WINDOW_CLOSE, -1, NULL, u->pos);  /* closeWindow: it shuts */
+        return DELETE_ME;
     }
     return 1;
 }

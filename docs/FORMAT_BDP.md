@@ -359,7 +359,8 @@ by depth × 5 (depth is 2 in every city) and 6 + 3 × storeys + 1.5 high (the la
 storey above the ground floor has a cell per facade column: the left side (depth columns, back to front), the right
 side (front to back) and the front (width columns), 16 bytes each: damage state 0 … 3 (the `TextureSheet` row), HP
 (10 at the start, 0x2CBEB4), the sheet's column (from the `Floor|` list), a tint and flags (`FloorFlags`; 0x400 hidden
-behind a front-row building, 0x800 hits ignored, 0x100 / 0x200 an open window). Each floor holds `FloorHP` (8 ×
+behind a front-row building, 0x800 hits ignored, 0x100 / 0x200 its `Openable` window `LRPos` 0 / 1 is open: see
+"Open windows"). Each floor holds `FloorHP` (8 ×
 width unless set), and the building `BuildingHP` (6 × width × storeys unless set). Script bindings read and set them
 (`getCellDamage`, `setCellDamage(face, storey, column, state)`, `getDestructionFrac` = HP left / HP at the start,
 `disableAutoCollapse`, ...; 0x2ADF00 → 0x2AD610).
@@ -480,6 +481,8 @@ the `ColumnDef|` entries (G+0xEC + column × 0x38, 0x2D0FB0).
   - It shows one of 16 tiles of `InnerWindow` (the cell's byte +6), or, with no inner window texture, a reflection
     (the 0x3F5818 variant, from the vertex normals).
   - An `Outline` (x0, z0, x1, z1 in tile pixels) becomes cell units: x = (o & (Wt − 1)) × 5 / Wt and z = (Ht − o) × 3 / Ht.
+  - The pass does not look at the open-window flags: an open window keeps its glass, and is covered from the front
+    (see "Open windows").
 - **Pass 2, cracks** (front 0x2C6A30, right 0x2C7340, left 0x2C7A90; emit 0x2C7020): `CrackTexture` just inside the
   face, faded in by the dent level.
   - The fade is the grid vertex's alpha, level × 85; a cell with no level at its corners is skipped.
@@ -487,6 +490,54 @@ the `ColumnDef|` entries (G+0xEC + column × 0x38, 0x2D0FB0).
   - The texture runs on across the unwrapped faces at 1 / `CrackScale` per unit.
 - **Which passes**: all three; a low-detail grid (G+0x1C) only the facade, or the facade and glass when it has an
   inner window texture.
+
+### Open windows
+A window occupant opens a window; nothing else does (no script calls `openWindow`, and the edibles' slots never open
+one: an edible stays behind the glass until its cell breaks). [R]
+- **Which window.** A sheet's `ColumnDef|` has, besides its `Outline|`, one or two `Openable|` entries (0x2D0FB0, names
+  at 0x3F5AB4 …): `LRPos` (0 or 1, which of the two), `OpensH` (1: it opens sideways, a casement; 0: upwards, a lower
+  sash) and four numbers in tile pixels, left, bottom, right, top, made cell units as the `Outline` (x0 = ((p0 & (Wt −
+  1)) + 1) × 5 / Wt, z0 = (Ht − (p1 & (Ht − 1))) × 3 / Ht, x1 = (p2 & (Wt − 1)) × 5 / Wt, z1 = (Ht − 1 − (p3 & (Ht −
+  1))) × 3 / Ht), kept per `LRPos` at ColumnDef +0x14 (there), +0x16 (`OpensH`), +0x18 (the rect). It is usually the
+  lower part of the outline (Chicago's `BrownBrick_Sheet` column 0: outline pixels 45, 102, 78, 31, openable 45, 102,
+  78, 74). 6 of the 183 column definitions have none, 39 have two; LRPos 1 is often the right half with `OpensH` 1.
+- **The building's list** (+0xFC, capacity +0x100, count +0x104), 0x24 bytes a window: +0x0 column, +0x4 storey (the
+  storey table's id, +0x200[storey], so it survives storeys falling), +0x8 `LRPos`, +0x9 `OpensH`, +0xC its left
+  edge in the world (grid min x + 5 × column + x0), +0x10 width, +0x14 its bottom above the storey's floor (z0),
+  +0x18 height, +0x1C how open (0 … 1), +0x20 its rate per second.
+- **`openWindow(storey, column, LRPos, open, seconds)`** (Building binding 0x38 → 0x2BE8B0, from 0x2ADAE8): a window
+  in the list just runs to open or shut, `rate` = ±1 / seconds (seconds ≤ 0.001: `open` = 1 or 0 at once, rate 0). A new
+  one only to open, and only while the front cell is intact (state 0, 0x2CF7C0) and the column has that `Openable`
+  (0x2CFF30): appended shut with rate 1 / seconds (open at once for ≤ 0.001), the cell's flag 0x100 << LRPos set
+  (0x2CF980; only flag bits 0 … 1 make the grid's meshes again, so this changes no mesh), and the building put on the
+  active list (0x4D17F0 / 0x4D17F4, its flag 0x200). `isWindowOpen(storey, column, LRPos)` (0x39, 0x2BE7C0): in the
+  list and `open` ≥ 1. `doesWindowOpen` (0x33, 0x2BE8A0 → 0x2D0460) and `getWindowPosition(storey, column,
+  LRPos)` (0x3A, 0x2BE660: x = grid min x + 5 × column + (x0 + x1) / 2, y the front's (+0x1E0), z = the storey's
+  height (0x2CD010) + z0: the openable's bottom middle) are the rest.
+- **The update** (0x2BDC70, from 0x2BDDD0): every window with a rate moves `open` by rate × the frame time (0x4D17A4);
+  opening it stops at 1 (rate 0); shutting, at 0 or below it leaves the list (the last one copied over it) and its
+  cell's flag goes (0x2CF890).
+- **Gone at once**: a front cell set to a damaged state (0x2BB580, the setter under 0x2BB410 / 0x2BD7D0 and
+  `setCellDamage`) drops both its windows and their flags before the state changes; a storey that falls (0x2BAE70)
+  drops its windows (the flags stay, the cells are at state 3 anyway).
+- **Drawn** (0x2BECC0, per building from 0x320280): the first 40 windows of the list, each a flat quad 0.015 in front
+  of the facade (y = +0x1E0 − 0.5 × 0.03 (0x430F80)), in a material of its own (0x25C4F0 shader 0x11 on 0x4CB480, no
+  texture, colour 0xFF101010: near black, opaque), corners (x, z0), (x1, z0), (x1, z1), (x, z1) from the bottom left:
+  with `OpensH` x1 = x + open × width and z1 = z0 + height (it opens from the left), else x1 = x + width and z1 = z0 +
+  open × height (it opens upwards); z0 = the storey's height now + the bottom. The occupant stands at the front's y,
+  so what of it is behind that plane is hidden and the rest leans out of the dark.
+- **Who opens and shuts** (the window occupants, 0x4D5F00; docs/PEOPLE_NOTES.md "Window occupants"): the spawn
+  (0x318B04) opens the slot's window over 0.5 s as it places the occupant; the actor binding `closeWindow` (0x30C3F0)
+  shuts it over 0.5 s (openWindow(…, 0, 0.5) on the slot's storey, column and `LRPos`), which `Person_Window` and
+  `Military_Window` call as their `WindowReEnter` ends. `leaveBuilding` (0x30C3D0 → 0x318140 with 0), a grab
+  (`grabBuildingOccupant` 0x2B3350 → 0x318140 with 1), the fall (0x30C510) and the actor's end (0x30DF80) only free the
+  slot: the window stays open (until its cell is damaged, or a new occupant of that slot shuts it).
+
+The port: `building_window_open` / `building_window_is_open` and the list in building.c (by template storey, the rect
+in cell units), the `Openable`s in city.c's `sheet_columns`, the drawing as part 4 of the facade mesh (city.c
+`open_windows`, every frame: in the facade's frame, so it sways with it [G: the game's quads are in world units]),
+and `scene_window_close` / `scene_window_close_at` for the occupants' `closeWindow`. Not ported: a mirrored cell
+(flag bit 0) mirrors the rect (0x2CC420), as the port mirrors no cells.
 
 ### Spawns
 A block definition also says who is in the street (names found through the property name table at 0x3F5990;

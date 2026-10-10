@@ -1024,19 +1024,28 @@ void scene_people_spawn(Scene *s, float dt)
             mil_total += s->military_freq[k];
         for (uint32_t bi = 0; bi < s->nbuildings; bi++) {
             const SceneBuilding *sb = &s->buildings[bi];
-            int win[512][2], n = 0;
-            for (int o = 0; o < sb->b.storeys; o++)  /* 0x2D01F0: live storeys 1 .. standing - 1 (not the ground) */
+            int win[512][3], n = 0;
+            /* 0x2D01F0: live storeys 1 .. standing - 1 (not the ground), the front cells with an Openable window:
+             * one of the column's two (LRPos), the first there is from a random one */
+            for (int o = 0; o < sb->b.storeys; o++)
                 for (int col = 0; col < sb->b.width && n < 512; col++) {
                     int ci = building_cell_index(&sb->b, FACE_FRONT, col), ls = building_live_of(&sb->b, o);
-                    if (ci >= 0 && ls >= 1 && ls <= sb->b.n - 1 && sb->outline[sb->b.cell[o][ci].tile & 3][0] >= 0) {
-                        win[n][0] = o;
-                        win[n++][1] = col;
-                    }
+                    if (ci < 0 || ls < 1 || ls > sb->b.n - 1)
+                        continue;
+                    int tile = sb->b.cell[o][ci].tile & 3, lr = spawn_rand() < 0.5f ? 0 : 1;
+                    if (sb->openable[tile][lr][0] < 0)
+                        lr ^= 1;
+                    if (sb->openable[tile][lr][0] < 0)
+                        continue;
+                    win[n][0] = o;
+                    win[n][1] = col;
+                    win[n++][2] = lr;
                 }
             for (int k = 0; k < n; k++) {             /* each one swapped with a random one */
-                int j = (int)(spawn_rand() * (float)n) % n, t0 = win[k][0], t1 = win[k][1];
-                win[k][0] = win[j][0]; win[k][1] = win[j][1];
-                win[j][0] = t0; win[j][1] = t1;
+                int j = (int)(spawn_rand() * (float)n) % n, t[3];
+                memcpy(t, win[k], sizeof t);
+                memcpy(win[k], win[j], sizeof t);
+                memcpy(win[j], t, sizeof t);
             }
             int total = (int)(0.5f + (float)n * s->fill_rate);
             int military = total - (int)((float)total * s->nonmilitary_rate);
@@ -1062,7 +1071,7 @@ void scene_people_spawn(Scene *s, float dt)
                 int q = 0;
                 while (q + 1 < kinds && pick >= freq[q]) { pick -= freq[q]; q++; }
                 s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
-                struct WindowSlot ws = { (int)bi, win[k][0], win[k][1], q, is_mil, -1 };
+                struct WindowSlot ws = { (int)bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2] };
                 s->slots[s->nslots++] = ws;
             }
         }
@@ -1094,7 +1103,11 @@ void scene_people_spawn(Scene *s, float dt)
         if (b->state != BUILDING_STANDING || ls < 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
             people_window_at(s->folk, ws->building, ls, ws->column) >= 0)
             continue;
-        const float *ol = sb->outline[b->cell[ws->storey][ci].tile & 3];
+        /* 0x2BE660: the bottom middle of the slot's Openable (0x2CFF30), on the front */
+        int tile = b->cell[ws->storey][ci].tile & 3;
+        const float *ol = sb->openable[tile][ws->lr];
+        if (ol[0] < 0)
+            continue;
         float at[3] = { b->min[0] + CELL * (float)ws->column + (ol[0] + ol[2]) / 2, b->min[1],
                         b->min[2] + GROUND_FLOOR + STOREY * (float)ls + ol[1] };
         if (ws->unit >= 0 && ws->unit < army_count(s->army)) {   /* its soldier still there (the army reuses ids) */
@@ -1109,8 +1122,40 @@ void scene_people_spawn(Scene *s, float dt)
         }
         else
             people_add_window(s->folk, s->occupant[ws->occupant], at, ws->building, ls, ws->column);
+        /* and its window opens over 0.5 s (0x318B04: openWindow(storey, column, LRPos, 1, 0.5)) */
+        building_window_open(&sb->b, ws->storey, ws->column, ws->lr, 1, 0.5f, ol, sb->opens_h[tile][ws->lr]);
         return;
     }
+}
+
+int scene_window_close(Scene *s, int building, int storey, int column)
+{
+    if (building < 0 || (uint32_t)building >= s->nbuildings)
+        return 0;
+    Building *b = &s->buildings[building].b;
+    if (storey < 0 || storey >= b->n)
+        return 0;
+    int o = b->live[storey], shut = 0;
+    for (int i = 0; i < s->nslots; i++)              /* 0x30C3F0: the slot's (+0x8 storey, +0x4 column, +0xC LRPos) */
+        if (s->slots[i].building == building && s->slots[i].storey == o && s->slots[i].column == column)
+            return building_window_open(b, o, column, s->slots[i].lr, 0, 0.5f, NULL, 0);
+    for (int lr = 0; lr < 2; lr++)                   /* no slot (not one of the spawner's): whichever is open */
+        shut |= building_window_open(b, o, column, lr, 0, 0.5f, NULL, 0);
+    return shut;
+}
+
+int scene_window_close_at(Scene *s, const float pos[3])
+{
+    for (uint32_t i = 0; i < s->nbuildings; i++) {   /* the building whose front the point is on */
+        const Building *b = &s->buildings[i].b;
+        if (pos[0] < b->min[0] || pos[0] >= b->max[0] || fabsf(pos[1] - b->min[1]) > 2.5f)
+            continue;
+        float zr = pos[2] - b->min[2] - GROUND_FLOOR;
+        if (zr < 0)
+            return 0;
+        return scene_window_close(s, (int)i, (int)(zr / STOREY), (int)((pos[0] - b->min[0]) / CELL));
+    }
+    return 0;
 }
 
 int scene_people_boxes(const Scene *s, PeopleBox *out, int max)
@@ -1188,8 +1233,11 @@ static Mesh facade(uint32_t sheet, int width, int depth, const float *z, Record 
  * x = (o & (Wt - 1)) x 5 / Wt, z = (Ht - o) x 3 / Ht, the first x and the last z a pixel in */
 static void sheet_columns(City *c, SceneBuilding *sb, const char *sheet)
 {
-    for (int k = 0; k < 4; k++)
+    for (int k = 0; k < 4; k++) {
         sb->outline[k][0] = -1;
+        sb->openable[k][0][0] = sb->openable[k][1][0] = -1;
+        sb->opens_h[k][0] = sb->opens_h[k][1] = 0;
+    }
     sb->inner_wall = 0;
     sb->crack_k = 1.0f / 8;
     sb->crack_tint[0] = sb->crack_tint[1] = sb->crack_tint[2] = 1;
@@ -1210,16 +1258,37 @@ static void sheet_columns(City *c, SceneBuilding *sb, const char *sheet)
     for (uint32_t i = 0; i < n; i++) {
         Group cd = record_group(where, r[i]);
         int col = (int)group_num(cd, "Column", -1);
-        Group ol = group_sub(cd, "Outline|");
-        if (col < 0 || col > 3 || !ol.at || group_items(ol, o, 8) < 4)
+        if (col < 0 || col > 3)
             continue;
+        Group ol = group_sub(cd, "Outline|");
         int p[4];
-        for (int k = 0; k < 4; k++)
-            p[k] = (int)record_num(o[k]);
-        sb->outline[col][0] = (float)((p[0] & (wt - 1)) + 1) * CELL / wt;
-        sb->outline[col][1] = (float)(ht - (p[1] & (ht - 1))) * STOREY / ht;
-        sb->outline[col][2] = (float)(p[2] & (wt - 1)) * CELL / wt;
-        sb->outline[col][3] = (float)(ht - 1 - (p[3] & (ht - 1))) * STOREY / ht;
+        if (ol.at && group_items(ol, o, 8) >= 4) {
+            for (int k = 0; k < 4; k++)
+                p[k] = (int)record_num(o[k]);
+            sb->outline[col][0] = (float)((p[0] & (wt - 1)) + 1) * CELL / wt;
+            sb->outline[col][1] = (float)(ht - (p[1] & (ht - 1))) * STOREY / ht;
+            sb->outline[col][2] = (float)(p[2] & (wt - 1)) * CELL / wt;
+            sb->outline[col][3] = (float)(ht - 1 - (p[3] & (ht - 1))) * STOREY / ht;
+        }
+        /* its Openable| windows (0x2D1280 ..): LRPos says which (0, 1), OpensH, and the rect, in the same pixels;
+         * the four numbers are left, bottom, right, top (the window's lower sash, or its casement) */
+        Group ow;
+        Record orr[4];
+        uint32_t no = group_values(cd, "Openable|", &ow, orr, 4);
+        for (uint32_t j = 0; j < no; j++) {
+            Group og = record_group(ow, orr[j]);
+            int lr = (int)group_num(og, "LRPos", 0);
+            if (lr < 0 || lr > 1 || group_items(og, o, 8) < 4)
+                continue;
+            for (int k = 0; k < 4; k++)
+                p[k] = (int)record_num(o[k]);
+            float *q = sb->openable[col][lr];
+            q[0] = (float)((p[0] & (wt - 1)) + 1) * CELL / wt;
+            q[1] = (float)(ht - (p[1] & (ht - 1))) * STOREY / ht;
+            q[2] = (float)(p[2] & (wt - 1)) * CELL / wt;
+            q[3] = (float)(ht - 1 - (p[3] & (ht - 1))) * STOREY / ht;
+            sb->opens_h[col][lr] = group_num(og, "OpensH", 0) != 0;
+        }
     }
 }
 
@@ -1392,6 +1461,43 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
     }
     free(crack->nrm);                                /* the cracks carry their light: drawn unlit (render_gl.c) */
     crack->nrm = NULL;
+}
+
+/* the open windows (0x2BECC0, every frame): per window of the building's list (the first 40), a flat quad of colour
+ * 0xFF101010 (material 0x25C4F0 shader 0x11, untextured: 16 / 255, unlit, opaque) 0.015 in front of the face (the
+ * front's y - 0.03 / 2), from its rect's bottom left: across `open` of its width (OpensH) or up `open` of its height,
+ * the full other way; the corners bottom left, bottom right, top right, top left. Not for a storey that is gone. */
+static void open_windows(Scene *s, SceneBuilding *sb)
+{
+    if (!sb->open_part || sb->mesh < 0 || s->meshes[sb->mesh].mesh.nparts <= (uint32_t)sb->open_part)
+        return;
+    MeshPart *p = &s->meshes[sb->mesh].mesh.parts[sb->open_part];
+    const Building *b = &sb->b;
+    if (!b->nwindows && !p->ntris)
+        return;
+    int n = b->nwindows < 40 ? b->nwindows : 40;
+    part_reset(p, (uint32_t)n);
+    static const float DARK[4] = { 16.0f / 255, 16.0f / 255, 16.0f / 255, 1 }, N[3] = { 0, -1, 0 };
+    for (int k = 0; k < n && b->state != BUILDING_GONE; k++) {
+        const BuildingWindow *w = &b->window[k];
+        int ls = building_live_of(b, w->o);
+        if (ls < 0)
+            continue;
+        float bottom, height;
+        building_storey(b, ls, &bottom, &height);
+        float x1 = w->x0 + (w->opens_h ? w->open * w->w : w->w), z1 = w->z0 + (w->opens_h ? w->h : w->open * w->h);
+        float az[4][2] = { { w->x0, w->z0 }, { x1, w->z0 }, { x1, z1 }, { w->x0, z1 } };
+        float pos[4][3], uv[4][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } }, col[4][4];
+        for (int c = 0; c < 4; c++) {
+            face_point(sb, FACE_FRONT, w->column, az[c][0], az[c][1], -0.015f, bottom, STOREY, pos[c]);
+            memcpy(col[c], DARK, sizeof DARK);
+        }
+        part_quad(p, pos, uv, col, N);
+    }
+    free(p->nrm);                                    /* its colour is all it has: drawn unlit, untextured */
+    p->nrm = NULL;
+    free(p->uv);
+    p->uv = NULL;
 }
 
 /* a group's Adornment| entries (0x2D1A30: the template's, then the instance's), placed by 0x30FAA0 / 0x30F710:
@@ -1583,9 +1689,10 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
     int mesh = -1;
     if (nst && sheet_name >= 0) {
         Mesh fm = facade((uint32_t)sheet_name, width, depth, z, tiles, ntiles, nst);
-        fm.parts = realloc(fm.parts, sizeof *fm.parts * 4);   /* glass, cracks, inner corner walls (facade_passes) */
-        memset(fm.parts + 1, 0, sizeof *fm.parts * 3);
-        fm.nparts = 4;
+        /* glass, cracks, inner corner walls (facade_passes), the open windows (open_windows) */
+        fm.parts = realloc(fm.parts, sizeof *fm.parts * 5);
+        memset(fm.parts + 1, 0, sizeof *fm.parts * 4);
+        fm.nparts = 5;
         Group sg = template_of(c, sheet);
         const char *glass = group_str(t, "Texture|InnerWindowTexture"), *crack = sg.at ? group_str(sg, "CrackTexture") : NULL;
         int gi = glass ? bdp_find_name(&c->bundle, glass) : -1, ki = crack ? bdp_find_name(&c->bundle, crack) : -1;
@@ -1593,6 +1700,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         fm.parts[2].material = ki > 0 ? (uint32_t)ki : 0;
         fm.parts[2].blend = 1;
         fm.parts[3].material = (uint32_t)sheet_name;
+        fm.parts[4].material = 0xFFFFFFFFu;              /* no material: untextured, its vertex colours */
         mesh = (int)scene_add_mesh(s, fm, s->city);
         facade_inst = new_instance(s, node, -1);
         push_item(s, (uint32_t)mesh, facade_inst, -1, NULL);
@@ -1633,6 +1741,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
         sb->b.min_crack = (int)group_num(t, "MinCollapseCrackLevel", (float)sb->b.min_crack);
         sheet_columns(c, sb, sheet);
+        sb->open_part = mesh >= 0 && s->meshes[mesh].mesh.nparts >= 5 ? 4 : 0;
         memset(sb->quad, 0xFF, sizeof sb->quad);
         memset(sb->skeleton, 0xFF, sizeof sb->skeleton);
         memset(sb->damaged_skeleton, 0xFF, sizeof sb->damaged_skeleton);
@@ -2850,6 +2959,7 @@ void scene_buildings_update(Scene *s, float dt)
         if (relit)
             light_building(s, sb, 1);
         sb->moving = moving;
+        open_windows(s, sb);                         /* the open windows, as they now are (0x2BECC0) */
         if (!sb->b.dirty || sb->mesh < 0) {
             if (moving || relit)
                 facade_passes(s, sb);

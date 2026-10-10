@@ -83,12 +83,33 @@ float building_shake(const Building *b)
     return fade < 1 ? x * fade : x;
 }
 
-/* 0x2BB410 / 0x2CFDA0: a front cell's state; the front's end cells are the sides' front cells too */
+static void window_drop(Building *b, int k)           /* the list's last record over this one */
+{
+    b->window[k] = b->window[--b->nwindows];
+}
+
+static int window_find(const Building *b, int o, int column, int lr)
+{
+    for (int k = 0; k < b->nwindows; k++)
+        if (b->window[k].o == o && b->window[k].column == column && b->window[k].lr == lr)
+            return k;
+    return -1;
+}
+
+/* 0x2BB410 / 0x2CFDA0: a front cell's state; the front's end cells are the sides' front cells too. A damaged front
+ * cell's open windows go at once, their flags with them (0x2BB580) */
 static void set_state(Building *b, int o, int col, int state)
 {
     int i = building_cell_index(b, FACE_FRONT, col);
     if (i < 0)
         return;
+    for (int lr = 0; lr < 2 && state > 0; lr++) {
+        int k = window_find(b, o, col, lr);
+        if (k >= 0) {
+            b->cell[o][i].flags &= (uint16_t)~(CELL_WINDOW_OPEN << lr);
+            window_drop(b, k);
+        }
+    }
     b->cell[o][i].state = (uint8_t)state;
     if (col == 0 && (i = building_cell_index(b, FACE_LEFT, b->depth - 1)) >= 0)
         b->cell[o][i].state = (uint8_t)state;
@@ -106,6 +127,9 @@ static void floor_falls(Building *b, int k)
         int o = b->live[k - 1];
         for (int c = 0; c < 2 * b->depth + b->width && c < BUILDING_CELLS; c++)
             b->cell[o][c].state = 3;
+        for (int w = b->nwindows - 1; w >= 0; w--)   /* its open windows (the flags stay, 0x2BB09C) */
+            if (b->window[w].o == o)
+                window_drop(b, w);
         for (int f = 0; f < 3; f++)                  /* its vertex rows to level 3, on every face */
             for (int c = 0; c <= (f == FACE_FRONT ? b->width : b->depth) && c < BUILDING_VCOLS; c++) {
                 building_set_level(b, f, k - 1, c, 3);
@@ -466,6 +490,67 @@ void building_update(Building *b, float dt)
     default:
         break;
     }
+    for (int k = 0; k < b->nwindows; k++) {          /* the windows opening and shutting (0x2BDDD0 ..) */
+        BuildingWindow *w = &b->window[k];
+        if (w->rate == 0)
+            continue;
+        w->open += w->rate * dt;
+        if (w->rate > 0) {
+            if (w->open >= 1) {
+                w->open = 1;
+                w->rate = 0;
+            }
+        } else if (w->open <= 0) {                   /* shut: out of the list, its flag cleared (0x2CF890) */
+            int i = building_cell_index(b, FACE_FRONT, w->column);
+            if (i >= 0 && w->o >= 0 && w->o < BUILDING_STOREYS)
+                b->cell[w->o][i].flags &= (uint16_t)~(CELL_WINDOW_OPEN << w->lr);
+            window_drop(b, k--);
+        }
+    }
+}
+
+int building_window_open(Building *b, int o, int column, int lr, int open, float seconds, const float rect[4], int opens_h)
+{
+    int i = building_cell_index(b, FACE_FRONT, column);
+    if (o < 0 || o >= BUILDING_STOREYS || i < 0 || lr < 0 || lr > 1 || building_live_of(b, o) < 0)
+        return 0;
+    int k = window_find(b, o, column, lr);
+    if (k >= 0) {                                    /* already there: on its way open or shut */
+        BuildingWindow *w = &b->window[k];
+        if (seconds <= 0.001f) {
+            w->open = open ? 1.0f : 0.0f;
+            w->rate = 0;
+        } else {
+            w->rate = (open ? 1.0f : -1.0f) / seconds;
+        }
+        return 1;
+    }
+    if (!open || b->cell[o][i].state != 0 || !rect || b->nwindows >= BUILDING_WINDOWS)
+        return 0;
+    BuildingWindow *w = &b->window[b->nwindows++];
+    w->o = o;
+    w->column = column;
+    w->lr = lr;
+    w->opens_h = opens_h != 0;
+    b->cell[o][i].flags |= (uint16_t)(CELL_WINDOW_OPEN << lr);
+    if (seconds <= 0.001f) {
+        w->open = 1;
+        w->rate = 0;
+    } else {
+        w->open = 0;
+        w->rate = 1 / seconds;
+    }
+    w->x0 = rect[0];                                 /* +0xC .. +0x18 (here in the cell, not the world) */
+    w->w = rect[2] - rect[0];
+    w->z0 = rect[1];
+    w->h = rect[3] - rect[1];
+    return 1;
+}
+
+int building_window_is_open(const Building *b, int o, int column, int lr)
+{
+    int k = window_find(b, o, column, lr);
+    return k >= 0 && b->window[k].open >= 1;
 }
 
 void building_storey(const Building *b, int s, float *bottom, float *height)

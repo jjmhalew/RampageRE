@@ -20,9 +20,24 @@ enum {                                               /* +0x14C */
     BUILDING_CRACKING = 4, BUILDING_SHAKING = 5, BUILDING_FALLING = 6   /* destroyed, in that order */
 };
 
+enum { CELL_WINDOW_OPEN = 0x100 };                   /* +0xE: 0x100 << LRPos, its Openable window is open */
+
 typedef struct {
     uint8_t state, hp, tile;                         /* +0 damage state, +4 HP (10), +5 the sheet's column */
+    uint16_t flags;                                  /* +0xE: CELL_WINDOW_OPEN << LRPos (only these are kept) */
 } BuildingCell;
+
+/* an open window (a record of 0x24 bytes in the building's list at +0xFC, count +0x104; openWindow 0x2BE8B0): one of
+ * a front cell's Openable windows (the sheet's ColumnDef| Openable| entries, LRPos 0 or 1), open by `open`, 0 .. 1,
+ * which runs at `rate` per second (the update 0x2BDC70). Drawn (0x2BECC0) as a near-black quad over the facade: from
+ * the rect's bottom left, `open` of its width (OpensH) or of its height. */
+#define BUILDING_WINDOWS 128                         /* (the game grows its list; it draws the first 40) */
+typedef struct {
+    int o, column, lr;                               /* +4 the storey (here template storey o), +0 column, +8 LRPos */
+    int opens_h;                                     /* +9 OpensH: it opens sideways, else upwards */
+    float x0, z0, w, h;                              /* +0xC .. +0x18: its rect in the cell (x from its left, z up) */
+    float open, rate;                                /* +0x1C, +0x20 */
+} BuildingWindow;
 
 /* a grid vertex (32 bytes in the game): its dent level 0 .. 3 (+0x0's alpha / 85) and how far the dent moved it
  * along its face (+0x14, left to right seen from outside) and up (+0x18); per vertex row, left D + 1 (back to front),
@@ -51,6 +66,7 @@ typedef struct {
     uint32_t seed;                                   /* Park-Miller (0x106BD0) */
     int no_autocollapse;                             /* disableAutoCollapse(1): its HP running out does not fell it */
     int dirty;                                       /* a cell or a storey changed: redraw */
+    BuildingWindow window[BUILDING_WINDOWS]; int nwindows;   /* its open (and opening, closing) windows */
 } Building;
 
 void building_init(Building *b, const float min[3], const float max[3], int width, int depth, int storeys);
@@ -72,6 +88,18 @@ int building_live_of(const Building *b, int o);      /* storey o's live place, -
 /* 0x2CEAD0: a vertex's dent level; a new dent moves it 0.1 .. 0.45 (by level) in a random direction in its face's
  * plane, a deeper one further the same way; the front's corners are the sides' too */
 void building_set_level(Building *b, int face, int row, int col, int level);
+
+/* ---- the windows the occupants open (docs/FORMAT_BDP.md "Open windows") ------------------------------------------
+ * openWindow(storey, column, LRPos, open, seconds) (Building binding 0x38, 0x2BE8B0) on front cell (o, column):
+ * - a window already in the list runs to open (1) or shut (0) over `seconds` (at once if seconds <= 0.001);
+ * - else, to open it: only while the cell is intact (state 0, 0x2CF7C0) and the column has that Openable (rect: x0, z0,
+ *   x1, z1 in the cell, NULL none; opens_h its OpensH), a new one, shut (open at once if seconds <= 0.001), the cell's
+ *   flag CELL_WINDOW_OPEN << lr set (0x2CF980); closing one that is not there does nothing.
+ * Once shut it leaves the list and the flag goes (the update). A front cell set to a damaged state drops its windows
+ * at once (0x2BB580), a storey that falls its own (0x2BAE70). 1 if a window was set going. */
+int building_window_open(Building *b, int o, int column, int lr, int open, float seconds, const float rect[4], int opens_h);
+/* isWindowOpen (binding 0x39, 0x2BE7C0): it is in the list and fully open */
+int building_window_is_open(const Building *b, int o, int column, int lr);
 
 /* ---- the building light (docs/BUILDING_LIGHT_NOTES.md) ----------------------------------------------------------
  * The buildings are lit on the CPU, not by the GS's lights: the lighting object (0x4D2680, filled by 0x2B92F0 from

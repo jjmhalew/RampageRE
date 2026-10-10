@@ -2762,6 +2762,7 @@ static void army_step(Viewer *v, float dt)
                 if (v->hud)
                     hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);
                 break;
+            case AE_WINDOW_CLOSE: scene_window_close_at(&v->scene, e->pos); break;
             case AE_SCORE:
                 if (v->game)
                     game_add_points(v->game, 0, e->level, (int)e->amount);
@@ -3182,6 +3183,8 @@ static void play_step(Viewer *v, float lx, float ly, const uint8_t *pressed, con
                 float up[3] = { 0, 1, 0 };
                 scene_fx(&v->scene, ev[i].name, ev[i].v, up);
             }
+            if (ev[i].type == PE_WINDOW_CLOSE)       /* back in: its window shuts */
+                scene_window_close_at(&v->scene, ev[i].v);
             if (ev[i].type == PE_MONSTER_HP)
                 v->hp = fmaxf(0, fminf(200, v->hp + ev[i].amount));
             else if (ev[i].type == PE_MONSTER_KNOCK) {   /* setVel(v, world), setReaction(2) */

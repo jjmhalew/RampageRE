@@ -85,6 +85,10 @@ typedef struct {                                      /* a building's cells and 
      * cracks, the inner corner walls. Per sheet column its window outline in cell units (x0, z0, x1, z1; x0 < 0
      * none), the sheet's InnerWallColumn, 1 / CrackScale and CrackTint */
     float outline[4][4]; int inner_wall; float crack_k, crack_tint[3];
+    /* per sheet column its Openable| windows by LRPos (0x2D0FB0: ColumnDef +0x14 there, +0x16 OpensH, +0x18 the rect,
+     * x0, z0, x1, z1 in cell units as the outline; x0 < 0 none): the occupants' windows (building_window_*) */
+    float openable[4][2][4]; uint8_t opens_h[4][2];
+    int open_part;                                    /* its facade mesh's part of open windows (part 4), 0 none */
     Adornment *adorn; int nadorn;
     uint8_t broke[BUILDING_STOREYS][BUILDING_CELLS];  /* a front cell at state 2 or more, its window people told */
     uint8_t seen[BUILDING_STOREYS][BUILDING_CELLS];   /* each cell's state when its effects were last played */
@@ -154,7 +158,8 @@ typedef struct {
     const HudQuad *hud; int nhud;                     /* the HUD and the floating scores, over everything (hud.c) */
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
-    struct WindowSlot { int building, storey, column, occupant, military, unit; } *slots; int nslots, slots_made;
+    /* a slot: its front cell (template storey, column), the Openable it opens (LRPos, +0xC), its occupant's kind */
+    struct WindowSlot { int building, storey, column, occupant, military, unit, lr; } *slots; int nslots, slots_made;
     /* the Occupants group's soldiers (MilitaryInstance|: Military_Window.bsf templates, the army's window soldiers)
      * and its rates (0x31A540: +0x48 MilitaryStartRate 0.1, +0x4C MilitaryEndRate 0.9, +0x50 MilitaryTimeRange 240) */
     const char *military[16]; float military_freq[16]; int nmilitary;
@@ -242,6 +247,13 @@ int scene_monster_node(const Scene *s, const char *name, Mat4 *world);
 /* the window occupants (0x318650): every SpawnRate seconds (0.75) one comes to a random free slot of a building in
  * view; the slots are the block's windows, a FillRate share of them, each with an occupant picked by Frequency */
 void scene_people_spawn(Scene *s, float dt);
+/* closeWindow (Actor binding, 0x30C3F0): the window an occupant came out of shuts over 0.5 s (openWindow(.., 0,
+ * 0.5)), the slot's Openable; building and storey as people_add_window got them (the live storey then), or, _at, the
+ * cell at a point (the occupant's place: the building whose front it is on, column (x - min x) / 5, storey (z - foot
+ * - 6) / 3). Call it when Person_Window's or Military_Window's WindowReEnter ends, not when the occupant falls out
+ * (leaveBuilding), is grabbed or is smashed: those leave the window open, as the game does. 1 if one was shut. */
+int scene_window_close(Scene *s, int building, int storey, int column);
+int scene_window_close_at(Scene *s, const float pos[3]);
 /* the playable buildings as people.c sees them */
 int scene_people_boxes(const Scene *s, PeopleBox *out, int max);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,

@@ -97,17 +97,28 @@ a person punched this way is never deleted. The port keeps this behaviour.
   from a random slot on, the first free one (+0x14 empty, +0xD an occupant) whose building's x lies in the view
   (0x318390) and that 0x31AD00 allows. The slots (0x31A540 calls 0x3196F0 per building with the
   Occupants' `FillRate` and `NonMilitaryRate` and the Edibles' `FillRate`): of the building's n windows (its list
-  from 0x2BE750 / 0x2D01F0: the front cells with a window on live storeys 1 and up, never the first storey above
-  the ground floor), round(n × FillRate) in a shuffled order, the
+  from 0x2BE750 / 0x2D01F0: the intact front cells on live storeys 1 and up, never the first storey above the ground
+  floor, whose column has an `Openable` window; of a column's two, `LRPos` 0 or 1 at random (Park–Miller < 0.5: 0
+  first), else the other: the slot's +0xC), round(n × FillRate) in a shuffled order, the
   first total − int(total × NonMilitaryRate) of them military (+0x40), the rest civilian (+0x3C). The building's
   `NumNonMilitaryOccupants` (then all n windows, that many civilians) and `NumMilitaryOccupants` override the
   counts, each capped at n. A slot's kind is a random one of the sort's list (0x318B40 makes it from the
   `MilitaryInstance|` / `OccupantInstance|` records; the viewer weighs them by `Frequency`). A military occupant
   is the army's window soldier (`army_spawn_window`, Military_Window.bsf).
-- **Placement** (0x2BE660): the actor stands at the window's bottom middle:
-  - x: the grid's min x + 5 × column + the middle of the column's `Outline`;
+- **Placement** (`getWindowPosition` 0x2BE660, with the slot's `LRPos`): the actor stands at its window's bottom middle:
+  - x: the grid's min x + 5 × column + the middle of the column's `Openable` (0x2CFF30; not the `Outline`);
   - y: the front's y;
-  - z: the storey's height + the `Outline`'s bottom.
+  - z: the storey's height + the `Openable`'s bottom (and +0xF4, its height above the storey's floor).
+- **The window opens** as the occupant comes (0x318B04: `openWindow(storey, column, LRPos, 1, 0.5)` on its building):
+  over 0.5 s a near-black quad grows over the window's `Openable` part, just in front of the facade, upwards (a sash)
+  or, with `OpensH`, from the left (docs/FORMAT_BDP.md "Open windows"). The occupant leans out of that dark.
+- **The window shuts** only through the actor binding `closeWindow` (0x30C3F0: `openWindow(…, 0, 0.5)` on the slot's
+  storey, column and `LRPos`, the slot found by the actor's +0xEC), which `Person_Window` and `Military_Window` call
+  at the end of `WindowReEnter`, then the actor is deleted: it closes over 0.5 s once the occupant has gone in. Falling
+  out (`leaveBuilding` 0x30C3D0 → 0x318140(mgr, actor, 0)), being grabbed (0x2B3350 → 0x318140(…, 1), which also
+  retires the slot: its +0xD = 0xFF, never filled again), the fall's 0x30C510 and the actor's end (0x30DF80) only
+  empty the slot: that window stays open. Damage to the cell drops it at once (0x2BB580). The edibles' slots (+0x10)
+  never open a window.
 - **The fall** (0x317DC0, from cell damage 0x2BB580): when a front cell's state is 2 or more, every non-military
   window person in that building within ±1 storey of it falls (`onFallFromWindow`), whatever its column.
 
@@ -186,7 +197,11 @@ This works on an actor, or on an object of class 0x4D0720.
   - the shape of the hold blend (taken as linear);
   - the attack-sphere test against people (0x2D4390): `CollisionRadius` 2 about the person, 1 up.
 - **Occupant spawning**: the timing and rates (+0x44 … +0x50), the view check (0x318390) and the cell check
-  (0x31AD00).
+  (0x31AD00: the cell not hidden, 0x400 by 0x2BE580, then a building search 0x2A3D20 from a point 10 lower [G]).
+  A grabbed occupant's slot is not retired.
+- **The windows** (city.c's spawner opens them, `scene_window_close` / `_at` shut them): the port's `closeWindow` is
+  for people.c and army.c to call (by the cell people_add_window got, or by the occupant's place); until they do, a
+  window stays open after its occupant went back in.
 - **The Actor bindings' bodies**: `startAnim`'s second argument, `onPickup` (taken as sending script event 8), and
   `getStringProp` versus `getTemplateStringProp` (only the template is read).
 - **Scripts not ported**: any other script plays its `DefaultAnim`, and if smashed is deleted after 3 s.

@@ -154,9 +154,10 @@ enum {
     AE_FLOAT,         /* a floating score number (0x331D50, scale 0.8) of amount at pos; level 1 a building's */
     AE_FART,          /* Monsters::timedDoFart on monster, amount (2) seconds from now */
     AE_REMOVED,       /* unit is gone (requestDelete) */
-    AE_IMPACT         /* unit's flight met an object of another module (0x287430): its TakeImpact (vtable +0x38) is the
+    AE_IMPACT,        /* unit's flight met an object of another module (0x287430): its TakeImpact (vtable +0x38) is the
                        * caller's to give. id the object's collision tag (collide.h COLLIDE_TAG), level its kind, pos
                        * where, dir the normal, amount the mover's Mass (a building: hit with radius Mass / 1000) */
+    AE_WINDOW_CLOSE   /* the window soldier went back in (closeWindow, 0x30C3F0): its window at pos shuts over 0.5 s */
 };
 typedef struct { int type, id, unit, shot, monster, level; const char *name; float v[3], dir[3], pos[3], amount; } ArmyEvent;
 
