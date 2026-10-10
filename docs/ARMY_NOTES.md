@@ -250,8 +250,10 @@ at 0.
   calls `setReaction(19)` (an overhead hit), and is gone. No damage.
 - The game calls this TakeDamage from the monster's object test (0x2E22B0) [R]: a droppable has neither 0x8000 nor
   0x2040, so every frame a monster's sphere touches its shape it is TakeDamage(type 0 and the attack's damage when the
-  sphere is armed, else type 1 and 2.0). Here it fires when the object touches the monster's spheres, or when an
-  attack reaches it; its shape is a 0.5 sphere at its place [G: the game's 0x28FD70 shape].
+  sphere is armed, else type 1 and 2.0). Here it fires when one of the monster's spheres meets its shape, or when an
+  attack reaches it; the shape is 0x28FD70's, and the Droppable_* books (Objects1_Props; their parent DefObjectProps
+  has only Gravity 35 and Points 10) set no CollisionBox, CollisionRadius or AutoCollisionBox, so it is the model's
+  sphere (0x184CB0, through the model's vtable +0x14 at 0x28FEC4) [R].
 
 ## Scoring
 **The records** [R] (`Player.addPoints` 0x33F530): each player's record holds `points[7]` and `kills[7]`. The
@@ -300,11 +302,12 @@ Floating = 100
     unit, ImpactDamage, the point and the shot's direction, no knock [R]) is not ported: the scripts' TakeDamage
     begin with coerceToMonster and ignore it, but Fountain.scr (ungated) and DamagingEffect.scr would not;
   - the beam's reach;
-  - when a droppable meets the monster;
-  - the units' shapes for the monster's attacks (actors: a sphere of `CollisionRadius` 2; objects: the host's model
-    box, else 4 × 6 × 3). In the collision world a unit has its shape by 0x28FD70 (`collide_shape_pick`:
-    CollisionBox, CollisionRadius, AutoCollisionBox, else the sphere the model keeps (0x184CB0, stored apart from
-    its box, 0x184940) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`.
+  - a unit has one shape by 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox, else
+    the sphere the model keeps (0x184CB0, stored apart from its box, 0x184940) [R]; here the union of its meshes'
+    header spheres, city.c `city_shape_sphere`), and the monster's spheres meet that one shape (0x2E22B0 ->
+    0x280470) [R], in the collision world, for the attacks (`army_hit`) and for a droppable's touch alike: each
+    collision sphere of the monster, armed or not, against the droppable (the Droppable_* books set no shape, so it
+    is the model's sphere) (`unit_meets`, `touches`).
 - **Movers:** the SplineMover's curve and the HeldObjectMover's axis turn (the unit takes the hand's matrix). A flight
   (`mv.kind` 2: a wreck knocked away, a smashed actor, a thrown vehicle, a falling bomber) is the game's
   SpherePhysicsMover (collide.c `collide_mover_step`, 0x28E440) with the template's `Gravity` (DefObjectProps 35,

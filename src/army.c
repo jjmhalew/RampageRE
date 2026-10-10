@@ -1341,6 +1341,20 @@ static void unit_shape(const Army *a, ArmyUnit *u, CollideShape *s)   /* read on
     *s = u->cshape;
 }
 
+/* [R 0x2E22B0 -> 0x280470] a monster's sphere against the unit's shape at its matrix (collide_obj_sphere): the
+ * monster's attacks and a droppable's touch alike */
+static int unit_meets(const Army *a, ArmyUnit *u, const float c[3], float radius)
+{
+    CollideObj co;
+    float n[3], pt[3], push[3];
+    memset(&co, 0, sizeof co);
+    unit_shape(a, u, &co.shape);
+    collide_matrix_from16(co.m, u->world);
+    co.flags = COLLIDE_F_WORLD;
+    co.building = -1;
+    return collide_obj_sphere(&co, c, radius, n, pt, push);
+}
+
 static void unit_take_impact(Army *a, ArmyUnit *u);
 
 typedef struct { Army *a; ArmyUnit *u; } FlightCtx;
@@ -3009,16 +3023,18 @@ static int on_pulse(Army *a, ArmyUnit *u)
     }
 }
 
-static int touches(const ArmyMonster *m, const float p[3], float r)   /* a point (radius r) in a monster's shapes */
+/* [R 0x2E22B0] a droppable meets a monster when one of its collision spheres, armed or not, meets the droppable's
+ * shape (0x28FD70: the Droppable_* books set none, so the model's sphere). A monster without spheres: its box
+ * against the unit's place */
+static int touches(const Army *a, const ArmyMonster *m, ArmyUnit *u)
 {
-    for (int s = 0; s < m->nspheres; s++) {
-        float d[3] = { p[0] - m->spheres[s][0], p[1] - m->spheres[s][1], p[2] - m->spheres[s][2] };
-        if (len3(d) <= m->spheres[s][3] + r)
+    for (int s = 0; s < m->nspheres; s++)
+        if (unit_meets(a, u, m->spheres[s], m->spheres[s][3]))
             return 1;
-    }
+    const float *p = u->pos;
     if (m->nspheres == 0 && m->box_max[2] > m->box_min[2])
-        return p[0] >= m->box_min[0] - r && p[0] <= m->box_max[0] + r && p[1] >= m->box_min[1] - r &&
-               p[1] <= m->box_max[1] + r && p[2] >= m->box_min[2] - r && p[2] <= m->box_max[2] + r;
+        return p[0] >= m->box_min[0] && p[0] <= m->box_max[0] && p[1] >= m->box_min[1] && p[1] <= m->box_max[1] &&
+               p[2] >= m->box_min[2] && p[2] <= m->box_max[2];
     return 0;
 }
 
@@ -3080,7 +3096,7 @@ static void unit_update(Army *a, int i, float dt)
     /* a droppable meeting a monster */
     if (r != DELETE_ME && u->kind == AK_DROP)
         for (int m = 0; m < a->nm && r != DELETE_ME; m++)
-            if (touches(&a->m[m], u->pos, 0.5f))
+            if (touches(a, &a->m[m], u))
                 r = drop_damage(a, u, m);
     if (r == DELETE_ME) {
         unit_remove(a, u);
@@ -3311,32 +3327,6 @@ int army_events(Army *a, ArmyEvent *out, int max)
 
 /* ---- the monster's side */
 
-/* a unit's shape for the monster's attack: [G] actors a sphere of CollisionRadius (DefActorProps: 2) 1 up (as
- * people.c); objects their model's box (AutoCollisionBox; the host's, else 4 x 6 x 3) turned with them */
-static int unit_touched(const Army *a, const ArmyUnit *u, const float c[3], float radius)
-{
-    if (u->kind == AK_TROOP || u->kind == AK_WINDOW) {
-        float p[3] = { u->pos[0], u->pos[1], u->pos[2] + 1 };
-        return dist3(p, c) <= radius + tnum(u, "CollisionRadius", 2);
-    }
-    float lo[3] = { -2, -3, 0 }, hi[3] = { 2, 3, 3 };
-    if (u->kind == AK_DROP) {
-        lo[0] = lo[1] = -1;
-        lo[2] = -1;
-        hi[0] = hi[1] = hi[2] = 1;
-    }
-    if (a->host.shape_box && u->shape)
-        a->host.shape_box(a->host.ctx, u->shape, lo, hi);
-    /* the centre in the unit's frame (its rotation is orthonormal: the transpose undoes it) */
-    float d[3] = { c[0] - u->world[12], c[1] - u->world[13], c[2] - u->world[14] }, l[3], q = 0;
-    for (int k = 0; k < 3; k++)
-        l[k] = d[0] * u->world[4 * k] + d[1] * u->world[4 * k + 1] + d[2] * u->world[4 * k + 2];
-    for (int k = 0; k < 3; k++) {
-        float e = l[k] < lo[k] ? lo[k] - l[k] : l[k] > hi[k] ? l[k] - hi[k] : 0;
-        q += e * e;
-    }
-    return q <= radius * radius;
-}
 
 /* TakeDamage(monster, amount, type, direction) of each unit an armed attack sphere reaches */
 void army_arm(Army *a, int monster)                  /* a monster's new attack: its hit list emptied (0x2E33A0) */
@@ -3354,9 +3344,8 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
     int n = 0;
     for (int i = 0; i < a->n; i++) {
         ArmyUnit *u = &a->u[i];
-        if (u->phase != AU_ALIVE || !unit_touched(a, u, centre, radius))
-            continue;
-        if (u->kind != AK_DROP && monster < ARMY_MONSTERS) {
+        if (u->phase != AU_ALIVE || !unit_meets(a, u, centre, radius))
+            continue;        if (u->kind != AK_DROP && monster < ARMY_MONSTERS) {
             if (u->hit_attack[monster] == a->attack[monster])
                 continue;
             u->hit_attack[monster] = a->attack[monster];
