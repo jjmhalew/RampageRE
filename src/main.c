@@ -95,7 +95,6 @@ typedef struct Mon {
     int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
     int held_parade;                                 /* or a biker or a cart's food (parade.c), -1 none */
     int held_rail, rail_knock;                       /* or a rail object (rail.c), -1 none; a knock taken */
-    int blow;                                        /* counts the attacks armed: one TakeDamage per blow (parade.c) */
     int streaker;                                    /* the defeated monster's streaker (people.c), -1 none */
     EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
@@ -1368,21 +1367,13 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     if (e->type == 0) {                              /* 0x2E7880: the parts' bones armed with this attack, or not */
         mo->armed = e->p[0] != 0 ? mo->armed | e->value : mo->armed & ~e->value;
-        if (e->p[0] != 0 && v->sobj)                 /* a new attack: its hit list is empty (0x2E33A0) */
-            streetobj_arm(v->sobj);
-        if (e->p[0] != 0 && v->boss)
-            boss_arm(v->boss, mo->slot);
-        if (e->p[0] != 0 && v->army)
-            army_arm(v->army, mo->slot);
-        if (e->p[0] != 0) {                          /* its record, the parts' own (0x2E7880) */
+        if (e->p[0] != 0) {                          /* its record, the parts' own (0x2E7880), its hit list empty */
             mo->atk_seq++;
             for (int p = 0; p < MOVES_PARTS; p++)
                 if (e->value >> p & 1)
                     mo->atk[p] = (struct MonAtk){ e->p[1], e->p[2], e->p[3], e->level, e->aflags, e->victims, 0,
                                                   e->value, mo->atk_seq };
         }
-        if (e->p[0] != 0)
-            mo->blow++;                               /* a new blow: parade.c's objects take one TakeDamage each */
         if (getenv("RAMPAGE_TRACE"))
             printf("  attack %x %s (%g %g %g)\n", e->value, e->p[0] != 0 ? "on" : "off", e->p[1], e->p[2], e->p[3]);
         return;
@@ -1978,19 +1969,19 @@ static void hit_spheres(Mon *mo)
         c[3] = sh->radius;
         scene_adornments_hit(&v->scene, c, c[3]);    /* 0x2D4390: it knocks adornments off */
         if (v->army)                                 /* and the army's units: the attack's damage, once an attack */
-            army_hit(v->army, mo->slot, c, c[3], atk->damage);
+            army_hit(v->army, mo->slot, c, c[3], atk->damage, atk->seq);
         if (v->veh)                                  /* and the vehicles and rockets */
             vehicle_hit(v->veh, mo->slot, c, c[3], 20);
         if (v->rail)                                 /* and the trains, cable cars and freighters */
             rail_hit(v->rail, mo->slot, c, c[3], 20);
         if (v->boss)                                 /* and the bosses */
-            boss_hit(v->boss, mo->slot, c, c[3], atk->damage);   /* the part's attack's damage, once a part */
+            boss_hit(v->boss, mo->slot, c, c[3], atk->damage, atk->seq);   /* the record's damage, once a record */
         if (v->parade)                               /* and the balloons, bikers and food carts */
-            parade_hit(v->parade, mo->slot, c, c[3], mo->blow);
+            parade_hit(v->parade, mo->slot, c, c[3], atk->seq);
         upgrade_touch(mo, c, c[3]);                   /* and the MonsterUpgrade object */
         if (v->sobj) {                               /* and the street and roof objects (TakeDamage, type 0) */
             StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
-            streetobj_hit(v->sobj, mo->slot, &me, c, c[3], 20);
+            streetobj_hit(v->sobj, mo->slot, &me, c, c[3], 20, atk->seq);
         }
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, mo->slot, c, c[3], mo->heading, mo->graph.states[mo->run.state].name);

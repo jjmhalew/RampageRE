@@ -193,6 +193,28 @@ int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int se
  * up): another flying object meeting it exchanges an impulse with it (0x285E90) instead of meeting it as static */
 void collide_set_mover(CollideWorld *w, int obj, CollideMover *mv, float m[12], float vel[3]);
 
+/* ---- 0x2E33A0's hit lists, kept the other way round: each attack record (an arming, 0x2E7880: the parts it arms
+ * share it, 0x2E45A0) lists the objects it has hit (8 ids at +0x6); here an object keeps the records (monster,
+ * record number) that hit it, the last eight */
+typedef struct { uint32_t key[8]; int next; } CollideHitList;
+static inline int collide_hit_seen(const CollideHitList *h, int monster, unsigned record)   /* on its list */
+{
+    uint32_t k = (((uint32_t)monster & 0xFu) << 28 | (record & 0x0FFFFFFFu)) + 1u;
+    for (int i = 0; i < 8; i++)
+        if (h->key[i] == k)
+            return 1;
+    return 0;
+}
+/* 1 when the record has not hit the object yet (and now has), 0 when it has */
+static inline int collide_hit_once(CollideHitList *h, int monster, unsigned record)
+{
+    if (collide_hit_seen(h, monster, record))
+        return 0;
+    h->key[h->next] = (((uint32_t)monster & 0xFu) << 28 | (record & 0x0FFFFFFFu)) + 1u;
+    h->next = (h->next + 1) & 7;
+    return 1;
+}
+
 /* ---- the viewer's side: who owns an object of the frame's world */
 #define COLLIDE_F_WORLD 0x4u                         /* every object in the world (the queries' "4") */
 /* CollideObj.tag / CollideBuilding.tag: the module that added it and its index there; kind is the module's own

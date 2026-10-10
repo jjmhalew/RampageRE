@@ -100,8 +100,8 @@ within π/100, or when `RequiresRotation/ElevationClearToFire` is 0; a step that
 
 The aim [R 0x293050]: actors (0x30EC10) and clusters aim straight at the target lifted by ½ × 9.81 × Gravity ×
 (L / V)² (L the straight distance, V the Velocity; no lift without gravity). A monster's target point (its vtable
-+0x1C, 0x2DB030) is 6 above its feet [R]; its x and y are taken as its place [G: offsets added by 0x2E6000 were not
-traced]. The weapon node comes from the host's `node_world` callback when it knows it, and from the unit's place
++0x1C, 0x2DB030) is 6 above its feet, at its `Bip01 Spine1`'s x and y (0x2E6000; "The weapon system" below) [R].
+The weapon node comes from the host's `node_world` callback when it knows it, and from the unit's place
 otherwise.
 
 **A shot** (RProjectile; init 0x2944F0, update 0x293120, step 0x294300) [R]:

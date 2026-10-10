@@ -168,8 +168,7 @@ street at 6 takes (its z / 6 / a frame; 0.01 for 0, after a dbgAssert); a frame'
   the instances of its model and its flags' cloths), then `streetobj_start(buildings)` attaches the others by the
   footprint.
 - `streetobj_update(dt, monsters, buildings)` runs the pulses at the world's step, 1/30 s (0x2B7800), and
-  onBuildingDestruction; `streetobj_arm`
-  empties the hit list when an attack is armed; `streetobj_hit` (an armed sphere: type 0, once an attack for an
+  onBuildingDestruction; `streetobj_hit` (an armed sphere: type 0, once per attack record for an
   0x8000 object) and `streetobj_touch` (the monster's box: type 1, not on 0x8000 objects) call TakeDamage, at most one
   an object a frame; `streetobj_impact` is TakeImpact; `streetobj_force_damage(name, pos)` is boss.c's
   BE_FORCE_DAMAGE.
@@ -196,8 +195,8 @@ leans away, held while the monster stays within 7.
   (`collide_shape_pick`: the template's then the instance's `CollisionBox`, `CollisionRadius` or `AutoCollisionBox`
   with the model's box; else the sphere the model keeps (0x184CB0) [R], here the union of its meshes' header spheres, city.c `city_shape_sphere`), read when the object is
   added; `box_min` / `box_max` hold
-  its box. One hit list for the whole attack, shared by the monsters (`streetobj_arm`: any monster's new attack
-  empties it); the game keeps one per body part's attack record (8 ids at +0x6, 0x2E33A0) [G: a stand-in].
+  its box. The hit lists are the game's records' (one per arming, its parts' own; 8 ids at +0x6, 0x2E33A0) kept
+  the other way round: each object keeps the last eight (monster, record) that hit it (`CollideHitList`).
 - `setPulseDelay` only sets the delay (0x2AA2A0) and the clock runs on: with a delay of 0.01 or more it grows by the
   step and at the delay it is taken off, onPulse once a frame; below 0.01 neither (0x309BA0) [R].
 - `rotate(e)` is rot × Rz(e[2]) Rx(e[0]) Ry(e[1]) (case 0xD, 0x278258) and `rotateAA(a, axis)` rot × (I + [a axis]×)

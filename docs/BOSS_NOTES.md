@@ -123,8 +123,8 @@ t 0, and places the object at the first point at once [R].
 
 The monster's update (0x2E22B0) tests its spheres against the objects within 20 (up to 64, flags 0x2040 skipped)
 and calls TakeDamage(monster, amount, type): an armed sphere gives the attack's damage (+0x2C) with type 0, and an
-object with 0x8000 goes on the attack's hit list (0x2E33A0, emptied when an attack is armed), so it takes one blow
-an attack. An unarmed sphere gives 2.0 (0x2E2680) with type 1 (Collision), every frame, and only to objects without
+object with 0x8000 goes on the attack record's hit list (0x2E33A0; a record per arming, its parts' own), so it
+takes one blow a record (here each part keeps the records that hit it, `CollideHitList`). An unarmed sphere gives 2.0 (0x2E2680) with type 1 (Collision), every frame, and only to objects without
 0x8000 [R]. That is how the Whirlwind catches a monster, how the Jumper's goo burns one, and how the wrecked Tank
 shoves one.
 

@@ -35,7 +35,6 @@ typedef struct { float step, sum; int skip; } Chain; /* a building's +0x194, +0x
 
 struct Army {
     ArmyHost host;
-    int attack[ARMY_MONSTERS];                       /* per monster: its attack's number (army_arm) */
     ArmyUnit *u; int n, cap;
     ArmyShot shot[MAX_SHOTS]; int nshots, next_shot;
     ArmyEvent ev[MAX_EVENTS]; int nev, next_fx;
@@ -3352,15 +3351,10 @@ int army_events(Army *a, ArmyEvent *out, int max)
 
 
 /* TakeDamage(monster, amount, type, direction) of each unit an armed attack sphere reaches */
-void army_arm(Army *a, int monster)                  /* a monster's new attack: its hit list emptied (0x2E33A0) */
-{
-    if (monster >= 0 && monster < ARMY_MONSTERS)
-        a->attack[monster]++;
-}
 
 /* [R 0x2E22B0] an armed sphere: TakeDamage(monster, the attack's damage, 0); every unit but a droppable has
  * OnlyHitWithEffNodes (0x8000, set by its script) and goes on the attack's hit list, one blow an attack */
-int army_hit(Army *a, int monster, const float centre[3], float radius, float amount)
+int army_hit(Army *a, int monster, const float centre[3], float radius, float amount, unsigned record)
 {
     if (monster < 0 || monster >= a->nm)
         return 0;
@@ -3369,11 +3363,8 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
         ArmyUnit *u = &a->u[i];
         if (u->phase != AU_ALIVE || !unit_meets(a, u, centre, radius))
             continue;
-        if (u->kind != AK_DROP && monster < ARMY_MONSTERS) {
-            if (u->hit_attack[monster] == a->attack[monster])
-                continue;
-            u->hit_attack[monster] = a->attack[monster];
-        }
+        if (u->kind != AK_DROP && !collide_hit_once(&u->hits, monster, record))
+            continue;
         float dir[3] = { u->pos[0] - a->m[monster].pos[0], u->pos[1] - a->m[monster].pos[1],
                          u->pos[2] - a->m[monster].pos[2] };
         norm3(dir);

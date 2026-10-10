@@ -189,8 +189,7 @@ int boss_defeated(const Boss *b);
 /* ---- the monster's side */
 /* an armed attack sphere reaching boss parts: their TakeDamage(monster, amount, 0 [G: Concussive], the way from
  * the monster). How many it hit */
-int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount);
-void boss_arm(Boss *b, int monster);   /* a new attack of that monster: each part can take one blow of it again */
+int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount, unsigned record);
 
 /* ---- the collision world (collide.c) */
 /* the parts and the VolumeTriggers put into the frame's world: each alive part with its shape (tag

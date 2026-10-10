@@ -432,7 +432,7 @@ static int new_obj(Parade *p, Group tmpl, int kind, const float pos[3], float fa
     o->phase = PAP_ALIVE;
     o->partner = -1;
     o->cobj = -1;
-    o->last_blow = -1;
+    memset(&o->hits, 0, sizeof o->hits);
     o->pulse_delay = -1;                             /* none until a script sets one */
     o->scale = tnum(o, "RenderScale", 1);
     o->shape = tstr(o, "Shape|Shape");
@@ -1062,14 +1062,14 @@ int parade_load_block(Parade *p, Group block)
 
 /* ---------------------------------------------------------------- the monster's side */
 
-int parade_hit(Parade *p, int monster_i, const float c[3], float radius, int blow)
+int parade_hit(Parade *p, int monster_i, const float c[3], float radius, unsigned record)
 {
     if (!monster(p, monster_i))
         return 0;
     int n = 0;
     for (int i = 0; i < p->n; i++) {
         ParadeObj *o = &p->o[i];
-        if (o->phase == PAP_GONE || o->phase == PAP_HELD || o->last_blow == blow)
+        if (o->phase == PAP_GONE || o->phase == PAP_HELD || collide_hit_seen(&o->hits, monster_i, record))
             continue;
         if (o->kind != PAK_BALLOON && o->kind != PAK_BIKER && !(o->kind == PAK_CART && o->phase == PAP_ALIVE))
             continue;
@@ -1091,7 +1091,7 @@ int parade_hit(Parade *p, int monster_i, const float c[3], float radius, int blo
         else if (o->kind == PAK_CART)
             took = cart_damage(p, o, monster_i);
         if (took) {
-            o->last_blow = blow;
+            collide_hit_once(&o->hits, monster_i, record);   /* [R 0x2E33A0] on the record's hit list */
             n++;
         }
     }

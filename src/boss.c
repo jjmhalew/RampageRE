@@ -125,7 +125,7 @@ typedef struct Obj {
         GenDef gen;
         AmbientDef amb;
     } s;
-    int hit_attack[8];                               /* per monster: the attack that last hit it (0x2E33A0's list) */
+    CollideHitList hits;                             /* the attack records that hit it (0x2E33A0's lists) */
 } Obj;
 
 typedef struct {                                     /* an AIInstance record of gAIMgr (0x335320), as army.c */
@@ -159,7 +159,6 @@ struct Boss {
     WorldObj wobj[MAX_WOBJ];
     int nwobj;
     int play[8];                                     /* gWorld.getPlayValue / setPlayValue */
-    int attack[8];                                   /* per monster: its attack's number (boss_arm) */
     int num_generators;                              /* Boss_NY_Generator.bsf's numGenerators */
     int main, defeated, city_destroyed;
     float now, view[2];
@@ -3773,16 +3772,9 @@ int boss_events(Boss *b, BossEvent *out, int max)
     return n;
 }
 
-/* a monster's new attack (0x2E7880 arming its bones): its hit list is emptied (0x2E33A0) */
-void boss_arm(Boss *b, int monster)
-{
-    if (monster >= 0 && monster < 8)
-        b->attack[monster]++;
-}
-
 /* [R 0x2E22B0] an armed sphere: TakeDamage(monster, the attack's damage, 0) on each part it meets; a part with 0x8000
  * (OnlyHitWithEffNodes: the Tank, Heli, Jumper, Saucer, Blimp, Generator) goes on the attack's hit list, once */
-int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount)
+int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount, unsigned record)
 {
     if (monster < 0 || monster >= b->nm)
         return 0;
@@ -3791,11 +3783,8 @@ int boss_hit(Boss *b, int monster, const float centre[3], float radius, float am
         Obj *o = &b->o[i];
         if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || box_distance(o, centre) > radius)
             continue;
-        if (monster < 8 && (o->oflags & OF_EFF_NODES)) {
-            if (o->hit_attack[monster] == b->attack[monster])
-                continue;
-            o->hit_attack[monster] = b->attack[monster];
-        }
+        if ((o->oflags & OF_EFF_NODES) && !collide_hit_once(&o->hits, monster, record))
+            continue;
         float dir[3];
         away_from(o, &b->m[monster], dir);
         n++;

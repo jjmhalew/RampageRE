@@ -103,7 +103,7 @@ typedef struct {                                     /* one weapon (a Weapon| gr
 
 #define ARMY_WEAPONS 4
 struct ArmyUnit {
-    int hit_attack[4];                               /* per monster: the attack that last hit it (0x2E33A0) */
+    CollideHitList hits;                             /* the attack records that hit it (0x2E33A0) */
     const char *name;                                /* template name */
     Group tmpl, inst;                                /* the template, and the AIInstance group it came from (or none) */
     int kind, phase;                                 /* AK_*, AU_* */
@@ -218,9 +218,9 @@ const ArmyShot *army_shot(const Army *a, int i);
 int army_events(Army *a, ArmyEvent *out, int max);   /* takes the events since the last call */
 
 /* ---- the monster's side */
-/* an armed attack sphere reaching units (their TakeDamage(monster, amount, ...)): how many it hit */
-int army_hit(Army *a, int monster, const float centre[3], float radius, float amount);
-void army_arm(Army *a, int monster);   /* a new attack of that monster: each unit can take one blow of it again */
+/* an armed attack sphere of the attack record `record` (the arming's number, its parts' own) reaching units (their
+ * TakeDamage(monster, amount, ...)): how many it hit */
+int army_hit(Army *a, int monster, const float centre[3], float radius, float amount, unsigned record);
 /* doGrabObject's search (0x2D99C0) over the units: Pickupable, not held, in front of root (forward), nearest within
  * radius of hand; -1 none */
 int army_nearest_pickup(const Army *a, const float hand[3], const float root[3], const float forward[3], float radius);

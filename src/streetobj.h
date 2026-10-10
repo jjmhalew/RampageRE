@@ -83,7 +83,8 @@ typedef struct {
     /* ---- the rest is the module's own */
     float rot[9];                                    /* world's 3 x 3 */
     float facing[3];                                 /* setFacing's angles (x, y tilt, z its turn) */
-    int state, flags, num_hits, counted, attach_fx, hit_fx, hit_played, attack, frame;
+    int state, flags, num_hits, counted, attach_fx, hit_fx, hit_played, frame;
+    CollideHitList hits;                             /* the attack records that hit it (0x2E33A0) */
     float pulse, pulse_delay;                        /* the next pulse in, the delay last set (0: none) */
     float attach_delay;
     float axis[3], prev_mpos[3], total_angle, sway_time, sway_intensity;   /* StreetObject: the sway, the fall */
@@ -132,14 +133,11 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb);
 void streetobj_update(StreetObjs *s, float dt, const StreetMonster *m, int nm, const StreetBuilding *b, int nb);
 
 /* ---- the monster's side (0x2E22B0) */
-/* an attack has just been armed (a clip's attack event, 0x2E7880): its hit list is empty, so every
- * OnlyHitWithEffNodes object may take one blow of it */
-void streetobj_arm(StreetObjs *s);
-/* an armed attack sphere of monster `monster` (at who) reaching objects: TakeDamage(who, amount (the attack's
- * damage, +0x2C: 5 a punch, 20 a kick), type 0). At most one TakeDamage an object a frame; an OnlyHitWithEffNodes
- * object once an attack. How many it reached */
+/* an armed attack sphere of monster `monster` (at who) and its attack record `record` (the arming's number)
+ * reaching objects: TakeDamage(who, amount (the attack's damage, +0x2C: 5 a punch, 20 a kick), type 0). At most one
+ * TakeDamage an object a frame; an OnlyHitWithEffNodes object once a record. How many it reached */
 int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const float centre[3], float radius,
-                  float amount);
+                  float amount, unsigned record);
 /* one of the monster's collision spheres, armed or not, touching objects (0x2E22B0: against each one's shape,
  * 0x280470): TakeDamage(who, 2, type 1) for each one without OnlyHitWithEffNodes, unless it took one this frame. How
  * many */

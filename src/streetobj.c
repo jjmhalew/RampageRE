@@ -29,7 +29,7 @@ struct StreetObjs {
     const StreetMonster *m;
     int nm;
     float acc;
-    int next_id, attack, frame;
+    int next_id, frame;
     uint32_t seed;
 };
 
@@ -729,7 +729,6 @@ StreetObjs *streetobj_new(const StreetHost *host)
         return NULL;
     if (host)
         s->host = *host;
-    s->attack = 1;
     return s;
 }
 void streetobj_free(StreetObjs *s) { free(s); }
@@ -881,7 +880,6 @@ void streetobj_update(StreetObjs *s, float dt, const StreetMonster *m, int nm, c
 
 /* ---------------------------------------------------------------- the monster's side */
 
-void streetobj_arm(StreetObjs *s) { s->attack++; }
 
 /* the object as the collision world has it (WCollisionInfo at its matrix) */
 static void as_collide(const StreetObj *o, CollideObj *c)
@@ -915,17 +913,16 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
 }
 
 int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const float centre[3], float radius,
-                  float amount)
+                  float amount, unsigned record)
 {
     (void)amount;                                    /* neither script looks at it */
     int n = 0;
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
-        if (!o->alive || o->frame == s->frame || ((o->oflags & SF_EFF_NODES) && o->attack == s->attack) ||
-            !sphere_meets(o, centre, radius))
+        if (!o->alive || o->frame == s->frame || !sphere_meets(o, centre, radius))
             continue;
-        if (o->oflags & SF_EFF_NODES)
-            o->attack = s->attack;                   /* [R] 0x2E33A0: on the attack's hit list */
+        if ((o->oflags & SF_EFF_NODES) && !collide_hit_once(&o->hits, monster, record))
+            continue;                                /* [R] 0x2E33A0: on the record's hit list */
         if (getenv("RAMPAGE_TRACE"))
             printf("  street object %d (%s) hit\n", i, o->name ? o->name : "?");
         take_damage(s, o, monster, who, 0);

@@ -164,8 +164,8 @@ template's name is what the challenge counts (0x346780).
 ## Not traced / guessed
 - **One TakeDamage per blow** [R]: the monster's object test (0x2E22B0) puts an OnlyHitWithEffNodes (0x8000) object
   on the attack's hit list (0x2E33A0, emptied when an attack is armed); the balloons, bikers and carts all have it,
-  and unarmed spheres do nothing to them. The port lets each armed attack (`blow`, counted by the caller) take one
-  hit point of a balloon, so five blows pop one.
+  and unarmed spheres do nothing to them. As here: once per attack record (the arming's number, its parts' own,
+  `CollideHitList`), so five blows pop a balloon.
 - **The hit tests** [R 0x2E2598]: the monster's sphere against the object's own shape (0x28FD70, `obj_shape`) with
   0x280470 (`collide_obj_sphere`).
 - **The SpherePhysicsMover** is the game's (collide.c `collide_mover_step`, 0x28E440) in the frame's collision world
