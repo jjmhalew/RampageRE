@@ -166,19 +166,27 @@ or delete what they throw). The street test (0x28E6F4) takes the sphere about th
 for the shape's centre, and the models' origins are at their base (the taxi's body centre 0.90 up, the bench's 0.37):
 a thrown object rests r above the street [R].
 
-## Not traced
-- What the other mover classes keep at +0x10 … +0x2C (mass, velocity, restitution, friction, inertia) for the
-  exchange.
-- The gate at the top of 0x2E2C50 in full: it returns at once when the monster's +0xFC (taken as its slot) is not
-  below 0x4D7E28 (the players' count: the revealed monster's slot, main.c `push_out`) or byte 0x4D6A9A is set
-  [R 0x2E2C6C .. 0x2E2C88]; what 0x4D6A9A is was not traced. Also +0x108, +0xB9C0, +0x258C,
-  the move offset +0xBAA0, the building's +0x38C.
-- The order of 0x101A90 (the spin turning the matrix: taken about a world axis).
-- WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays): the viewer adds the spheres as sphere
-  objects flagged 4 | 0x40. Whether 0x27F620 meets it (a thrown object against its thrower) is not traced: the
-  viewer's movers leave the monsters out (`collide_mover_step_ex`'s exclude).
-- Where the monster's touch damage (TakeDamage of type Collision, boss.c / rail.c) comes from: not 0x2E2C50.
+## Settled since, and what is left
+- The gate at the top of 0x2E2C50 [R 0x2E2C6C .. 0x2E2C88]: it returns at once when the monster's +0xFC (its slot)
+  is not below 0x4D7E28 (the players' count: the revealed monster's slot, main.c `push_out`) or the debug byte
+  0x4D6A9A is set, which nothing writes (FLOW_NOTES.md; read only at 0x2E2C84, 0x2E3620, 0x2EDC94, 0x33CA38). The
+  fields it reads: +0x108 setIsAI (0x2E35C0), +0xB9C0 (`Monster.isClimbing` tests it ≠ 0, BOSS_NOTES.md; the held
+  monster's slot word, MULTIPLAYER_NOTES.md), +0x258C the foot IK (FOOTSTEP_NOTES.md), +0xBAA0 the kept type-16 move
+  record (its +0xC / +0x10, main.c `Mon.ev16x` / `ev16`) [R]; the building's +0x38C [G: not followed].
+- The order of 0x101A90 [R]: a × b of the game's 3 × 4 row matrices (rows the axes, v' = v a b), called by the
+  SpherePhysicsMover as (the object's matrix, R(axis, angle)) (0x28E610 .. 0x28E618): the spin turns about a world
+  axis, as collide.c has it; the HeldObjectMover's blend as (the rest, the hand's place): the rest in the hand's frame
+  (0x310D04).
+- WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays) [R]: a type 3 shape, which 0x27FD70 never
+  meets (0x27F620 passes the higher type first), so a thrown object does not meet its thrower or any monster: the
+  viewer's movers leave the monsters out (`collide_mover_step_ex`'s exclude COLLIDE_F_MONSTER), as the game.
+- The monster's touch damage (TakeDamage of type Collision, 2.0, every frame, to an object without
+  OnlyHitWithEffNodes; boss.c, rail.c, city.c's huts) [R]: the monster's object test 0x2E22B0, its unarmed spheres
+  against each object's shape (0x280470), not 0x2E2C50.
 - `isSphereVisible` is the camera's, not the collision world's.
+- Not traced: what the other mover classes keep at +0x10 … +0x2C for the exchange (they answer no spin and ignore the
+  impulse, 0x2873A0, 0x287390); which of two boxes 0x27F620 takes as the sphere [G]; whether a gone building keeps a
+  box (collide_add_building leaves it out) [G].
 
 ## Wired in (main.c and the modules)
 
@@ -188,7 +196,8 @@ Each frame, before anything moves, main.c's `world_build` fills the Viewer's `Co
    the sphere's number), moved again with the monster before the modules update (`world_monster_moved`);
 3. each module's objects with their shapes (0x28FD70, `collide_shape_pick`, read once per object) and their own
    flags | 4: `army_collide_add`, `vehicle_collide_add`, `rail_collide_add`, `parade_collide_add`,
-   `streetobj_collide_add`, `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged 4 |
+   `streetobj_collide_add`, `scene_huts_collide_add` (the guards' huts, their own sphere: a flying hut meets the
+   buildings and objects), `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged 4 |
    `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). Flag 4 is "in the world's object list": World::addObject
    (0x284CD0, gWorld vtable +0x3C) sets it on every object it adds, VolumeTriggers too (0x2A6710 adds them at 0x2A67C0
    / 0x2A68D4), and removeObject (0x284B60, +0x40) clears it [R]. A held object stays in, as in the game: the grab

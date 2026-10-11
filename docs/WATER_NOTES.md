@@ -216,8 +216,11 @@ plays a part [R: nothing in 0x3368C0 .. 0x339DF0 reads them; they are read by 0x
   `mon_body_centre`, the box with the airborne 3, `water_box_touches` for 0x2801A0, the last one, once a frame), the
   ground under the body centre, the wading's states, modes, place, radius and depth, the landing's press at the body
   centre, the footfalls' and landing's choice of effect, letting go of the face in a water (climb.c `climb_check`,
-  `Climber.in_water`). The type-16 record's +0xC (added to +0x1A0) is not kept by the viewer: 0 there [G] (George's
-  +0x1A0 is 0 anyway). The water list holds the flat stand-ins of the blocks behind as well [G: which list the game
-  adds them to was not followed; a monster cannot reach them].
+  `Climber.in_water`). The type-16 record's +0xC (added to +0x1A0) and +0x10 (to +0x1A4) are kept (moves.c reads
+  both, main.c `Mon.ev16x` / `ev16`, `mon_body_centre`) [R]. The water list holds the flat stand-ins of the blocks
+  behind as well [R]: they are the same WaterObject, made by the same init (0x338CC0, from 0x304450 for the block's and
+  0x3050F0 for the ones behind, f12 their slot's y) and put in the world by the same `addObject` (gWorld 0x4D17A0
+  vtable +0x3C, 0x305978), so the water test's list (0x4D0AE0 / 0x4D0AE8, 0x2D5F00) has them too; a monster cannot
+  reach them.
 - The blocks behind [R]: city.c makes the flat quads for the waters with LoadWhenWaiting (slot 1) / LoadWhenDistant
   (slot 2), at y + 41 / + 82.

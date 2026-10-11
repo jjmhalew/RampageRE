@@ -138,7 +138,8 @@ typedef struct {
     int mode;                                        /* +0xAD8: moves.h MODE_* (0 ground, 1 air, 5 on a building) */
     float half_w, half_h;                            /* MONSTER_DATA +0x198, +0x19C (3, 4.25), x scale */
     float probe[2];                                  /* MONSTER_DATA +0x1A0, +0x1A4 (0, 2.5) x scale: its body's centre */
-    int wide;                                        /* +0xB9C0 set: the alleys' measure 5 more [G what it is] */
+    int wide;                                        /* +0xB9C0 set (Monster.isClimbing's word): the alleys'
+                                                      * measure 5 more */
     int no_push;                                     /* +0x108 (setIsAI, 0x2E35C0) set: PushOutMonsters objects do
                                                       * not push it */
     int dead;                                        /* +0xA4C <= 0: no building below */
@@ -185,8 +186,8 @@ typedef void (*CollideContactFn)(void *user, int other, const float point[3], co
 int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, CollideContactFn fn,
                        void *user);
 /* the same, the objects with any of `exclude` left out of the objects it meets (0x287430 asks with include -1,
- * exclude 0: collide_mover_step). The viewer's movers leave out the monsters (COLLIDE_F_MONSTER) [G: the monster's
- * own shape, WCISpheres, against a thrown object in 0x27F620 is not traced] */
+ * exclude 0: collide_mover_step). The viewer's movers leave out the monsters (COLLIDE_F_MONSTER), as the game's meet
+ * none: a monster's shape is its WCISpheres, type 3, which 0x27FD70 never meets [R] */
 int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, uint32_t exclude,
                           CollideContactFn fn, void *user);
 /* the object obj of the frame's world flies on mv (its matrix m, its module's velocity vel, which the exchange keeps

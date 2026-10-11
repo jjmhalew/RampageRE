@@ -64,7 +64,8 @@ int water_read(Group g, WaterDef *def)
     def->num_rows = (int)group_num(g, "NumRows", 0);    /* +0x17C = NumRows + 1 [R] */
     if (def->num_cols < 1 || def->num_rows < 1 || def->num_cols > 1024 || def->num_rows > 1024)
         return -1;
-    def->tile = group_num(g, "TileSize", 1);            /* +0x18C [R]; the default is a stand-in [G] */
+    def->tile = group_num(g, "TileSize", 1);            /* +0x18C [R]; the game has no default (without the key
+                                                         * it reads address 0, 0x338EC8): 1 is the viewer's */
     def->damp = group_num(g, "Damp", 0.98f);            /* +0x1AC [R] */
     def->wave_speed = group_num(g, "WaveSpeed", 5);     /* +0x1B0 [R] */
     Group o = group_sub(g, "Origin");                   /* three list values through 0x28DB00 [R] */
@@ -203,7 +204,8 @@ Water *water_new(const WaterDef *def, const float offset[3], int flat)
         }
     /* the game draws a strip per row pair, the rows run on without degenerate joins (0x338838: (row + 1, col),
      * (row, col) for every col, row after row); here each cell is two triangles, wound as the strip's are seen from
-     * above (its joins between rows are left out) [G] */
+     * above: the same surface, without the strip's thin join triangles from one row's end to the next's start [R,
+     * left out on purpose] */
     int t = 0;
     for (int r = 0; r + 1 < w->rows; r++)
         for (int c = 0; c + 1 < w->cols; c++) {

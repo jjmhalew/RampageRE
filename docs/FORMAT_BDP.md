@@ -420,7 +420,7 @@ windows"). The books' FloorFlags are all 0 but 22 cells of New York with 1 (`Con
 NY05 and the buffer block, `Broadway_3x9`, `Empire_3x18`): the front's right column, a side's front cell [R]. Each floor holds `FloorHP` (8 ×
 width unless set), and the building `BuildingHP` (6 × width × storeys unless set). Script bindings read and set them
 (`getCellDamage`, `setCellDamage(face, storey, column, state)`, `getDestructionFrac` = HP left / HP at the start,
-`disableAutoCollapse`, ...; 0x2ADF00 → 0x2AD610).
+`disableAutoCollapse`, ...; 0x2ADF00 → 0x2AD610). `setCellDamage` (0x2BB580 → 0x2CFDA0) writes only that cell's state (+0x0; the sheet column +5 when given): its HP stays, no side cell follows [R].
 
 A monster damages a building through its clips' script calls, not its attack spheres: `Monsters.bsf`'s
 `hitBuildingFront(kind, x, y, z)` (George's street punches `(2, 0.5, 6, 8.5)`: 6 ahead and 8.5 up, the first

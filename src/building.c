@@ -391,10 +391,12 @@ int building_hit_roof(Building *b, const float p[3], float radius, int *col_out)
     if (s < 0)
         return 0;
     int o = b->live[s];
-    int left = at < b->width ? at : b->width - 1;    /* the game reads past the row beyond the width [G: clamped] */
+    int left = at < b->width ? at : b->width - 1;    /* the game reads past the storey's cell array beyond the width:
+                                                      * [G: heap memory, not in the ELF; clamped] */
     while (left >= 0 && b->cell[o][front + left].state >= 3)
         left--;
-    int right = at + 1 > 0 ? at + 1 : 0;             /* [G: from column 0 when left of the box] */
+    int right = at + 1 > 0 ? at + 1 : 0;             /* left of the box the game reads before the array [G: as
+                                                      * above; from column 0] */
     while (right < b->width && b->cell[o][front + right].state >= 3)
         right++;
     int dl = left >= 0 ? at - left : at + 0x200, dr = right < b->width ? right - at : 0x400 - at;
@@ -499,9 +501,11 @@ static int crack_step(Building *b)
     return 0;
 }
 
+/* setCellDamage (0x2BB580 -> 0x2CFDA0) [R]: a front cell set above 0 first drops its open windows (both LRPos), then
+ * the one cell's state (+0x0) is written and the grid marked for its meshes; its HP (+4) is left as it was (0x2CFDA0
+ * writes only the state and, when given, the sheet column +5) */
 void building_set_cell(Building *b, int face, int o, int col, int state)
 {
-    static const uint8_t HP[4] = { 10, 7, 3, 0 };   /* the HP a state starts below (cell_damage's 7 and 3) [G] */
     if (state < 0 || state > 3)
         return;
     if (face == FACE_ROOF) {                         /* 0x2CFDA0: one state for the whole roof, G+0x658 */
@@ -511,18 +515,17 @@ void building_set_cell(Building *b, int face, int o, int col, int state)
     }
     if (o < 0 || o >= BUILDING_STOREYS)
         return;
-    if (face == FACE_FRONT) {
-        set_state(b, o, col, state);
-        int i = building_cell_index(b, FACE_FRONT, col);
-        if (i >= 0)
-            b->cell[o][i].hp = HP[state];
-        return;
-    }
     int i = building_cell_index(b, face, col);
     if (i < 0)
         return;
+    for (int lr = 0; lr < 2 && face == FACE_FRONT && state > 0; lr++) {
+        int k = window_find(b, o, col, lr);
+        if (k >= 0) {
+            b->cell[o][i].flags &= (uint16_t)~(CELL_WINDOW_OPEN << lr);
+            window_drop(b, k);
+        }
+    }
     b->cell[o][i].state = (uint8_t)state;
-    b->cell[o][i].hp = HP[state];
     b->dirty = 1;
 }
 

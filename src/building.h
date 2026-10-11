@@ -98,8 +98,8 @@ void building_set_one_hit(int on);
 int building_hit_roof(Building *b, const float p[3], float radius, int *col);
 void building_destroy(Building *b);                 /* the collapseBuilding binding (0x2BB8B0): it falls */
 /* setCellDamage(face, floor, column, state): the cell of template storey o (0 the first above the ground floor) on
- * that face to damage state 0 .. 3, its HP with it (10, 7, 3, 0); a front end cell is its side's too; face 5 (the
- * roof) sets the roof's state, whatever the storey and column (0x2CFDA0) */
+ * that face to damage state 0 .. 3, its HP left as it was, that cell alone (a front cell above 0 drops its open
+ * windows first, 0x2BB580); face 5 (the roof) sets the roof's state, whatever the storey and column (0x2CFDA0) */
 void building_set_cell(Building *b, int face, int o, int col, int state);
 void building_update(Building *b, float dt);         /* collapses, destruction, the shaker (0x2BDC70) */
 float building_shake(const Building *b);             /* the sway along x now (0x2CC450) */
