@@ -4141,11 +4141,13 @@ static void mon_step(Mon *mo, float dt)
         if (st->flags & NODE_STEER)
             mo->heading += steer(mo, st, lx, ly, dt);
         scene_monster_blend_step(&v->scene, mo->slot, dt);
-        if (ev != 0 && mo->pending_slot >= 0) {       /* the army's hit: the reaction slot (0x2D6A50), its column's */
+        if (ev != 0 && mo->pending_slot >= 0) {       /* the army's hit: the reaction slot (0x2D6A50), its column's;
+                                                      * the mount stays (0x2D6A50 does not unmount: a face's reaction
+                                                      * holds on, any other lets go at the next mount check, mode 5 no
+                                                      * more, 0x2E14F0) [R] */
             int to = moves_slot(&mo->graph, mo->pending_slot, mo->column);
             mo->pending_slot = -1;
             if (to >= 0) {
-                climb_unmount(&mo->mount);
                 moves_force(&mo->run, to);
                 if (mo->vel[2] > 0)
                     mo->mode = MODE_AIRBORNE;
