@@ -181,7 +181,11 @@ next block.
 
 - **Starting lives** (0x33DB90, a new city; 0x33D820, a restored checkpoint): **3** per player in the campaign; 0 in
   the other modes, which never run out.
-- **Defeat**: at 0 HP the monster takes slot 67 `React_Defeated`. George's graph runs:
+- **Defeat**: at 0 HP the monster takes slot 67 `React_Defeated`: from a blow's TakeDamage (0x2D9500 .. 0x2D95F4),
+  and from the monster's update itself (0x2E68D0 .. 0x2E6A4C) once it is at 0 HP with no reaction asked, not in the
+  air and not yet defeated (+0xA59), so the HP the scripts take with `addHitPoints` (0x2DA530: the bosses, the trains,
+  the rockets; it only clamps) fells it too [R]. (Without the update's test the port's monster stood at 0 HP until
+  the watchdog's `never_respawns`, HongKong's boss block.) George's graph runs:
   - `React_Defeated` (0.833 s clip at rate 1.2);
   - `Faceup_Idle_Dead` (0.833 s);
   - `Faceup_Idle_Shrinking` (1 s): `setScale(0.2, 0.833)` at 0, `becomeHuman` at 0.763;

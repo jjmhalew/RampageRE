@@ -4512,6 +4512,15 @@ static void mon_step(Mon *mo, float dt)
         if (st->flags & NODE_STEER)
             mo->heading += steer(mo, st, lx, ly, dt);
         scene_monster_blend_step(&v->scene, mo->slot, dt);
+        if (!mo->defeated && mo->hp <= 0 && mo->pending_slot < 0 && mo->mode != MODE_AIRBORNE) {
+            /* [R 0x2E68D0 .. 0x2E6A4C] the update's own test: at 0 HP, no reaction asked (+0x110), not in the air
+             * (+0xAD8 1) and not yet defeated (+0xA59), the defeat as TakeDamage's (0x2D9500 .. 0x2D95F4): its slot
+             * (67), the velocity 0, +0xA59 = 1. So the HP the scripts take (addHitPoints 0x2DA530: the bosses, the
+             * trains, the rockets) fells it too, rather than leaving it standing at 0 */
+            mo->defeated = 1;
+            mo->pending_slot = 67;
+            memset(mo->vel, 0, sizeof mo->vel);
+        }
         if (ev != 0 && mo->pending_slot >= 0) {       /* the army's hit: the reaction slot (0x2D6A50), its column's;
                                                       * the mount stays (0x2D6A50 does not unmount: a face's reaction
                                                       * holds on, any other lets go at the next mount check, mode 5 no

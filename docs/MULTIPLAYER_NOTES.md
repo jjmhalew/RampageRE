@@ -203,6 +203,14 @@ pays +0x190 as well. Everything else (army, people, vehicles) goes through addSt
   taken as their collision boxes [G]. A bot answers −2 or −3 at its mount point with a street punch (director.c,
   frontPoint 0x2EF8F0).
 
+A deadlock of the bots' own logic [R, the port's autoplay NY08_Broadway]: a bot in the back row's alley behind a
+fallen front building (NewYork's (-10, 16), between Broadway's buildings 1 and 4, 3 gone) stands idle for good.
+pickBuilding (0x2F0F60) takes the front row's building 2, whose right side passes pickSide; approachAndMount's
+canMount from where the bot stands (0x2EFA90 → 0x2A4470) finds building 1's right face first, whose front-corner
+spot is in building 2 (0x2DDC40: −5), and drops the target for the idle; the next frame validate (0x2F15F0: canMount
+−5) fails, pickBuilding takes building 2 again with +0x70 at 0 (0x2F11F8), so the minute's collapse never comes. As
+the game's code does; only a bot gets there (`monster_stuck` in the cities suite is this).
+
 Stand-ins and gaps:
 - Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here
   they have no keys and are made AI with the bots' goal.
