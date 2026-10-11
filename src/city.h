@@ -154,6 +154,7 @@ typedef struct {
     float ik_shoulder[2][3], ik_reach[2];             /* the upper arm's place (model space, as drawn), the arm's length */
     struct IkFeet *feet;                              /* its foot IK (ik.c ik_feet), NULL none */
     struct TailAnim *tail;                            /* its tail's springs (look.c tail_pose), NULL none */
+    int sway_building;                                /* the building whose sway moves it as drawn (0x2D6680), -1 */
 } SceneMonster;
 
 typedef struct {
@@ -266,6 +267,9 @@ void scene_update(Scene *s, double t);               /* pose everything that mov
  * travels in that clip (units per second), for moving it by hand */
 int scene_monster_clip(Scene *s, int k, const char *suffix, float *speed);
 void scene_monster_place(Scene *s, int k, float x, float y, float z, float deg);
+/* the building (scene index, -1 none) the monster climbs or stands on: while it shakes, the monster and its hair are
+ * drawn moved by its sway (0x2D6680), the monster's own matrix (and the places of its bones) staying where they are */
+void scene_monster_sway(Scene *s, int k, int building);
 /* the root's axes held (bit 0 x, 1 y, 2 z) at hold, and turn degrees about Z taken out of it: the motion the
  * monster itself makes */
 void scene_monster_root_motion(Scene *s, int k, int axes, const float hold[3], float turn);

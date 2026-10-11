@@ -296,7 +296,7 @@ engine    0x2C6090-0x2D34C0  a building's cells, adornments and windows (dtors, 
 engine    0x2D34C0-0x2D4A80  Monster: its getters and plumbing (main.c Mon, moves.c, edible.c)
 engine    0x2D4A80-0x2D4C40  Monster fireWeapon (army.c army_mon_weapon_fire, from Monsters.bsf's clip event) / stopWeapon (no script calls it)
 engine    0x2D4C40-0x2D6680  Monster: weapons' setup (read), climbing, the hit search (climb.c, collide.c, main.c)
-open      0x2D6680-0x2D6880  a monster on (or at) a shaking building is drawn moved by its sway, its hair too; the port sways the building only
+engine    0x2D6680-0x2D6880  the monster's draw matrix: its building's sway (city.c monster_sway), the hair's scale and offset (city.c skin_item)
 engine    0x2D6880-0x2E7988  Monster: the hit's mode cases (army.c army_reaction_slot), script getters, the update: main.c, look.c, climb.c
 unused    0x2E7988-0x2E7CC0  clip events of types 1, 3, 4 (0x2E7840's cases): no monster's clips have them (FORMAT_MONSTER.md "Clip events")
 engine    0x2E7CC0-0x2E7E30  clip events 5/20/21 (script calls), 22/23, 6 (sound), 7, 9: main.c clip_event, sound.c
@@ -332,7 +332,6 @@ engine    0x4373C0-0x43B880  C++ static constructors: fonts, script types, the j
 platform  0x43B880-0x440590  the static constructor filling the renderers' VU1 microprogram tables (sizes of the microcode at 0x34BCB0 ..): render_gl.c
 engine    0x440590-0x443B50  C++ static constructors: TypedObject / WorldObject type registry, gWorld's managers, the RWorld singletons: main.c, collide.c
 # --- found while sorting (shown under "Open" in docs/COVERAGE.md)
-note The monster's cloth scale: while its dynamic scale is on (+0xA74), 0x2D6680 sets ClothInstance +0x8C to the monster's scale (+0xA78), which the ported draw 0x1D5920 reads; the port scales the base matrix instead (main.c). Unchecked whether the two look the same.
 note WCISpheres' ray against the monster's spheres (0x29A300): main.c `world_build` adds the spheres itself; its nearest hit and normal are not compared with the game's.
 note enableSfx pauses the sound event player for a frame at block teardown and game over (0x2B6760, 0x324584); sound.c has none [G: inaudible].
 note funcmap.csv splits some functions at jump-table targets (e.g. 0x107838, 0x107BF0, 0x108558 are cases of 0x1072B0; 0x1900B0 is the tail of 0x18F9C0), so a few "functions" here are pieces of one.

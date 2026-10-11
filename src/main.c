@@ -4686,6 +4686,10 @@ static void mon_step(Mon *mo, float dt)
         for (int k = 0; k < 11; k++)
             if ((k & 3) != 3)
                 mon_in(mo)->base.m[k] *= mo->scale;
+    /* [R 0x2D6680] the building it is drawn swaying with: the one it climbs (+0xC640), else on the ground (+0xAD8
+     * 0) the one under its body (0x2D6150) */
+    scene_monster_sway(&v->scene, mo->slot, mo->mount.at.building >= 0 ? mo->mount.at.building :
+                       mo->mode == MODE_GROUND ? mon_building_below(mo) : -1);
     hands_step(mo, dt);
     feet_step(mo);
 }

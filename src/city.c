@@ -2508,6 +2508,8 @@ static void pose_instance(Scene *s, Instance *in, double t)
     }
 }
 
+static float monster_sway(const Scene *s, int k);
+
 static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
 {
     Skin *sk = it->skin;
@@ -2559,18 +2561,31 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
     if (sk->cloth && sk->particle) {                 /* hair: simulated in the world (the monster's moves drag it) */
         static float world[256][16];
         int nodes = cloth_nodes(sk->cloth);
+        /* [R] a monster's hair is simulated under its unscaled matrix (0x2E13F8: 0x1D90E0 with the monster's +0x8)
+         * and drawn scaled by its dynamic scale about its place (0x2D6680 sets ClothInstance +0x8C to +0xA78 while
+         * +0xA74, else 1, by 0x1D67A0; the draw 0x1D5920 pushes the object matrix's inverse x scale x the object
+         * matrix). The base here carries that scale (main.c): it is taken out for the simulation, and the particles
+         * brought back under the unscaled matrix are drawn under the scaled one, which is the same picture */
+        Mat4 sim = in->base;
+        if (scene_monster_slot(s, it->instance) >= 0) {
+            float sc = sqrtf(sim.m[0] * sim.m[0] + sim.m[1] * sim.m[1] + sim.m[2] * sim.m[2]);
+            if (sc > 1e-6f && fabsf(sc - 1) > 1e-6f)
+                for (int k = 0; k < 11; k++)
+                    if ((k & 3) != 3)
+                        sim.m[k] /= sc;
+        }
         for (int j = 0; j < nodes && j < (int)nb; j++) {
-            Mat4 w = mat_mul(in->base, palette[j]);
+            Mat4 w = mat_mul(sim, palette[j]);
             memcpy(world[j], w.m, sizeof world[j]);
         }
         /* the world matrix moves only with a step: a posing between steps draws the particles where the last step
          * left them, under that step's matrix (else the hair would trail by the monster's move since) */
         if (!sk->cloth_started) {
-            cloth_set_world(sk->cloth, in->base.m);
+            cloth_set_world(sk->cloth, sim.m);
             cloth_reset(sk->cloth, (const float (*)[16])world);
             sk->cloth_started = 1;
         } else if (s->cloth_dt > 0) {
-            cloth_set_world(sk->cloth, in->base.m);
+            cloth_set_world(sk->cloth, sim.m);
             float wind[3] = { 0, 0, 0 };
             if (sk->has_wind)                        /* 0x3473B0: the flag's wind at the game clock */
                 cloth_flag_wind(&sk->wind, s->cloth_time, wind);
@@ -2785,6 +2800,9 @@ static void update(Scene *s, double t, int all)
         } else {
             it->world = it->node >= 0 ? mat_mul(in->base, in->node[it->node]) : in->base;
         }
+        int mk = scene_monster_slot(s, it->instance);
+        if (mk >= 0)                                 /* its building's sway, as drawn (0x2D6680) */
+            it->world.m[12] += monster_sway(s, mk);
     }
     s->cloth_time += s->cloth_dt;
     s->cloth_dt = 0;
@@ -2797,7 +2815,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     memset(s, 0, sizeof *s);
     s->city = &c->bundle;
     for (int k = 0; k < SCENE_MONSTERS; k++)
-        s->mon[k].inst = -1;
+        s->mon[k].inst = s->mon[k].sway_building = -1;
     s->sky = -1;
     s->ground_inst = -1;
     s->placing_building = -1;
@@ -3641,6 +3659,26 @@ void scene_monster_place(Scene *s, int k, float x, float y, float z, float deg)
     Instance *in = mon_inst(s, k);
     if (in)
         in->base = mat_trs_z(x, y, z, deg);
+}
+
+void scene_monster_sway(Scene *s, int k, int building)
+{
+    if (k >= 0 && k < SCENE_MONSTERS)
+        s->mon[k].sway_building = building >= 0 && (uint32_t)building < s->nbuildings ? building : -1;
+}
+
+/* [R 0x2D6680, from the monster's draw 0x2FEFA0] the sway the monster is drawn moved by: while its building shakes
+ * (0x2CC5B0: the shake not yet over), the shaker's offset (0x2CC450: along the world's x, as building_place moves the
+ * building) is added to the place of the matrix it is drawn with (a copy of +0x8, given to its render instance
+ * +0x950 by 0x186AC0) and set as its hair's draw offset (ClothInstance +0x90 by 0x1D6780, added by the draw
+ * 0x1D5920); else the hair's offset is 0 (0x409FF8). The monster's own matrix, its bones' places and its cloth's
+ * simulation stay unmoved */
+static float monster_sway(const Scene *s, int k)
+{
+    int bi = s->mon[k].sway_building;
+    if (bi < 0 || (uint32_t)bi >= s->nbuildings || s->buildings[bi].b.shake_time <= 0)
+        return 0;
+    return building_shake(&s->buildings[bi].b);
 }
 
 void scene_monster_root_motion(Scene *s, int k, int axes, const float hold[3], float turn)

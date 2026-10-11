@@ -155,5 +155,15 @@ axis: the game's rsqrt.s (0x1D6E30, 0x1D7F88) of 0 is the EE's +MAX (its FPU has
 normal and the torque come out 0, as the port's guarded 0 [R]. The skin matrices come from the caller (the game
 builds them from the skeleton for the bone list only; the port's are the same matrices for those nodes). Left out:
 the collisions (no entry has a sphere: the count +0x44 is 0 on all 44 [R]), the bounding sphere (instance +0x4C ..
-+0x5C, the drawing's), and the renderer's scale (+0x8C, 1) [G: no reader of it was found in 0x1AA000 .. 0x1AC000, and
-at 1 it would change nothing].
++0x5C, the drawing's).
+
+The draw (0x1D5920) places the simulated particles with two settings of the monster's (0x2D6680, each frame of its
+draw 0x2FEFA0) [R]: the scale +0x8C (0x1D67A0: the monster's dynamic scale +0xA78 while +0xA74, else 1) and the offset
++0x90 (0x1D6780: its building's sway while that shakes, else 0). With a scale it pushes the object matrix's inverse ×
+scale × the object matrix (the object matrix +0x1C is the unscaled one the step was given, the monster's +0x8 at
+0x2E13F8), plus the offset; without, a translation by the offset. So the hair is simulated at full size and drawn
+shrunk about the monster's place. The port gets the same picture: it simulates under the unscaled matrix (city.c
+`skin_item` takes the scale main.c puts in the monster's base out again) and draws the particles, brought back into
+the model, under the scaled base, which is the same transform; the sway is added to the monster's draw items
+(`monster_sway`). Simulating under the scaled matrix instead (as the port did) gives other strands at a small scale:
+the pins shrink but the springs' rest lengths and the gravity do not.

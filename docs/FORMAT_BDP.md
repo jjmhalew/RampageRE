@@ -524,7 +524,11 @@ The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then it
 - **The shaker** (+0x8AC, from `ShakerDef`: `MasterAmp` 0.05, `ShakeLength` 0.5, and (period, phase, amp) triples
   (0.05, 1, 3), (0.25, 2, 0.25), (0.33, 3, 0.25), (0.61, 4, 0.25)) sways the building along x: MasterAmp × the sum
   of amp × a parabolic sine of (t + phase) / period (0x2CC450), fading over the last fifth. Every cell hit and every
-  frame of a falling storey adds ShakeLength × (1 + a random share) to it (0x2CC5E0).
+  frame of a falling storey adds ShakeLength × (1 + a random share) to it (0x2CC5E0). A monster climbing it
+  (+0xC640) or, on the ground (+0xAD8 0), standing on it (0x2D6150) is drawn moved by the same offset while it
+  shakes (0x2D6680, from the monster's draw 0x2FEFA0): added to the place of the matrix its render instance is drawn
+  with and given to its hair as the draw offset (ClothInstance +0x90, 0x1D6780; 0 otherwise); its own matrix, its
+  bones and its hair's simulation stay put [R] (city.c `monster_sway`).
 
 `CellDetachDamage` and `VertDetachDamage` belong to a building's attachments (AC units, fire escapes; 0x2C617C), not
 to the grid.
