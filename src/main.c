@@ -2618,9 +2618,10 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
     }
 }
 
-/* the game's frame (game.c): what it sees (the monster's HP, the buildings standing), then what it says. The viewer
- * has no intro or walk-out choreography: a move the flow waits for is done at once, the walks and the script cameras
- * are left out [G], and a new block is built after the frame */
+/* the game's frame (game.c): what it sees (the monster's HP, the buildings standing), then what it says. The intro and
+ * walk-out choreography plays as the scripts give it: their moves and walks are the AI's PlayMove and WalkTo goals
+ * (director.c; a move the flow waits for on a monster with no AI is done at once), their cameras the script camera
+ * (dircam_game_event); a new block is built after the frame */
 static void game_step(Viewer *v, float dt)
 {
     if (!v->game || game_left(v->game))
@@ -5426,7 +5427,8 @@ static void shell_start_game(Viewer *v)
     int pick[MONSTERS], n = g->num_players < 1 ? 1 : g->num_players > MONSTERS ? MONSTERS : g->num_players;
     for (int k = 0; k < n; k++)                      /* the players' monsters, then the bots' (GameStatus +0x14) */
         pick[k] = monster_index(v, g->monster_name[k]);
-    for (int k = 1; k < n; k++)                      /* a slot the shell left empty: player 1's monster [G] */
+    for (int k = 1; k < n; k++)                      /* a name the viewer does not know: player 1's monster (a guard:
+                                                      * the shell fills every player's, GameStatus +0x14 + 4 i) */
         if (pick[k] < 0)
             pick[k] = pick[0];
     setup_players(v, n, g->num_bots, pick);

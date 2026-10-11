@@ -58,7 +58,7 @@ enum { DG_PLAY_MOVE = 0, DG_WALK_TO = 1, DG_DESTROY = 2 };   /* the goal types (
  * its update 0x2F1A60; docs/MULTIPLAYER_NOTES.md). What it sees of the world each frame, the host's to fill: */
 typedef struct {
     float min[3], max[3];    /* its box (building +0x1DC, +0x1E8) */
-    float pos[3];            /* its place (+0x2C: the middle of its foot here [G]) */
+    float pos[3];            /* its place (+0x2C: the middle of its foot, 0x2BC920 [R]) */
     int state;               /* +0x14C: 1 .. 3 standing, 4 and up falling, 0 gone (building.h BUILDING_*) */
     int row, width, storeys; /* +0x10C, +0x1C8, the storeys standing (+0x1D0) */
 } DirBuilding;
@@ -67,7 +67,7 @@ typedef struct {
     int mounted, rail;       /* the building it is on (+0xC640, -1 none) and its rail there */
     int human;               /* it became human (+0xAB4) */
     int ai;                  /* +0x108 */
-    float radius;            /* MONSTER_DATA +0x188 x its scale: here its half width [G] */
+    float radius;            /* MONSTER_DATA +0x188 x its scale: its half width (+0x198), 3 in all 30 [R] */
 } DirMonster;
 typedef struct {
     /* the bot itself */

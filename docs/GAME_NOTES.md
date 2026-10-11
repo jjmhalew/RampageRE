@@ -277,7 +277,10 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
   centre building falls (flag 1), or Levels' ResultsNI (flag 2). Any other non-Levels script goes to the host's
   `script` callback, falling back to Levels.bsf's version.
 - `gWorld.frand` is Park-Miller (0x106BD0 on gWorld +0x828, seeded from GameStatus seed[0] at the world's reset,
-  0x2B74D0) [R]; one state shared by every script, as here (wrand.c).
+  0x2B74D0) [R]; one state shared by every script, as here (wrand.c). GameStatus' two seeds are drawn anew by the
+  shell's startGame for every play type but the demo (0x308890: each (s >> 8) & 0xFFFF of a step of 0x106BD0 on
+  gShell +0x1C, again while 0) [R], the demo keeping its own; main.c `shell_start_game` (gShell +0x1C's start is not
+  found, .bss and no traced writer: 1 there [G]).
 - The block left behind's moving objects [R]: every in-game activateNextBlock passes a1 = 1 (0x2AF260, 0x325054,
   0x325258, 0x325924; only the world's reset 0x2B7568 passes 0), which first runs 0x2B66C0: 0x2A5370, the block
   manager's unload 0x302800 (the buildings), 0x4D265C / 0x4D2660 = -1, then every object of RWorld's list (gWorld
