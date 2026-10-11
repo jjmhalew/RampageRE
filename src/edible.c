@@ -339,7 +339,9 @@ int edible_add_building(Edibles *e, int building, Group inst, Group props, int w
             made += e->nslots - before;
         }
         if (m)
-            break;                                   /* [G] the instance's own list; the template's only without one */
+            break;                                   /* the instance's own list; the template's only without one [G;
+                                                      * moot: no building template (Buildings1_props, the cities'
+                                                      * _buildings books) has an EdibleInstance|] */
     }
     return made;
 }

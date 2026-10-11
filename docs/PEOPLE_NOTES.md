@@ -259,8 +259,10 @@ PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAni
   (0x318390) and the cell check (0x31AD00 [R]: not on the ground storey (its record +0x10 is 0), the cell not hidden
   (0x400 by 0x2BE580), then the last building whose box holds the point 10 out in front of the cell (y − 10;
   0x2A3D20) must have fewer standing storeys than the cell's live storey: a building in front does not hide it).
-- **The flying hut**: its `SphereMover` flight (−25 × the hit's direction in x and y) is city.c's
-  (`scene_huts_update`), until its next pulse deletes it; the mover's gravity there is not applied.
-- **Drawing**: `RenderScale` (`DefActorProps`: 0.65) scales the look (city.c's `people_sync`).
+- **The flying hut**: a script's `SphereMover` is the SpherePhysicsMover [R: createSphereMover (World binding 0x23,
+  0x2AE7C0) makes the one sphere mover class there is, vtable 0x449500], so the hut flies at −25 × the hit's
+  direction in x and y under its `Gravity` (DefObjectProps 35) until its next pulse (at most 1 s) deletes it. That
+  flight is city.c's (`scene_huts_update`), which moves it in a straight line.
+- **Drawing** [R]: `RenderScale` (`DefActorProps`: 0.65) scales the look (city.c's `people_sync`).
 - **Band timing** [R]: `Band`'s `onInit` (at the block's start, 0x2B6580) sets a 0.25 s pulse; the pulse comes once
   its clock reaches the delay (0x309BA0, STREETOBJ_NOTES.md), on the 8th step; the members are made then.
