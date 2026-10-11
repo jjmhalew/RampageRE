@@ -7,7 +7,8 @@
  *   the event player 0x4CFAB0 (instances of 0x3C bytes at +0x4C, run by 0x2716E0 every frame)  -> Inst, sfx_tick
  *   the 3D sound list 0x4CFB40 (objects of 0x40 bytes, sorted by distance, 16 nearest, 0x273CF0)  -> objects_tick
  *   the voice layer 0x4CF800 (start 0x26E3E0, 3D volume/pan/pitch 0x26E8F0, volume 0x26EE90)  -> Voice
- *   MultiStream V7.1 (STREAM.IRX on the IOP: SPU2 voices, sample cache, disc streams)  -> the mixer below [G]
+ *   MultiStream V7.1 (STREAM.IRX on the IOP: SPU2 voices, sample cache, disc streams)  -> the mixer below: the
+ *     volume and pitch units the EE sends it [R]; how the IOP mixes them is not in the ELF
  */
 #include <math.h>
 #include <stdio.h>
@@ -18,9 +19,15 @@
 
 #define PI 3.14159265f
 #define TWO_PI 6.2831853f
-#define MAX_INST 64                      /* [G] instances the event player holds */
-#define MAX_VOICES 32                    /* [G] SPU2 voices MultiStream lends the sound effects */
-#define MAX_TRACKS 96                    /* [G] named sounds + 3D objects (the game: 32 slots, a list of objects) */
+/* [R] 0x270F20: the player holds 0x2E - (2 x streams + 2) instances, the voice layer's constructor (0x270FC0) giving
+ * 2 streams (+0x20, the two music slots): 40. They are the SPU2 voices 2 .. 41 marked for the sound effects
+ * (0x270B60; the streams have the top six of the 48, 46 .. 47 and 44 .. 45 the music's), and each instance holds at
+ * most one voice (0x26E4E0), so a voice is never short and MultiStream's stealing (+0x1E, 0x26F280) never comes. */
+#define MAX_INST 40
+#define MAX_NAMED 32                     /* [R] the SoundDevice's named sounds (+0x54, 0x1C each): playSound is refused
+                                          * when all 32 are taken (0x26D0F0) */
+#define MAX_OBJECTS 128                  /* [R] the 3D list's objects (0x40 bytes each, 0x274FE0) */
+#define MAX_TRACKS (MAX_NAMED + MAX_OBJECTS)
 #define NEAREST 16                       /* [R] 0x273CF0 looks after the 16 nearest 3D objects */
 #define NGROUPS 64                       /* [R] 0x26E0D8 */
 #define GROUP_MUSIC 3                    /* [R] setMusicVolume = group 3 (0x26B5E0) */
@@ -32,6 +39,13 @@ static inline int unpack_vol(int v) { return (v >> 7) & 0xFF; }      /* [R] 0x26
 /* [R] an SPU2 volume register: 15 bits, 0x4000..0x7FFF negative (phase inverted); MultiStream keeps that meaning
  * (0x131990 scales 0x7FFF - v for those). 0x3FFF is full volume. */
 static inline float spu_amp(int v) { v &= 0x7FFF; return (float)(v & 0x4000 ? v - 0x8000 : v) / 16384.0f; }
+/* [R] 0x135320: the SPU2 pitch for a rate in Hz, rate x 4096 / 48000 cut to an integer (0x1000 plays at 48 kHz); the
+ * step through the sample per output frame is that / 4096 */
+static inline double spu_step(int rate)
+{
+    uint32_t p = (uint32_t)(((uint64_t)((uint32_t)rate << 12) * 0x057619F1u) >> 32) >> 10;
+    return p / 4096.0;
+}
 
 /* ---- the banks ([R] FORMAT_SOUND.md: UBER = PROJ, POOL, SDIR, group counts, group names, names) */
 typedef struct { int16_t *pcm; int n, loop, rate, tried; } Sample;
@@ -64,7 +78,7 @@ typedef struct {
     uint32_t fade_t0, fade_t1;           /* +0x2C, +0x30 (0 = no fade) */
     int fade_to;                         /* +0x34, packed */
     float pos[3], vel[3], range;         /* the 3D object's, copied each frame (0x26D2F0) */
-    float gain;                          /* [G] the viewer's volume */
+    float gain;                          /* the viewer's own scale on top (sound_play's volume: 1 everywhere) */
 } Inst;
 
 /* ---- a voice (the instance's voice record at +0x38, 0x26E3E0; the SPU2 voice behind it) */
@@ -76,7 +90,8 @@ typedef struct {
     int base;                            /* +0x04: a 3D voice's volume before distance and pan, -1 = the instance's */
     int l, r;                            /* the volume registers */
     int is3d;                            /* +0x13 */
-    int sign;                            /* +0x12: the surround phase, +-1 */
+    int sign;                            /* +0x12: the surround phase, +-1: 1 when the instance slot's voice record is
+                                          * made (0x26F20C, from 0x2729C4), kept from one play to the next [R] */
     float angle;                         /* +0x00: the last pan angle, 2 pi = none yet */
 } Voice;
 
@@ -92,17 +107,18 @@ typedef struct {
     float gain;
 } Track;
 
+/* a music slot (SoundDevice +0x3D4, 0x14 each) and its stream */
 typedef struct {
     uint8_t *data;
     uint32_t size;
-    int on, loop, ch, rate, inter, blocks;
+    int on, loop, ch, rate, inter, blocks;   /* on: +0x00 (the stream's handle) not -1 */
     int block, frame;                    /* the next ADPCM frame */
     int16_t pcm[2][28];
     int at, have;
     int hist[2][2];
     double phase;
-    int vol, fade_from, fade_to, stop_after;
-    uint32_t f0, f1;
+    int vol, to, from, stop_after;       /* bytes +0xD (now), +0xE, +0xF; +0xC: stop it when the fade is over */
+    uint32_t f1, f0;                     /* +0x04 the fade's end, +0x08 its start (ms) */
     char name[32];
 } Music;
 
@@ -115,17 +131,18 @@ static struct {
     Voice voice[MAX_INST];               /* one per instance slot */
     Track track[MAX_TRACKS];
     Music music[2];
+    int music_last;                      /* SoundDevice +0x434: the slot the last music went into */
     int next_handle;                     /* +0x40 of the player */
     int next_id;
     uint32_t rng;                        /* +0x50 of the player */
     int flags[32];                       /* op 32 */
     uint8_t group_vol[NGROUPS];          /* +0x444 + 8 g */
-    int enable_3d;                       /* +0x13 (enable3DSfx) */
+    int enable_3d;                       /* SoundDevice +0x3 (enable3DSfx) */
     float lis_pos[3], lis_r0[3], lis_r1[3], lis_r2[3];
     uint32_t now;                        /* ms, 0x26F230 */
     double ms_acc;
     float sfx_gain, music_gain;
-    int wrap;                            /* 1: op 0D's volume wraps as the game's does */
+    int wrap;                            /* 1: op 0D's volume wraps as the game's does (0: the viewer's option) */
     int manual_mix;
     float pending;                       /* seconds of audio to move on by when nothing pulls */
     int (*pull)(void *ctx, int16_t *out, int frames);   /* sound_stream */
@@ -303,15 +320,20 @@ static void voice_3d(const Inst *in, Voice *vc, float *pitch, int *pl, int *pr)
 
 void sound_listener(const float pos[3], const float rows[3][3])
 {
-    /* [R] 0x288550 passes the camera's place and two of its vectors as rows 0 and 1, and a zero vector (0x409FF8)
-     * as row 2, the one the pan's angle is measured from: so a sound only ever sits at +-90 degrees, in front of
-     * row 0 (both channels in phase, 0.707) or behind it (the right channel inverted: Pro Logic surround).
-     * [G] row 0 = the camera's forward, row 1 = up. */
+    /* [R] 0x288550 asks the camera manager (RCameraMgr 0x4D3100, its controller's camera 0x27F500) for its place and
+     * two of its rows, the ones the view matrix (0x167D10: right, up, forward) keeps second and third: forward as row
+     * 0, up as row 1 (its fifth argument, 0x409FF8, is not read). 0x26FCB0 scales the place by setVelocityScalar's
+     * +0xC (1, 0x26E390; no script sets it) and makes row 2 = row 0 x row 1 normalised (forward x up = right; (1, 0,
+     * 0) if under 1e-6): the pan's angle is atan2(d . forward, d . right), right 0, ahead pi / 2, left pi, behind
+     * -pi / 2 (0x26E8F0). */
+    const float *f = rows[1], *u = rows[2];
+    float c[3] = { f[1] * u[2] - f[2] * u[1], f[2] * u[0] - f[0] * u[2], f[0] * u[1] - f[1] * u[0] };
+    float n2 = c[0] * c[0] + c[1] * c[1] + c[2] * c[2];
     for (int k = 0; k < 3; k++) {
         S.lis_pos[k] = pos[k];
-        S.lis_r0[k] = rows[1][k];
-        S.lis_r1[k] = rows[2][k];
-        S.lis_r2[k] = 0;
+        S.lis_r0[k] = f[k];
+        S.lis_r1[k] = u[k];
+        S.lis_r2[k] = n2 < 1e-6f ? (k == 0) : c[k] / sqrtf(n2);
     }
 }
 
@@ -332,19 +354,13 @@ static void voice_start(Inst *in, int idx)    /* [R] 0x26E3E0 (op 10) */
     Voice *vc = &S.voice[in - S.inst];
     if (vc->on)                          /* [R] the instance's voice is still busy: the play is skipped */
         return;
-    int busy = 0;
-    for (int i = 0; i < MAX_INST; i++)
-        busy += S.voice[i].on;
-    if (busy >= MAX_VOICES)              /* [G] no voice free (MultiStream would steal for +0x1E) */
-        return;
-    Sample *s = sample_get(in->bank, idx);
+    Sample *s = sample_get(in->bank, idx);   /* (a voice is always free: MAX_INST) */
     if (!s || s->n == 0)
         return;
     vc->s = s;
     vc->rate = s->rate;
     vc->angle = TWO_PI;
     vc->base = -1;
-    vc->sign = 1;                        /* [G] */
     vc->is3d = in->is3d;
     float pitch = 1;
     if (in->is3d)
@@ -352,7 +368,7 @@ static void voice_start(Inst *in, int idx)    /* [R] 0x26E3E0 (op 10) */
     else
         vc->l = vc->r = in->vol;
     vc->pos = 0;
-    vc->step = (double)(int)((float)vc->rate * pitch) / SOUND_RATE;
+    vc->step = spu_step((int)((float)vc->rate * pitch));
     vc->on = 1;
 }
 
@@ -363,7 +379,7 @@ static void voice_3d_update(Inst *in)  /* [R] 0x26E840, every frame for a 3D ins
         return;
     float pitch;
     voice_3d(in, vc, &pitch, &vc->l, &vc->r);
-    vc->step = (double)(int)((float)vc->rate * pitch) / SOUND_RATE;
+    vc->step = spu_step((int)((float)vc->rate * pitch));
 }
 
 /* ---- the event player */
@@ -539,7 +555,7 @@ static void sfx_tick(void)
                 int cur = unpack_vol(in->vol);
                 int nv = (int)(128.0f * ((float)op[1] / 128.0f * ((float)cur / 128.0f)));
                 if (!S.wrap && nv > 127)
-                    nv = 127;                /* [G] sound_wrap_volumes(0): kept at full instead */
+                    nv = 127;                /* sound_wrap_volumes(0), the viewer's: kept at full instead */
                 in->vol = pack_vol(nv);
                 voice_set_volume(in, in->vol);
                 more = 1;
@@ -617,6 +633,11 @@ static void sfx_tick(void)
 /* ---- named sounds and the 3D list */
 static int track_new(const char *name, int obj, const float pos[3], float range, int keep, float gain)
 {
+    int used = 0;
+    for (int i = 0; i < MAX_TRACKS; i++)
+        used += S.track[i].id && S.track[i].obj == obj;
+    if (used >= (obj ? MAX_OBJECTS : MAX_NAMED))   /* [R] full: refused */
+        return -1;
     for (int i = 0; i < MAX_TRACKS; i++) {
         Track *t = &S.track[i];
         if (t->id)
@@ -712,7 +733,7 @@ static void objects_tick(float dt)
     }
 }
 
-/* ---- music ([R] 0x26FF60: "<name>.mic", 2 slots crossfading, group 3's volume) */
+/* ---- music ([R] 0x26FF60: "<name>.mic", 2 slots (SoundDevice +0x3D4), group 3's volume) */
 static void music_off(Music *m)
 {
     free(m->data);
@@ -732,17 +753,24 @@ static int music_open(Music *m, const char *name)
     if (head < 0x18 || ch < 1 || ch > 2 || rate <= 0 || inter < 16 || inter % 16 || blocks <= 0 ||
         (uint64_t)head + (uint64_t)blocks * inter * ch > size)
         goto bad;
-    music_off(m);
+    free(m->data);
     m->data = d;
     m->size = size;
     m->ch = ch;
     m->rate = rate;
     m->inter = inter;
     m->blocks = blocks;
-    m->loop = 1;                         /* [G] setMusicRepeat's default */
-    m->vol = pack_vol(S.group_vol[GROUP_MUSIC]);
+    m->block = m->frame = m->at = m->have = 0;
+    memset(m->hist, 0, sizeof m->hist);
+    m->phase = 0;
+    /* [R] it loops: setMusicRepeat's flag is 1 from the start (SoundDevice +0x43C, 0x26E384; the voice layer's copy
+     * +0xBC, 0x271118) and no script changes it, so MultiStream is told not to stop at the end (0x2700B4) and the
+     * ended stream's slot is not freed (0x26DCC8) */
+    m->loop = 1;
     m->on = 1;
     snprintf(m->name, sizeof m->name, "%s", name);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("music %s (slot %d, group 3 at %d)\n", name, (int)(m - S.music), S.group_vol[GROUP_MUSIC]);
     return 0;
 bad:
     free(d);
@@ -771,75 +799,162 @@ static int music_next_frame(Music *m)
     return 1;
 }
 
-static void music_fade(Music *m, int to, float seconds, int stop_after)
+static void music_fade(Music *m, int to, uint32_t ms, int stop_after)   /* a slot from its byte now to `to` */
 {
-    m->fade_from = m->vol;
-    m->fade_to = to;
     m->f0 = S.now;
-    m->f1 = S.now + (uint32_t)(seconds * 1000.0f);
+    m->from = m->vol;
+    m->f1 = S.now + ms;
+    m->to = to & 0xFF;
     m->stop_after = stop_after;
-    if (seconds <= 0) {
-        m->vol = to;
-        m->f1 = 0;
-        if (stop_after)
-            music_off(m);
-    }
 }
 
-static void music_tick(void)
+static void music_tick(void)           /* [R] 0x26DA50, each frame for each slot in use */
 {
     for (int i = 0; i < 2; i++) {
         Music *m = &S.music[i];
-        if (!m->on || !m->f1)
+        if (!m->on || (!m->stop_after && m->to == m->vol))
             continue;
-        uint32_t span = m->f1 - m->f0;
-        float f = span ? (float)(S.now - m->f0) / (float)span : 1;
-        if (f >= 1) {
-            m->vol = m->fade_to;
-            m->f1 = 0;
+        if ((int32_t)(m->f1 - S.now) <= 0 || m->f1 == m->f0) {
+            m->vol = m->to;                  /* the fade is over: stopped when it was one going out */
             if (m->stop_after)
                 music_off(m);
-        } else
-            m->vol = (int)((float)m->fade_from + f * (float)(m->fade_to - m->fade_from));
+        } else {
+            float f = (float)(S.now - m->f0) / (float)(m->f1 - m->f0);
+            m->vol = (m->from + (int)(f * (float)(m->to - m->from))) & 0xFF;
+        }
     }
+}
+
+/* [R] 0x26C4D0 / 0x26BFC0: the slot after the last one used, unless one is free (the first free then); a stream still
+ * in it is cut */
+static Music *music_slot(void)
+{
+    int k = (S.music_last + 1) % 2;
+    for (int i = 0; i < 2; i++)
+        if (!S.music[i].on) {
+            k = i;
+            break;
+        }
+    S.music_last = k;
+    music_off(&S.music[k]);
+    return &S.music[k];
+}
+
+static int music_target(float f)       /* f x group 3's byte (0x26C07C) */
+{
+    float v = f * (float)S.group_vol[GROUP_MUSIC];
+    return v > 0 ? (int)v & 0xFF : 0;
 }
 
 int music_replace(const char *name, float fade_out, float fade_in)
 {
-    /* [R] two slots: the new stream goes into the one not playing (or the one already on its way out) */
-    int slot = !S.music[0].on ? 0 : !S.music[1].on ? 1 : S.music[0].stop_after ? 0 : 1;
-    Music *m = &S.music[slot], *old = &S.music[slot ^ 1];
-    if (!name || !*name) {               /* replaceMusic("") fades the music out */
-        music_stop(fade_out);
+    /* [R] 0x26BFC0 replaceMusic(name, in, out) (the script's seconds x 1000, 0x275680): the new stream comes up from 0
+     * to group 3's volume over `in` while every other one goes down to 0 over `out` and is then stopped; "" only
+     * sends them all down */
+    uint32_t in_ms = fade_in > 0 ? (uint32_t)(fade_in * 1000.0f) & 0xFFFF : 0;
+    uint32_t out_ms = fade_out > 0 ? (uint32_t)(fade_out * 1000.0f) & 0xFFFF : 0;
+    if (!name || !*name) {
+        for (int i = 0; i < 2; i++)
+            if (S.music[i].on)
+                music_fade(&S.music[i], music_target(0), out_ms, 1);
         return 0;
     }
+    Music *m = music_slot();
     if (music_open(m, name) != 0)
         return -1;
-    if (old->on)
-        music_fade(old, 0, fade_out, 1);
-    int full = m->vol;
     m->vol = 0;
-    music_fade(m, full, fade_in, 0);     /* [G] 0x26BFC0: the new one comes up while the old one goes */
+    music_fade(m, music_target(1), in_ms, 0);
+    for (int i = 0; i < 2; i++)
+        if (&S.music[i] != m && S.music[i].on)
+            music_fade(&S.music[i], 0, out_ms, 1);
     return 0;
 }
 
 int music_play(const char *name)
 {
-    music_off(&S.music[0]);
-    music_off(&S.music[1]);
-    return music_open(&S.music[0], name);
+    /* [R] 0x26C4D0 playMusic: into a slot at group 3's volume at once; the other slot plays on */
+    Music *m = music_slot();
+    if (music_open(m, name) != 0)
+        return -1;
+    m->vol = m->to = S.group_vol[GROUP_MUSIC];
+    m->f0 = m->f1 = 0;
+    m->stop_after = 0;
+    return 0;
 }
 
-void music_stop(float fade_out)
+void music_stop(float fade_out) { music_replace("", fade_out, 0); }
+
+int music_playing(void) { return S.music[0].on || S.music[1].on; }   /* [R] 0x26BDB0: a slot in use */
+
+void sound_group_volume(int group, float v, int ms)
 {
-    for (int i = 0; i < 2; i++)
-        if (S.music[i].on)
-            music_fade(&S.music[i], 0, fade_out, 1);
+    /* [R] 0x26B5E0 setMusicVolume (group 3) / setSfxVolume (1) / setVoiceVolume (2): the group's byte = 127 v; the
+     * music slots (group 3) go to it over ms, otherwise the running instances of the group (0x2724B0; group 0: all) */
+    if (group < 0 || group >= NGROUPS)
+        return;
+    float f = 127.0f * v;
+    int b = f > 0 ? (int)f & 0xFF : 0;
+    S.group_vol[group] = (uint8_t)b;
+    if (group == GROUP_MUSIC) {
+        for (int i = 0; i < 2; i++) {
+            Music *m = &S.music[i];
+            if (!m->on)
+                continue;
+            if (ms <= 0)
+                m->vol = m->to = b;          /* 0x26B698: at once */
+            else {
+                m->from = m->vol;
+                m->to = b;
+                m->f0 = S.now;
+                m->f1 = S.now + (uint32_t)(ms & 0xFFFF);
+            }
+        }
+        return;
+    }
+    for (int i = 0; i < MAX_INST; i++) {
+        Inst *in = &S.inst[i];
+        if (in->handle == -1 || !in->running || (group && in->group != group))
+            continue;
+        in->fade_to = pack_vol(b);
+        in->fade_t0 = S.now;
+        in->fade_t1 = S.now + (uint32_t)(ms & 0xFFFF);
+    }
 }
 
-int music_playing(void) { return (S.music[0].on && !S.music[0].stop_after) || (S.music[1].on && !S.music[1].stop_after); }
+float sound_group_volume_get(int group)   /* [R] 0x26B570: the byte / 127 */
+{
+    return group >= 0 && group < NGROUPS ? (float)S.group_vol[group] / 127.0f : 0;
+}
 
-/* ---- the mixer ([G] MultiStream's master volumes taken as 1; linear interpolation for the SPU's gaussian) */
+void sound_settings(float sfx, float music, int music_ms)
+{
+    /* [R] the profile's and the Options page's volumes (0..0.75) as the game sets them (0x33EFD8, 0x2C2FA4):
+     * setSfxVolume on groups 1, 9, 10 and 11 (which no event is in: every PROJ group byte is 0xFF, made 0 by
+     * 0x272BC0, so the sound effects stay at group 0's 0x6A whatever the slider says), setMusicVolume on group 3 */
+    static const int sfx_groups[] = { 1, 9, 10, 11 };
+    for (int i = 0; i < 4; i++)
+        sound_group_volume(sfx_groups[i], sfx, 0);
+    sound_group_volume(GROUP_MUSIC, music, music_ms);
+}
+
+void music_for_state(int state, const char *block_music)
+{
+    /* [R] 0x323CE0, each time the world enters a state (0x3247A8): nothing while the music volume is under 0.05;
+     * the state's name (4 BeginLevel / ContinueLevel, 5 BeginBlock, 7 Results, 8 GameOver, 9 ContinueBlock,
+     * 10 EndLevel, 11 Victory; 6 none) looked up in the city book's and the block's "Music" groups (none in the
+     * data), the block's Music for BeginBlock, else "Wilder" for BeginBlock and "Oingo" for Results; then
+     * replaceMusic(name, 0.5, 0.5) */
+    if (sound_group_volume_get(GROUP_MUSIC) < 0.05f)
+        return;
+    const char *name = state == 5 ? (block_music && *block_music ? block_music : "Wilder") :
+                       state == 7 ? "Oingo" : NULL;
+    if (name)
+        music_replace(name, 0.5f, 0.5f);
+}
+
+/* ---- the mixer: the voices' volume registers as the SPU2 takes them (spu_amp) and the master volume at full: the
+ * boot logos' sound start (0x1AF608) sets MVOL to 0x3FFF on both cores and nothing sets it again [R]. [G: the
+ * SPU2 interpolates a voice with its 4-point gaussian table, a hardware matter, not in the ELF: linear here] */
 static float mixbuf[2 * 1024];
 
 static void mix_block(float *out, int frames)
@@ -872,7 +987,7 @@ static void mix_block(float *out, int frames)
         Music *m = &S.music[i];
         if (!m->on)
             continue;
-        float a = spu_amp(m->vol) * S.music_gain;
+        float a = spu_amp(pack_vol(m->vol)) * S.music_gain;   /* [R] 0x26FE00: byte << 7 on its two voices */
         double step = (double)m->rate / SOUND_RATE;   /* 1: the streams are at 48 kHz [R] */
         for (int f = 0; f < frames; f++) {
             if (m->at >= m->have && !music_next_frame(m)) {
@@ -1076,11 +1191,11 @@ void sound_update(float dt)
     uint32_t ms = (uint32_t)S.ms_acc;
     S.ms_acc -= ms;
     S.now += ms;
-    for (int i = 0; i < MAX_TRACKS; i++)  /* a named 2D sound's slot is free once its instance has ended */
+    sfx_tick();                          /* [R] 0x26D960: the event player, then the 3D list, the named sounds, */
+    objects_tick(dt);                    /* the music slots */
+    for (int i = 0; i < MAX_TRACKS; i++)  /* a named 2D sound's slot is free once its instance has ended (0x26D9C8) */
         if (S.track[i].id && !S.track[i].obj && !inst_find(S.track[i].inst))
             S.track[i].id = 0;
-    objects_tick(dt);
-    sfx_tick();
     music_tick();
     if (out_open())
         out_feed();
@@ -1106,14 +1221,18 @@ int sound_init(const Vol *v)
     for (int i = 0; i < MAX_BANKS; i++)
         if (bank_load(&S.bank[S.nbanks], v, banks[i]) == 0)
             S.nbanks++;
-    for (int i = 0; i < MAX_INST; i++)
+    for (int i = 0; i < MAX_INST; i++) {
         inst_free(&S.inst[i]);
+        S.voice[i].sign = 1;             /* [R] 0x26F20C */
+    }
     for (int g = 0; g < NGROUPS; g++)
         S.group_vol[g] = 0x6A;           /* [R] 0x26E0CC: every group at 0x6A, music (3) at 0x3F */
     S.group_vol[GROUP_MUSIC] = 0x3F;
-    S.next_handle = 100;
-    S.rng = 12345;                       /* [G] the seed */
-    S.enable_3d = 1;                     /* [G] enable3DSfx's default */
+    S.next_handle = 100;                 /* [R] 0x44086C */
+    S.rng = 12345;                       /* [G: 0x106C80 seeds it at start-up with the EE timer's count (0x10D4D0,
+                                          * which starts the timer on its first call) | 1: unknowable] */
+    S.enable_3d = 1;                     /* [R] SoundDevice +0x3 = 1 (0x26E368); only a script could change it */
+    S.music_last = 0;                    /* +0x434: the static's 0 */
     S.sfx_gain = S.music_gain = 1;
     S.wrap = 1;
     S.lis_r0[1] = 1;

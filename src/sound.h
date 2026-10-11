@@ -9,7 +9,10 @@
  *   the monsters' clip sounds        0x287860 -> sound_play(name, pos, 1) (3D, range 0 = 1000 x the event's scale)
  *   gSndDev.killSound(name)          0x26B960 -> sound_kill_name(name)
  *   gSndDev.playMusic(name)          0x26C4D0 -> music_play(name)  ("bbop" -> bbop.mic; a BlockDef's Music)
- *   gSndDev.replaceMusic(n, out, in) 0x26BFC0 -> music_replace(n, out, in)
+ *   gSndDev.replaceMusic(n, in, out) 0x26BFC0 -> music_replace(n, out, in)
+ *   gSndDev.setMusicVolume(v, ms)    0x26B5E0 -> sound_group_volume(3, v, ms) (setSfxVolume group 1, setVoiceVolume 2)
+ *   the profile's / Options' volumes 0x33EFD8, 0x2C2FA4 -> sound_settings(sfx, music, ms)
+ *   the world entering a state       0x323CE0 -> music_for_state(state, the block's Music)
  *   the camera each frame            0x288550 -> sound_listener(pos, rows)
  * Names are looked up case-insensitively (0x273480), first in Rampage.uber, then in RShell.uber (the front end's
  * "Cancel" is only there). Positions are the game's: z up.
@@ -32,8 +35,9 @@ void sound_update(float dt);             /* a game frame: the 3D list, the event
 int  sound_mix(int16_t *out, int frames);/* render frames (stereo) by hand instead of the output (tests, capture);
                                           * once called, sound_update stops moving the voices on by itself */
 
-/* a sound by its event name; pos NULL = a 2D sound (playSound), else a one-shot 3D sound at pos (dropped when out of
- * its range). volume scales it on top of the game's own volumes [G] (1 = as the game). The handle, 0 if refused. */
+/* a sound by its event name; pos NULL = a 2D sound (playSound; refused when the 32 named slots are taken), else a
+ * one-shot 3D sound at pos (dropped when out of its range; the 3D list holds 128). volume is the viewer's own scale
+ * on top of the game's volumes (1 = as the game). The handle, 0 if refused. */
 int  sound_play(const char *name, const float pos[3], float volume);
 /* a 3D sound object (add3DSfx): range 0 = 1000 x the event's scale; keep = stays in the list while out of range and
  * starts again when the listener comes back (the game keeps the objects scripts add by id). */
@@ -45,18 +49,30 @@ int  sound_active(int h);                /* still playing (or waiting to come in
 /* the listener: the camera's place and rows (right, forward, up as in camera.h) */
 void sound_listener(const float pos[3], const float rows[3][3]);
 
-int  music_play(const char *name);       /* a music stream, looping; replaces the one playing at once */
+/* the two music slots (the streams loop): playMusic puts a stream into the free slot (else the one after the last
+ * used, cutting it) at group 3's volume at once, the other slot playing on; replaceMusic does the same from 0 up
+ * over fade_in while the other fades out over fade_out and stops; "" (or music_stop) fades them all out */
+int  music_play(const char *name);
 int  music_replace(const char *name, float fade_out, float fade_in);   /* seconds */
 void music_stop(float fade_out);
-int  music_playing(void);
+int  music_playing(void);                /* a slot in use (one fading out counts, as isMusicPlaying) */
+/* the music for a state the world enters (GS_*): BeginBlock (5) the block's Music (else "Wilder"), Results (7)
+ * "Oingo", over 0.5 s each way; nothing for the others, nor while the music volume is under 0.05 */
+void music_for_state(int state, const char *block_music);
 
-void sound_volume(float sfx, float music);   /* the viewer's own gains [G], 1 = as the game */
-/* a stream the mixer pulls (a movie's sound, movie.c): pull(ctx, out, frames) fills stereo 48 kHz frames; at the
- * music's gain [G]. NULL stops it. */
+/* a volume group's byte = 127 v (group 3 the music: its slots fade to it over ms; others: their instances) */
+void sound_group_volume(int group, float v, int ms);
+float sound_group_volume_get(int group);
+/* the profile's sound and music volumes (0..0.75) as the game applies them: the sound one on groups 1, 9, 10, 11,
+ * which hold no event (the slider changes nothing in the game), the music one on group 3 (over music_ms) */
+void sound_settings(float sfx, float music, int music_ms);
+void sound_volume(float sfx, float music);   /* the viewer's own gains on top (not the game's), 1 = as the game */
+/* a stream the mixer pulls (a movie's sound, movie.c): pull(ctx, out, frames) fills stereo 48 kHz frames, mixed at
+ * full scale (MOVIE_NOTES.md). NULL stops it. */
 void sound_stream(int (*pull)(void *ctx, int16_t *out, int frames), void *ctx);
 /* [R] op 0D multiplies the instance's volume byte (group 0's 0x6A to start) by op[1] / 128 and keeps the low 8 bits;
  * a byte of 128 or more is an SPU volume of 0x4000 or more, which the SPU2 plays phase-inverted and quieter. On (the
- * default) does as the game; off keeps such volumes at 127 [G], to compare by ear. */
+ * default) does as the game; off (the viewer's option) keeps such volumes at 127, to compare by ear. */
 void sound_wrap_volumes(int on);
 
 /* introspection (tools, tests) */

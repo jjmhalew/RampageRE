@@ -208,7 +208,9 @@ typedef struct Viewer {
     int challenges_lost;                             /* a block of this city was won with its challenge not met */
     int upgrade_fx;                                  /* the MonsterUpgrade object's effect, -1 */
     int exit_game;                                   /* the game went back to the shell (the Pause menu's Quit) */
-    float sfx_vol, music_vol, music_now;             /* the Options page's volumes, 1 = as the game; the music now */
+    float sfx_vol, music_vol, music_now;             /* the Options page's volumes / 0.75 (the profile's 0.75 = 1);
+                                                      * the music now */
+    int music_state;                                 /* a state whose music waits for its block to be built, 0 none */
     Reveal reveal; RevealRoster roster;              /* the cryotube's monster and the unlocks (reveal.c): the
                                                       * roster's flags stand for the profile's, from 0 */
     RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
@@ -833,8 +835,15 @@ static void build(Viewer *v)
         mon_in(&v->mon[v->extra])->hidden = 1;
     if (v->nmon && v->mon[0].have_graph)
         play_reset(v);
-    if (v->have_scene && v->scene.music)            /* the block's music, looping (sound.c; silent unless started) */
+    if (v->have_scene && v->game_built && v->music_state) {   /* the game's next block: BeginBlock's music, its Music
+                                                      * (sound.c music_for_state, 0x323CE0) */
+        music_for_state(v->music_state, v->scene.music);
+        v->music_state = 0;
+    } else if (v->have_scene && v->scene.music && !have_monster(v)) {   /* no game: the block's music, looping
+                                                      * (silent unless started); a game's comes with its states */
+        music_stop(0);
         music_play(v->scene.music);
+    }
     if (v->army) {
         army_free(v->army);
         v->army = NULL;
@@ -2660,7 +2669,9 @@ static void game_step(Viewer *v, float dt)
                 if (e->a == GS_BEGIN_BLOCK && v->next_block >= 0) {
                     v->game_block = v->next_block;   /* built once this frame is over */
                     v->next_block = -1;
-                }
+                    v->music_state = GS_BEGIN_BLOCK; /* its music then */
+                } else                               /* the state's music (0x3247A8) */
+                    music_for_state(e->a, v->have_scene ? v->scene.music : NULL);
                 break;
             case GE_EXIT:                            /* the demo is over (0x324D18): back to the shell */
                 if (e->a == 2) {
@@ -2843,7 +2854,7 @@ static void hud_frame(Viewer *v, int after)
         v->vibrate = profile_set_rumble(&v->prof, rumble, 1);
         v->sfx_vol = sv / 0.75f;
         v->music_vol = v->music_now = mv / 0.75f;
-        sound_volume(v->sfx_vol, v->music_now);
+        sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0);
         break;
     default: break;
     }
@@ -2851,8 +2862,8 @@ static void hud_frame(Viewer *v, int after)
     int nc = hud_calls(v->hud, calls, 16);
     for (int i = 0; i < nc; i++)                     /* gSndDev's volumes (no fades here) */
         switch (calls[i].call) {
-        case HUD_CALL_MUSIC_VOLUME: v->music_now = calls[i].value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
-        case HUD_CALL_SFX_VOLUME: v->sfx_vol = calls[i].value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+        case HUD_CALL_MUSIC_VOLUME: v->music_now = calls[i].value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
+        case HUD_CALL_SFX_VOLUME: v->sfx_vol = calls[i].value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
         case HUD_CALL_SAVE_SETTINGS:
             hud_settings(v->hud, &sv, &mv, &rumble);
             profile_set_sound_volume(&v->prof, sv);
@@ -2860,7 +2871,7 @@ static void hud_frame(Viewer *v, int after)
             v->vibrate = profile_set_rumble(&v->prof, rumble, 1);
             v->sfx_vol = sv / 0.75f;
             v->music_vol = v->music_now = mv / 0.75f;
-            sound_volume(v->sfx_vol, v->music_now);
+            sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0);
             break;
         case HUD_CALL_RUMBLE:                        /* setEnableRumble(on, save) */
             v->vibrate = profile_set_rumble(&v->prof, calls[i].value != 0, calls[i].arg);
@@ -5254,8 +5265,8 @@ static int shell_answer(Viewer *v)
                 else
                     music_stop(0.5f);
                 break;
-            case SHELL_EVT_MUSIC_VOLUME: v->music_now = e->value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
-            case SHELL_EVT_SFX_VOLUME: v->sfx_vol = e->value / 0.75f; sound_volume(v->sfx_vol, v->music_now); break;
+            case SHELL_EVT_MUSIC_VOLUME: v->music_now = e->value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
+            case SHELL_EVT_SFX_VOLUME: v->sfx_vol = e->value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
             case SHELL_EVT_RUMBLE: v->vibrate = profile_set_rumble(&v->prof, e->arg != 0, 0); break;
             case SHELL_EVT_RUMBLE_PULSE:             /* gCommon.rumble(ms): pad 0 [R 0x2C34C8] */
                 if (v->pads_live && v->vibrate)
@@ -5268,7 +5279,7 @@ static int shell_answer(Viewer *v)
                 v->vibrate = profile_set_rumble(&v->prof, rumble, 1);
                 v->sfx_vol = sv / 0.75f;
                 v->music_vol = v->music_now = mv / 0.75f;
-                sound_volume(v->sfx_vol, v->music_now);
+                sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0);
                 break;                               /* (saveProfile: the popup asks for the write) */
             case SHELL_EVT_PROFILE_LOAD:
             case SHELL_EVT_PROFILE_CREATE:
@@ -5841,7 +5852,7 @@ int main(int argc, char **argv)
     v.vibrate = profile_set_rumble(&v.prof, profile_rumble(&v.prof), 0);   /* the pads vibrate as the profile says [G] */
     v.sfx_vol = profile_sound_volume(&v.prof) / 0.75f;
     v.music_vol = v.music_now = profile_music_volume(&v.prof) / 0.75f;
-    sound_volume(v.sfx_vol, v.music_now);
+    sound_settings(v.sfx_vol * 0.75f, v.music_now * 0.75f, 0);
     v.nmonsters = monster_names(&v.vol, v.monsters, 64);
     v.clip = clip;
     {                                                /* --players N (1 .. 4, --bots B of them the computer's) */
