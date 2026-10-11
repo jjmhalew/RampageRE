@@ -211,7 +211,8 @@ int challenge_load(Challenge *c, Group block_def, int play_type, int last_block,
 
 /* [R] 0x2B4970 / 0x2B47C0 / the cases 0x2AF488 and 0x2AF5C8: the current block's ChallengeDef (0x303160 on the block
  * manager, then "ChallengeDef" a group record), its key read every call; a missing key leaves the answer as made:
- * the floats 0.0 (PFloat's constructor 0x1CE830) [R], the strings "" [G] */
+ * the floats 0.0 (PFloat's constructor 0x1CE830) [R]; the strings get no string and are cleared to "" (0x2B4A48 ..
+ * 0x2B4A70) [R] */
 const char *challenge_identifier(const Challenge *c)
 {
     const char *s = c->def.at ? group_str(c->def, "Name") : NULL;
@@ -393,7 +394,8 @@ uint32_t challenge_upgrade_hit(Challenge *c, const float centre[3], float radius
         float e = centre[i] - c->up.pos[i];
         d2 += e * e;
     }
-    float reach = radius + c->up.radius;             /* [G] the engine's sphere test */
+    float reach = radius + c->up.radius;             /* [R 0x2E22B0] the monster's object test: each collision
+                                                      * sphere against the shape, CollisionRadius about its middle */
     if (d2 > reach * reach)
         return 0;
     if (c->up_delay > 0)

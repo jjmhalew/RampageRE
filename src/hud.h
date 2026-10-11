@@ -77,7 +77,8 @@ void hud_set_project(Hud *h, HudProject fn, void *ctx);
 /* a floating score number (a PointsBanner): amount at pos (world, Z up; army AE_FLOAT's pos, already 5 towards the
  * street), building = 1 for a whole building's award (yellow), 0 for the rest (white); scale 0.8 for the army's
  * awards [R 0x2BAB2C], 1.0 for an edible's [R Edible.scr]. Without a projection, pos[0], pos[1] are a screen point
- * and the number's motion and size are drawn at 8 pixels per world unit [G]. */
+ * and the number's motion and size are drawn at 8 pixels per world unit (a viewer's fallback: the game always has
+ * its camera). */
 void hud_float(Hud *h, int amount, const float pos[3], int building, float scale);
 
 /* ---- the text banners: PointsBanner.createAndStartText (0x2B1640) loads the interface Rage and hands it the text
@@ -182,8 +183,8 @@ typedef struct {
  * the time bonus among them), LevelResults (the city's: its score, the par, the stars), WorldResults (the campaign's
  * end), KingBlockResults (the block's winner, the points, the standings), KingCityResults (the King of the City, the
  * standings), KingWorldResults (the King of the World) and TimedRunResults (the time left and added). r may be NULL
- * for GameOver. A screen whose layout is missing is a stand-in that draws nothing and answers DONE after 3 s or on
- * HUD_EV_ACCEPT */
+ * for GameOver. A screen whose layout is missing (a viewer's fallback; the game's files have them all) draws nothing
+ * and answers DONE after 3 s or on HUD_EV_ACCEPT */
 void hud_results(Hud *h, int screen, const HudResults *r);
 /* the result the screen gave since the last call (HUD_RESULT_*, the numbers of game.h GR_*), HUD_RESULT_NONE none */
 int hud_result(Hud *h);
@@ -196,8 +197,8 @@ void hud_set_save_active(Hud *h, int on);
 /* gCommon.getAllowSave() changed under the screen (the popup's warn-continue turned autosave off): Results' Save button
  * shows again [R Results.scr:217, read each frame] */
 void hud_set_allow_save(Hud *h, int on);
-/* stand-in for a player: press ACCEPT for them this many seconds after a screen takes buttons (Results' Continue,
- * GameOver's Retry); 0 = never (default) */
+/* a test aid in place of a player: press ACCEPT for them this many seconds after a screen takes buttons (Results'
+ * Continue, GameOver's Retry); 0 = never (default) */
 void hud_results_auto(Hud *h, float seconds);
 
 /* the pad, as GuiEvent ids [R the screens' scripts]. Which direction is which [R by the scripts' use]: the Pause
@@ -245,7 +246,7 @@ enum {
 int hud_pause_result(Hud *h);            /* since the last call, HUD_PAUSE_NONE none */
 /* the settings the game keeps (gCommon.getSoundVolume / getMusicVolume, 0 .. 0.75 = the sliders' 0 .. 100, and
  * getEnableRumble; the profile's 0x4D7ACC / 0x4D7AD0 / 0x4D7AD4 [R 0x2C2F68..0x2C3480]): set them from the profile
- * (default 0.75, 0.75, 1 [G]); the Options page's Accept changes them */
+ * (default a new profile's 0.5, 0.25, on [R 0x33F630]); the Options page's Accept changes them */
 void hud_set_settings(Hud *h, float sound, float music, int rumble);
 void hud_settings(const Hud *h, float *sound, float *music, int *rumble);
 /* what the Pause menu asks of gSndDev / gCommon since the last call (the same call twice in a row: the last kept) */

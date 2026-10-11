@@ -51,14 +51,15 @@ box (GuiListBox), `X` child interface. Properties:
 **GuiRect** [R] (vtable 0x447A00, ctor 0x245650, draw 0x244500, rebuild 0x2449F0): the outer box is `d` from the
 origin (`B`, default 5, would add 2 ΔB, but every layout gives `d` after `B`). The background (sprite +0x80) starts at
 −bbias / 2 with the size d + bbias (0x243840): with bbias −8, 4 in on each side. Four B × B corners at the outer
-corners, inside the box, `FrameCorner` turned 0°, 270°, 180° and 90° (0x3B3EC0, 0x3B3E90, 0x3B3E60; here mirrored
-**[G]**); four GuiLines B wide between (left and right at x = B/2 from B to H − B, top and bottom at y = B/2; drawn
+corners, inside the box, `FrameCorner` turned 0°, 270°, 180° and 90° (0x3B3EC0, 0x3B3E90, 0x3B3E60; the picture is
+symmetric about its diagonal, so the turns are mirrors **[R]**); four GuiLines B wide between (left and right at x = B/2 from B to H − B, top and bottom at y = B/2; drawn
 left, bottom, right, top). The order: the background, the rect's own text (none in any layout), two more lines
-(+0x178), the sides, the corners. **[G]** Which rows of `FrameLine` are the outside (the GuiLine draw), and the +0x178
-lines, were not read.
+(+0x178), the sides, the corners. `FrameLine`'s opaque rows (9 .. 15) are the outside, where they meet the corner's
+arc **[R: the textures]**; the rebuild's point order for each line and the +0x178 lines were not decoded **[G]**.
 
-**The list box** (its layout, 0x23CF60, is read: PAUSE_NOTES.md) [G: the rest of GuiListBox (ctor 0x23E280) not read]: the selected item in the highlight colour, the others the
-normal one, the highlight bar (segment + end caps, `d highlight` tall, pulsing) behind the selected item's text.
+**The list box** **[R]** (ctor 0x23E280, draw 0x23C250, layout 0x23CF60; [PAUSE_NOTES.md](PAUSE_NOTES.md) "The list
+box"): the selection without wrap, the item colours set every frame, the selected item's growth, and the highlight
+(a GuiLine with the segment and end cap pictures) across the selected item's text, in the GUI's pulse.
 
 **Word wrap** [R 0x1B5AA0]: a line ends once Σ(a + w + c + spacing) × s reaches `w` (the trailing spacing counted, no
 slant): at the last break (a space, or just after a `-`), else before the character that overflows (one at least);
@@ -141,10 +142,10 @@ OFontData loader 0x1B7CD0, read **[R]**. Field-by-field layout is in `tools/gui.
   - PointsBanner spacing is 2.
 
 ## Not traced
-- `F` 0x20 (an icon quad: drawn only with a picture). `F` 0x1 is hidden and 0x4 is never tested **[R: SHELL_NOTES.md
-  "The GUI's 3D objects"]**.
+- `F` 0x20 (on the icon quads): no code tests it (no +0x5A & 0x20 in the ELF); what the game draws for a quad whose
+  picture is missing (hud.c draws nothing). `F` 0x1 is hidden and 0x4 is never tested **[R: SHELL_NOTES.md "The GUI's
+  3D objects"]**.
 - The GUI draws each interface in tree order, the object, then its children, without a sort **[R 0x241770]**.
-- Shift-JIS glyphs and the special glyph images
-  (OFont +0x25C: the `.loc` texts' `\v1.25Controller_Back\v` pictures, drawn here as a square the cell's height times
-  the number).
+- Shift-JIS glyphs. (The special glyph images, the `.loc` texts' `\v1.25Controller_Back\v` pictures, are read:
+  0x1B7AE0, 0x1B74A0, [SCREENS_NOTES.md](SCREENS_NOTES.md) "Pictures in a text".)
 - The mapping of the 640 × 480 screen to the PAL/NTSC frame buffer.

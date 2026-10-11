@@ -47,7 +47,8 @@ the dispatcher 0x2AE3D0 via the jump table 0x42DD70):
 The four book getters read the current block's `ChallengeDef` every time (0x303160 on the block manager). They do
 this whatever the play type and whether or not goals were loaded. Scale and ShiftX must be float records. A missing
 key writes nothing into the answer, which the float type made 0.0 first (gp −0x6EF0, TypePFloat 0x1CE830:
-`sw zero, 4(a1)`), so a missing Scale or ShiftX is 0 [R]. (`wasMonsterRevealed`, id 0x47, sits
+`sw zero, 4(a1)`), so a missing Scale or ShiftX is 0 [R]. A missing Name or Icon (not a string record) is given to the
+answer string as none, which clears it to "" (0x2B4970: 0x2B4A48 .. 0x2B4A70) [R]. (`wasMonsterRevealed`, id 0x47, sits
 next to them: 0x4D6A6C ≠ 0.)
 
 ## The data

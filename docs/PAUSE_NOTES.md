@@ -3,7 +3,7 @@
 The in-game Pause menu as `src/hud.c` ports it (`hud_pause_open` and the calls after it in `src/hud.h`): the layout
 `Pause.ifc` of `WorldGui.bdp`, run by its script `PAUSE.BSF` (`build/scripts/Pause.scr`, with `ObjectFader.h` and
 `ConfirmQuit.h`), and the engine calls it makes. The formats are in [FORMAT_GUI.md](FORMAT_GUI.md), the other screens
-in [SCREENS_NOTES.md](SCREENS_NOTES.md). **[R]** read in the code or the files, **[G]** a guess or a stand-in.
+in [SCREENS_NOTES.md](SCREENS_NOTES.md). **[R]** read in the code or the files, **[G]** a guess.
 Addresses are in `RAMPAGE.ELF`.
 
 ## What opens it [R WorldGuiDriver.scr]
@@ -42,7 +42,7 @@ Addresses are in `RAMPAGE.ELF`.
     `city_location` (ArialBlack24 × 0.6, maxwidth 360).
   - `challenge_group` (hidden at the start), at 220 30:
     - `icon` (F 0x20, Q 6, m 1.25);
-    - `completed`: "COMPLETED", green, wrapped at 300, placed by a full matrix `<x>` (turned −28°, scale 0.8);
+    - `completed`: "COMPLETED", green, wrapped at 300, placed by a full matrix `<x>` (scale 0.8, turned 28° up to the right);
     - `challenge`: "Bonus Challenge" (`CT_Challenge`), orange, m 0.86;
     - `goal`: the challenge's text (s 0.8, wrapped at 270).
   - `boss_group` (hidden) at 220 40: `boss_icon`, `boss_completed`, `boss_title` (maxwidth 300), and `boss_challenge`,
@@ -50,7 +50,8 @@ Addresses are in `RAMPAGE.ELF`.
   - `boss_group_foreign` (hidden): the same at 190 40, with x −220 and a 520 wrap for the longer languages.
   - `selection_group` at 0 160: a rule (child 0), the list box `choices` at 136 153 (child 1), and a rule at 4 235
     (child 2). The list has "CONTINUE" / "OPTIONS" / "QUIT" (`Button_Continue`, `Button_Options`, `Button_Quit`;
-    Atrox60 × 0.5), yellow when selected and grey 0x7F otherwise, with the pulsing highlight bar.
+    Atrox60 × 0.5), yellow when selected and grey 0x7F otherwise, the selected one grown to 1.2 (`<growth>`), with the
+    pulsing highlight bar (below, "The list box").
   - `controller_group` (hidden) at 0 45: the picture `controller_map` (centred at 210 285, m 1.2) with green labels
     ROAR (with the `Trigger_Right` icon), KICK, PUNCH, GRAB, JUMP and MOVE (`Pause_*`, ArialBlack24 × 0.4).
 - `confirmQuit` (hidden), inside `pause_group`: ConfirmQuit.h's dialog (veil, `cq_rect`, `cq_title`, No / Yes).
@@ -132,8 +133,9 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
     no music plays and the value is above 0.
 - **Events**: those of pads other than 0 are dropped.
   - Up / down (8 / 16): the row, wrapping over the three, with `Rollover`. The old row's title goes back to scale 1.
-  - Left / right (4 / 2), on the rumble row: `incrementSelection(dir, 1)` with `Rollover`. Going from OFF to ON calls
-    `setEnableRumble(1, 0)` and `gCommon.rumble(250)`.
+  - Left / right (4 / 2), on the rumble row: `incrementSelection(dir, 1)` with `Rollover`: left ON, right OFF, no
+    wrap (0x23E360; the 1 plays the list's end sound once at an end, which this list has none of). Going from OFF to
+    ON calls `setEnableRumble(1, 0)` and `gCommon.rumble(250)`.
   - X (64; Start does nothing here): `Click`, then `saveSettings`. It sets `prevMusic` and `prevRumble` to the sliders'
     values and calls `gCommon.setSoundVolume`, `setMusicVolume` and `setEnableRumble(b, 1)`. Then `deactivateOptions`:
     the faders back, and `setMusicVolume(0, 1000)`.
@@ -150,7 +152,8 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
 
 - `getEnableRumble` is 0x32. `clearCheatFlags` (0x30, 0x2C3390) clears bits of 0x4D7E68.
 - The setters raise the profile's "changed" byte 0x4D7AC8. The profile's load (0x33F120) applies them again.
-- Flag 65536 is the main menu's cheat code "082864" (`MainMenu::activateCheat`). What it does is not traced.
+- Flag 65536 is the main menu's cheat code "082864" (`MainMenu::activateCheat`): the attract mode's soak test of
+  fake GUI presses (0x33D740, 0x307920; [SHELL_NOTES.md](SHELL_NOTES.md)) [R]. Quitting clears it.
 
 ## Two players [R]
 - Either pad opens the menu, and either pad's events move its list, pick Continue / Quit and answer ConfirmQuit.
@@ -188,9 +191,41 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
 - `hud_set_settings` gives the menu the profile's volumes and vibration. Default a new profile's 0.5, 0.25, on
   (0x33F630) [R]; the slider's full scale is 0.75.
 
+## The list box (GuiListBox) [R]
+The three lists (`choices`, ConfirmQuit's `cq_list`, the Options page's `rumble`) work as GuiListBox does (ctor
+0x23E280 over 0x23EF70, vtable 0x447850: draw 0x23C250, layout 0x23CF60; the script calls in 0x253730):
+- **Selection** (`selectItem` / `setSelection`: 0x23E480): at or below 0 the first item shown, at or past the last
+  the last one shown, else the nearest shown one from there, searching away from the old selection. No wrap.
+  `incrementSelection(delta, bump)` (0x23E360) sets the selection + delta; when it moved the list's move sound
+  (+0xF0) plays, when it did not and `bump` is 1 its end sound (+0x108), once, flag 0x10. No layout here names those
+  sounds.
+- **Colours**, every frame in the layout (0x23D8A4 .. 0x23DB2C): with the highlight on (+0x10C & 2, set by the
+  constructor) the selected item takes `<c highlight>`, the other items shown `<c normal>`, hidden ones
+  `<c disabled>`.
+- **Growth** (each item, 0x23CB20 from the layout): `<growth>3 1.2 4 16` is a count and +0x13C, +0x14C, +0x150
+  (0x22A640; defaults 1, 4, 16). The selected item (shown, highlight on) grows towards +0x13C, the others back to 1:
+  up `g += 4 dt (target − g)` (reached within 0.0001), down at 16, not past the target. The item's growth record
+  (+0x50) holds g and an offset that keeps it in place by its justify and origin: across 0.5 (w / g_old)(1 − g),
+  w the text's width (0x234BA0), minus for left-justified, plus for right, none centred; the same down by its height.
+  GuiText's draw (0x234D60) scales the text (not its children) by g and moves it by the offset when its parent is a
+  list. So CONTINUE grows to 1.2, ConfirmQuit's No / Yes to 1.15 (about their middles), ON / OFF to 1.2.
+- **Highlight** (draw 0x23C250): `<b highlight>` (0x23BE10) and `<b endcap>` (0x23BD40) make a GuiLine (+0x138) with
+  the segment picture (sprite +0x16C) and the cap picture at both ends (+0x6C, +0xEC). For the selected item, shown
+  with a text: s its frame's scale times its growth; its box (0x234BA0 × s) placed by its justify and origin from its
+  place plus the growth's offset; for each line (the line's measure, held to maxwidth, × s) the line runs from ext
+  before the line's start to ext past its end at the line's middle, ext = max(dh₀ s, s × cap − h / 2), the band
+  h + dh₁ s across (`<d highlight>` dh, cap the cap picture's width: HighlightEndcap 64), in `<c selector>`, times the
+  GUI's pulse with `setHighlightPulse(1)` (+0x10C & 8). The GuiLine (0x23A8E0) puts a cap of the picture's width
+  inside each end (u 0 at the end, the far one mirrored; HighlightEndcap fades out towards u 0) and the segment
+  between. The segment's uv on that path is left as the sprite has them [G: taken 0 .. 1]; without caps the segment
+  runs end to end, u 1 .. 0. For CONTINUE: s 1.2, h ≈ 36, ext 58.8, the band 69.6 (the pictures are clear at their
+  top and bottom).
+
 ## Not ported, or guessed
-- The `<x>` matrix's turn: quads cannot turn, so the "COMPLETED" stamp is drawn level at its place and scale.
-  Mirrors (the arrows) are kept.
+- The `<x>` matrix (0x22DEC0: the 12 floats into +0x8 .. +0x34 as written) [R]: a point goes through it as a row
+  vector, x' = x m00 + y m10 (0x101CD0), so "COMPLETED" (0.7055 −0.3771 / 0.3771 0.7055) is scale 0.8 turned 28° up
+  to the right, the arrows mirrored up-down. The port draws the object and its children turned about its origin
+  (hud.c `turn_quads`, corner quads the renderer already draws for the shell's turned pictures).
 - `setFlags(1024)` on "COMPLETED" is the GUI's pulse: object flag 0x400 multiplies the alpha by 1 − (0.2 + 0.2 sin
   phase), the phase 2π a second (0x242950): 0.6 … 1 at 1 Hz [R].
 - The list's `setExtraSpacing` is GuiListBox id 0x4D (dispatcher 0x253730, case 0x253D48): it replaces the list's
@@ -220,7 +255,8 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
 - The slider steps: one per script frame, the world's step 1/30 s (the GuiManager's update in the tick 0x288340,
   paused or not, with gWorld +4 as dt) [R]: a full sweep in about 3.3 s.
 - `getPlatform()` answers 2 in this build (App case 0x28B1A0) [R], so the foreign boss card is used from French on.
-- After Quit the menu goes on the next `hud_update` (in the game it stays up while the world shuts down).
+- After Quit the menu goes on the next `hud_update` (in the game it stays up while the world shuts down; the viewer
+  leaves the world at once).
 - `pauseGame`'s gate is the tick's (0x288340: App +0xA0 & 0x10 skips the world's update; the GUI and the drawing
   run on) [R]; each system's own tests (0x2B6AF0, 0x2C1CE0) were not traced.
 - The music fade, the pausing of the sound events and the vibration belong to the viewer.

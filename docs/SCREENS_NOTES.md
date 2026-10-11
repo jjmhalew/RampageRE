@@ -12,7 +12,9 @@ code or the files, **[G]** a guess or a stand-in.
   `createAndStartText2(name, name2, colour, scale, hold, sound)` (0x2B14E0).
 - The text calls load the interface **`Rage`** on the screen (screen +0x238, vtable +0x144 / +0x40) and call the script
   function `Rage::setPointsBannerData` (or `...Data2`) in it. So a text banner *is* the RAMPAGE banner with other data;
-  `Monsters::startRage` loads `Rage` with none (its defaults: "Rampage", red, scale 1, `v_rampage`).
+  `Monsters::startRage` loads `Rage` with none (its defaults: "Rampage", red, scale 1, `v_rampage`). Nothing sets
+  its `fHoldTime`: a namespace float, 0.0 when made (TypePFloat 0x1CE830) or the last banner's if the interfaces
+  share the script's namespace [G: the PP interpreter's instancing not traced; the port holds it 0.35 s].
 - `Rage.ifc`: the text `Rage` at 320 240, Atrox60, centred both ways, s 1.4, charspacing 1, maxwidth 500, with a
   hidden `line2` (ArialBlack24, s 1.2, 30 below), and a quad `Head` (HUD_GEORGE_HEAD, scale 4).
 - `setPointsBannerData`: message, colour, the text object's scale (0.5 for edibles and the reveal, 1.0 for challenges),
@@ -29,7 +31,15 @@ code or the files, **[G]** a guess or a stand-in.
 - **The name**: `localizeString(name)`; if it begins with `#` the text is the rest, as is (the reveal builds its
   text itself). The texts are in `Game.loc` (WorldGui.bdp): `InstantRampage` "Instant\nRampage", `SpeedIncrease`
   "Speed\nBoost", `Challenge_Met` "CHALLENGE MET!", `MonsterRevealed` "%s Unlocked", `RAMPAGE`. Keys ignore case
-  [R: LocalizationManager 0x1D4C60, a strcasecmp binary search per table]. `Edible.scr` turns the first `\n` (two characters) of its Message into a line break first.
+  [R: LocalizationManager 0x1D4C60, a strcasecmp binary search per table]; `gApp.localizeString` of a missing key
+  gives "" (0x28B470) [R]. `Edible.scr` turns the first `\n` (two characters) of its Message into a line
+  break first.
+- **Pictures in a text**: the upgrade hints (`Inst_Upgrade1` .. `8`, the reward banner's second line) hold
+  `\v1.25Controller_Back\v`. The font's special glyph (0x1B7AE0) [R]: a leading number is its scale sc (else 1),
+  the rest the texture's name; it is k × the picture's used size, k = sc min(1, the font's average height / its
+  height), with no space around it, and counts in the line's height. It is drawn after the text (0x1B74A0), white
+  in the text's alpha, at the glyph's place, max(0, average height − picture height) / 2 down: Controller_Back
+  (32 × 32) in ArialBlack24 (average height 22.6) 28.3 square, Trigger_Right (32 × 16) 40 × 20.
 - **Motion** (`Rage::doInterface`, from its second frame; the first sets up):
   - setup: the text, colour, scale; 15 copies of the text (with `line2`), fades 0, 1/15 .. 14/15; the text hidden;
     the sound played.
@@ -123,12 +133,14 @@ result 1, 5 s, fade, end. No walkout.
 
 ### GameOver [R GameOver.scr]
 A dark full-screen veil and a framed box: "GAME OVER" on a red band, the list Retry / Choose Monster / Quit (Choose
-Monster hidden in the Timed Run). Up / down move the selection (`Rollover`), X: Retry → result 2, Choose Monster → 3
+Monster hidden in the Timed Run; the list's highlight and growth as [PAUSE_NOTES.md](PAUSE_NOTES.md) "The list
+box"). Up / down move the selection (`Rollover`), X: Retry → result 2, Choose Monster → 3
 and `endResults` at once; Quit → ConfirmQuit, Yes → 4. `gApp.pauseGame(1)` while it shows.
 
 ### ConfirmQuit (ConfirmQuit.h) [R]
 A frame 480 wide holding `ConfirmQuit` ("Unsaved progress ... quit?") or `ConfirmQuitShort`, the list No / Yes
-(left / right) 15 below the text, centred on the screen, fading in; X answers, Back closes.
+(left / right) 15 below the text, centred on the screen, fading in; the selected one grows to 1.15 about its
+middle (`<growth>3 1.15 4 16`); X answers, Back closes.
 
 ### The other screens: the common pattern [R]
 WorldResults, KingBlockResults, KingCityResults, KingWorldResults and TimedRunResults are written like Results.scr:
@@ -142,7 +154,9 @@ Alert", "CHANNEL 3", the grey field, the orange band, "Live", the buttons, the s
 walkout of the field, band, buttons and "Live", the same title scroll and "Live" blink from 1.5 s, buttons at 590 less
 the widest shown, the PS2 button colours and (except KingWorldResults) ConfirmQuit for Back. After the walkout: result
 1, 5 s more, a 0.5 s fade, `endResults`. "P" + (n + 1) is a key of Game.loc ("P1"); monster names are localized keys
-("Boosy" is "Bubba").
+("Boosy" is "Bubba"). The scrolling title runs between 62 and 503 in each (`gtTitleLeftX` / `RightX`) [R].
+`getMonsterName(-1)` (a city with no King: KingCity / KingWorld do not test for one) is not traced [G: "" in the
+port].
 
 ### WorldResults (the campaign's end, state 11) [R WorldResults.scr]
 "TOTAL DESTRUCTION!" (Atrox60 × 1.25, from x 960) and "ALL CITIES DESTROYED!" (from −320) between two red bands

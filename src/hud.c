@@ -6,7 +6,7 @@
  * WorldResults.scr, KingBlockResults.scr, KingCityResults.scr, KingWorldResults.scr, TimedRunResults.scr,
  * GameOver.scr, Pause.scr, WorldGuiDriver.scr and the
  * include files ObjectFader.h, ConfirmQuit.h, ButtonSetup.h), the GUI objects that draw them (GuiQuad 0x2439E0,
- * GuiSlider layout 0x24A310, GuiText 0x234D30), the bitmap fonts (OFontData loader 0x1B7CD0, OFont defaults 0x1B7200,
+ * GuiSlider layout 0x24A310, GuiText 0x234D30, GuiListBox 0x23C250 / 0x23CF60, GuiLine 0x23A8E0), the bitmap fonts (OFontData loader 0x1B7CD0, OFont defaults 0x1B7200,
  * the line measure 0x1B5AA0 / 0x1B6270, the string draw 0x1B6A80 and its glyph quads 0x1B64B0), the string tables
  * (.loc, type 23: tools/loc.py), the floating score numbers (PointsBanner, vtable 0x44B6A0: start 0x331D50, advance
  * 0x331B00, draw 0x331960, font setup 0x2B8510) and the text banners (PointsBanner's script bindings 0x2A6A40:
@@ -143,7 +143,7 @@ static int font_load(Font *f, const Gui *gui, const char *name)
     if (!tex_find(gui, base, &f->tex))
         return 0;
     uint32_t rows = rd32(d + 0x304), nchars = rd32(d + 0x308), nalias = rd32(d + 0x30C);
-    f->cell_h = f->tex.h / (float)(rows ? rows : 1);   /* [R 0x1B8050; G: the texture's height is its used height] */
+    f->cell_h = f->tex.h / (float)(rows ? rows : 1);   /* [R 0x1B8050: the used height, +0x24 from 0x26AA80] */
     f->spacing = (int)rdf(d + 0x310);                   /* [R 0x1B7200: cvt.w.s, truncated] */
     f->linespacing = (int)rdf(d + 0x314);
     f->shadow_dx = (int)rdf(d + 0x318);
@@ -233,6 +233,13 @@ static const char *loc_find(const Gui *g, const char *key)
     return NULL;
 }
 
+/* gApp.localizeString(key) (App binding 0x28B470) [R]: the table's text, or "" when there is none or it is empty */
+static const char *loc_app(const Gui *g, const char *key)
+{
+    const char *s = loc_find(g, key);
+    return s ? s : "";
+}
+
 /* ---------------------------------------------------------------- the draw list */
 typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; float skew; int additive; } Emit;
 
@@ -264,21 +271,25 @@ static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0,
 /* ---------------------------------------------------------------- texts */
 typedef struct { const char *s; int n; float w, h; } TLine;
 
-/* "\v1.25Controller_Back\v": a picture in a .loc text (the upgrade hints' buttons) [G: OFont's special glyphs at
- * +0x25C are not traced; drawn square, the cell's height times the number]. s[0] is the first \v; returns the
- * characters it takes */
-static int text_icon(const Gui *g, const Font *f, const char *s, int n, TexRef *t, int *ok, float *size)
+/* "\v1.25Controller_Back\v": a picture in a .loc text (the upgrade hints' buttons), the font's special glyph
+ * (0x1B7AE0) [R]: a number first is its scale sc (else 1), the rest to the next \v the texture's name; the glyph is
+ * k w by k h of the picture's used size, k = sc min(1, the font's average height / h), with no space before or
+ * after. s[0] is the first \v; returns the characters it takes; *w *h 0 without the picture */
+static int text_icon(const Gui *g, const Font *f, const char *s, int n, TexRef *t, int *ok, float *w, float *h)
 {
     int i = 1, k = 0;
     char buf[48];
     while (i < n && s[i] != '\v') { if (k < 47) buf[k++] = s[i]; i++; }
     buf[k] = 0;
     if (i < n) i++;
-    char *end;
-    float sc = strtof(buf, &end);
-    if (end == buf) sc = 1;
-    *size = f->cell_h * sc;
+    char *end = buf;
+    float sc = 1;
+    if (buf[0] >= '0' && buf[0] <= '9')
+        sc = strtof(buf, &end);
     *ok = tex_find(g, end, t);
+    float kk = *ok && t->h > 0 ? sc * fminf(1.0f, f->avg_h / t->h) : 0;
+    *w = *ok ? kk * t->w : 0;
+    *h = *ok ? kk * t->h : 0;
     return i;
 }
 
@@ -294,9 +305,10 @@ static void run_measure(const Gui *g, const Font *f, const char *s, int n, int s
         if (ch == '\v') {
             TexRef t;
             int ok;
-            float size;
-            i += text_icon(g, f, s + i, n - i, &t, &ok, &size);
-            w += size + (float)spacing;
+            float iw, ih;
+            i += text_icon(g, f, s + i, n - i, &t, &ok, &iw, &ih);
+            w += iw + (float)spacing;                    /* a glyph like the others (0x1B5CD8: its a w c h) */
+            if (ih > h) h = ih;
             any = 1;
             continue;
         }
@@ -335,9 +347,9 @@ static int text_lines(const Gui *g, const Font *f, const char *s, int spacing, f
                     if (p[i] == '\v') {
                         TexRef t;
                         int ok;
-                        float size;
-                        i += text_icon(g, f, p + i, n - i, &t, &ok, &size);
-                        adv = size + (float)spacing;
+                        float iw, ih;
+                        i += text_icon(g, f, p + i, n - i, &t, &ok, &iw, &ih);
+                        adv = iw + (float)spacing;
                     } else {
                         const Glyph *gl = &f->g[(unsigned char)p[i++]];
                         if (gl->ok)
@@ -374,8 +386,8 @@ typedef struct {
     float linesp, maxwidth, wrap, slant;            /* in font pixels (linesp, maxwidth: before s) */
 } TextStyle;
 
-/* the size of a text in font pixels, after the maxwidth squeeze (GuiText's width() and height() [G: by the text's own
- * scale, which the caller adds]) */
+/* the size of a text in font pixels, after the maxwidth squeeze (GuiText's width() and height(), text_w / text_h,
+ * add its own scale s) */
 static void text_extent(const Gui *g, const TextStyle *ts, const char *s, float *w, float *h)
 {
     TLine L[MAX_LINES];
@@ -442,16 +454,18 @@ static void text_emit(Emit *e, const Gui *g, const TextStyle *ts, const char *s,
             for (int i = 0; i < L[l].n;) {
                 unsigned char ch = (unsigned char)L[l].s[i];
                 if (ch == '\v') {
+                    /* the pictures, after the text (0x1B74A0) [R]: white in the text's alpha, at the glyph's place,
+                     * down max(0, average height - the picture's height) / 2 */
                     TexRef t;
                     int ok;
-                    float size;
-                    i += text_icon(g, f, L[l].s + i, L[l].n - i, &t, &ok, &size);
+                    float iw, ih;
+                    i += text_icon(g, f, L[l].s + i, L[l].n - i, &t, &ok, &iw, &ih);
                     if (ok && pass == 1) {
-                        float ic[4] = { 1, 1, 1, c[3] }, it = top + 0.5f * (cell - size * k);
-                        emit_quad(e, ox + sc * cx, oy + sc * it, ox + sc * (cx + size * k), oy + sc * (it + size * k),
+                        float ic[4] = { 1, 1, 1, c[3] }, it = top + 0.5f * fmaxf(0.0f, f->avg_h - t.h);
+                        emit_quad(e, ox + sc * cx, oy + sc * it, ox + sc * (cx + iw * k), oy + sc * (it + ih * k),
                                   0, 0, t.us, t.vs, ic, t.b, t.name, z);
                     }
-                    cx += k * (size + spacing);
+                    cx += k * (iw + spacing);
                     continue;
                 }
                 i++;
@@ -481,10 +495,11 @@ typedef struct Node {
     int kind;
     char name[32];
     float p[3], m, z;           /* <p> x y z, <m> scale, <z> */
-    int flip_y;                 /* <x> with a mirrored frame (Pause's arrows under MIN / MAX) */
+    int turned; float rot[4];   /* <x>'s 2 x 2 over its scale m when not the identity (Pause's "completed" stamps,
+                                 * its arrows mirrored under MIN / MAX): x' = x r0 + y r2, y' = x r1 + y r3 */
     float d[2]; int has_d;      /* <d> size */
     float col[4];               /* <c> (white when absent) */
-    unsigned F, Q, M;           /* <F> flags (0x1: hidden [G]), <Q> sprite flags, <M> (0x310: a mask [G]) */
+    unsigned F, Q, M;           /* <F> flags (0x1: hidden), <Q> sprite flags, <M> (0x200: depth only, not drawn) */
     TexRef tex; int has_tex;    /* <b> */
     /* text: <v> / <L>, <g j o s charspacing linespacing w>font</g>, <maxwidth> */
     char text[MAX_TEXT];
@@ -506,6 +521,9 @@ typedef struct Node {
     int has_hl, has_norm, has_dis;
     TexRef hl_tex, endcap; int has_hl_tex, has_endcap;
     float hl_d[2];
+    float growth[3];            /* <growth> (a count, then +0x13C the selected item's scale, +0x14C its rate up,
+                                 * +0x150 down; 1, 4, 16 without [R 0x22A640, ctor 0x23E280]) */
+    float grow, go[2];          /* an item's: its growth record (+0x50: +0x4 the scale, +0xC / +0x10 the offset) */
     int sel, pulse;
     unsigned la; float lsp;     /* list: <a> its flags (8 across), <sp> its spacing (setExtraSpacing replaces it) */
     int sizer; unsigned sflags; /* <sz> (GuiSizer): <sflags>, <stretch>; an item's <si> room before and after it, */
@@ -557,7 +575,7 @@ static void parse_floats(const char *s, float *out, int max)
     }
 }
 
-/* GuiText.setText / localizeString (a key without a text keeps the key [G]) */
+/* GuiText.setText; node_localize is the layout's <L> (0x235800) */
 static void node_text(Node *nd, const char *s)
 {
     if (nd)
@@ -683,14 +701,20 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
     else if (strcmp(tag, "B") == 0) nd->B = strtof(text, NULL);
     else if (strcmp(tag, "bbias") == 0) nd->bbias = strtof(text, NULL);
     else if (strcmp(tag, "x") == 0) {
-        /* the object's whole frame: the 3x3 by rows, then the position (Pause's "completed" stamps, turned 28 degrees
-         * at scale 0.8, and its arrows, mirrored up-down). A quad here cannot turn: the position and the scale are
-         * kept, a mirror flips the picture, a turn is dropped [G] */
+        /* the object's whole frame (0x22DEC0: the 12 floats into +0x8 .. +0x34 as they come): the 3x3 by rows, then
+         * the position. A point goes through it as a row vector, x' = x m00 + y m10 (0x101CD0) [R]: Pause's
+         * "completed" stamps (0.7055 -0.3771 / 0.3771 0.7055) are scale 0.8 turned 28 degrees up to the right (y
+         * down), its arrows mirrored up-down. Here the scale is m and the rest the node's turn (layout_emit) */
         float x[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
         parse_floats(text, x, 12);
         memcpy(nd->p, x + 9, sizeof nd->p);
         nd->m = sqrtf(x[0] * x[0] + x[1] * x[1]);
-        nd->flip_y = x[0] * x[4] - x[1] * x[3] < 0;
+        if (nd->m > 0) {
+            nd->rot[0] = x[0] / nd->m; nd->rot[1] = x[1] / nd->m;
+            nd->rot[2] = x[3] / nd->m; nd->rot[3] = x[4] / nd->m;
+            nd->turned = fabsf(nd->rot[0] - 1) > 1e-4f || fabsf(nd->rot[1]) > 1e-4f || fabsf(nd->rot[2]) > 1e-4f ||
+                         fabsf(nd->rot[3] - 1) > 1e-4f;
+        }
     } else if (strcmp(tag, "ep") == 0) {
         float e[16] = { 0 };                             /* the count, then x y z each (0x22C0E0 copies two points) */
         parse_floats(text, e, 16);
@@ -713,8 +737,12 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
             if (strcmp(at[i].k, "s") == 0) nd->si_s = atoi(at[i].v);
     }
     else if (strcmp(tag, "sp") == 0) nd->lsp = strtof(text, NULL);
-    /* sc (script), f (entry function), R, growth, si / sflags / stretch (sizers), X / xf (child interfaces):
-     * not needed for drawing */
+    else if (strcmp(tag, "growth") == 0) {               /* "3 1.2 4 16": the count, then the three [R 0x22A640] */
+        float v[4] = { 0, nd->growth[0], nd->growth[1], nd->growth[2] };
+        parse_floats(text, v, 4);
+        memcpy(nd->growth, v + 1, sizeof nd->growth);
+    }
+    /* sc (script), f (entry function), R, X / xf (child interfaces): not needed for drawing */
 }
 
 static int node_kind(const char *tag)
@@ -748,6 +776,10 @@ static Node *node_new(Layout *L, int kind)
     nd->visible = 1;
     nd->fade = 1;
     nd->lw = 3;
+    nd->growth[0] = 1;                                   /* [R 0x23E328: +0x13C 1, +0x14C 4, +0x150 16] */
+    nd->growth[1] = 4;
+    nd->growth[2] = 16;
+    nd->grow = 1;
     return nd;
 }
 
@@ -845,7 +877,7 @@ static int xml_element(Gui *g, Layout *L, Xml *x, Node *parent)
 done:
     if (nd) {
         if (nd->F & 1)
-            nd->visible = 0;                             /* [G: F 0x1 = starts hidden; the scripts show them] */
+            nd->visible = 0;                             /* [R 0x241770: the draw skips F & 0x201; scripts show them] */
         if (!parent)
             L->root = nd;
     }
@@ -882,7 +914,8 @@ static Node *layout_find(Node *nd, const char *name)
     }
     return NULL;
 }
-/* GuiObject.copyObject + setParent: a deep copy, the parent's last child [G: last] */
+/* GuiObject.copyObject + setParent: a deep copy, the parent's last child [R: setParent 0x2426F0 is the parent's
+ * addChild 0x242540 with no place given, which links it after the last] */
 static Node *node_copy(Layout *L, const Node *src, Node *parent)
 {
     if (L->n >= MAX_NODES)
@@ -913,8 +946,8 @@ static void text_style(const Node *nd, TextStyle *ts)
     ts->slant = nd->has_tslant ? nd->tslant : nd->font ? (float)nd->font->slant : 0;
     ts->wrap = nd->wrap > 0 && nd->tscale > 0 ? nd->wrap / nd->tscale : 0;
 }
-/* GuiText.width() / height(): the text's size by its own scale s, not the object's m [G: Results::setupButtons
- * multiplies width() by getScale()] */
+/* GuiText.width() / height() (0x234C40 / 0x234BF0): the font's measure 0x1B6270, after the text's own scale s and
+ * maxwidth, not through the object's frame m [R] (Results::setupButtons multiplies width() by getScale()) */
 static float text_w(const Gui *g, const Node *nd)
 {
     if (!nd || !nd->font)
@@ -1034,11 +1067,18 @@ static void sizer_lay(const Gui *g, Node *sz)
         it[i]->p[0] = pos[i];
 }
 
-static void layouts_lay(const Gui *g, Node *nd)
+static void list_colours(Node *l);
+static void list_grow(const Gui *g, Node *l, float dt);
+
+static void layouts_lay(const Gui *g, Node *nd, float dt)
 {
     for (; nd; nd = nd->next) {
         if (nd->sizer)
             sizer_lay(g, nd);
+        if (nd->kind == N_LIST) {
+            list_colours(nd);
+            list_grow(g, nd, dt);
+        }
         if (nd->kind == N_LIST && (nd->la & 8)) {
             float place = 0;
             for (Node *c = nd->child; c; c = c->next) {
@@ -1049,7 +1089,7 @@ static void layouts_lay(const Gui *g, Node *nd)
                 place += w + nd->lsp;
             }
         }
-        layouts_lay(g, nd->child);
+        layouts_lay(g, nd->child, dt);
     }
 }
 
@@ -1065,59 +1105,149 @@ static Node *list_item(Node *l, int i)
     while (c && i-- > 0) c = c->next;
     return i < 0 ? c : NULL;
 }
-/* selectItem(i): the item in the highlight colour, the rest in the normal one [G: the list's colours replace the
- * items'; the layouts give the items the same ones] */
-static void list_select(Node *l, int i)
+static int list_shown(Node *l, int j)
 {
-    if (!l)
-        return;
-    l->sel = i;
+    Node *c = list_item(l, j);
+    return c && c->visible;
+}
+/* the list's colours on its items, every frame (the layout 0x23CF60, at 0x23D8A4 .. 0x23DB2C) [R]: with the
+ * highlight on (+0x10C & 2, set by the constructor 0x23EF70) the selected item takes the highlight colour, the other
+ * shown ones the normal one, the hidden the disabled one */
+static void list_colours(Node *l)
+{
     int j = 0;
     for (Node *c = l->child; c; c = c->next, j++) {
         if (c->kind != N_TEXT)
             continue;
-        if (j == i && l->has_hl) { memcpy(c->tcol, l->hl_col, sizeof c->tcol); c->has_tcol = 1; }
-        else if (j != i && l->has_norm) { memcpy(c->tcol, l->norm_col, sizeof c->tcol); c->has_tcol = 1; }
+        const float *col = j == l->sel ? (l->has_hl ? l->hl_col : NULL) :
+                           c->visible && c->text[0] ? (l->has_norm ? l->norm_col : NULL) :
+                           l->has_dis ? l->dis_col : NULL;
+        if (col) {
+            memcpy(c->tcol, col, sizeof c->tcol);
+            c->has_tcol = 1;
+        }
     }
 }
-/* incrementSelection(delta, 0): to the next item shown, no wrap [G] */
-static void list_increment(Node *l, int delta)
+/* the selection set to n (0x23E480) [R]: at or below 0 the first item shown, at or past the last the last one shown,
+ * else the nearest shown one from n away from the old selection (down when n is below it); none: 0. No wrap */
+static void list_set(Node *l, int n)
+{
+    int cnt = list_count(l), old = l->sel, j = -1;
+    if (n <= 0) {
+        for (j = 0; j < cnt && !list_shown(l, j); j++) {}
+    } else if (n >= cnt - 1) {
+        for (j = cnt - 1; j >= 0 && !list_shown(l, j); j--) {}
+    } else if (n < old) {
+        for (j = n; j >= 0 && !list_shown(l, j); j--) {}
+    } else {
+        for (j = n; j < cnt && !list_shown(l, j); j++) {}
+    }
+    l->sel = j >= 0 && j < cnt ? j : 0;
+}
+/* selectItem(i) / setSelection(i) (GuiListBox's dispatcher 0x253730: 0x23E480) */
+static void list_select(Node *l, int i)
 {
     if (!l)
         return;
-    int n = list_count(l);
-    for (int j = l->sel + delta; j >= 0 && j < n; j += delta) {
-        Node *c = list_item(l, j);
-        if (c && c->visible) {
-            list_select(l, j);
-            return;
-        }
-    }
+    list_set(l, i);
+    list_colours(l);
 }
-/* incrementSelection(delta, 1): the same, going round at the ends [G: the second argument] (Pause's vibration
- * ON / OFF) */
-static void list_increment_wrap(Node *l, int delta)
+/* incrementSelection(delta, bump) (0x23E360) [R]: the selection set to the selection + delta, no wrap. When it moved
+ * the list's move sound plays, when it did not and bump is 1 its end sound, once (flag 0x10): sounds no layout here
+ * gives (+0xF0, +0x108) */
+static void list_increment(Node *l, int delta)
 {
-    int n = list_count(l);
-    if (!l || n <= 0)
-        return;
-    for (int k = 1, j = l->sel; k <= n; k++) {
-        j = ((j + delta) % n + n) % n;
-        Node *c = list_item(l, j);
-        if (c && c->visible) {
-            list_select(l, j);
-            return;
+    if (l)
+        list_select(l, l->sel + delta);
+}
+
+/* each item's growth (0x23CB20, from the layout every frame) [R]: towards growth[0] while it is the selected item
+ * shown (the highlight on), else 1: up g += rate 4 dt (target - g), taken as reached within 0.0001; down rate 16,
+ * not past the target. Its offset keeps it in place by its justify and origin: across 0.5 (w / g_old) (1 - g), with
+ * w the text's width (0x234BA0) and g_old the scale before (the game's own sum), minus for the left, plus for the
+ * right, none centred; the same down by the height (top minus) */
+static void list_grow(const Gui *g, Node *l, float dt)
+{
+    int j = 0;
+    for (Node *c = l->child; c; c = c->next, j++) {
+        if (c->kind != N_TEXT)
+            continue;
+        float target = j == l->sel && c->visible && c->text[0] ? l->growth[0] : 1.0f, old = c->grow, v = old;
+        if (v != target) {
+            if (v > target + 0.0001f) {
+                v += l->growth[2] * dt * (target - v);
+                if (v < target) v = target;
+            } else if (v < target) {
+                v += l->growth[1] * dt * (target - v);
+                if (v > target - 0.0001f) v = target;
+            }
         }
+        c->grow = v;
+        float k = old > 0 ? 1.0f / old : 1.0f, bw = k * text_w(g, c), bh = k * text_h(g, c);
+        float dx = 0.5f * (bw - bw * v), dy = 0.5f * (bh - bh * v);
+        c->go[0] = c->justify == 0 ? dx : c->justify == 2 ? -dx : 0.0f;
+        c->go[1] = c->origin == 0 ? dy : c->origin == 2 ? -dy : 0.0f;
     }
 }
 
 /* ---------------------------------------------------------------- drawing a layout */
+/* a quad given by its four corners (top-left, top-right, bottom-right, bottom-left) and their uv: a turned picture */
+static void emit_corners(Emit *e, const float x[4], const float y[4], const float u[4], const float v[4],
+                         const float col[4], const Bundle *b, uint32_t tex, float z)
+{
+    int n = e->n;
+    emit_quad(e, fminf(fminf(x[0], x[1]), fminf(x[2], x[3])), fminf(fminf(y[0], y[1]), fminf(y[2], y[3])),
+              fmaxf(fmaxf(x[0], x[1]), fmaxf(x[2], x[3])), fmaxf(fmaxf(y[0], y[1]), fmaxf(y[2], y[3])), u[0], v[0],
+              u[2], v[2], col, b, tex, z);
+    if (e->n == n)
+        return;
+    HudQuad *q = &e->q[n];
+    q->corners = 1;
+    memcpy(q->cx, x, sizeof q->cx);
+    memcpy(q->cy, y, sizeof q->cy);
+    memcpy(q->cu, u, sizeof q->cu);
+    memcpy(q->cv, v, sizeof q->cv);
+}
+
+/* the quads emitted since `first` turned about the object's origin (ox, oy) by its <x> (r: x' = x r0 + y r2,
+ * y' = x r1 + y r3, a row vector through the frame as 0x101CD0 does) */
+static void turn_quads(Emit *e, int first, float ox, float oy, const float r[4])
+{
+    for (int i = first; i < e->n; i++) {
+        HudQuad *q = &e->q[i];
+        if (!q->corners) {
+            float cx[4] = { q->x0 + q->skew, q->x1 + q->skew, q->x1, q->x0 }, cy[4] = { q->y0, q->y0, q->y1, q->y1 };
+            float cu[4] = { q->u0, q->u1, q->u1, q->u0 }, cv[4] = { q->v0, q->v0, q->v1, q->v1 };
+            memcpy(q->cx, cx, sizeof cx);
+            memcpy(q->cy, cy, sizeof cy);
+            memcpy(q->cu, cu, sizeof cu);
+            memcpy(q->cv, cv, sizeof cv);
+            q->corners = 1;
+            q->skew = 0;
+        }
+        for (int k = 0; k < 4; k++) {
+            float dx = q->cx[k] - ox, dy = q->cy[k] - oy;
+            q->cx[k] = ox + dx * r[0] + dy * r[2];
+            q->cy[k] = oy + dx * r[1] + dy * r[3];
+        }
+        q->x0 = fminf(fminf(q->cx[0], q->cx[1]), fminf(q->cx[2], q->cx[3]));
+        q->x1 = fmaxf(fmaxf(q->cx[0], q->cx[1]), fmaxf(q->cx[2], q->cx[3]));
+        q->y0 = fminf(fminf(q->cy[0], q->cy[1]), fminf(q->cy[2], q->cy[3]));
+        q->y1 = fmaxf(fmaxf(q->cy[0], q->cy[1]), fmaxf(q->cy[2], q->cy[3]));
+    }
+}
+
+/* the GUI's pulse, gp -0x7DF4 (0x242950) [R]: 1 - (0.2 + 0.2 sin phase), the phase 2 pi a second: 0.6 .. 1 at 1 Hz.
+ * Objects with F 0x400 and the lists' highlight with setHighlightPulse(1) (+0x10C & 8) take it */
+static float gui_pulse(const Gui *g) { return 0.8f - 0.2f * sinf(2.0f * HUD_PI * g->time); }
+
 /* GuiRect (vtable 0x447A00, draw 0x244500, rebuild 0x2449F0) [R]: the outer box is d from the origin; the background
  * (bkgdColor, sprite +0x80) from -bbias / 2 with the size d + bbias (bbias -8: 4 in on each side, 0x243840); then the
  * frame in bc inside the box: B wide sides (GuiLines, FrameLine) and B x B corners (FrameCorner, turned 0, 270, 180
- * and 90 degrees: here mirrored [G: the same for a symmetric corner]). The left and right sides need the side picture
- * turned, which a quad cannot do: they are drawn as one-pixel strips, each the colour of one row of it [G: which rows
- * of FrameLine are the outside, the GuiLine draw not read]. */
+ * and 90 degrees, 0x3B3EC0 .. 0x3B3E60; FrameCorner is the same picture mirrored about its diagonal, so the turns are
+ * the mirrors drawn here [R: the texture]). The sides are FrameLine along the side: its opaque rows (9 .. 15, v 0.56
+ * .. 1) on the outside, the way they meet the corner's arc at its edges [R: the textures; the rebuild's point order
+ * for each GuiLine, which gives the side its v, was not decoded], the left and right ones turned. */
 static void rect_emit(Emit *e, const Node *nd, float ox, float oy, float sc, float z, float fade)
 {
     float w = nd->has_d ? nd->d[0] : 0, h = nd->has_d ? nd->d[1] : 0;
@@ -1146,46 +1276,79 @@ static void rect_emit(Emit *e, const Node *nd, float ox, float oy, float sc, flo
         const TexRef *t = &nd->side;
         emit_quad(e, RX(x0 + B), RY(y0), RX(x1 - B), RY(y0 + B), 0, t->vs, t->us, 0, bc, t->b, t->name, z);
         emit_quad(e, RX(x0 + B), RY(y1 - B), RX(x1 - B), RY(y1), 0, 0, t->us, t->vs, bc, t->b, t->name, z);
-        int ns = (int)(B * sc + 0.5f);
-        if (ns < 1) ns = 1;
-        for (int i = 0; i < ns; i++) {
-            float a = B * (float)i / (float)ns, b = B * (float)(i + 1) / (float)ns;
-            float v = t->vs * (1.0f - ((float)i + 0.5f) / (float)ns);   /* the outside (v = 1) at the edge */
-            emit_quad(e, RX(x0 + a), RY(y0 + B), RX(x0 + b), RY(y1 - B), 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b,
-                      t->name, z);
-            emit_quad(e, RX(x1 - b), RY(y0 + B), RX(x1 - a), RY(y1 - B), 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b,
-                      t->name, z);
-        }
+        const float u[4] = { 0, 0, t->us, t->us };       /* along the side, top to bottom */
+        const float lx[4] = { RX(x0), RX(x0 + B), RX(x0 + B), RX(x0) }, rx[4] = { RX(x1 - B), RX(x1), RX(x1), RX(x1 - B) };
+        const float yy[4] = { RY(y0 + B), RY(y0 + B), RY(y1 - B), RY(y1 - B) };
+        const float lv[4] = { t->vs, 0, 0, t->vs }, rv[4] = { 0, t->vs, t->vs, 0 };   /* v = 1 at the outer edge */
+        emit_corners(e, lx, yy, u, lv, bc, t->b, t->name, z);
+        emit_corners(e, rx, yy, u, rv, bc, t->b, t->name, z);
     }
 #undef RX
 #undef RY
 }
 
-/* the list's highlight behind its selected item [G: GuiListBox's highlight (its growth and pulse) is not traced]:
- * the segment picture across the item's text, an end cap at each end, hl_d's height, in the selector colour,
- * pulsing when setHighlightPulse(1) */
+/* a GuiLine across from x0 to x1 at y, hw either side, in the list's frame (the geometry 0x23A8E0, a line along +x)
+ * [R]: with an end cap picture, a cap of the picture's width at each end inside the points (u 0 at the line's end,
+ * the far one mirrored, v 0 on the top side), the segment picture between them [G: its uv, which that path leaves as
+ * the sprite has them; taken 0 .. 1 from the left]; without, the segment from end to end, u 1 .. 0 */
+static void line_emit(Emit *e, const Node *l, float x0, float x1, float y, float hw, float ox, float oy, float sc,
+                      const float col[4], float z)
+{
+    float y0 = oy + sc * (y - hw), y1 = oy + sc * (y + hw);
+    const TexRef *t = &l->hl_tex, *k = &l->endcap;
+    if (!l->has_endcap) {
+        if (l->has_hl_tex)
+            emit_quad(e, ox + sc * x0, y0, ox + sc * x1, y1, t->us, 0, 0, t->vs, col, t->b, t->name, z);
+        return;
+    }
+    float cw = k->w;
+    emit_quad(e, ox + sc * x0, y0, ox + sc * (x0 + cw), y1, 0, 0, k->us, k->vs, col, k->b, k->name, z);
+    emit_quad(e, ox + sc * (x1 - cw), y0, ox + sc * x1, y1, k->us, 0, 0, k->vs, col, k->b, k->name, z);
+    if (l->has_hl_tex)
+        emit_quad(e, ox + sc * (x0 + cw), y0, ox + sc * (x1 - cw), y1, 0, 0, t->us, t->vs, col, t->b, t->name, z);
+}
+
+/* GuiListBox's draw (0x23C250) [R]: its background in its colour, then the highlight line (+0x138, made by
+ * <b highlight> / <b endcap>) behind the selected item when it is shown with a text and the highlight is on. The
+ * item's scale s is its frame's times its growth; its box (the text's width and height, 0x234BA0, times s) placed by
+ * its justify and origin from its place plus its growth's offset; for each line of it (the line's measure, held to
+ * maxwidth) the line from ext before its start to ext past its end at the line's middle, where ext = max(dh0 s,
+ * s cap - h / 2) (dh = <d highlight>, cap the end cap picture's width) and the band is h + dh1 s across; in the
+ * selector colour, times the GUI's pulse with setHighlightPulse(1) (once more each line) */
 static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, float sc, float z, float fade)
 {
     if (l->col[3] > 0 && l->has_d)
         emit_quad(e, ox, oy, ox + sc * l->d[0], oy + sc * l->d[1], 0, 0, 1, 1,
                   (const float[4]){ l->col[0], l->col[1], l->col[2], l->col[3] * fade }, NULL, 0, z);
     const Node *it = list_item((Node *)l, l->sel);
-    if (!l->has_hl_tex || !it || !it->visible || it->kind != N_TEXT)
+    if ((!l->has_hl_tex && !l->has_endcap) || !it || !it->visible || it->kind != N_TEXT || !it->text[0] ||
+        !it->font)
         return;
-    float w = text_w(g, it) * it->m, h = text_h(g, it) * it->m;
-    float x0 = it->p[0] - (it->justify == 1 ? 0.5f * w : it->justify == 2 ? w : 0), x1 = x0 + w;
-    float cy = it->p[1] + (it->origin == 0 ? 0.5f * h : it->origin == 2 ? -0.5f * h : 0);
-    float bh = l->hl_d[1] > 0 ? l->hl_d[1] : h, cap = 0.5f * bh;
+    float s = it->m * it->grow, W = text_w(g, it) * s, H = text_h(g, it) * s;
+    float x = it->p[0] + it->go[0] - (it->justify == 1 ? 0.5f * W : it->justify == 2 ? W : 0);
+    float y = it->p[1] + it->go[1] - (it->origin == 1 ? 0.5f * H : it->origin == 2 ? H : 0);
     float c[4] = { l->sel_col[0], l->sel_col[1], l->sel_col[2], l->sel_col[3] * fade };
-    if (l->pulse)
-        c[3] *= 0.7f + 0.3f * sinf(2.0f * HUD_PI * 1.5f * g->time);
-    float y0 = oy + sc * (cy - 0.5f * bh), y1 = oy + sc * (cy + 0.5f * bh);
-    const TexRef *t = &l->hl_tex;
-    emit_quad(e, ox + sc * x0, y0, ox + sc * x1, y1, 0, 0, t->us, t->vs, c, t->b, t->name, z);
-    if (l->has_endcap) {
-        const TexRef *k = &l->endcap;
-        emit_quad(e, ox + sc * (x0 - cap), y0, ox + sc * x0, y1, k->us, 0, 0, k->vs, c, k->b, k->name, z);
-        emit_quad(e, ox + sc * x1, y0, ox + sc * (x1 + cap), y1, 0, 0, k->us, k->vs, c, k->b, k->name, z);
+    float d0 = l->hl_d[0] * s, d1 = l->hl_d[1] * s, cap = l->has_endcap ? l->endcap.w : 0;
+    TextStyle ts;
+    text_style(it, &ts);
+    TLine L[MAX_LINES];
+    int nl = text_lines(g, ts.f, it->text, ts.spacing, ts.slant, ts.wrap, L, MAX_LINES);
+    for (int i = 0; i < nl; i++) {
+        float lw = L[i].w * it->tscale, lh = L[i].h * it->tscale;
+        if (it->maxwidth > 0 && lw > it->maxwidth) {
+            lh *= it->maxwidth / lw;
+            lw = it->maxwidth;
+        }
+        lw *= s;
+        lh *= s;
+        float lx = x;
+        if (i > 0)                                       /* the lines after the first by the block's mode */
+            lx += it->tmode == 1 ? 0.5f * (W - lw) : it->tmode == 2 ? W - lw : 0.0f;
+        float ext = fmaxf(d0, s * cap - 0.5f * lh);
+        if (l->pulse)
+            c[3] *= gui_pulse(g);
+        line_emit(e, l, lx - ext, lx + lw + ext, y + 0.5f * lh, 0.5f * (lh + d1), ox, oy, sc, c, z);
+        y += lh;
     }
 }
 
@@ -1200,9 +1363,9 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             continue;
         float nox = ox + sc * nd->p[0], noy = oy + sc * nd->p[1], nsc = sc * nd->m;
         float nz = z + nd->p[2] + nd->z, nf = fade * nd->fade;
-        if (nd->F & 0x400)                               /* [R 0x242950] 1 - (0.2 + 0.2 sin 2 pi t): 0.6 .. 1, 1 Hz */
-            nf *= 0.8f - 0.2f * sinf(2.0f * HUD_PI * g->time);
-        int clip = e->clip;
+        if (nd->F & 0x400)                               /* the GUI's pulse (0x2439E0: gp -0x7DF4) [R] */
+            nf *= gui_pulse(g);
+        int first = e->n, clip = e->clip;
         float cx0 = e->cx0, cx1 = e->cx1;
         if (nd->clip) {
             e->clip = 1;
@@ -1215,21 +1378,20 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             float x0 = nd->Q & 2 ? -0.5f * w : 0, y0 = nd->Q & 4 ? -0.5f * h : 0;
             float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
             /* M 0x200 (Results' 0x310 boxes at the title's ends): the depth-only shader, no colour [R]; F 0x20 (the challenge
-             * icons): drawn only with a picture [G] */
+             * icons): drawn only with a picture [G: no code tests F 0x20 (no +0x5A & 0x20 in the ELF), so it does
+             * nothing; what the game draws for a picture that is missing was not traced, here nothing] */
             int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
-            float vs = nd->has_tex ? nd->tex.vs : 1, v0 = nd->flip_y ? vs : 0, v1 = nd->flip_y ? 0 : vs;
-            if (nd->flip_y)                              /* mirrored about the origin */
-                y0 = -(y0 + h);
+            float vs = nd->has_tex ? nd->tex.vs : 1;
             e->additive = (nd->M & 0x80) != 0;           /* [R 0x17D100] Pause's icons, ChallengeText's icon1 */
             if (drawn && w > 0 && h > 0)
-                emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, v0,
-                          nd->has_tex ? nd->tex.us : 1, v1, c,
+                emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, 0,
+                          nd->has_tex ? nd->tex.us : 1, vs, c,
                           nd->has_tex ? nd->tex.b : NULL, nd->has_tex ? nd->tex.name : 0, nz);
             e->additive = 0;
         } else if (nd->kind == N_SLIDER) {
             float w = nd->has_d ? nd->d[0] : 100, h = nd->has_d ? nd->d[1] : 20;
             float f = nd->vmax != nd->vmin ? (nd->val - nd->vmin) / (nd->vmax - nd->vmin) : 0;
-            if (f < 0) f = 0;                            /* [G: the game does not clamp; the HUD stays in range] */
+            if (f < 0) f = 0;                            /* setValue (0x24ABA0) holds the value to min .. max [R] */
             if (f > 1) f = 1;
             float xf = w * (f - 0.5f);
             float bc[4] = { nd->bar_col[0], nd->bar_col[1], nd->bar_col[2], nd->bar_col[3] * nf };
@@ -1253,8 +1415,10 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             s[3] *= nf;
             TextStyle ts;
             text_style(nd, &ts);
-            /* the text's own scale s goes into its matrix (GuiText 0x234D88 scales the matrix by it) */
-            text_emit(e, g, &ts, nd->text, nox, noy, nsc * nd->tscale, c, s, f->shadow_dx, f->shadow_dy, nz);
+            /* the text's own scale s goes into its matrix (GuiText 0x234D88 scales the matrix by it); a list's item
+             * also by its growth, moved by its offset (0x234D60: the record +0x50 when the parent is a list) [R] */
+            float gx = nox + sc * nd->go[0], gy = noy + sc * nd->go[1];
+            text_emit(e, g, &ts, nd->text, gx, gy, nsc * nd->grow * nd->tscale, c, s, f->shadow_dx, f->shadow_dy, nz);
         } else if (nd->kind == N_LINE && nd->has_ep) {
             /* a GuiLine (Pause's options rule) [R 0x23A8E0]: a band of +- width / 2 across its points, in its frame */
             float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf }, hw = 0.5f * nd->lw;
@@ -1267,6 +1431,8 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
         else if (nd->kind == N_LIST)
             list_emit(e, g, nd, nox, noy, nsc, nz, nf);
         layout_emit(e, g, nd->child, nox, noy, nsc, nz, nf);
+        if (nd->turned)                                  /* the object and its children through its <x> */
+            turn_quads(e, first, nox, noy, nd->rot);
         e->clip = clip;
         e->cx0 = cx0;
         e->cx1 = cx1;
@@ -1357,7 +1523,7 @@ typedef struct {
     ConfirmQuit cq;
     int ended;                                           /* WorldGuiDriver::endResults: unloaded next frame */
     int exit_fn, exit_val;                               /* the call Results::setExitState holds back a frame */
-    float age, ready;                                    /* seconds shown; seconds it has taken buttons (stand-in) */
+    float age, ready;                                    /* seconds shown; seconds it has taken buttons (hud_results_auto) */
     /* the data */
     HudResults r;
     char played[64], current[64], results_text[64], city[64];
@@ -1525,8 +1691,7 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
     h->energy_max = 100;
     h->prev_lives = -1;
     h->prev_points = -1;
-    h->prev_health = h->prev_energy = -1;                /* [G: the script starts at 0; its first update has the real
-                                                          * numbers, here hud_set comes after hud_open] */
+    h->prev_health = h->prev_energy = 0;                 /* fPrevHealth / fPrevEnergy 0.0 [R Hud.scr:63] */
     h->lives = -1;
     h->blocks_won = -1;
     h->set_sound = 0.5f;                                 /* a new profile's (0x33F630: 0.5, 0.25, on) [R] */
@@ -1660,7 +1825,8 @@ void hud_float(Hud *h, int amount, const float pos[3], int building, float scale
 {
     if (!h || !pos)
         return;
-    if (h->nbanners >= MAX_FLOATS) {                     /* [G: the game's pool size is not checked; drop the oldest] */
+    if (h->nbanners >= MAX_FLOATS) {                     /* the game news each one (createAndStart, id 0x2B) with no
+                                                          * limit [R]; here 64 (1.4 s each), the oldest dropped */
         memmove(h->banners, h->banners + 1, sizeof h->banners[0] * (MAX_FLOATS - 1));
         h->nbanners--;
     }
@@ -1792,7 +1958,8 @@ static void hud_stats(Hud *h, float dt)
 /* screen.loadInterface("Rage"), Rage::doInterface 8192 [R]: the defaults are the RAMPAGE banner's */
 static Rage *rage_load(Hud *h)
 {
-    if (h->nrages >= MAX_RAGE) {                         /* [G: the game has no limit; the oldest goes] */
+    if (h->nrages >= MAX_RAGE) {                         /* the game loads one more interface each time, with no
+                                                          * limit [R 0x2B1640]; here 8 at once, the oldest goes */
         rage_free(h->rages[0]);
         memmove(h->rages, h->rages + 1, sizeof h->rages[0] * (MAX_RAGE - 1));
         h->nrages--;
@@ -1817,7 +1984,10 @@ static Rage *rage_load(Hud *h)
     r->scale = 1.0f;
     snprintf(r->sound, sizeof r->sound, "v_rampage");
     col_set(r->col, 1, 0, 0, 1);
-    r->hold = 0.35f;                                     /* [G: fHoldTime is only set by setPointsBannerData; 0.35] */
+    /* [G: nothing sets fHoldTime for the plain RAMPAGE banner (Rage.scr's 8192 does not, only setPointsBannerData and
+     * ...Data2): a namespace float, 0.0 when made (TypePFloat 0x1CE830), or the last banner's if the interfaces share
+     * the script's namespace; which (the PP interpreter's instancing) was not traced. 0.35, the text banners'] */
+    r->hold = 0.35f;
     h->rages[h->nrages++] = r;
     return r;
 }
@@ -1972,8 +2142,9 @@ void hud_banner_reveal(Hud *h, const char *monster)
 
 /* gWorld.hideChallengeCompletionUI, 0x2B01C0 [R]: for each interface of the screen (screen +0x238: the list at +0x0,
  * its count at +0x8) whose name (+0x38) is "Removeable", vtable +0x44 (0x22A3B0: flags +0x5A |= 1) with 1. Flag 0x1
- * is the one GuiObject.isVisible tests (0x256C64: !(flags & 1)) [R]. The banner's script goes on [G: the GUI manager's
- * frame events to a hidden interface not traced] and unloads it at its end as usual; here it is not drawn. */
+ * is the one GuiObject.isVisible tests (0x256C64: !(flags & 1)) [R]. The banner's script goes on and unloads it at
+ * its end as usual [R: the screen's update 0x233850 runs every interface's tree update 0x2415E0, which never tests F
+ * 0x1, and Rage.ifc's F 0x80 gives it the frame event unfocused, 0x2416E8]; here it is not drawn. */
 void hud_hide_challenge_completion(Hud *h)
 {
     if (!h)
@@ -2920,8 +3091,8 @@ static void gameover_input(Hud *h, Screen *s, int ev)
 /* Their scripts follow Results.scr [R WorldResults.scr, KingBlockResults.scr, KingCityResults.scr,
  * KingWorldResults.scr, TimedRunResults.scr]: an intro of timed items (from / to, scale, fade), the scrolling title
  * and the "Live" box, a count-up (KingBlockResults: the players' points; TimedRunResults: the times), Continue for
- * the walkout, then setResultState(1), 5 s, a 0.5 s fade, endResults. Their processIntro takes niFlag by value like
- * Results.scr's; it is taken by reference here, as there [G]. */
+ * the walkout, then setResultState(1), 5 s, a 0.5 s fade, endResults. Their processIntro takes niFlag as Results.scr's
+ * does: by reference (the PP interpreter passes a writable variable uncopied, results_intro) [R]. */
 
 /* setupIntroItem into list 0 introItems, 1 walkoutItems, 2 rankItems or 3 altWalkoutItems, t0 .. t1, moving along
  * axis (0 x, 1 y, -1 none) from a to b */
@@ -3009,7 +3180,9 @@ static void loc_format(const Gui *g, char *out, size_t n, const char *fmt_key, c
         snprintf(out, n, "%s", fmt ? fmt : arg);
 }
 
-/* the scrolling title (goal1 and goal2, from goalbase, cut to 62 .. 503 as in Results [G]) set to text; "Live" */
+/* the scrolling title (goal1 and goal2, from goalbase, between 62 and 503: gtTitleLeftX / RightX, set so in each of
+ * the four scripts [R KingBlockResults.scr:341, KingCityResults.scr, KingWorldResults.scr, TimedRunResults.scr]) set
+ * to text; "Live" */
 static void kr_title(Hud *h, Screen *s, const char *text)
 {
     Node *root = s->L->root;
@@ -3047,21 +3220,20 @@ static int kr_players(const Screen *s)
 {
     return s->r.num_players > 0 && s->r.num_players <= 4 ? s->r.num_players : 1;
 }
-/* localizeString(getGameStatus().getMonsterName(slot)) [G: slot -1, no King, gives ""] */
+/* localizeString(getGameStatus().getMonsterName(slot)) (a missing key: "" [R 0x28B470]) [G: slot -1 (KingCity /
+ * KingWorld do not test for a King; a tie) gives "" here, getMonsterName's answer for it not traced] */
 static const char *kr_monster(const Hud *h, const Screen *s, int slot)
 {
     if (slot < 0 || slot > 3)
         return "";
-    const char *t = loc_find(&h->gui, s->monsters[slot]);
-    return t ? t : s->monsters[slot];
+    return loc_app(&h->gui, s->monsters[slot]);
 }
 /* the winner's line: localizeString("P" + (slot + 1)) + ": " + the monster's name ("P1: Lizzie") */
 static void kr_winner(Hud *h, Screen *s, Node *t, int slot)
 {
     char key[16], buf[MAX_TEXT];
     snprintf(key, sizeof key, "P%d", slot + 1);
-    const char *p = loc_find(&h->gui, key);
-    snprintf(buf, sizeof buf, "%s: %s", p ? p : key, kr_monster(h, s, slot));
+    snprintf(buf, sizeof buf, "%s: %s", loc_app(&h->gui, key), kr_monster(h, s, slot));
     node_text(t, buf);
 }
 /* one row of a standings list: the item localized "P<slot + 1>", its "name" ": <monster>", its child `value_of`
@@ -3659,7 +3831,8 @@ static void pause_challenge(Hud *h, Screen *s)
 static void pause_boss(Hud *h, Screen *s)
 {
     Node *r = s->L->root;
-    /* gApp.getLanguage() > 2 (French and on) and gApp.getPlatform() == 2 (taken as the PS2's [G]): the wider card */
+    /* gApp.getLanguage() > 2 (French and on) and gApp.getPlatform() == 2 (this build's answer, App case 0x28B1A0
+     * [R]): the wider card */
     int foreign = h->gui.lang > 2;
     float padding = foreign ? 0.0f : 8.0f;
     Node *head = layout_find(r, foreign ? "boss_group_foreign" : "boss_group");
@@ -3721,11 +3894,10 @@ static void pause_start(Hud *h, Screen *s, int pad, const HudPause *p)
         pause_boss(h, s);
     else
         pause_challenge(h, s);
-    /* cityTitle: localizeString(city) + " : " + localizeString(getBlockName(1)) (a missing key shows itself [G]) */
+    /* cityTitle: localizeString(city) + " : " + localizeString(getBlockName(1)) (a missing key gives "" [R 0x28B470]) */
     const char *ck = p && p->city ? p->city : "", *bk = p && p->block ? p->block : "";
-    const char *cs = loc_find(&h->gui, ck), *bs = loc_find(&h->gui, bk);
     char title[MAX_TEXT];
-    snprintf(title, sizeof title, "%s : %s", cs ? cs : ck, bs ? bs : bk);
+    snprintf(title, sizeof title, "%s : %s", loc_app(&h->gui, ck), loc_app(&h->gui, bk));
     node_text(layout_find(r, "city_location"), title);
     cq_init(s);
     s->pause_group = layout_find(r, "pause_group");
@@ -3745,7 +3917,8 @@ static void pause_resume(Hud *h)
 }
 
 /* Pause::onQuit (ConfirmQuit's Yes): pauseGame(0), clearCheatFlags(65536), the music and vibration back,
- * gWorld.restartShell. The script leaves the interface up for the world's end; here it goes on the next frame [G] */
+ * gWorld.restartShell. The script leaves the interface up for the world's end [R Pause.scr]; here it goes on the next
+ * frame, as the viewer leaves the game at once (game_restart_shell) */
 static void pause_quit(Hud *h, Screen *s)
 {
     hud_call(h, HUD_CALL_CLEAR_CHEATS, 0.0f, 65536);
@@ -3833,7 +4006,7 @@ static void pause_options_list(Hud *h, Screen *s, int dir)   /* updateLists: OFF
     if (!s->l_rumble)
         return;
     int sel = s->l_rumble->sel;
-    list_increment_wrap(s->l_rumble, dir);
+    list_increment(s->l_rumble, dir);                   /* incrementSelection(dir, 1): no wrap */
     if (sel && sel != s->l_rumble->sel) {
         hud_call(h, HUD_CALL_RUMBLE, 1.0f, 0);
         hud_call(h, HUD_CALL_RUMBLE_PULSE, 0.0f, 250);
@@ -4156,7 +4329,7 @@ static void screen_update(Hud *h, float dt)
         fader_update(&s->fd, dt);
     else if (s->kind >= SCR_WORLD)
         kr_frame(h, s, dt);
-    else if (s->age >= 3.0f) {                           /* the stand-in (a layout missing) */
+    else if (s->age >= 3.0f) {                           /* a layout missing (never with the game's files): answer */
         set_result(h, s->screen == HUD_SCREEN_GAME_OVER ? HUD_RESULT_CONTINUE : HUD_RESULT_DONE);
         s->ended = 1;
         return;
@@ -4197,9 +4370,9 @@ void hud_update(Hud *h, float dt)
             pause_frame(h, h->pause, dt);
     }
     if (h->scr && h->scr->L)
-        layouts_lay(&h->gui, h->scr->L->root);
+        layouts_lay(&h->gui, h->scr->L->root, dt);
     if (h->pause && h->pause->L)
-        layouts_lay(&h->gui, h->pause->L->root);
+        layouts_lay(&h->gui, h->pause->L->root, dt);
 }
 
 int hud_sounds(Hud *h, HudSound *out, int max)
