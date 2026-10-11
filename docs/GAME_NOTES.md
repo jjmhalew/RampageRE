@@ -264,7 +264,9 @@ Notes on the blocks:
 A tied block is replayed. Lives do not run out. The HUD shows blocks won instead of lives.
 
 **King of the World**: the same, city after city in the campaign order. Cities won are kept from city to city (they
-reset only when the first city starts). (cities − 1) / players + 1 cities make the King of the World.
+reset only when the first city starts). (cities − 1) / players + 1 cities make the King of the World. They live in
+GameStatus (0x4D7990, the player's +0x3C), which outlives the world; the port makes a game.c `Game` per city, so
+main.c carries them over (`GameConfig.cities_won`, kept at each `GE_EXIT`).
 
 **Timed Run**: TimeLimit 180 per block, adding up. Running out is game over. There is no Continue choice.
 

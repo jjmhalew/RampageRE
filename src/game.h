@@ -102,6 +102,9 @@ typedef struct {
     uint32_t cheats;                                 /* gCommon.getCheatFlags (0x4D7E68): 0x10000 | 0x20000 skip a
                                                       * block (0x324930); 0x10000 reseeds the world each block */
     uint32_t seed1;                                  /* gWorld +0x82C's seed: GameStatus seed[1] */
+    int cities_won[GAME_PLAYERS];                    /* GameStatus' players' +0x3C as the last world left them (King
+                                                      * of the World: the cities won so far; cleared in its first city,
+                                                      * 0x33DB90) */
 } GameConfig;
 
 /* ---- what the module is told each frame */

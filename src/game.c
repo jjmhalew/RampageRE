@@ -1064,6 +1064,7 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
     g->king_block = g->king_city = g->king_world = g->first_place = g->second_place = -1;
     g->results_screen = -1;
     for (int i = 0; i < GAME_PLAYERS; i++) {
+        g->p[i].cities_won = g->cfg.cities_won[i];   /* GameStatus outlives the world [R 0x4D7990 +0x318 + 0x60 i] */
         g->hp[i] = 1e9f;
         if (g->cfg.play_type == GP_ATTRACT && i < g->cfg.num_players)
             g->lives[i] = 3;                         /* the shell's demo set them (0x3086C8); 0x33DB90 leaves them */

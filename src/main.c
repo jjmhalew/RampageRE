@@ -220,6 +220,7 @@ typedef struct Viewer {
     uint32_t upgrades[64];                           /* the moves each monster took from upgrades (the profile's
                                                       * getMonsterFlags; a new profile: none [G]) */
     int challenges_lost;                             /* a block of this city was won with its challenge not met */
+    int cities_won[MONSTERS];                        /* GameStatus' players' cities won (+0x3C), across the worlds */
     int upgrade_fx;                                  /* the MonsterUpgrade object's effect, -1 */
     int exit_game;                                   /* the game went back to the shell (the Pause menu's Quit) */
     float sfx_vol, music_vol, music_now;             /* the Options page's volumes / 0.75 (the profile's 0.75 = 1);
@@ -1136,7 +1137,8 @@ static void build(Viewer *v)
             GameConfig gc = { play_type(v), v->nmon, v->num_bots,
                               campaign_index(CITIES[v->city_index]), 7,
                               city_block_index(v->city, v->blocks[v->block]), v->prof.current.seed[0],
-                              v->prof.cheats, v->prof.current.seed[1] };
+                              v->prof.cheats, v->prof.current.seed[1], { 0 } };
+            memcpy(gc.cities_won, v->cities_won, sizeof gc.cities_won);   /* King of the World's so far */
             v->game = game_new(&gh, &gc);
             dir_ai_seed(v->prof.current.seed[1]);   /* RWorld's reset: gWorld +0x82C */
             building_set_one_hit((v->prof.cheats & PCH_40000000) != 0);
@@ -2798,6 +2800,9 @@ static void game_step(Viewer *v, float dt)
                 v->exit_game = 1;
                 if (e->a == 2)
                     v->attract_button = e->b == 1;
+                for (int k = 0; k < GAME_PLAYERS && k < MONSTERS; k++)   /* GameStatus' players' cities won
+                                                      * go on with it (0x4D7990, King of the World) */
+                    v->cities_won[k] = game_cities_won(v->game, k);
                 if (e->a == 1 && e->b >= 0) {        /* GameStatus' city is the next one, from its first block */
                     v->last_game.city_index = e->b;
                     v->last_game.city[0] = 0;
