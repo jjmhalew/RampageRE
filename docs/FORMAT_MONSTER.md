@@ -19,7 +19,9 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 |---|---|---|---|
 | 0x000 | | 11 | version |
 | 0x004..0x128 | | 74 × i32 | event slots: the start list (+0xA5C) of each event, the defaults for every mode |
-| 0x12C..0x9C0 | | | not decoded |
+| 0x12C..0x134 | | 3, 15, 30 (all 30) | f32 × 3: TakeDamage's reaction level by the amount (0x2D9680): below the first 4 (none), below the second 0, the third 1, else 2 |
+| 0x138 | | 200 | f32 the most HP: 0x2D9374 clamps a hit to it, addStats (0x2C51A0) and the respawn (0x2D3930) fill to it. 200 for most; Amanda and Wally 250, Jack 180, Jill 170, Marco 150, Snapper 320 [R] |
+| 0x13C..0x9C0 | | | not decoded (0x13C .. 0x168: twelve f32 1.0, as many as the DamageTypes [G: what they are]; the hit, 0x2D6A50, reads none of them) |
 | 0x9C4..0xA2C | | | name indices (−1 = none), settings (f32 0x9F4..0xA10) |
 | 0xA30, 0xA34, 0xA38 | | | names of the skeleton, the mesh and the cloth model |
 | 0xA44 / 0xA48 | collision spheres | 11 × 24 at 0xAA8 | f32[3] centre in the bone's frame, f32 (not traced), f32 radius, i16 bone, i16 body part; 0x2DA9E0 places them: bone matrix, the monster's scale (+0xA78), its matrix |

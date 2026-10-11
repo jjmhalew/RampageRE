@@ -188,6 +188,9 @@ int moves_read(const Bundle *b, MoveGraph *g)
         }
     }
     free(offset);
+    for (int k = 0; k < 3; k++)
+        g->react[k] = rdf(d + 0x12C + 4 * k);
+    g->hp_max = rdf(d + 0x138);
     g->box[0] = rdf(d + 0x198);
     g->box[1] = rdf(d + 0x19C);
     g->probe[0] = rdf(d + 0x1A0);

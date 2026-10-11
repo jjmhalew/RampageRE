@@ -118,7 +118,7 @@ typedef struct Mon {
     float scale, scale_from, scale_to, scale_time, scale_left;   /* setDynamicScale */
     DirGraph ag; int have_ag;                        /* the move graph as the AI reads it (director.c) */
     DirAI ai; int is_ai;                             /* the monster's goals while the game drives it (setIsAI) */
-    float hp, energy;                                /* its hit points (MONSTER_DATA +0x138: 200) and energy, eating */
+    float hp, energy;                                /* its hit points (most: MONSTER_DATA +0x138), energy, eating */
     const MoveNode *face;                            /* the face layer's node playing now */
     IkFeet feet_ik; int feet_due;                   /* the legs bent to the held feet (ik.c), once a frame */
     FootProps feet_fx; FootState feet;              /* the footfalls' names and the foot records (footstep.c) */
@@ -463,6 +463,12 @@ static void face_step(Mon *mo, float dt)
     }
 }
 
+/* the most HP: MONSTER_DATA +0x138 (0x2D9374 clamps a hit to it, addStats 0x2C51A0, the respawn 0x2D3930) [R] */
+static float mon_hp_max(const Mon *mo)
+{
+    return mo->have_graph && mo->graph.hp_max > 0 ? mo->graph.hp_max : 200;
+}
+
 static void start_moves(Mon *mo)
 {
     Viewer *v = mo->v;
@@ -517,7 +523,7 @@ static void start_moves(Mon *mo)
     mo->defeated = 0;
     mo->scale = mo->scale_to = 1;
     mo->scale_left = 0;
-    mo->hp = 200;
+    mo->hp = mon_hp_max(mo);
     if (getenv("RAMPAGE_HP"))                        /* a test's start (the game starts at MONSTER_DATA +0x138) */
         mo->hp = (float)atof(getenv("RAMPAGE_HP"));
     mo->energy = 0;
@@ -1165,7 +1171,8 @@ static void build(Viewer *v)
             if (k == 0)
                 v->hud = mo->hud;
             if (mo->hud) {
-                hud_set(mo->hud, mo->hp, 200, mo->energy, 100, 0, 3, -1);   /* three lives: the campaign's start [G] */
+                /* three lives: the campaign's start [G] */
+                hud_set(mo->hud, mo->hp, mon_hp_max(mo), mo->energy, 100, 0, 3, -1);
                 hud_set_project(mo->hud, hud_project, v);
                 hud_set_language(mo->hud, v->lang);
                 hud_set_settings(mo->hud, profile_sound_volume(&v->prof), profile_music_volume(&v->prof),
@@ -1644,7 +1651,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::startRespawn")) { /* 0x2D3930: a life, back to full health where the streaker is
                                                         or dropping in from the view */
-        mo->hp = 200;
+        mo->hp = mon_hp_max(mo);
         mo->defeated = 0;
         if (mon_in(mo))
             mon_in(mo)->hidden = 0;
@@ -2647,7 +2654,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
             }
             case BE_REACTION: if (mo->hp > 0) force_state(mo, e->name); break;
             case BE_VEL: memcpy(mo->vel, e->v, sizeof mo->vel); break;
-            case BE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
+            case BE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + e->amount)); break;
             case BE_FACING: mo->heading = e->amount * 57.2957795f; break;
             case BE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
             case BE_STATS: if (v->army) army_add_stats(v->army, mo->slot, e->tmpl, e->level); break;
@@ -2932,7 +2939,7 @@ static void game_step(Viewer *v, float dt)
                 }
                 break;
             case GE_REVIVE:                          /* cancelRespawn: full HP where it is */
-                mo->hp = 200;
+                mo->hp = mon_hp_max(mo);
                 mo->defeated = 0;
                 mo->human = mo->dropping = 0;
                 mo->scale = mo->scale_to = 1;
@@ -3046,7 +3053,7 @@ static void rage_started(Mon *mo)
  * Monsters.bsf [R]) */
 static void monster_stats(Mon *mo, float health, float energy)
 {
-    if (edible_power_add_stats(&mo->power, &mo->hp, 200, health, energy, others_full(mo))) {
+    if (edible_power_add_stats(&mo->power, &mo->hp, mon_hp_max(mo), health, energy, others_full(mo))) {
         edible_power_start_rage(&mo->power, others_full(mo));
         if (!mo->defeated)
             mo->pending_slot = 54;
@@ -3247,7 +3254,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
             case VE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
             case VE_REACTION: set_reaction(mo, e->level); break;
             case VE_SET_VEL: memcpy(mo->vel, e->v, sizeof mo->vel); break;
-            case VE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
+            case VE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + e->amount)); break;
             case VE_STATS:                           /* id 1: the army applied it (its events follow) */
                 if (e->id == 0) {
                     monster_stats(mo, e->v[0], e->v[1]);
@@ -3372,7 +3379,7 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
              * one is enough [R] */
             case RE_REACTION: if (mo->pending_slot < 0 && set_reaction(mo, e->level)) mo->rail_knock = 1; break;
             case RE_SET_VEL: if (mo->rail_knock < 2) memcpy(mo->vel, e->v, sizeof mo->vel); break;
-            case RE_HP: if (mo->hp > 0 && mo->rail_knock < 2) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
+            case RE_HP: if (mo->hp > 0 && mo->rail_knock < 2) mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + e->amount)); break;
             case RE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
             case RE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             case RE_STATS:
@@ -3779,7 +3786,7 @@ static void army_step(Viewer *v, float dt)
             case AE_REACTION: set_reaction(mo, e->level); break;
             case AE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
             case AE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
-            case AE_STATS_HEALTH: mo->hp = mo->hp > 0 ? fmaxf(1, fminf(200, mo->hp + e->amount)) : mo->hp; break;
+            case AE_STATS_HEALTH: mo->hp = mo->hp > 0 ? fmaxf(1, fminf(mon_hp_max(mo), mo->hp + e->amount)) : mo->hp; break;
             case AE_STATS_ENERGY: monster_stats(mo, 0, e->amount); break;
             case AE_FLOAT:                           /* a PointsBanner: 0.8 for the army's awards (0x2BAB2C) */
                 if (v->hud)
@@ -4475,7 +4482,7 @@ static void play_step(Viewer *v, float dt, float aspect)
                     }
             Mon *mo = ev_mon(v, ev[i].monster);
             if (ev[i].type == PE_MONSTER_HP)
-                mo->hp = fmaxf(0, fminf(200, mo->hp + ev[i].amount));
+                mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + ev[i].amount));
             else if (ev[i].type == PE_MONSTER_KNOCK) {   /* setVel(v, world), setReaction(2) */
                 memcpy(mo->vel, ev[i].v, sizeof mo->vel);
                 mo->mode = MODE_AIRBORNE;
@@ -4521,7 +4528,7 @@ static void play_step(Viewer *v, float dt, float aspect)
             continue;
         int vis = 0;
         float clock = v->game ? game_clock(v->game, &vis) : 0;
-        hud_set(mo->hud, mo->hp, 200, mo->energy, 100, v->game ? game_points(v->game, k, GPT_TOTAL) :
+        hud_set(mo->hud, mo->hp, mon_hp_max(mo), mo->energy, 100, v->game ? game_points(v->game, k, GPT_TOTAL) :
                 v->army ? (int)army_stats(v->army, k)->points[6] : 0, v->game ? game_lives(v->game, k) : -1,
                 v->game && (game_play_type(v->game) == GP_KING_CITY || game_play_type(v->game) == GP_KING_WORLD) ?
                 game_blocks_won(v->game, k) : -1);   /* (the King modes: the blocks won by the block icon) */

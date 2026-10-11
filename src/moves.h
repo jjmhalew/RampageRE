@@ -66,6 +66,8 @@ typedef struct {
      * the default (+0x4), columns 1.. the overrides (+0xA98) the clip events of type 23 select (moves_slot) */
     int (*slot)[MOVES_SLOTS]; int ncolumns;
     MoveShape *shapes; int nshapes;
+    float react[3];                                  /* +0x12C .. +0x134: TakeDamage's levels by the amount (3, 15, 30) */
+    float hp_max;                                    /* +0x138: the most HP (200; Amanda, Wally 250, Snapper 320, ...) */
     float box[2];                                    /* +0x198 across, +0x19C up: the collision box (3, 4.25) */
     float probe[2];                                  /* +0x1A0, +0x1A4: where canMount looks for a face (0, 2.5) */
     /* the body parts (+0xA74: Arm L, Arm R, Body, Head, Leg L, Leg R) and their bones, which an attack event (type 0)

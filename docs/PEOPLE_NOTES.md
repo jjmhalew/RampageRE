@@ -199,7 +199,7 @@ The script's `onThrow(monster, eat)` always runs. After that:
   `SpherePhysicsMover`.
 - **An actor** gets no velocity at all.
   - If eaten, it is deleted. Its script's `addStats` (0x2C51A0) gives the monster:
-    - HP = max(1, HP + `Health`) up to `MONSTER_DATA` +0x138 (200), only while HP > 0. People mostly have
+    - HP = max(1, HP + `Health`) up to `MONSTER_DATA` +0x138 (200 for most, 150 .. 320), only while HP > 0. People mostly have
       `Health` 20; `Dragon` has −20.
     - Energy + `Energy`, within 0 … 100 (100 starts `startRage`).
     - `Points`.
