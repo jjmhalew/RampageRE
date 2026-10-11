@@ -61,7 +61,8 @@ typedef struct {
 #define MOVES_SLOTS 74
 typedef struct {                                     /* a collision sphere (+0xA48, 24 bytes; 0x2DA9E0 places them) */
     float off[3];                                    /* in its bone's frame */
-    float size, radius;                              /* +0xC not traced; +0x10 the sphere's radius */
+    float size, radius;                              /* +0xC read by none of the code that loads +0xA48
+                                                      * (FORMAT_MONSTER.md); +0x10 the sphere's radius */
     int bone, part;                                  /* the skeleton node, the body part */
 } MoveShape;
 #define MOVES_PARTS 8

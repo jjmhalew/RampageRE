@@ -2464,8 +2464,10 @@ static int take_damage_level(const Mon *mo, float amount);
  *   (both 0: no knock), to 0x2D9650 -> 0x2D6A50 (type, the monster, no point, the knock, ReactionLevel, the amount:
  *   DamagePerSec as it is, once, not by time); a level < 0 would go to its TakeDamage (+0x34);
  * - anything else: its TakeDamage (+0x34: DamageType, the monster, no point, the way, DamagePerSec). Here the modules'
- *   sphere entries, which test their own shapes against the sphere [G: the game tests the shapes' bounding spheres;
- *   a box's reach is a little short here], a fresh attack record so each is hit once;
+ *   sphere entries, which test their own shapes against the sphere, a fresh attack record so each is hit once [G:
+ *   the game tests the shapes' bounding spheres (0x282BC0), so a box's corners reach a little short here; the
+ *   modules' hit entries (army.c, vehicle.c, rail.c, boss.c, parade.c, streetobj.c, people.c) take a sphere, not
+ *   the world's objects];
  * - a building (0x2BC150 with type 0, a monster, a way and no point, 0x2BC328): only a standing one with storeys
  *   (+0x1D0), its Scoring paying the monster (+0x190); the front cell under the monster's shape centre (0x287F00:
  *   column (x - its min x) / 5 and storey (z - 6) / 3, each clamped to the building's), hit at its middle (min x +
@@ -2570,7 +2572,8 @@ static void mon_weapons_step(Viewer *v, float dt)
                         R[a][j] = n.m[4 * a + j] / l;
                     at[a] = n.m[12 + a];
                 }
-            } else {                                 /* [G: no node; every monster has its fxNode_Belch] */
+            } else {                                 /* [G: no node; every monster has its fxNode_Belch, so the
+                                                      * data never takes this] */
                 mon_body_centre(mo, at);
                 at[2] += mon_half_height(mo);
             }
