@@ -3375,12 +3375,25 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
     }
 }
 
+/* an attached effect's frame on a parade object [R 0x291ED0 / 0x277100, as rail.c's]: the object's axes (its world
+ * matrix's columns, made 1 long) */
+static void parade_fx_frame(const ParadeObj *o, float R[3][3])
+{
+    for (int a = 0; a < 3; a++) {
+        float l = sqrtf(o->world[4 * a] * o->world[4 * a] + o->world[4 * a + 1] * o->world[4 * a + 1] +
+                        o->world[4 * a + 2] * o->world[4 * a + 2]);
+        for (int c = 0; c < 3; c++)
+            R[a][c] = l > 1e-6f ? o->world[4 * a + c] / l : (float)(a == c);
+    }
+}
+
 /* the balloons', bikers' and food carts' frame (parade.c): what they see of the monster and the camera, then what
  * they did; the one in the monster's hand follows it */
 static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
 {
     if (!v->parade)
         return;
+    parade_set_world_state(v->parade, v->game ? game_state(v->game) : GS_PLAY);
     parade_update(v->parade, dt, m, m ? nm : 0, v->view.pos[0]);
     ParadeEvent ev[64];
     int ne;
@@ -3390,10 +3403,14 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             Mon *mo = ev_mon(v, e->monster);
             switch (e->type) {
             case PAE_EFFECT:
-                if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
+                if (v->fxw) {                        /* attached: in its object's frame, following it while it is there */
                     const ParadeObj *o = e->obj >= 0 ? parade_obj(v->parade, e->obj) : NULL;
-                    if (id >= 0 && o && v->npfx < 32) {   /* attached: it follows its object while it is there */
+                    float R[3][3];
+                    if (o)
+                        parade_fx_frame(o, R);
+                    int id = o ? fx_spawn_frame(v->fxw, e->name, e->pos, (const float (*)[3])R, 1)
+                               : fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
+                    if (id >= 0 && o && v->npfx < 32) {
                         v->pfx[v->npfx].fx = id;
                         v->pfx[v->npfx].obj = e->obj;
                         for (int k = 0; k < 3; k++)
@@ -3454,8 +3471,9 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             v->pfx[k--] = v->pfx[--v->npfx];
             continue;
         }
-        float at[3] = { o->pos[0] + v->pfx[k].off[0], o->pos[1] + v->pfx[k].off[1], o->pos[2] + v->pfx[k].off[2] };
-        fx_move(v->fxw, v->pfx[k].fx, at);
+        float at[3] = { o->pos[0] + v->pfx[k].off[0], o->pos[1] + v->pfx[k].off[1], o->pos[2] + v->pfx[k].off[2] }, R[3][3];
+        parade_fx_frame(o, R);
+        fx_place(v->fxw, v->pfx[k].fx, at, (const float (*)[3])R);
     }
     for (int i = 0, n = parade_count(v->parade); v->army && i < n; i++) {   /* the bikers' weapons go with them */
         const ParadeObj *o = parade_obj(v->parade, i);

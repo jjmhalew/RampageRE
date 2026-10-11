@@ -19,6 +19,7 @@
 struct Parade {
     ParadeHost host;
     int active;                                      /* gAIMgr activated (bit 8, 0x2A6208): its delays run */
+    int not_in_play;                                 /* the world's state (0x4D6A80) is not 6: no SpawnsItem chains */
     ParadeObj o[MAX_OBJS];
     int n;
     int gone_age[MAX_OBJS];                          /* frames since a slot went (a slot is reused after 2 s) */
@@ -256,7 +257,9 @@ static void line_init(ParadeObj *o, const float a[3], const float b[3], float sp
     memcpy(o->pos, a, sizeof o->pos);
 }
 
-/* the LineMover's frame (0x315E10) [R]: past the end it stays there and calls back 2 ([G] once). None of these
+/* the LineMover's frame (0x315E10) [R]: past the end it stays there and calls back 2, every frame after in the game:
+ * here once, as each handler of it gives a new line or deletes at the first, and the states it skips (held, smashed,
+ * popping) have another mover by then. None of these
  * templates has a MonsterResponseDist, so callback 4 never comes. 0 or 2 */
 static int line_step(ParadeObj *o, float dt)
 {
@@ -321,8 +324,8 @@ static const float *book_box(Group g, float b[6])
 }
 
 /* an object's shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius (the bikers'
- * DefActorProps 2, the carts' own) or AutoCollisionBox (the balloons) with the model's box; else the model's bounding
- * sphere [G: taken as its box's, the host's] */
+ * DefActorProps 2, the carts' own) or AutoCollisionBox (the balloons) with the model's box; else the sphere the model
+ * keeps (0x184CB0 [R], the host's shape_sphere, below) */
 static void obj_shape_read(const Parade *p, const ParadeObj *o, CollideShape *s)
 {
     float tb[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
@@ -459,7 +462,8 @@ static void weapon(Parade *p, ParadeObj *o, int on, int target)   /* enableWeapo
 static void make_biker(Parade *p, Group inst, int walk_in);
 
 /* requestDelete (or eaten): [R] the Actor's destructor (0x30DF80) then makes each SpawnsItem<n> of its instance (n =
- * 0, 1, ... while there is one) from the block and sends it onWalkIn ([G] the world is always in state 6 here) */
+ * 0, 1, ... while there is one) from the block and sends it onWalkIn, only while the world's state (0x4D6A80) is 6 and
+ * a block is current (0x4D4E88 >= 0, 0x30DFC0 .. 0x30DFD4): parade_set_world_state */
 static void obj_delete(Parade *p, ParadeObj *o)
 {
     if (o->phase == PAP_GONE)
@@ -470,7 +474,7 @@ static void obj_delete(Parade *p, ParadeObj *o)
     o->oflags = 0;
     p->gone_age[idx(p, o)] = 0;
     emit(p, PAE_REMOVED, idx(p, o), o->name, o->pos);
-    if (o->kind != PAK_BIKER || !o->instance.at || !p->block.at)
+    if (o->kind != PAK_BIKER || !o->instance.at || !p->block.at || p->not_in_play)
         return;
     Group inst = o->instance;
     for (int n = 0; n < 16; n++) {
@@ -828,7 +832,8 @@ static ParadeObj *cart_base(Parade *p, ParadeObj *o)
 }
 
 /* onThrow(monster, eaten) [R]: its HitEffect on it; eaten: Monsters::timedDoFart 2 s later (always) and addStats
- * type 0 ([G] the engine then takes it away, as an eaten actor); not eaten: smashObject, flags 2, no longer
+ * type 0, and the engine takes it away (throwObject 0x2D9DC0: requestDelete, vtable +0x58, 0x2DA2A0 [R, vehicle.c's
+ * reading]); not eaten: smashObject, flags 2, no longer
  * Pickupable, pulsing every 0.25 s, and the monster's player gets its Points (addPoints, category 0) */
 static void cart_throw(Parade *p, ParadeObj *o, int m, int eaten, float heading)
 {
@@ -1137,6 +1142,7 @@ void parade_grab(Parade *p, int obj, int monster_i, float blend)
     o->blend_left = o->blend;
     mat_quat(o->world, o->from_q);
     memcpy(o->from_p, &o->world[12], sizeof o->from_p);
+    o->rel = 0;
     if (o->kind == PAK_BIKER)
         biker_pickup(p, o);
     else if (o->kind == PAK_CART)
@@ -1145,7 +1151,10 @@ void parade_grab(Parade *p, int obj, int monster_i, float blend)
 
 /* [R] HeldObjectMover (init 0x310ED0, held 0x3109E0), as people.c: the MajorAxis (default 2) along the hand's z, the
  * next along its y, the last their cross product; at the hand plus HoldOffset (MirroredHoldOffset when mirrored) in
- * the hand's frame; [G] blended in linearly from where it was */
+ * the hand's frame. The blend [R 0x310B50]: where it was is kept relative to that place (a turn +0x68, an offset
+ * +0x78), so it follows the hand; with s = the time left x 1 / the blend's (+0x84 x +0x88), the turn is slerped
+ * towards none by 1 - s (0x104C60) and the offset scaled by s, then put on the hand's place (0x101A90(rest, place):
+ * a x b of row matrices, the rest in the place's frame). Made relative at the first hold */
 void parade_hold(Parade *p, int obj, const float hand[16], int mirrored, float dt)
 {
     if (!alive(p, obj) || p->o[obj].phase != PAP_HELD)
@@ -1177,13 +1186,36 @@ void parade_hold(Parade *p, int obj, const float hand[16], int mirrored, float d
         t[12 + k] = hand[12 + k] + off[0] * hand[k] + off[1] * hand[4 + k] + off[2] * hand[8 + k];
     t[15] = 1;
     if (o->blend_left > 0) {
+        if (!o->rel) {                               /* where it was, in the place's frame: T^-1 x S */
+            float sm[16], d[3], rq[4];
+            quat_mat(o->from_q, sm);
+            for (int k = 0; k < 3; k++)
+                d[k] = o->from_p[k] - t[12 + k];
+            float rm[16] = { 0 };
+            for (int c = 0; c < 3; c++)
+                for (int k = 0; k < 3; k++)
+                    rm[4 * c + k] = t[4 * k] * sm[4 * c] + t[4 * k + 1] * sm[4 * c + 1] + t[4 * k + 2] * sm[4 * c + 2];
+            rm[15] = 1;
+            mat_quat(rm, rq);
+            memcpy(o->from_q, rq, sizeof rq);
+            for (int k = 0; k < 3; k++)
+                o->from_p[k] = t[4 * k] * d[0] + t[4 * k + 1] * d[1] + t[4 * k + 2] * d[2];
+            o->rel = 1;
+        }
         o->blend_left -= dt;
-        float f = o->blend_left > 0 ? 1 - o->blend_left / o->blend : 1, tq[4], oq[4];
-        mat_quat(t, tq);
-        slerp(o->from_q, tq, f, oq);
-        quat_mat(oq, o->world);
+        float s = o->blend_left > 0 ? o->blend_left / o->blend : 0, oq[4], om[16], off_p[3];
+        static const float none[4] = { 0, 0, 0, 1 };
+        slerp(o->from_q, none, 1 - s, oq);
+        quat_mat(oq, om);
         for (int k = 0; k < 3; k++)
-            o->world[12 + k] = o->from_p[k] + (t[12 + k] - o->from_p[k]) * f;
+            off_p[k] = o->from_p[k] * s;
+        for (int c = 0; c < 3; c++)                   /* T x (the turn left, the offset left) */
+            for (int k = 0; k < 3; k++)
+                o->world[4 * c + k] = t[k] * om[4 * c] + t[4 + k] * om[4 * c + 1] + t[8 + k] * om[4 * c + 2];
+        for (int k = 0; k < 3; k++)
+            o->world[12 + k] = t[12 + k] + t[k] * off_p[0] + t[4 + k] * off_p[1] + t[8 + k] * off_p[2];
+        o->world[3] = o->world[7] = o->world[11] = 0;
+        o->world[15] = 1;
     } else {
         memcpy(o->world, t, sizeof t);
     }
@@ -1254,6 +1286,7 @@ void parade_clear(Parade *p)
 
 void parade_set_collide(Parade *p, CollideWorld *w) { p->cw = w; }
 void parade_activate(Parade *p, int on) { if (p) p->active = on; }
+void parade_set_world_state(Parade *p, int state) { if (p) p->not_in_play = state != 6; }
 
 void parade_collide_add(Parade *p, CollideWorld *w)
 {

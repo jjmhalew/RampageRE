@@ -1062,7 +1062,9 @@ static void exchange(CollideObj *oa, CollideObj *ob, CollideMover *b, float mb[1
         memcpy(oa->mvel, a->vel, sizeof a->vel);
 }
 
-static void rotate_axis(float m[12], const float a[3], float ang)   /* 0x1014D0 / 0x101A90: about a world axis */
+/* 0x1014D0 / 0x101A90 [R]: 0x101A90(a, b) is a x b of the game's row matrices (rows the axes, v' = v a b), called with
+ * (the object's matrix, R(axis, angle)): the turn after the matrix, about a world axis */
+static void rotate_axis(float m[12], const float a[3], float ang)
 {
     float c = cosf(ang), s = sinf(ang);
     for (int i = 0; i < 3; i++) {

@@ -158,10 +158,11 @@ template's name is what the challenge counts (0x346780).
   RenderScale) at `world`.
 - The monster: `parade_hit` (TakeDamage of the balloons, the riding or lying bikers and the carts with their stand),
   `parade_nearest_pickup` / `parade_grab` / `parade_hold` / `parade_throw`, `parade_is_edible`.
-- Events (`parade_events`): effects (attached ones follow their object), sounds, the monster's chuckle, addStats,
+- Events (`parade_events`): effects (attached ones in their object's frame, following it: main's fx_spawn_frame /
+  fx_place, as rail.c's [R 0x291ED0]), sounds, the monster's chuckle, addStats,
   addPoints, the fart, the biker's weapon on and off, removals.
 
-## Not traced / guessed
+## Details checked in the code
 - **One TakeDamage per blow** [R]: the monster's object test (0x2E22B0) puts an OnlyHitWithEffNodes (0x8000) object
   on the attack's hit list (0x2E33A0, emptied when an attack is armed); the balloons, bikers and carts all have it,
   and unarmed spheres do nothing to them. As here: once per attack record (the arming's number, its parts' own,
@@ -183,15 +184,27 @@ template's name is what the challenge counts (0x346780).
   monster is pushed out of them (collide_monster).
 - **Pulses** [R]: setPulseDelay only sets the delay; the count runs on (0x309BA4, the Actor's 0x30CEA0).
   `getTimeStep` is gWorld +4, the world's fixed step: 1/30 (RWorld's init 0x2B7800; FLOW_NOTES.md) [R]; `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R].
-- **The world's state 6** for the chains: the Actor's destructor tests state 6 and a current block ≥ 0 (0x30DFC0)
-  [R]; the port takes it as always true. gAIMgr's clock is reset at the block's load (0x334C40) and runs only while
+- **The world's state 6** for the chains: the Actor's destructor tests state 6 (0x4D6A80, a block in play) and a
+  current block ≥ 0 (0x4D4E88; 0x30DFC0 .. 0x30DFD4) [R]: main passes the game's state each frame
+  (`parade_set_world_state`; 6 without a game), so a biker gone during the intro or the results starts no chain.
+- **getNearestMonster** [R 0x2B26F0]: the nearest player's monster by squared 3D distance, starting at 1000: none
+  beyond about 31.6 (the biker's bottle, the bike's smash).
+- **The hold's blend** [R 0x310B50]: where the object was is kept relative to the hand's place (a turn +0x68, an
+  offset +0x78), so it follows the hand; with s the share of the blend left (+0x84 × +0x88) the turn is slerped
+  towards none by 1 − s (0x104C60: none above 0.999, as it is below 0.001) and the offset scaled by s, then put on the
+  hand's place (0x101A90(rest, place): a × b of row matrices). Made relative at the first `parade_hold`. gAIMgr's clock is reset at the block's load (0x334C40) and runs only while
   it is activated (BeginBlockNI, 0x333D48) [R]: `parade_activate`.
 - **Clip lengths** [R]: `Duration` when the look gives one, else the anim's own (+0x1C), read as the anim updates
   (0x30AAD0 setup, 0x30A850 update); a length of 0 never completes. Here: from the host, else the bikers' as read
   from SanFrancisco.bdp (`Biker_Riding_Throw` 0.7 s KeyInterp, `Biker_Held` 1.0, `Biker_Riding` / `Biker_Bike` 0.1
   RawAnims; the Biker template has no `Duration`), else 0.
-- **Not ported**: the riderless bike's `onMoverCallback` from a SphereMover (taken to come only from its line), `onBuildingDestruction` (never sent
-  to these), which monster's slot gets the score with two players (the port says monster 0 / the one given).
+- **The riderless bike's onMoverCallback** [R]: only from its line: the SpherePhysicsMover's frame (0x28E440, vtable
+  0x449500 +0x30) always answers 1, so a smashed bike's script gets none (it goes by its pulses).
+- **onBuildingDestruction** [R]: never sent to these (the building link +0x104 is set only by the building's own
+  object loader, 0x309DF0 from 0x2BC920; these are block objects).
+- **The score with two players** [R]: the scripts pass the monster that hit or threw: `addStats(obj, m.getSlot(), …)`
+  (ParadeBalloon.bsf, GroundCart.bsf, Biker.bsf) and `addPoints(monster.getSlot(), 0, points)` (GroundCart.bsf); the
+  port's events carry that monster (ev_mon in main).
 
 ## Driving it from the viewer
 1. **Setup** (per block): `parade_new` with a host whose `find` is the army's (city_book_group), `shape_box`
