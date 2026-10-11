@@ -83,7 +83,8 @@ of 0x3196F0 works like this:
   6. `gCommon.addStats(actor, slot, 3)`.
   7. `ShowBanner` with `Points` > 0: `PointsBanner.createAndStart(points, pos, white, 1.0)`.
   8. `Message`: a literal `\n` becomes a line break, then `createAndStartText(message, MessageColor (default 220, 0, 0),
-     0.5, PickupSound)`.
+     0.5, PickupSound)`. getColorProp (0x278A00 -> 0x27BAF0 / 0x27B4F0) reads three or four numbers (the fourth 255
+     without one), packs each one's int's low byte, and 0x1C97F0 makes them / 255 [R].
   9. `ExtraEffect`:
      - centred: at the building's place, z = (storeys × 3 + 1.5 + 6) / 2, y − 7;
      - otherwise: its own place, y − 6.
@@ -414,8 +415,6 @@ at the first block's end.
     undefined (it could by chance be a real storey's). The port's floor number is a stand-in for that.
 - **Building and banner details:**
   - `b.getPosition()` / `getSizeZ()` without the host's `building_place` (the viewer gives one);
-  - the scale of `MessageColor` (taken as 0 … 255, as the default's `set255`; the getColorProp binding's body was not
-    read);
   - a fixed slot's side (0x2D0460: a byte of the cell's tile per side, at +0x100; taken as 0). An edible's slot opens
     no window, so the side shows only if an occupant shares the cell.
 - **The rage's side:**

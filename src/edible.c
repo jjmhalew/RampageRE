@@ -546,8 +546,10 @@ static void edible_pickup(Edibles *e, Edible *d, int monster, int eat, const cha
         Group col = group_sub(d->tmpl, "Color|MessageColor");
         Record c[4];
         uint32_t nc = col.at ? group_items(col, c, 4) : 0;
-        for (uint32_t i = 0; i < nc && i < 4; i++)
-            v->v[i] = record_num(c[i]) / 255.0f;     /* [G] the book's 0 .. 255, as set255 */
+        /* [R 0x27B4F0 -> 0x1C97F0] getColorProp: three or four numbers (the fourth 255 without one), each cut to an
+         * int and its low byte, then / 255; fewer than three keep the default */
+        for (uint32_t i = 0; nc >= 3 && i < nc && i < 4; i++)
+            v->v[i] = (float)((int)record_num(c[i]) & 0xFF) / 255.0f;
         v->name2 = gstr(d->tmpl, "PickupSound");
     }
     const char *extra = gstr(d->tmpl, "ExtraEffect");

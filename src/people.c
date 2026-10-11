@@ -516,8 +516,8 @@ static void window_fall(People *p, Person *q)
     q->state = 5;
     start_anim(p, q, "Falling", 0, 0);
     leave_window(q);
-    q->flags |= OF_PICKUP;                           /* setFlags(65536) [G: or-ing, as clearFlags exists; the
-                                                      * WorldObject binding's body (id 0x13) was not located] */
+    q->flags |= OF_PICKUP;                           /* setFlags(65536) [R 0x278688: the WorldObject binding 0x277C10's
+                                                      * case 0x13 ors it into +0x4C; clearFlags, 0x14, and-nots it] */
     float dir = -1.0f + 2.0f * (float)(frand(p) > 0.5f);
     float start[3] = { q->pos[0], q->pos[1], q->pos[2] }, end[3] = { q->pos[0], q->pos[1] - 1, 0 };
     float next[3] = { end[0], dir * 1.0f - 3.0f, 0 }, run[3] = { -dir * 100.0f, next[1], 0 };

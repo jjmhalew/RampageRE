@@ -9,8 +9,9 @@ records, the `LineMover`, the window occupants, and the physics that throws them
 The names are in the table at 0x3F5F70: 0x2000 `IsBuilding`, 0x4000 `PushOutMonsters`, 0x8000 `OnlyHitWithEffNodes`,
 0x10000 `Pickupable`, 0x20000 `BeingHeld`, 0x40000 `IsObstacle`. The Actor constructor also sets 0x80000 (an
 actor). 0x800 means "deleting" (`requestDelete`, vtable +0x58, 0x285DD0), and 0x40000000 means "already counted"
-(addStats). A template's `Flags` names set the bits, and a script's `setFlags` adds bits (there is a separate
-`clearFlags`).
+(addStats). A template's `Flags` names set the bits, and a script's `setFlags` adds bits, `clearFlags` clears them
+(the WorldObject binding 0x277C10, cases 0x13 and 0x14: 0x278688 ors its argument into +0x4C, 0x2786D8 and-nots it,
+for a valid handle) [R].
 
 ## The anim records (0x30AAD0)
 `ActorAnimShape|<state>` has the fields `Shape|ShapeName`, `Anim|AnimName`, `Duration` and `AnimRepeat`:
@@ -254,8 +255,6 @@ PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAni
   sets no 0x8000, so in the game a mere touch (type 1) reaches it too; here only blows do.
 - **The hold blend** [R 0x310ED0 / 0x310B50]: the start kept in the hold's frame, w = 1 − left / blend, its turn w of
   the way to none and its place scaled by 1 − w; the port takes the hand of the first held frame for the grab's.
-- **setFlags**: taken as or-ing (there is a separate `clearFlags`); the WorldObject binding's body (id 0x13) was not
-  located.
 - **The LineMover's flag 4** (the tourists' and ActorSwarm's; +0x68, 0x316380) is not ported: the tourists' mover has
   no length, and nothing else that is ported sets it.
 - **The occupant spawning** is city.c's (`scene_people_spawn`): its timing and rates (+0x44 … +0x50), the view check
