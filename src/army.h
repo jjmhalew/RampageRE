@@ -247,6 +247,8 @@ void army_set_view(Army *a, float xmin, float xmax);
 /* the block's AIDef (its BlockDef| group in <City>_Props; 0x334C40): the spawner's records; their count */
 int army_load_block(Army *a, Group block_def);
 void army_activate(Army *a, int on);                 /* gAIMgr.activate: the spawner's clocks run from here */
+void army_set_weapons(Army *a, int on);              /* gp-0x772C (game_weapons_on): off, no weapon fires */
+int army_weapons_on(const Army *a);
 void army_clear(Army *a);                            /* every unit and shot gone (a new block) */
 
 /* a unit made by name (createAttackObject + callOnInit / createActor) at pos facing facing (its script may move it:
@@ -346,7 +348,7 @@ int army_mon_weapon_fire(ArmyMonWeapons *ws, const char *key);
  * with 1) by dt: what the host does this frame, AMW_* bits: START the FireEffect at the WeaponNode, STOP it (the
  * burst's Duration is out), BURST the damage (once a burst, the frame it starts) */
 enum { AMW_START = 1, AMW_STOP = 2, AMW_BURST = 4 };
-int army_mon_weapon_step(ArmyMonWeapon *w, float dt);
+int army_mon_weapon_step(ArmyMonWeapon *w, float dt, int weapons_on);   /* weapons_on: gp-0x772C (game.h) */
 
 /* ---- the score (gCommon.addStats, Player.addPoints) */
 #define ARMY_MONSTERS 4

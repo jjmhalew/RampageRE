@@ -301,7 +301,8 @@ then the weapon's update (vtable +0x6C with 1).
   +0xF5 = 1 and +0x1B8 = 0. A roar within a burst's Duration of the last does nothing.
 - Update (0x31BE50): +0x1AC falls by dt; at 0 a burst that is on ends, its effect stopped, the countdown RefireDelay
   (0), +0xF5 = 0. Then the common 0x2971A0: the place from the node, and with weapons on (gp−0x772C: set as play
-  starts, 0x3243A8 / 0x324494, cleared with the block won, 0x324510; off, every monster weapon is held each frame)
+  starts, 0x3243A8 / 0x324494, cleared with the block won and at Game Over, 0x324510 / 0x324588; off, every monster
+  weapon is held each frame: game.c `game_weapons_on`, GAME_NOTES.md "The weapons' switch")
   the countdown falls by the rate × dt, not below 0; then the burst (vtable +0x70).
 - **The burst** (0x31BAD0), once a burst (+0x1B8): the RGridMgr's sphere query (vtable +0x3C / +0x40 / +0x44 =
   0x282BC0 / 0x282A40 / 0x282A30, include −1, exclude 0) over the world's objects: each one whose shape's bounding

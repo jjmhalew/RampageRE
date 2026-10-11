@@ -57,6 +57,7 @@ struct Army {
     float dt;
     float view[2];                                   /* about the camera's x (army_set_view) */
     CollideWorld *cw;                                /* the frame's collision world (army_set_collide), NULL none */
+    int weapons_off;                                 /* !gp-0x772C (army_set_weapons) */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -932,6 +933,11 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
         } else
             beam_update(a, u, w, from, dir, frame, dt);
     }
+    if (a->weapons_off)                              /* [R 0x297398, 0x2977BC, 0x2963EC, 0x295CC0] no countdown, no
+                                                      * charge, no shot; a beam on runs its Duration out [G: the hold,
+                                                      * vtable +0x7C, comes only with the owner's state +0x5C at 2, 3
+                                                      * or 7, which the army's units are not traced in] */
+        return;
     if (w->ammo > 0 || !(w->def_flags & 2)) {
         w->timer -= w->scale * dt;
         float floor = may ? 0 : w->charge_time + w->firing_offset;
@@ -1456,6 +1462,8 @@ void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], cons
 }
 
 void army_activate(Army *a, int on) { a->active = on; }   /* [R] 0x2A6208: bit 8 of the manager's flags */
+void army_set_weapons(Army *a, int on) { if (a) a->weapons_off = !on; }
+int army_weapons_on(const Army *a) { return !a || !a->weapons_off; }
 
 /* [R] gAIMgr.removeAIObject (0x332A50): every record of that template name has one fewer alive */
 static void remove_ai(Army *a, ArmyUnit *u)
@@ -4135,9 +4143,12 @@ int army_mon_weapon_fire(ArmyMonWeapons *ws, const char *key)
  * - the update: +0x1AC falls by dt; at 0 a burst that is on ends: its effect stopped (0x292670 + the handle's +0x30),
  *   the countdown RefireDelay (desc +0x14: 0), +0xF5 / +0xF6 0. Then 0x2971A0: the place from the node, the countdown
  *   down by the rate x dt (weapons are on in play, gp-0x772C, set at 0x3243A8 / 0x324494 as play starts and cleared
- *   with the block won, 0x324510; the monster's state is 2 or 3), not below 0 (the update's 1);
+ *   with the block won and at Game Over, 0x324510 / 0x324588; the monster's state is 2 or 3), not below 0 (the update's 1). With them off
+ *   (0x297398) there is no countdown and the weapon is held (vtable +0x7C: 0x31BA50 over 0x297090): the countdown
+ *   at least ChargeTime + FiringOffset, the burst off, +0x1AC 0 and its FireEffect stopped. So a roar then starts
+ *   its burst (tryFire does not test the flag) and loses it the same frame: no effect seen, no damage;
  * - the burst (0x31BAD0), once a burst (+0x1B8): see main.c roar_burst. The Shockwave counts no ammo (Ammo 100 stays) */
-int army_mon_weapon_step(ArmyMonWeapon *w, float dt)
+int army_mon_weapon_step(ArmyMonWeapon *w, float dt, int weapons_on)
 {
     int out = 0;
     if (w->state == 3) {
@@ -4156,6 +4167,15 @@ int army_mon_weapon_step(ArmyMonWeapon *w, float dt)
         w->timer = w->refire;
         w->firing = 0;
         out |= AMW_STOP;
+    }
+    if (!weapons_on) {                               /* held */
+        if (w->timer < w->charge + w->offset)
+            w->timer = w->charge + w->offset;
+        if (w->firing)
+            out = (out & ~AMW_START) | AMW_STOP;
+        w->firing = 0;
+        w->left = 0;
+        return out;
     }
     w->timer -= dt;
     if (w->timer < 0)

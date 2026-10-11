@@ -78,6 +78,25 @@ movies, shell state 6); ControlRoom.scr picks the first interface in that order.
    (SHELL_NOTES.md "The demo game"). game.c `game_attract_button`, `GE_EXIT` 2 with b = 1.
 7. If the state ended: its handler. The end of state 6 in the demo leaves at once (0x324D08), whatever ended it.
 
+**The weapons' switch** (gp−0x772C, a byte; 1 in the ELF's data) [R]: set entering states 3 and 5 (0x3243A8,
+0x324494), cleared entering 7 (the block won, 0x324510) and 8 (Game Over, 0x324588); its only other writer is the
+World binding `globalWeaponEnable` (59, 0x2AF0C0; `isGlobalWeaponEnabled` 60, 0x2AF0D8), which no script calls. Off,
+no weapon fires: RBeamWeapon's and RProjectileWeapon's tryFire refuse (0x295CC0, 0x2963EC), the charge does not start
+(0x2977BC), and the common update (0x297398) stops the countdown and, while the owner's state (+0x5C) is 2, 3 or 7,
+holds the weapon each frame (vtable +0x7C: the burst off, the countdown at least ChargeTime + FiringOffset; the
+Shockwave's 0x31BA50 also ends its burst and its FireEffect). So from the block won to the next BeginBlockNI and on the
+Game Over screen the army, the bosses and the fire trucks hold their fire, and a monster's roar starts and loses its
+burst the same frame (Shockwave's tryFire does not test the flag): no effect, no damage. game.c `game_weapons_on`;
+main.c hands it to army.c (`army_set_weapons`: the units' and the bosses' weapons, vehicle.c's stream) and to
+`army_mon_weapon_step` (the roar).
+
+**The 3D sounds at a block's teardown and at Game Over** [R]: the teardown 0x2B66C0 ends with enableSfx(0) (0x2B6760:
+SoundDevice +2 = 0, the event player paused, +0x48), 0x26D500 (0x274610: every object of the 3D list, SoundEffects
+included, killed through 0x26BB30 → 0x2725C0 and freed), the sound's frame 0x26D960 once, and enableSfx back as it
+was; entering state 8 does the same (0x324584 .. 0x3245B0). Every loop and object sound of the block stops: sound.c
+`sound_objects_clear`, from main.c at GE_BLOCK with b = 1 and at GE_STATE 8 (the extra sound frame, with the event
+player paused, makes nothing else heard).
+
 **NI functions** are looked up by 0x324180: the block's string property of that name (the block just won for
 ResultsNI, GameOverNI and EndBlockNI, since the next block is already current), else WorldData's, else the name
 itself; then as given, as `<City>::<name>`, as `Levels::<name>`. Only New York's boss block overrides any:

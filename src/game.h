@@ -208,6 +208,12 @@ void game_start_respawn(Game *g, int slot, const GameRespawnIn *in, GameRespawn 
 
 /* ---- queries */
 int game_state(const Game *g);                       /* gWorld.getState() */
+/* the weapons' global switch, gp-0x772C [R]: 1 in the ELF's data, set entering states 3 and 5 (0x3243A8, 0x324494),
+ * cleared entering 7 and 8 (the block won 0x324510, Game Over 0x324588); World bindings 59 / 60 (globalWeaponEnable
+ * 0x2AF0C0, isGlobalWeaponEnabled 0x2AF0D8) are in no script. Off, no weapon fires: the beams' and the projectiles'
+ * tryFire (0x295CC0, 0x2963EC) and the charge (0x2977BC) refuse, and the common update (0x297398) stops the
+ * countdown and holds the weapon (vtable +0x7C) while its owner's state (+0x5C) is 2, 3 or 7 */
+int game_weapons_on(const Game *g);
 int game_left(const Game *g);                        /* a GE_EXIT was given: nothing runs until game_load_city */
 int game_play_type(const Game *g);
 int game_lives(const Game *g, int slot);             /* GameStatus.getNumLives (the HUD's "xN") */

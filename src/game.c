@@ -81,6 +81,7 @@ struct Game {
     int left;                                        /* GE_EXIT given: the world is being left, nothing runs */
     int button, button_end;                          /* gWorld +0x1B (0x4D6A9B): a pad button (game_attract_button);
                                                       * the demo ended by it */
+    int weapons_on;                                  /* gp-0x772C (game_weapons_on) */
     GameEvent ev[MAX_EVENTS]; int nev;
 };
 
@@ -826,6 +827,7 @@ static int enter(Game *g)
     switch (s) {
     case GS_LOADING:                                 /* 0x324398 */
         g->city_destroyed = g->quit = g->select = g->world_done = 0;
+        g->weapons_on = 1;                           /* 0x3243A8 */
         break;
     case GS_BEGIN_LEVEL:                             /* 0x3243D0: the intro, or ContinueLevelNI past the first block */
         start_ni(g, g->first < g->cur ? "ContinueLevelNI" : "BeginLevelNI", 0);
@@ -833,6 +835,7 @@ static int enter(Game *g)
     case GS_BEGIN_BLOCK:                             /* 0x324458 */
         start_ni(g, "BeginBlockNI", 0);
         adv = g->ni == FN_NONE;
+        g->weapons_on = 1;                           /* 0x324494 */
         break;
     case GS_PLAY:                                    /* 0x3244A0: IsBlockFinished, the clock runs */
         g->fin = resolve(g, "IsBlockFinished", 0, g->fin_name, sizeof g->fin_name);
@@ -846,10 +849,14 @@ static int enter(Game *g)
     case GS_GAME_OVER:                               /* 0x324520: GameOverNI is in no script */
         start_results(g, GR_SCREEN_GAME_OVER);
         start_ni(g, "GameOverNI", 1);
+        g->weapons_on = 0;                           /* 0x324588; then enableSfx(0), every 3D sound stopped
+                                                      * (0x26D500), the sound's frame, enableSfx back (0x324584 ..
+                                                      * 0x3245B0): the host's GE_STATE */
         break;
     case GS_END_BLOCK:                               /* 0x3245C0 */
         start_ni(g, "EndBlockNI", 1);
         adv = g->ni == FN_NONE;
+        g->weapons_on = 0;                           /* 0x324510 */
         break;
     case GS_END_LEVEL:                               /* 0x324600 */
         start_results(g, g->cfg.play_type == GP_KING_CITY || g->cfg.play_type == GP_KING_WORLD ?
@@ -1063,6 +1070,7 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
     g->start_block = g->cfg.start_block;
     g->king_block = g->king_city = g->king_world = g->first_place = g->second_place = -1;
     g->results_screen = -1;
+    g->weapons_on = 1;                               /* gp-0x772C: 1 in the ELF's data */
     for (int i = 0; i < GAME_PLAYERS; i++) {
         g->p[i].cities_won = g->cfg.cities_won[i];   /* GameStatus outlives the world [R 0x4D7990 +0x318 + 0x60 i] */
         g->hp[i] = 1e9f;
@@ -1242,6 +1250,7 @@ void game_start_respawn(Game *g, int slot, const GameRespawnIn *in, GameRespawn 
 }
 
 int game_state(const Game *g) { return g ? g->state : GS_NONE; }
+int game_weapons_on(const Game *g) { return g ? g->weapons_on : 1; }
 int game_left(const Game *g) { return g ? g->left : 1; }
 int game_play_type(const Game *g) { return g ? g->cfg.play_type : GP_CAMPAIGN; }
 int game_lives(const Game *g, int slot) { return g && slot >= 0 && slot < GAME_PLAYERS ? g->lives[slot] : 0; }

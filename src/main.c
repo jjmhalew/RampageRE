@@ -2531,7 +2531,7 @@ static void mon_weapons_step(Viewer *v, float dt)
             continue;
         for (int i = 0; i < mo->weapons.n; i++) {
             ArmyMonWeapon *w = &mo->weapons.w[i];
-            int what = army_mon_weapon_step(w, dt);
+            int what = army_mon_weapon_step(w, dt, game_weapons_on(v->game));
             if (!what)
                 continue;
             Mat4 n;
@@ -2949,6 +2949,8 @@ static void game_step(Viewer *v, float dt)
             Mon *mo = ev_mon(v, e->slot);            /* the monster slot it is for (the monster events) */
             switch (e->type) {
             case GE_BLOCK: {                         /* the next block: in the game at once, else when it begins */
+                if (e->b)                            /* [R 0x2B6760] the teardown's end: every 3D sound killed */
+                    sound_objects_clear();
                 int k = -1;
                 for (uint32_t i = 0; e->name && i < v->nblocks; i++)
                     if (!_stricmp(v->blocks[i], e->name))
@@ -2996,6 +2998,8 @@ static void game_step(Viewer *v, float dt)
                 }
                 if (e->a == GS_EXIT)
                     v->exit_game = 1;
+                if (e->a == GS_GAME_OVER)            /* [R 0x324584 .. 0x3245B0] every 3D sound killed */
+                    sound_objects_clear();
                 if (e->a == GS_BEGIN_BLOCK && v->next_block >= 0) {
                     v->game_block = v->next_block;   /* built once this frame is over */
                     v->next_block = -1;
@@ -3956,6 +3960,7 @@ static void army_step(Viewer *v, float dt)
         boxes[nb].gone = b->state == BUILDING_GONE;
     }
     army_set_view(v->army, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the camera's x (FlybySound), and the x range unhosted */
+    army_set_weapons(v->army, game_weapons_on(v->game));   /* the army's and the bosses' weapons (gp-0x772C) */
     army_update(v->army, dt, m, nm, boxes, nb);
     vehicle_step(v, dt, m, nm, boxes, nb);
     parade_step(v, dt, m, nm);

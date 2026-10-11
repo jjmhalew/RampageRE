@@ -46,6 +46,7 @@ int  sound_add3d(const char *name, const float pos[3], float range, int keep, fl
 void sound_move(int h, const float pos[3]);   /* a 3D sound's new place (each frame for things that move) */
 void sound_kill(int h);                  /* 0x2725C0: ends a loop's wait, or fades the sound out in 100 ms */
 void sound_kill_name(const char *name);
+void sound_objects_clear(void);          /* 0x26D500: the whole 3D list killed (a block's teardown, Game Over) */
 int  sound_active(int h);                /* still playing (or waiting to come into range) */
 /* the scripts' SoundEffect (0x2750F0; Traffic's Crowd_Panic): 16 slots; start = a 3D sound object at the slot's
  * place (the world's origin until set), auto_stop = it goes once its sound is not playing (0x2765C0, run by

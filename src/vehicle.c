@@ -1163,6 +1163,9 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
         }
     }
     int may = o->w.on && o->ft_has_target && on_target && tdist <= o->w.range;
+    if (v->army && !army_weapons_on(v->army))      /* [R 0x297398, 0x295CC0] the weapons off (gp-0x772C): no
+                                                      * countdown, no stream (army.c weapon_tick) */
+        return;
     if (o->w.ammo > 0 || !o->w.counts) {
         o->w.timer -= dt;
         float floor = may ? 0 : o->w.charge + o->w.offset;

@@ -1340,6 +1340,17 @@ void sound_kill(int h)
         track_drop(t);
 }
 
+/* [R] 0x26D500 -> 0x274610: every object of the 3D list (SoundEffect slots included) killed (0x26BB30 -> 0x2725C0)
+ * and freed. Its callers (the block's teardown 0x2B6760, Game Over 0x324584) put it between enableSfx(0) and
+ * enableSfx(as it was), with the sound's frame (0x26D960) run once in between with the event player paused (+0x48):
+ * nothing of that frame is heard but the kills */
+void sound_objects_clear(void)
+{
+    for (int i = 0; i < MAX_TRACKS; i++)
+        if (S.track[i].id && S.track[i].obj)
+            track_drop(&S.track[i]);
+}
+
 void sound_kill_name(const char *name)  /* [R] 0x26B960 */
 {
     for (int i = 0; i < MAX_TRACKS; i++)

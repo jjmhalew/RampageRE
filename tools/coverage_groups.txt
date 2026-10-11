@@ -223,7 +223,7 @@ engine    0x26BE90-0x26C940  SoundDevice: replaceMusic, playMusic, isMusicPlayin
 unused    0x26C940-0x26CE70  gSndDev.killVoice (0x26C940), playVoice (0x26CBE0): only the binding calls them and no script does
 engine    0x26CE70-0x26CF30  SoundDevice helper: sound.c
 unused    0x26CF30-0x26CF80  gSndDev.setSfxFilter: no script calls it
-engine    0x26CF80-0x26D5B0  enableSfx (a one-frame flush at block teardown / game over, 0x2B6760, 0x324584), playSound, 3D sounds: sound.c
+engine    0x26CF80-0x26D5B0  enableSfx (around the 3D list's kill at block teardown / game over, 0x2B6760, 0x324584: sound.c sound_objects_clear), playSound, 3D sounds: sound.c
 unused    0x26D5B0-0x26D660  gSndDev.getVelocityScalar (0x26D5B0), querySoundFlag (0x26D5E0): no script calls them
 engine    0x26D660-0x2750F0  the event player, banks (.uber / .samp), voice layer, music slots, 3D list: sound.c (MultiStream itself is platform)
 engine    0x2750F0-0x2755F0  the script type SoundEffect (start / stop / setPoint; getPosition, setVelocity ... unused): sound.c's sound_effect_*, Traffic's Crowd_Panic from city.c
@@ -332,5 +332,4 @@ engine    0x4373C0-0x43B880  C++ static constructors: fonts, script types, the j
 platform  0x43B880-0x440590  the static constructor filling the renderers' VU1 microprogram tables (sizes of the microcode at 0x34BCB0 ..): render_gl.c
 engine    0x440590-0x443B50  C++ static constructors: TypedObject / WorldObject type registry, gWorld's managers, the RWorld singletons: main.c, collide.c
 # --- found while sorting (shown under "Open" in docs/COVERAGE.md)
-note enableSfx pauses the sound event player for a frame at block teardown and game over (0x2B6760, 0x324584); sound.c has none [G: inaudible].
 note funcmap.csv splits some functions at jump-table targets (e.g. 0x107838, 0x107BF0, 0x108558 are cases of 0x1072B0; 0x1900B0 is the tail of 0x18F9C0), so a few "functions" here are pieces of one.
