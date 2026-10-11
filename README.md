@@ -23,7 +23,7 @@ with their challenges, bosses, results screens and the credits, the other play m
 included), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch (homebrew)
 and Android, on keyboard, controllers (rumble included) or the touch screen, with texture packs and graphics
 settings (GTAO, SMAA / MSAA). It has been played on Windows; the Switch, phones and controllers are not yet tried on
-real hardware. Still missing: the unlockable arcade games and the demo, the memory card's messages, and the smaller
+real hardware. Still missing: the unlockable arcade games and the demo, and the smaller
 gaps that the notes in `docs/` list under "Not ported" (and mark [G] where the port guesses).
 
 The recompiled game (`build.ps1`) is the reference the port is checked against. It runs the front end and the first
@@ -57,7 +57,7 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | Monster move graphs (`MONSTER_DATA`): all 30 parsed, the pad variables and the game's runner decoded; clip events (script calls, movement modes), jump physics and the landing slots, the state nodes (playback rate, flags), the game's steering, air control and clip blending; the native viewer plays every monster by its own graph, jumps included, its punches damage the buildings' cells by the game's rules until floors collapse and buildings fall to rubble, and it climbs them | ✅ [docs/FORMAT_MONSTER.md](docs/FORMAT_MONSTER.md) |
 | The game in the native port: front end and shell, profiles, game flow, challenges, people, army, traffic, bosses, edibles, effects, sound and music, movies, HUD and Pause | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 | Linux, Switch (homebrew) and Android builds, controllers and rumble, touch pad, texture packs, graphics settings, CI | ✅ (not yet tried on real hardware) [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) |
-| The arcade games, the demo, the memory card's messages | ❌ |
+| The arcade games, the demo | ❌ |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.

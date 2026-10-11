@@ -18,6 +18,9 @@
  * Use: shell_open() with the volume, how the shell starts (the boot, or back from a game) and the profile as the viewer
  * knows it; every frame shell_input*() for the pad, shell_update(dt), shell_events() for what it asks of the viewer
  * (sounds, music, profile load / create / save, the movies, the start of a game) and shell_quads() for what to draw.
+ * The profile's file is the viewer's: the popup asks for each read and write (SHELL_EVT_PROFILE_LOAD / _CREATE /
+ * _SAVE) as the memory card's job, and the viewer answers each with shell_card_result() before the next update. The
+ * game's screens use the popup alone (shell_open_popup): Results' saveProfile, the SaveIcon while it writes.
  * When SHELL_EVT_START comes, shell_game() is the game to play (gCommon.getGameStatus(): the play type, players,
  * bots, each player's monster, the city, the start block, day or night); the loading screen stays drawn until the
  * viewer closes the shell. Nothing here touches OpenGL or plays sounds.
@@ -58,6 +61,7 @@ typedef struct {
     float sound, music;             /* 0 .. 0.75 (the sliders' 0 .. 100) */
     int rumble;
     uint32_t cheats;                /* gCommon.getCheatFlags() */
+    int changed;                    /* saveProfile's test (0x33E2D0): the block or its status changed */
     int nprofiles;                  /* the profiles saved (the popup's list; getSaveFilesExist = nprofiles > 0) */
     char profiles[SHELL_PROFILES][16];
     int language;                   /* hud.h's languages: 0 English .. 8 Portuguese */
@@ -105,6 +109,24 @@ void shell_set_movie_time(Shell *s, float seconds);
  * (SHELL_CARD_NEED_KB). Unset: room enough */
 void shell_set_card_free(Shell *s, int kb);
 #define SHELL_CARD_NEED_KB 140
+/* the card's answer to the last SHELL_EVT_PROFILE_LOAD / _CREATE / _SAVE, as PS2MemoryCardManager's statuses [R the
+ * sceMcRead / sceMcWrite results 0x1A1550, 0x1A1B98: -4 -> 6, below -9 -> 7, -3 -> 11; the data's CRC -> 18,
+ * 0x1A19B0]: OK; NOT_FOUND the file is not there (a read); IO it could not be read or written; NO_SPACE no room for
+ * it; CORRUPT a file that is not a profile (its sizes, magic or CRC). The popup shows the game's message for each */
+enum { SHELL_CARD_OK = 0, SHELL_CARD_NOT_FOUND = 6, SHELL_CARD_IO = 7, SHELL_CARD_NO_SPACE = 11,
+       SHELL_CARD_CORRUPT = 18 };
+void shell_card_result(Shell *s, int status);
+/* gCommon.saveProfile() for a profile that changed (the viewer's test, 0x33E2D0) [R 0x345950]: with autosave off
+ * (allow_save 0) nothing; else the popup's save (state 7): the SaveIcon alone, then SHELL_EVT_PROFILE_SAVE */
+void shell_save_profile(Shell *s);
+/* the SaveGame popup alone, for the game's screens (Results' saveProfile): MemoryCard.bdp read from vol, the fonts
+ * and frames of common (the viewer's CommonGUI.bdp; it must outlive the Shell). Nothing but the popup runs and draws;
+ * NULL when MemoryCard.bdp is missing */
+Shell *shell_open_popup(const Vol *vol, const Bundle *common, const ShellProfile *p);
+/* gCommon.isSaveGameActive() [R 0x2C2F30: the popup's state 0x4D813C is not 1]: the popup has the pad */
+int shell_popup_active(const Shell *s);
+/* the popup is still drawn: active, or closed and fading out with its SaveIcon playing out [R 0x341CD8] */
+int shell_popup_shown(const Shell *s);
 /* the movie SHELL_EVT_MOVIE named is played: it lasts until shell_movie_end (or the pad skips it) */
 void shell_movie_hold(Shell *s);
 void shell_movie_end(Shell *s);              /* it is over (Video.status() 3): the shell goes on */
@@ -145,9 +167,12 @@ enum {
                                      * "Victory", "Credits", "victory", "credits", "ballers") */
     SHELL_EVT_EMULATOR,             /* gShell.startEmulator(arg): 0 Rampage, 1 Rampage World Tour (skipped) */
     SHELL_EVT_ATTRACT_GAME,         /* gShell.startAttractGame(): the attract mode's demo game (skipped) */
-    SHELL_EVT_PROFILE_LOAD,         /* the popup chose saved profile arg (ShellProfile.profiles[arg]): load it and
-                                     * call shell_set_profile */
-    SHELL_EVT_PROFILE_CREATE,       /* the popup's name entry: create profile `name`, then shell_set_profile */
+    SHELL_EVT_PROFILE_LOAD,         /* the popup reads saved profile arg (ShellProfile.profiles[arg], name): load it,
+                                     * call shell_set_profile and answer shell_card_result */
+    SHELL_EVT_PROFILE_CREATE,       /* the popup writes a new profile `name` (the name entry; an overwrite): create
+                                     * it, write it, shell_set_profile and answer shell_card_result */
+    SHELL_EVT_PROFILE_SAVE,         /* the popup writes the profile as it is (saveProfile): write it and answer
+                                     * shell_card_result */
     SHELL_EVT_PROFILE_NONE,         /* the popup's "continue without a profile": nothing is saved (allow_save 0) */
     SHELL_EVT_BUDDY_PROFILE,        /* gShell.loadBuddyProfile(arg): player arg's own monsters from another profile;
                                      * answer with shell_buddy_profile */

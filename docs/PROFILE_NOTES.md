@@ -177,9 +177,11 @@ host: same logic, but the profile now holds those flags.
 
   It calls the popup 0x345950 with the block and the callback 0x33F230, which clears both changed bytes on success.
   The popup writes only with its flag 4 (autosave) set; otherwise 0x345540(3): no message, the popup closed with
-  result 3 (no show-profile change), the profile not written and its changed bytes kept **[R 0x345950]**. The
-  port: `profile_write` with force 0, from Results (HUD_CALL_SAVE_PROFILE) and the Options page. The
-  port: `profile_write` with force 0, from Results (HUD_CALL_SAVE_PROFILE) and the Options page.
+  result 3 (no show-profile change), the profile not written and its changed bytes kept **[R 0x345950]**. With flag
+  4 it runs state 7: the SaveIcon alone, then the write (SHELL_NOTES.md "The memory card's states"). The port: the
+  viewer's `save_profile` (Results, HUD_CALL_SAVE_PROFILE) and the shell's Options (`op_save`, a new value marks
+  the profile changed) test the changed bytes, then the popup asks for the write (`SHELL_EVT_PROFILE_SAVE`) and the
+  viewer writes with `profile_write(.., force 1)`.
 - **Where it is called**:
   - Results.bsf, every block won: `updateProfile` and `saveProfile` 1.5 s into the screen;
   - Results.bsf's **save button**: it shows when a profile is loaded and autosave is off. Pressing it calls
@@ -296,7 +298,9 @@ The cheats are not in the saved block.
   - `profile_save_checkpoint`, `profile_update`, `profile_needs_save`.
 - **The file**:
   - `profile_write(p, path, force, now_ms)` and `profile_read(p, path)` write and read the card's data file (header
-    and block), e.g. `rampage_profile.bin` next to the viewer;
+    and block), e.g. `rampage_profile.bin` next to the viewer. The write answers -1 when the file cannot be
+    written and -2 for a full drive (ENOSPC), the read -1 when there is no file and 0 for one that is not a
+    profile: the popup's statuses 7, 11, 6 and 18 (main.c `card_job`; SHELL_NOTES.md);
   - `profile_pack` / `profile_unpack` handle the bare block, `profile_pack_file` / `profile_unpack_file` the whole
     file;
   - `profile_crc32`, `profile_card_dir`.

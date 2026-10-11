@@ -101,8 +101,13 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
 - **Save** (Results.scr:215, 354): at 1.5 s `updateProfile`, `saveProfile` and `bTrackSave`; from then on each frame
   the Save button ("Autosave", button 1) shows while `hasLoadedProfile() && !getAllowSave()` (a profile created
   or loaded, autosave off), and when it goes from shown to hidden `saveProfile` runs. Button 1 while it shows (not in
-  the walkout): `Click`, `setAllowSave(1)`, 0.25 s before Continue answers. Continue clears `bTrackSave`. The port:
-  HUD_CALL_SAVE_PROFILE (arg 1 at 1.5 s: updateProfile first) and HUD_CALL_ALLOW_SAVE; key V, `menu b1`.
+  the walkout): `Click`, `setAllowSave(1)`, 0.25 s before Continue answers. Continue clears `bTrackSave`. The
+  answers (`exitCallFunction`) wait while `gCommon.isSaveGameActive()` (Results.scr:200). The port:
+  HUD_CALL_SAVE_PROFILE (arg 1 at 1.5 s: updateProfile first) and HUD_CALL_ALLOW_SAVE; key V, `menu b1`. The
+  viewer's saveProfile opens the SaveGame popup over the screen (shell.c `shell_open_popup`): the SaveIcon at the
+  bottom left while it writes, an error's message (a file that cannot be written: "... damaged and cannot be
+  used.") with the pad, and the held answer waits for it (`hud_set_save_active`); its warn-continue's Don't Save
+  shows the Save button again (`hud_set_allow_save`) [SHELL_NOTES.md "The memory card's states"].
 - **The end**: after the walkout, result 1 (DONE), 5 s more on screen, a 0.5 s fade, `endResults`. The game goes on
   to the next block meanwhile (game.c moves on at DONE).
 - The script's `processIntro(dt, niFlag)` clears `bDoIntro` through its reference: the PP interpreter passes a
@@ -188,4 +193,5 @@ City Destroyed" and "Time Remaining:" the clock's seconds; no count-up; Quit hid
   ConfirmQuit, Yes → 4.
 
 ### Not ported
-The save button and profile saving. (The Pause menu is ported: [PAUSE_NOTES.md](PAUSE_NOTES.md).)
+Nothing of these screens' scripts. (The Pause menu is ported: [PAUSE_NOTES.md](PAUSE_NOTES.md); the save button and
+the autosave are, above, through the SaveGame popup of [SHELL_NOTES.md](SHELL_NOTES.md).)

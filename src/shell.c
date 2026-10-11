@@ -7,8 +7,9 @@
  * dispatcher 0x3062B0, jump table 0x432F50), the shell object 0x4D51F0 (activation 0x308950, update 0x308710), the
  * Common bindings (lookup 0x2C3840, table 0x430450) and GameStatus (0x4D7990, getMonsterFlags 0x33D760), the SaveGame
  * popup 0x4D7E80 (the profile list 0x340B40 / 0x3410E0 / 0x341250, the name entry 0x340980 / 0x340320, the messages
- * 0x3401E0 / 0x33FBB0, the event split 0x341880) and the loading screen 0x4D8250 (showLoading 0x3485E0, the dots
- * 0x348B80). [R] = read there, [G] = a guess where it matters.
+ * 0x3401E0 / 0x33FBB0, the event split 0x341880, the card states 0x342F30, the errors 0x341DF0, saveProfile
+ * 0x345950) and the loading screen 0x4D8250 (showLoading 0x3485E0, the dots 0x348B80). [R] = read there, [G] = a
+ * guess where it matters.
  *
  * The GUI core (fonts, texts, the .ifc reader, rects, list boxes, the fader) is hud.c's, copied and widened here (hud.c
  * keeps it static): each object's frame is a full 2D affine map instead of a position and a uniform scale, so turned
@@ -1722,16 +1723,38 @@ typedef struct {
 
 /* the SaveGame popup's panels [R 0x341880: +0x2D0 1 the profile list, 2 the name entry, 3 the messages] */
 enum { MC_OFF, MC_LIST, MC_KEYBOARD, MC_MESSAGE };
-enum { MSG_AUTOSAVE, MSG_WARN_CONTINUE, MSG_DUPLICATE, MSG_OVERWRITE, MSG_NOSPACE_BOOT, MSG_NOSPACE_LIST,
-       MSG_NOSPACE_SAVE };
+/* its messages: the popup's own, the card's (no buttons) and the card's errors (MemCard.err) */
+enum { MSG_AUTOSAVE, MSG_WARN_CONTINUE, MSG_OVERWRITE, MSG_NOSPACE_BOOT, MSG_CHECKING, MSG_SAVING, MSG_LOADING,
+       MSG_ERROR };
 enum { MCP_BOOT, MCP_LOAD, MCP_BUDDY };
+/* the request (+0x2B4) [R]: 1 loadProfile (0x345700), 2 saveProfile (0x345950), 3 the boot (0x345BC0) */
+enum { MCR_LIST = 1, MCR_SAVE = 2, MCR_BOOT = 3 };
+/* the message panel's answers (+0x350 / +0x354) [R 0x33FBB0, 0x33FD10]: none, done (no buttons, the time out),
+ * btn_select (Cross), btn_cancel (Back), btn_button0 */
+enum { MCA_NONE = 0xF, MCA_DONE = 0x11, MCA_SELECT = 0x12, MCA_CANCEL = 0x13, MCA_BUTTON0 = 0x14 };
 typedef struct {
     Layout *L;
     int mode, purpose, msg, buddy;
     int had;                                             /* flag 0x20: flag 8 and a name held when it opened */
+    int req, op;                                         /* +0x2B4 the request; +0x2B8 the op (3 the list, 4 the name
+                                                          * entry, 5 check and write, 7 save, 12 the boot) */
+    int card, sub;                                       /* the card state running (+0x2BC 5, 6 or 7; 0 none), its
+                                                          * sub-state (+0x2C0) */
+    int overwrite;                                       /* +0x2C4 9: state 11's YES, write into the file there */
+    int errored;                                         /* flag 0x80: an error was shown since the popup opened */
+    int err;                                             /* +0x2A8: the error shown */
+    int answer, delivered;                               /* +0x350 / +0x354 (MCA_*) */
+    float timer;                                         /* +0x358: the time before an answer counts */
+    int shown;                                           /* the message panel shown (t0) */
+    int pending, result;                                 /* a card request out to the viewer; its answer */
+    int load_index;                                      /* the list's profile being loaded */
+    int closing;                                         /* closed: fading out, the SaveIcon playing out */
+    Node *bg, *save_icon, *autosave_icon;                /* background_quad (+0x394), SaveIcon (+0x398), AutoSaveIcon
+                                                          * (+0x39C) */
     Node *profiles, *keyboard, *messages;
     /* the messages (0x3401E0) */
     Node *message_rect, *autosave_rect, *nodata_rect, *title, *text, *btn_select, *btn_cancel, *btn_button0;
+    Node *bottom_bar;
     /* the profile list (+0x2D8) */
     Node *list, *bar, *pl_name, *pl_id, *arrow_up, *arrow_down;
     int nentries;
@@ -1912,69 +1935,114 @@ static int ms_player_selection(Shell *s, int player);
 static void mm_update_faders(Shell *s, float dt);
 
 /* ---------------------------------------------------------------- the SaveGame popup (MemoryCard.ifc) */
-/* the message panel [R 0x3401E0 finds them; 0x33FD10 fills title, text and the buttons' texts] */
-static void mc_message(Shell *s, int msg)
+/* the message panel (0x33FD10) [R]: the title and the text (each through sprintf with the KB a save needs, 0x33FECC);
+ * the time before an answer counts (+0x358); shown (t0, always for the list's request): the messages group and
+ * background_quad, at fade 1 for the boot's request and 0.6 otherwise (0x33FE30), else both hidden (an autosave: the
+ * SaveIcon alone); the buttons' texts, NULL hidden; none at all: the bottom bar hidden and the answer 0x11 ("done")
+ * once the time is up. The answers reset to 0xF (none), the messages group to fade 0 (it fades in, 0x341BE0) */
+static void mc_panel(Shell *s, int msg, const char *title, const char *text, float time, int shown, const char *sel,
+                     const char *can, const char *b0)
 {
     MemCard *m = &s->mc;
     m->mode = MC_MESSAGE;
     m->msg = msg;
-    show(m->profiles, 0);
-    show(m->keyboard, 0);
-    show(m->messages, 1);
-    show(m->autosave_rect, msg == MSG_AUTOSAVE);
+    if (m->req == MCR_LIST)
+        shown = 1;
+    m->shown = shown;
+    show(m->messages, shown);
+    show(m->bg, shown);
+    set_fade(m->bg, m->req == MCR_BOOT ? 1.0f : 0.6f);
+    show(m->message_rect, 1);
+    show(m->autosave_rect, 0);
     show(m->nodata_rect, 0);
-    show(m->message_rect, msg != MSG_AUTOSAVE);
-    /* 0x33FD10(title, text, .., btn_select's, btn_cancel's, btn_button0's text) [R 0x3401E0: +0x2C / +0x30 / +0x34] */
-    const char *title = NULL, *text = NULL, *sel = NULL, *can = NULL;
-    if (msg == MSG_WARN_CONTINUE) {
-        /* 0x3439E8: a name held, "Autosave Turned Off" with Don't Save; none, "WARNING: No Profile" with Continue.
-         * Back on Cross, the other on Triangle [R] */
-        int named = s->prof.loaded;
-        title = named ? "mcWarnContinueTitle" : "mcWarnContinueTitle (NoProfile)";
-        text = named ? "mcWarnContinue" : "mcWarnContinue (NoProfile)";
-        sel = "MC_BUTTON_BACK";
-        can = named ? "MC_BUTTON_DONTSAVE" : "MC_BUTTON_CONTINUE";
-    } else if (msg == MSG_DUPLICATE) {                   /* error 24 for the list's request [R 0x3423B8] */
-        title = "mcErrorTitle";
-        text = "mcDuplicate";
-        sel = "MC_BUTTON_CANCEL";
-        can = "MC_BUTTON_OVERWRITE";
-    } else if (msg == MSG_OVERWRITE) {                   /* state 11 [R 0x343868] */
-        title = "mcConfirmOverwriteTitle";
-        text = "mcConfirmOverwrite";
-        sel = "MC_BUTTON_NO";
-        can = "MC_BUTTON_YES";
-    }
-    else if (msg == MSG_NOSPACE_BOOT || msg == MSG_NOSPACE_SAVE) {   /* [R 0x343408, 0x342038] */
-        title = "mcErrorTitle";
-        text = "mcNoSpace";
-        sel = "MC_BUTTON_RETRY";
-        can = "MC_BUTTON_DONTSAVE";
-    } else if (msg == MSG_NOSPACE_LIST) {                /* [R 0x342038 with op 3, the list: Continue alone] */
-        title = "mcErrorTitle";
-        text = "mcNoSpace";
-        sel = "MC_BUTTON_CONTINUE";
-    }
-    if (title) {
-        node_localize(&s->gui, m->title, title);
-        node_localize(&s->gui, m->text, text);
-        node_localize(&s->gui, m->btn_select, sel);
-        if (can)
-            node_localize(&s->gui, m->btn_cancel, can);
-        show(m->btn_select, 1);
-        show(m->btn_cancel, can != NULL);
-        show(m->btn_button0, 0);
-        /* [R 0x33FECC] every text goes through sprintf with the KB a save needs (0x4D7FFC: 140) */
-        for (int i = 0; i < 2; i++) {
-            Node *t = i ? m->text : m->title;
-            const char *at = t ? strstr(t->text, "%d") : NULL;
-            if (at) {
-                char buf[MAX_TEXT];
-                snprintf(buf, sizeof buf, "%.*s%d%s", (int)(at - t->text), t->text, SHELL_CARD_NEED_KB, at + 2);
-                node_text(t, buf);
-            }
+    node_localize(&s->gui, m->title, title);
+    node_localize(&s->gui, m->text, text);
+    for (int i = 0; i < 2; i++) {
+        Node *t = i ? m->text : m->title;
+        const char *at = t ? strstr(t->text, "%d") : NULL;
+        if (at) {
+            char buf[MAX_TEXT];
+            snprintf(buf, sizeof buf, "%.*s%d%s", (int)(at - t->text), t->text, SHELL_CARD_NEED_KB, at + 2);
+            node_text(t, buf);
         }
     }
+    const char *bt[3] = { sel, can, b0 };
+    Node *bn[3] = { m->btn_select, m->btn_cancel, m->btn_button0 };
+    for (int i = 0; i < 3; i++) {
+        if (bt[i])
+            node_localize(&s->gui, bn[i], bt[i]);
+        show(bn[i], bt[i] != NULL);
+    }
+    show(m->bottom_bar, sel || can || b0);
+    m->answer = sel || can || b0 ? MCA_NONE : MCA_DONE;
+    m->delivered = MCA_NONE;
+    m->timer = time;
+    set_fade(m->messages, 0);
+}
+
+/* the popup's own messages: the autosave notice (state 13, 0x342FF8: autosave_rect, Cross alone, 0.25 s; the
+ * AutoSaveIcon), warn-continue (state 2, 0x3439E8), the overwrite's question (state 11, 0x343868), the boot's no room
+ * (state 12, 0x343408), and the card's CHECKING (0.25 s), SAVING and LOADING (1 s) [R 0x344050, 0x3440C0, 0x344540] */
+static void mc_message(Shell *s, int msg, int shown)
+{
+    MemCard *m = &s->mc;
+    if (msg == MSG_AUTOSAVE) {
+        mc_panel(s, msg, "mcWarnContinueTitle", "mcWarnAutosave", 0.25f, 1, NULL, NULL, NULL);
+        show(m->message_rect, 0);
+        show(m->autosave_rect, 1);
+        m->answer = MCA_NONE;
+        effect_start(m->autosave_icon);
+    } else if (msg == MSG_WARN_CONTINUE) {
+        /* a name held, "Autosave Turned Off" with Don't Save; none, "WARNING: No Profile" with Continue. Back on
+         * Cross, the other on Triangle [R] */
+        int named = s->prof.loaded;
+        mc_panel(s, msg, named ? "mcWarnContinueTitle" : "mcWarnContinueTitle (NoProfile)",
+                 named ? "mcWarnContinue" : "mcWarnContinue (NoProfile)", 0.25f, 1, "MC_BUTTON_BACK",
+                 named ? "MC_BUTTON_DONTSAVE" : "MC_BUTTON_CONTINUE", NULL);
+    } else if (msg == MSG_OVERWRITE)
+        mc_panel(s, msg, "mcConfirmOverwriteTitle", "mcConfirmOverwrite", 0.25f, 1, "MC_BUTTON_NO", "MC_BUTTON_YES",
+                 NULL);
+    else if (msg == MSG_NOSPACE_BOOT)
+        mc_panel(s, msg, "mcErrorTitle", "mcNoSpace", 0.25f, 1, "MC_BUTTON_RETRY", "MC_BUTTON_DONTSAVE", NULL);
+    else if (msg == MSG_CHECKING)
+        mc_panel(s, msg, "mcCheckingTitle", "mcChecking", 0.25f, 1, NULL, NULL, NULL);
+    else if (msg == MSG_SAVING)
+        mc_panel(s, msg, "mcSavingTitle", "mcSaving", 1.0f, shown, NULL, NULL, NULL);
+    else if (msg == MSG_LOADING)
+        mc_panel(s, msg, "mcLoadingTitle", "mcLoading", 1.0f, 1, NULL, NULL, NULL);
+}
+
+/* the card's errors (0x341DF0, table 0x435640) [R]: the SaveIcon stopped and flag 0x80 (an error was seen) set, the
+ * error's message in state 8 (0.25 s), its answers in 0x342680. The ones a host's file can give: 2 (any status
+ * without a message of its own, a file not found among them: shown as "mcCorrupt"), 7 (an I/O error:
+ * mcRemovedOnLoad in op 6, mcGeneralIOError otherwise; mcFailOnSave needs flag 0x40000, which the write's callback
+ * clears first, 0x3425D8), 11 (no room; the list's Continue alone in op 3), 18 (a corrupt file: Retry / Cancel), 24
+ * (the name is on the card already: the list's Cancel / Overwrite, a save's Retry / Don't Save / Overwrite) */
+static void mc_error(Shell *s, int code)
+{
+    MemCard *m = &s->mc;
+    effect_stop(m->save_icon);
+    m->errored = 1;
+    m->card = 0;
+    if (code != 7 && code != 11 && code != 18 && code != 24)
+        code = 2;
+    m->err = code;
+    if (code == 7)
+        mc_panel(s, MSG_ERROR, "mcErrorTitle", m->op == 6 ? "mcRemovedOnLoad" : "mcGeneralIOError", 0.25f, 1,
+                 "MC_BUTTON_RETRY", "MC_BUTTON_DONTSAVE", NULL);
+    else if (code == 11)
+        mc_panel(s, MSG_ERROR, "mcErrorTitle", "mcNoSpace", 0.25f, 1, m->op == 3 ? "MC_BUTTON_CONTINUE" :
+                 "MC_BUTTON_RETRY", m->op == 3 ? NULL : "MC_BUTTON_DONTSAVE", NULL);
+    else if (code == 18)
+        mc_panel(s, MSG_ERROR, "mcCorruptTitle", "mcCorrupt", 0.25f, 1, "MC_BUTTON_RETRY", "MC_BUTTON_CANCEL", NULL);
+    else if (code == 24 && m->req == MCR_LIST)
+        mc_panel(s, MSG_ERROR, "mcErrorTitle", "mcDuplicate", 0.25f, 1, "MC_BUTTON_CANCEL", "MC_BUTTON_OVERWRITE",
+                 NULL);
+    else if (code == 24)
+        mc_panel(s, MSG_ERROR, "mcErrorTitle", "mcDuplicate", 0.25f, 1, "MC_BUTTON_RETRY", "MC_BUTTON_DONTSAVE",
+                 "MC_BUTTON_OVERWRITE");
+    else
+        mc_panel(s, MSG_ERROR, "mcErrorTitle", "mcCorrupt", 0.25f, 1, "MC_BUTTON_RETRY", "MC_BUTTON_DONTSAVE", NULL);
 }
 
 /* the profile list's selection shown (0x340B40): the bar under the selected item, its text as the name, the arrows */
@@ -1992,8 +2060,9 @@ static void mc_list_update(Shell *s)
     show(m->arrow_down, top < m->nentries - 6);
 }
 
-/* gCommon.loadProfile() -> SaveGame 0x345700 with "create allowed" (flag 0x10): the list, "Create New Profile" first,
- * then the profiles found (0x341250: item 0 kept, the others shown and named, copies of item 0 for more) */
+/* gCommon.loadProfile() -> SaveGame 0x345700 with "create allowed" (flag 0x10): the list (state 3, op 3), "Create New
+ * Profile" first, then the profiles found (0x341250: item 0 kept, the others shown and named, copies of item 0 for
+ * more); the background at 0.6 (0x341504) */
 static void mc_open_list(Shell *s, int purpose, int buddy)
 {
     MemCard *m = &s->mc;
@@ -2002,9 +2071,11 @@ static void mc_open_list(Shell *s, int purpose, int buddy)
     m->purpose = purpose;
     m->buddy = buddy;
     m->mode = MC_LIST;
+    m->op = 3;
+    m->card = 0;
     show(m->profiles, 1);
-    show(m->keyboard, 0);
-    show(m->messages, 0);
+    show(m->bg, 1);
+    set_fade(m->bg, 0.6f);
     m->nentries = s->prof.nprofiles;
     int n = list_count(m->list);
     for (int i = 1; i < n; i++)
@@ -2022,16 +2093,16 @@ static void mc_open_list(Shell *s, int purpose, int buddy)
     mc_list_update(s);
 }
 
-/* the name entry's start (0x340980): the keyboard shown, the colours from color_normal / color_selected, the caret
- * blinking (flag 0x400), the first key */
+/* the name entry's start (state 4, op 4; 0x340980): the keyboard shown, the colours from color_normal /
+ * color_selected, the caret blinking (flag 0x400), the first key; the background at 0.6 (0x343F0C) */
 static void mc_open_keyboard(Shell *s)
 {
     MemCard *m = &s->mc;
     m->mode = MC_KEYBOARD;
-    show(m->profiles, 0);
-    show(m->messages, 0);
+    m->op = 4;
     show(m->keyboard, 1);
-    if (m->keyboard) m->keyboard->fade = 1;
+    show(m->bg, 1);
+    set_fade(m->bg, 0.6f);
     m->row = m->col = 0;
     m->len = 0;
     m->name[0] = 0;
@@ -2051,14 +2122,24 @@ static void mc_open_keyboard(Shell *s)
 
 /* close(result) [R 0x345540]: a result other than 3 (the list's Back with nothing to warn of, the attract mode's
  * interrupt) sets 0x300 (show-profile off, boot done), or only 0x100 for the boot's check (op 12): the autosave
- * notice. Nothing sets show-profile again */
+ * notice. Nothing sets show-profile again. Both icons are stopped, flag 0x80 cleared, the state 1 (isSaveGameActive
+ * 0 at once); the panels fade out and the interface goes once they are gone and the SaveIcon has played out
+ * (0x341CD8) */
 static void mc_close(Shell *s, int result)
 {
-    if (result != 3 && !(s->mc.mode == MC_MESSAGE && s->mc.msg == MSG_AUTOSAVE))
+    MemCard *m = &s->mc;
+    if (result != 3 && !(m->mode == MC_MESSAGE && m->msg == MSG_AUTOSAVE))
         s->show_profile = 0;
-    s->mc.mode = MC_OFF;
-    if (s->mc.L)
-        show(s->mc.L->root, 0);
+    m->mode = MC_OFF;
+    m->card = 0;
+    m->errored = 0;
+    m->overwrite = 0;
+    m->op = 1;
+    m->req = 0;
+    m->pending = 0;
+    effect_stop(m->save_icon);
+    effect_stop(m->autosave_icon);
+    m->closing = m->L != NULL;
 }
 
 static void mc_finish_buddy(Shell *s, int player)
@@ -2081,20 +2162,45 @@ static void mc_name_changed(Shell *s)
 static int mc_room(const Shell *s) { return s->mc.card_free < 0 || SHELL_CARD_NEED_KB < s->mc.card_free; }
 static int mc_fits(const Shell *s) { return s->mc.card_free < 0 || s->mc.card_free >= SHELL_CARD_NEED_KB; }
 
-/* the name written as a new profile (state 5's write; close(1) in op 5: flags 4 and 8 stay as they are); no room:
- * error 11, mcNoSpace with Retry / Don't Save (0x342038) */
-static void mc_create(Shell *s)
+static void mc_card_update(Shell *s);
+/* a card state (5 the check and write, 6 the load, 7 the save) from its sub-state 0; every store of state 7 is state
+ * 5 once flag 0x80 is set (the macro at each state store, e.g. 0x342870, 0x345B2C) [R] */
+static void mc_card(Shell *s, int st)
 {
     MemCard *m = &s->mc;
-    if (!mc_fits(s)) {
-        mc_message(s, MSG_NOSPACE_SAVE);
-        return;
-    }
-    event(s, SHELL_EVT_PROFILE_CREATE, m->name, m->purpose == MCP_BUDDY ? m->buddy : 0, 0);
-    mc_close(s, 1);
+    if (st == 7 && m->errored)
+        st = 5;
+    m->card = st;
+    m->sub = 0;
+    mc_card_update(s);                                   /* (its first sub-state at once: the popup is up) */
 }
 
-/* DONE with a name [R 0x340700: trailing spaces cut, an empty name refused with "Cancel"] */
+/* warn-continue (state 2, 0x3439E8) [R]: with flag 0x20 (flag 8 and a name held as the list opened) or flag 4 clear
+ * it closes at once, close(3); else the message */
+static void mc_warn(Shell *s)
+{
+    if (s->mc.had || !s->prof.allow_save)
+        mc_close(s, 3);
+    else
+        mc_message(s, MSG_WARN_CONTINUE, 1);
+}
+
+/* the state of the op (+0x2B8) again: an answer's Retry or Back [R 0x342870, 0x343B38] */
+static void mc_redo(Shell *s)
+{
+    MemCard *m = &s->mc;
+    if (m->op == 3)
+        mc_open_list(s, m->purpose, m->buddy);
+    else if (m->op == 4)
+        mc_open_keyboard(s);
+    else if (m->op == 5 || m->op == 6 || m->op == 7)
+        mc_card(s, m->op);
+    else
+        mc_close(s, 3);
+}
+
+/* DONE with a name [R 0x340700: trailing spaces cut, an empty name refused with "Cancel"]; then state 5 (0x343F90: the
+ * name to +0x188) */
 static void mc_done(Shell *s)
 {
     MemCard *m = &s->mc;
@@ -2106,14 +2212,8 @@ static void mc_done(Shell *s)
         return;
     }
     sound(s, "Click");
-    /* [R] DONE does not look: state 5 opens the file by its name (the directory is crc32 of the name, so the case
-     * counts) and finds it there: error 24, "The Profile name already exists." */
-    for (int i = 0; i < s->prof.nprofiles; i++)
-        if (strcmp(s->prof.profiles[i], m->name) == 0) {
-            mc_message(s, MSG_DUPLICATE);
-            return;
-        }
-    mc_create(s);
+    m->overwrite = 0;
+    mc_card(s, 5);
 }
 
 static void mc_key_add(Shell *s, char ch)
@@ -2195,79 +2295,235 @@ static void mc_list_input(Shell *s, int ev)
         sound(s, "Click");
         int sel = m->list ? m->list->sel : 0;
         if (sel <= 0 && !mc_room(s))
-            mc_message(s, MSG_NOSPACE_LIST);             /* [R 0x343D38: the room test first] */
+            mc_error(s, 11);                             /* [R 0x343D38: +0x2C4 11, the room test first] */
         else if (sel <= 0)
-            mc_open_keyboard(s);                         /* state 7: create */
-        else {                                           /* state 8: load */
-            event(s, m->purpose == MCP_BUDDY ? SHELL_EVT_BUDDY_PROFILE : SHELL_EVT_PROFILE_LOAD,
-                  s->prof.profiles[sel - 1], m->purpose == MCP_BUDDY ? m->buddy : sel - 1, (float)(sel - 1));
-            mc_close(s, 1);                              /* (op 3: flags 4 and 8 set, the viewer's) */
+            mc_open_keyboard(s);                         /* state 4: create */
+        else if (m->purpose == MCP_BUDDY) {              /* [G] a buddy's load: at once (no second profile here) */
+            event(s, SHELL_EVT_BUDDY_PROFILE, s->prof.profiles[sel - 1], m->buddy, (float)(sel - 1));
+            mc_close(s, 1);
+        } else {                                         /* the name to +0x188; state 6, the load (a save's request:
+                                                          * 7) [R 0x343D60] */
+            m->load_index = sel - 1;
+            snprintf(m->name, sizeof m->name, "%s", s->prof.profiles[sel - 1]);
+            mc_card(s, m->req == MCR_SAVE ? 7 : 6);
         }
     } else if (ev == EV_BACK) {
         sound(s, "Cancel");                              /* state 9 */
         if (m->purpose == MCP_BUDDY) {
             mc_close(s, 2);                              /* [G: the result] */
             mc_finish_buddy(s, -1);
-        } else if (m->had || !s->prof.allow_save)
-            mc_close(s, 3);                              /* [R 0x3439E8: 0x20 set or 4 clear, nothing to warn of] */
-        else
-            mc_message(s, MSG_WARN_CONTINUE);            /* [R the list's Back, 0x343DF8: state 2] */
+        } else
+            mc_warn(s);                                  /* [R the list's Back, 0x343DF8: state 2] */
     }
 }
 
-/* the messages' pad (0x33FBB0) [R: Accept while the autosave notice shows or btn_select shows: 0x12; Back with
- * btn_cancel: 0x13; button 0 with btn_button0: 0x14] */
+/* the messages' pad (0x33FBB0) [R]: Accept while the autosave notice or btn_select shows: 0x12; Back with
+ * btn_cancel: 0x13; button 0 with btn_button0: 0x14; each plays Click. It counts once the panel's time is up */
 static void mc_message_input(Shell *s, int ev, int button)
 {
     MemCard *m = &s->mc;
-    int ok = ev == EV_ACCEPT && (m->msg == MSG_AUTOSAVE || (m->btn_select && m->btn_select->visible));
-    int back = ev == EV_BACK && m->btn_cancel && m->btn_cancel->visible && m->msg != MSG_AUTOSAVE;
-    (void)button;
-    if (!ok && !back)
+    int a = MCA_NONE;
+    if (m->msg == MSG_AUTOSAVE)
+        a = ev == EV_ACCEPT ? MCA_SELECT : MCA_NONE;
+    else if (ev == EV_ACCEPT && m->btn_select && m->btn_select->visible)
+        a = MCA_SELECT;
+    else if (ev == EV_BACK && m->btn_cancel && m->btn_cancel->visible)
+        a = MCA_CANCEL;
+    else if (ev == EV_BUTTON && button == 0 && m->btn_button0 && m->btn_button0->visible)
+        a = MCA_BUTTON0;
+    if (a == MCA_NONE)
         return;
+    m->answer = a;
     sound(s, "Click");
-    if (m->msg == MSG_AUTOSAVE) {                        /* then state 12, the card check (0x3432E0): saves there,
-                                                          * or room for one, closes; else mcNoSpace */
+}
+
+/* an answer the panel passed on (+0x354) to the message's state [R] */
+static void mc_answered(Shell *s, int a)
+{
+    MemCard *m = &s->mc;
+    int msg = m->msg;
+    m->answer = m->delivered = MCA_NONE;
+    if (msg == MSG_AUTOSAVE) {                           /* state 13: the AutoSaveIcon stopped, then state 12, the card
+                                                          * check (0x3432E0): saves there, or room for one, closes;
+                                                          * else mcNoSpace */
+        effect_stop(m->autosave_icon);
         if (s->prof.nprofiles > 0 || mc_room(s)) {
             m->boot_done = 1;
             mc_close(s, 1);
         } else
-            mc_message(s, MSG_NOSPACE_BOOT);
-    } else if (m->msg == MSG_WARN_CONTINUE) {
-        if (back) {                                      /* [R 0x343B00] Continue / Don't Save: flags 4 and 8 off */
+            mc_message(s, MSG_NOSPACE_BOOT, 1);
+    } else if (msg == MSG_WARN_CONTINUE) {
+        if (a == MCA_CANCEL) {                           /* [R 0x343B00] Continue / Don't Save: flags 4 and 8 off */
             s->prof.allow_save = s->prof.was_saving = 0;
             event(s, SHELL_EVT_PROFILE_NONE, NULL, 0, 0);
             mc_close(s, 2);
-        } else
-            mc_open_list(s, m->purpose, m->buddy);       /* Back: the state it came from, the list */
-    } else if (m->msg == MSG_DUPLICATE) {
-        if (back)
-            mc_message(s, MSG_OVERWRITE);                /* Overwrite: state 11 */
-        else
-            mc_open_list(s, m->purpose, m->buddy);       /* Cancel: state 3, the name lost */
-    } else if (m->msg == MSG_OVERWRITE) {
-        if (back)                                        /* YES: op 9, state 5 writes a new profile into the file
-                                                          * (the list's hook 0x33F0F0, 0x344444) */
-            mc_create(s);
-        else
-            mc_open_list(s, m->purpose, m->buddy);       /* NO: state 3 */
-    } else if (m->msg == MSG_NOSPACE_BOOT) {             /* [R 0x3434C0] */
-        if (back || mc_room(s)) {                        /* Don't Save: state 2, flag 4 clear: close(3) at once.
+        } else if (a == MCA_SELECT)
+            mc_redo(s);                                  /* Back: the op's state (the list's: the list) */
+    } else if (msg == MSG_OVERWRITE) {                   /* state 11's answer (0x3438F8, op 5) */
+        if (a == MCA_SELECT) {                           /* NO: a save's request back to the save, the list's to it */
+            if (m->req == MCR_SAVE)
+                mc_card(s, 7);
+            else
+                mc_open_list(s, m->purpose, m->buddy);
+        } else if (a == MCA_CANCEL) {                    /* YES: +0x2C4 9, state 5 writes into the file */
+            m->overwrite = 1;
+            mc_card(s, 5);
+        }
+    } else if (msg == MSG_NOSPACE_BOOT) {                /* [R 0x3434C0] */
+        if (a == MCA_CANCEL || mc_room(s)) {             /* Don't Save: state 2, flag 4 clear: close(3) at once.
                                                           * Retry: the game waits for the card's status to change
                                                           * (0x345100); here the check runs again [G: a host's room
                                                           * comes back without a status change] */
             m->boot_done = 1;
-            mc_close(s, back ? 3 : 1);
+            mc_close(s, a == MCA_CANCEL ? 3 : 1);
         }
-    } else if (m->msg == MSG_NOSPACE_LIST) {             /* Continue: the room test again (0x342D08 with +0x2C4 11) */
-        if (mc_room(s))
-            mc_open_keyboard(s);
-    } else if (m->msg == MSG_NOSPACE_SAVE) {
-        if (back)                                        /* Don't Save: a list request's create goes back to it */
-            mc_open_list(s, m->purpose, m->buddy);
-        else
-            mc_create(s);                                /* Retry: the write again */
+    } else if (msg == MSG_ERROR) {                       /* state 8 (0x342680) */
+        if (m->err == 18) {                              /* Retry: the load again; Cancel: the list */
+            if (a == MCA_SELECT)
+                mc_card(s, 6);
+            else if (a == MCA_CANCEL)
+                mc_open_list(s, m->purpose, m->buddy);
+        } else if (m->err == 24 && m->req == MCR_LIST) { /* Cancel: the list, the name lost; Overwrite: state 11 */
+            if (a == MCA_SELECT)
+                mc_open_list(s, m->purpose, m->buddy);
+            else if (a == MCA_CANCEL)
+                mc_message(s, MSG_OVERWRITE, 1);
+        } else if (m->err == 24) {                       /* Retry: state 5; Don't Save: state 2; Overwrite: 11 */
+            if (a == MCA_SELECT)
+                mc_card(s, 5);
+            else if (a == MCA_CANCEL)
+                mc_warn(s);
+            else if (a == MCA_BUTTON0)
+                mc_message(s, MSG_OVERWRITE, 1);
+        } else {                                         /* 2, 7, 11: Retry (Continue) the op's state, Don't Save
+                                                          * state 2 */
+            if (a == MCA_SELECT)
+                mc_redo(s);
+            else if (a == MCA_CANCEL)
+                mc_warn(s);
+        }
     }
+}
+
+/* the card's request out to the viewer (PS2MemoryCardManager's job): answered by shell_card_result */
+static void mc_request(Shell *s, int kind, const char *name, int arg)
+{
+    s->mc.pending = 1;
+    s->mc.result = SHELL_CARD_OK;
+    event(s, kind, name, arg, 0);
+}
+
+static int mc_has_name(const Shell *s, const char *name)
+{
+    for (int i = 0; i < s->prof.nprofiles; i++)
+        if (strcmp(s->prof.profiles[i], name) == 0)      /* (the directory is crc32 of the name: the case counts) */
+            return 1;
+    return 0;
+}
+
+/* the card states, a sub-state a frame (0x344020, 0x344510, 0x344770) [R]. 1: the message's fade in first (the
+ * group's fade, even while it is hidden); the write's and the load's result (sub-state 3, the callback 0x3424F0); 2:
+ * the message's own time out (the answer 0x11), then close(1) */
+static void mc_card_update(Shell *s)
+{
+    MemCard *m = &s->mc;
+    int st = m->card;
+    if (!st)
+        return;
+    if (st == 5 || st == 7)
+        m->op = st;
+    if (m->sub == 0) {
+        if (st == 6) {                                   /* LOADING, shown; flag 0x1000 */
+            mc_message(s, MSG_LOADING, 1);
+        } else if (m->errored || (st == 5 && m->req == MCR_LIST))
+            mc_message(s, MSG_CHECKING, 1);
+        else {                                           /* SAVING: shown unless flag 8 (state 5, 0x3440C4) or flag 4
+                                                          * (state 7, 0x3447FC): an autosave shows the SaveIcon alone */
+            mc_message(s, MSG_SAVING, st == 5 ? !s->prof.was_saving : !s->prof.allow_save);
+            effect_start(m->save_icon);
+        }
+        m->sub = 1;
+        return;
+    }
+    if (m->sub == 1) {
+        if (get_fade(m->messages) < 1.0f)
+            return;
+        if (st == 6) {                                   /* the open, the read and its checks (0x3445AC .. 0x344718) */
+            mc_request(s, SHELL_EVT_PROFILE_LOAD, m->name, m->load_index);
+            m->sub = 3;
+            return;
+        }
+        /* [no host meaning] the card id's change (error 22), the file changed since the load (error 23) */
+        if (!mc_fits(s)) {                               /* the write's room (0x1A2E00): error 11 */
+            mc_error(s, 11);
+            return;
+        }
+        const char *name = m->name;
+        if (st == 5 && mc_has_name(s, name) && !m->overwrite) {   /* the name's file opened: error 24 (0x344398) */
+            mc_error(s, 24);
+            return;
+        }
+        if (st == 5 || m->errored) {                     /* SAVING again, shown after an error or for the list
+                                                          * (0x3442C8, 0x3443B0, 0x344A30), at fade 1 */
+            mc_message(s, MSG_SAVING, m->errored || m->req == MCR_LIST);
+            set_fade(m->messages, 1);
+        }
+        if (m->req == MCR_LIST)                          /* the list's hook 0x33F0F0: a new profile into the file */
+            mc_request(s, SHELL_EVT_PROFILE_CREATE, name, m->purpose == MCP_BUDDY ? m->buddy : 0);
+        else
+            mc_request(s, SHELL_EVT_PROFILE_SAVE, name, 0);
+        m->sub = 3;
+        return;
+    }
+    if (m->sub == 3) {
+        if (m->pending)
+            return;
+        if (m->result != SHELL_CARD_OK)
+            mc_error(s, m->result);
+        else
+            m->sub = 2;
+        return;
+    }
+    if (m->sub == 2 && m->delivered >= MCA_DONE)
+        mc_close(s, 1);
+}
+
+/* the popup's update (0x341940) [R]: the panel's group fades in at 4 a second, the others out (the list, the name entry,
+ * the messages; a group gone is hidden); the message's time runs, and an answer counts (+0x354) once it is up; the
+ * states; after a close everything fades out and the interface goes when the SaveIcon has played out (0x341CD8) */
+static void mc_update(Shell *s, float dt)
+{
+    MemCard *m = &s->mc;
+    if (!m->L || (m->mode == MC_OFF && !m->closing))
+        return;
+    Node *g[3] = { m->profiles, m->keyboard, m->messages };
+    int on = m->mode == MC_LIST ? 0 : m->mode == MC_KEYBOARD ? 1 : m->mode == MC_MESSAGE ? 2 : -1;
+    int gone = 1;
+    for (int i = 0; i < 3; i++) {
+        if (!g[i])
+            continue;
+        float f = g[i]->fade + (i == on ? dt : -dt) / 0.25f;
+        g[i]->fade = f < 0 ? 0 : f > 1 ? 1 : f;
+        if (i != on && g[i]->fade <= 0)
+            show(g[i], 0);
+        gone &= g[i]->fade <= 0;
+    }
+    if (m->closing) {
+        Node *icon = m->save_icon;
+        if (gone && !(icon && (icon->eflags & (FXE_RUN | FXE_START | FXE_STOP)))) {
+            m->closing = 0;
+            show(m->L->root, 0);
+        }
+        return;
+    }
+    if (m->mode == MC_MESSAGE) {
+        m->timer -= dt;
+        if (m->answer != MCA_NONE && m->timer <= 0)
+            m->delivered = m->answer;
+        if (m->delivered >= MCA_SELECT && m->msg != MSG_CHECKING && m->msg != MSG_SAVING && m->msg != MSG_LOADING)
+            mc_answered(s, m->delivered);
+    }
+    mc_card_update(s);
 }
 
 static void mc_input(Shell *s, int ev, int button)
@@ -2277,7 +2533,8 @@ static void mc_input(Shell *s, int ev, int button)
     else if (s->mc.mode == MC_MESSAGE) mc_message_input(s, ev, button);
 }
 
-/* SaveGame's interface (0x345D60 loads MemoryCard.ifc of MemoryCard.bdp) */
+/* SaveGame's interface (0x345D60 loads MemoryCard.ifc of MemoryCard.bdp; the groups start at fade 0, 0x3402F4,
+ * 0x340AEC, 0x345F0C) */
 static void mc_load(Shell *s)
 {
     MemCard *m = &s->mc;
@@ -2288,6 +2545,9 @@ static void mc_load(Shell *s)
     if (!m->L)
         return;
     Node *r = m->L->root;
+    m->bg = find(r, "background_quad");
+    m->save_icon = find(r, "SaveIcon");
+    m->autosave_icon = find(r, "AutoSaveIcon");
     m->profiles = find(r, "profiles");
     m->keyboard = find(r, "keyboard");
     m->messages = find(r, "messages");
@@ -2299,6 +2559,7 @@ static void mc_load(Shell *s)
     m->btn_select = find(m->message_rect, "btn_select");
     m->btn_cancel = find(m->message_rect, "btn_cancel");
     m->btn_button0 = find(m->message_rect, "btn_button0");
+    m->bottom_bar = find(m->message_rect, "bottom_bar");
     m->list = find(m->profiles, "profile_list");
     m->bar = find(m->profiles, "profile_bar");
     m->pl_name = find(m->profiles, "profile_name");
@@ -2318,22 +2579,50 @@ static void mc_load(Shell *s)
     fix_buttons(m->profiles, "btn_select", "btn_cancel", "", "");
     fix_buttons(m->keyboard, "btn_select", "btn_cancel", "", "");
     fix_buttons(m->messages, "btn_select", "btn_cancel", "btn_button0", "");
+    set_fade(m->profiles, 0);
+    set_fade(m->keyboard, 0);
+    set_fade(m->messages, 0);
     show(r, 0);
 }
-static void mc_show(Shell *s) { if (s->mc.L) show(s->mc.L->root, 1); }
+static void mc_show(Shell *s)
+{
+    if (s->mc.L)
+        show(s->mc.L->root, 1);
+    s->mc.closing = 0;
+}
 
-/* gCommon.loadProfile() */
+/* gCommon.loadProfile() [R 0x345700: request 1, "create allowed"] */
 static void load_profile(Shell *s)
 {
     if (!s->mc.L)
         return;
     mc_show(s);
+    s->mc.req = MCR_LIST;
     s->mc.had = s->prof.was_saving && s->prof.loaded;   /* [R 0x345760: flag 8 and a name held: 0x20] */
     mc_open_list(s, MCP_LOAD, 0);
 }
 
-/* gShell.doBootCheck() [R 0x306300: once, in shell state 1, SaveGame's boot check 0x345BC0]: here the autosave notice
- * (mcWarnAutosave) the PS2 build shows at the boot [G: the memory card's own checks are not there to make] */
+/* gCommon.saveProfile() [R 0x345950]: the interface, setEffect(SaveIcon, "SaveIcon"); with flag 4 clear close(3);
+ * else request 2, the name held (+0x25C) to +0x188 and state 7 (none held: the list, state 3) */
+static void save_profile(Shell *s)
+{
+    MemCard *m = &s->mc;
+    if (!m->L || !s->prof.allow_save || m->mode != MC_OFF)
+        return;
+    mc_show(s);
+    effect_set(m->save_icon, "SaveIcon");                /* (<E> 0x1, manual: started by the write) */
+    m->req = MCR_SAVE;
+    m->had = 0;                                          /* (flags &= ~0x20, 0x345AFC) */
+    m->overwrite = 0;
+    if (s->prof.loaded && s->prof.name[0]) {
+        snprintf(m->name, sizeof m->name, "%s", s->prof.name);
+        mc_card(s, 7);
+    } else
+        mc_open_list(s, MCP_LOAD, 0);
+}
+
+/* gShell.doBootCheck() [R 0x306300: once, in shell state 1, SaveGame's boot check 0x345BC0: request 3, the autosave
+ * notice (state 13) with the AutoSaveIcon, then the card check (state 12)] */
 static void boot_check(Shell *s)
 {
     if (s->boot_completed || s->state != 1 || !s->mc.L) {
@@ -2341,7 +2630,10 @@ static void boot_check(Shell *s)
         return;
     }
     mc_show(s);
-    mc_message(s, MSG_AUTOSAVE);
+    s->mc.req = MCR_BOOT;
+    s->mc.op = 12;
+    effect_set(s->mc.autosave_icon, "SaveIcon");
+    mc_message(s, MSG_AUTOSAVE, 1);
 }
 
 /* ---------------------------------------------------------------- the loading screen (0x4D8250, Loading.scr) */
@@ -3114,13 +3406,22 @@ static void op_setup(Shell *s)                         /* setupItems */
         if (o->titles[i]) o->titles[i]->tscale = 1.0f;
 }
 
-static void op_save(Shell *s)                          /* saveSettings */
+static void save_profile(Shell *s);
+/* saveSettings: setSoundVolume, setMusicVolume, setEnableRumble(.., 1) (each raises the changed byte with a new
+ * value, 0x2C2F68, 0x2C3440), then saveProfile (0x33E2D0: only when something changed) [R] */
+static void op_save(Shell *s)
 {
     Options *o = &s->op;
-    s->prof.sound = (o->sound ? o->sound->val : 100) / 100.0f * 0.75f;
-    s->prof.music = (o->music ? o->music->val : 100) / 100.0f * 0.75f;
-    s->prof.rumble = !(o->rumble ? o->rumble->sel : 0);
+    float sv = (o->sound ? o->sound->val : 100) / 100.0f * 0.75f, mv = (o->music ? o->music->val : 100) / 100.0f * 0.75f;
+    int rumble = !(o->rumble ? o->rumble->sel : 0);
+    if (sv != s->prof.sound || mv != s->prof.music || rumble != s->prof.rumble)
+        s->prof.changed = 1;
+    s->prof.sound = sv;
+    s->prof.music = mv;
+    s->prof.rumble = rumble;
     event(s, SHELL_EVT_SAVE_SETTINGS, NULL, s->prof.rumble, 0);
+    if (s->prof.changed)
+        save_profile(s);
 }
 
 static void op_event(Shell *s, int ev, int pad, float dt)
@@ -4414,9 +4715,7 @@ static void idle_update(Shell *s, float dt)
         /* [R 0x341790] the autosave notice, or the list while show-profile is on */
         if (!((s->mc.mode == MC_MESSAGE && s->mc.msg == MSG_AUTOSAVE) || (s->mc.mode == MC_LIST && s->show_profile)))
             return;
-        s->mc.mode = MC_OFF;                             /* result 3: show-profile stays */
-        if (s->mc.L)
-            show(s->mc.L->root, 0);
+        mc_close(s, 3);                                  /* result 3: show-profile stays */
     }
     s->idle = IDLE_SECONDS;
     s->city_destroyed = s->quitting = s->choose_monster = 0;
@@ -4550,6 +4849,58 @@ void shell_close(Shell *s)
     free(s);
 }
 
+Shell *shell_open_popup(const Vol *vol, const Bundle *common, const ShellProfile *p)
+{
+    if (!vol)
+        return NULL;
+    Shell *s = calloc(1, sizeof *s);
+    if (!s)
+        return NULL;
+    s->vol = vol;
+    s->quads = calloc(MAX_QUADS, sizeof *s->quads);
+    s->have_mc = load_bundle(vol, "MemoryCard.bdp", &s->b_mc);
+    if (!s->quads || !s->have_mc) {
+        shell_close(s);
+        return NULL;
+    }
+    if (common)
+        s->gui.bundles[s->gui.nb++] = (Bundle *)common;
+    s->gui.bundles[s->gui.nb++] = &s->b_mc;
+    if (p) s->prof = *p;
+    s->gui.lang = s->prof.language;
+    s->cheats = s->prof.cheats;
+    s->state = 3;                                        /* (the game's: no shell runs) */
+    s->boot_completed = 1;
+    s->show_profile = !s->prof.profile_shown;
+    s->cheat_param_block = s->cheat_param_video = -1;
+    mc_load(s);
+    if (!s->mc.L) {
+        shell_close(s);
+        return NULL;
+    }
+    s->mc.boot_done = 1;
+    return s;
+}
+
+void shell_save_profile(Shell *s)
+{
+    if (!s)
+        return;
+    s->prof.changed = 1;
+    save_profile(s);
+}
+
+void shell_card_result(Shell *s, int status)
+{
+    if (!s || !s->mc.pending)
+        return;
+    s->mc.pending = 0;
+    s->mc.result = status;
+}
+
+int shell_popup_active(const Shell *s) { return s && s->mc.mode != MC_OFF; }
+int shell_popup_shown(const Shell *s) { return s && (s->mc.mode != MC_OFF || s->mc.closing); }
+
 int shell_profile_shown(const Shell *s) { return s && !s->show_profile; }
 
 void shell_set_profile(Shell *s, const ShellProfile *p)
@@ -4671,6 +5022,7 @@ void shell_update(Shell *s, float dt)
         ifc_event(s, s->focus, EV_FRAME, 0, 0, dt);
         idle_update(s, dt);
     }
+    mc_update(s, dt);
     loading_update(s, dt);
     for (int i = 0; i < IF_COUNT; i++)
         effects_update(s->ifc[i]);
@@ -4726,7 +5078,7 @@ static void emit_all(const Shell *s, Emit *e)
     if (!s->ld.on || !s->ld.L || s->ld.intro < 3 || get_fade(s->ld.fill) < 1.0f)   /* hidden under the loading */
         for (int i = 0; i < IF_COUNT; i++)
             emit_layout(e, &s->gui, s->ifc[i]);
-    if (s->mc.mode != MC_OFF)
+    if (s->mc.mode != MC_OFF || s->mc.closing)
         emit_layout(e, &s->gui, s->mc.L);
     if (s->ld.on)
         emit_layout(e, &s->gui, s->ld.L);
@@ -4849,7 +5201,7 @@ int shell_quads_turned(const Shell *s, ShellQuad *out, int max)
     if (!s->ld.on || !s->ld.L || s->ld.intro < 3 || get_fade(s->ld.fill) < 1.0f)   /* hidden under the loading */
         for (int i = 0; i < IF_COUNT; i++)
             emit_layout(&e, &s->gui, s->ifc[i]);
-    if (s->mc.mode != MC_OFF)
+    if (s->mc.mode != MC_OFF || s->mc.closing)
         emit_layout(&e, &s->gui, s->mc.L);
     if (s->ld.on)
         emit_layout(&e, &s->gui, s->ld.L);

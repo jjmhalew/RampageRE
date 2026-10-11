@@ -194,12 +194,12 @@ void profile_saved(Profile *p);
 #define PROFILE_FILE_HEADER 0x50
 #define PROFILE_FILE_SIZE (PROFILE_FILE_HEADER + PROFILE_SIZE)   /* 0x178 */
 #define PROFILE_MAGIC 0x0BADFEE5u
-/* saveProfile: writes when profile_needs_save and allow_save (force: always); 1 written, 0 nothing to do, -1 error.
- * now_ms: the block's +0x20 stamp (0: left as it is) */
+/* saveProfile: writes when profile_needs_save and allow_save (force: always); 1 written, 0 nothing to do, -1 the
+ * file could not be written, -2 no room on its drive (ENOSPC). now_ms: the block's +0x20 stamp (0: left as it is) */
 int profile_write(Profile *p, const char *path, int force, uint64_t now_ms);
-/* loadProfile: reads the file; a missing or bad one (shorter than its sizes, not the magic, a CRC that is not 0 and
- * does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C], not version 8 [G]) gives a new profile
- * (0x33F0F0) and returns 0; read: restoreProfile, both changed bytes cleared (0x33F120 with 1), loaded = 1, 1 */
+/* loadProfile: reads the file; a missing one (-1) or a bad one (0: shorter than its sizes, not the magic, a CRC that
+ * is not 0 and does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C], not version 8 [G]) gives a
+ * new profile (0x33F0F0); read: restoreProfile, both changed bytes cleared (0x33F120 with 1), loaded = 1, 1 */
 int profile_read(Profile *p, const char *path);
 void profile_pack(const ProfileBlock *b, uint8_t out[PROFILE_SIZE]);
 int profile_unpack(ProfileBlock *b, const uint8_t in[PROFILE_SIZE]);   /* 0: not version 8 / size 0x128 */

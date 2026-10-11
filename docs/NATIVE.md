@@ -76,7 +76,9 @@ upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in
 autosave notice, the movies (the logos and the intro, Start or Enter skips them once a profile exists; the
 Victory movie and the credits after the campaign), the profile popup (one profile, its file; letters and digits type
 the name, Enter is DONE; it opens from Back on the main menu, "Profiles", and autosave is on once a profile is
-loaded from it or the Results' Save is pressed), the main menu, players, monster select, city select, the loading screen, then the game it chose; the Pause menu's Quit
+loaded from it or the Results' Save is pressed), the main menu, players, monster select, city select, the loading screen, then the game it chose; the popup shows the
+memory card's CHECKING / SAVING / LOADING and its errors for the profile file (one that cannot be written or read, a
+corrupt one, a full drive), and the SaveIcon while an autosave writes, in the menus and over the Results; the Pause menu's Quit
 goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
 square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
 `menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), and the words left once a game
@@ -503,8 +505,8 @@ city with its ring on it, lit for day or night; the main menu's fires, MonsterSe
 play, through the game's GUI camera, each in its place among the screen's pictures.
 
 ## Not there yet
-- the arcade emulators and the demo game, skipped (SHELL_NOTES.md); the memory card's own popup states; the [G] marks
-  in the notes.
+- the arcade emulators and the demo game, skipped (SHELL_NOTES.md); the memory card's states a PC has no meaning for
+  (formatting, a card changed or taken out); the [G] marks in the notes.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people
 (people.c), the army (army.c), the traffic, rockets and fire truck (vehicle.c), the edibles and the rage (edible.c),

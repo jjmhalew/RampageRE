@@ -190,6 +190,12 @@ int hud_result(Hud *h);
 int hud_results_showing(const Hud *h);   /* a results screen is up (it has the pad: route hud_input to it) */
 int hud_paused(const Hud *h);            /* gApp.pauseGame(1): the GameOver screen or the Pause menu pauses the game
                                           * until a choice */
+/* gCommon.isSaveGameActive() (shell.h shell_popup_active): Results holds its answer (Continue, Change Monster, the
+ * quit) while the SaveGame popup is up [R Results.scr:200] */
+void hud_set_save_active(Hud *h, int on);
+/* gCommon.getAllowSave() changed under the screen (the popup's warn-continue turned autosave off): Results' Save button
+ * shows again [R Results.scr:217, read each frame] */
+void hud_set_allow_save(Hud *h, int on);
 /* stand-in for a player: press ACCEPT for them this many seconds after a screen takes buttons (Results' Continue,
  * GameOver's Retry); 0 = never (default) */
 void hud_results_auto(Hud *h, float seconds);

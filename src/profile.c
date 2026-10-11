@@ -1,5 +1,6 @@
 /* profile.c - the player profile and its save (profile.h; docs/PROFILE_NOTES.md). [R] marks what is read from the
  * game's code or scripts, [G] what is a guess or a stand-in. */
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include "profile.h"
@@ -500,13 +501,15 @@ int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
         p->block.save_time = now_ms;                 /* [R] 0x344434 */
     uint8_t buf[PROFILE_FILE_SIZE];
     profile_pack_file(&p->block, buf);
-    FILE *f = fopen(path, "wb");
+    errno = 0;
+    FILE *f = path ? fopen(path, "wb") : NULL;
     if (!f)
-        return -1;
+        return errno == ENOSPC ? -2 : -1;
     int ok = fwrite(buf, 1, sizeof buf, f) == sizeof buf;
+    int room = errno != ENOSPC;
     ok = (fclose(f) == 0) && ok;
     if (!ok)
-        return -1;
+        return room && errno != ENOSPC ? -1 : -2;    /* [G] the host's full drive: the card's -3, no room */
     profile_saved(p);                                /* [R] 0x33F230 with 1 */
     p->loaded = 1;
     return 1;
@@ -523,7 +526,7 @@ int profile_read(Profile *p, const char *path)
         p->block.changed = 0;
         profile_block_new(&p->block);
         profile_restore(p);
-        return 0;
+        return f ? 0 : -1;
     }
     profile_restore(p);                              /* [R] 0x33F120 with 1 */
     p->block.status.changed = 0;

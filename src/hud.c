@@ -1410,6 +1410,7 @@ typedef struct {
 struct Hud {
     HudConfig cfg;
     char monster[32];
+    int save_active;                                     /* gCommon.isSaveGameActive() (hud_set_save_active) */
     Gui gui;
     Layout *hud, *clock;
     /* Hud.scr's objects and state */
@@ -2647,7 +2648,7 @@ static void results_quit(Hud *h, Screen *s)             /* Results::onQuit */
 /* Results::doInterface 2048 [R] */
 static void results_frame(Hud *h, Screen *s, float dt)
 {
-    if (s->exit_fn) {                                    /* the held call (gCommon.isSaveGameActive: never) */
+    if (s->exit_fn && !h->save_active) {                 /* the held call, once the SaveGame popup is gone */
         if (s->exit_fn == 1) set_result(h, s->exit_val);
         else s->ended = 1;
         s->exit_fn = 0;
@@ -4090,6 +4091,8 @@ int hud_result(Hud *h)
 
 int hud_results_showing(const Hud *h) { return h && h->scr; }
 int hud_paused(const Hud *h) { return h && (h->paused || hud_pause_showing(h)); }
+void hud_set_save_active(Hud *h, int on) { if (h) h->save_active = on != 0; }
+void hud_set_allow_save(Hud *h, int on) { if (h && h->scr) h->scr->allow_save = on != 0; }
 void hud_results_auto(Hud *h, float seconds) { if (h) h->auto_press = seconds; }
 
 static void screen_input(Hud *h, Screen *s, int ev, int button)

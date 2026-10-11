@@ -16,7 +16,7 @@ Addresses are in `RAMPAGE.ELF`.
 | Shell object, `gShell` | 0x4D51F0: +0x0 state, +0x8 the script, +0xC the ShellData book, +0x10 play videos, +0x14 attract state, +0x18 the idle timer, +0x20 / +0x21 attract game / boot completed |
 | `gShell` bindings | lookup 0x306BF0 (records 0x432CE0), dispatcher 0x3062B0, jump table 0x432F50 (index = id + 1) |
 | `gCommon` bindings | lookup 0x2C3840, table 0x430450. GameStatus 0x4D7990, its lookup 0x2C4C30 |
-| Profile popup (SaveGame) | 0x4D7E80. Interface 0x345D60. Load 0x345700. Boot check 0x345BC0. Event split 0x341880. Profile list 0x340B40 / 0x3410E0 / 0x341250. Name entry 0x340980 / 0x340320. Messages 0x3401E0 / 0x33FBB0 / 0x33FD10 |
+| Profile popup (SaveGame) | 0x4D7E80. Interface 0x345D60. Load 0x345700. Save 0x345950. Boot check 0x345BC0. Close 0x345540. Update 0x341940 (panels), states 0x342F30 (table 0x4358F0). Errors 0x341DF0 (table 0x435640), their answers 0x342680. Event split 0x341880. Profile list 0x340B40 / 0x3410E0 / 0x341250. Name entry 0x340980 / 0x340320. Messages 0x3401E0 / 0x33FBB0 / 0x33FD10 |
 | Loading screen | 0x4D8250: showLoading 0x3485E0, the dots and percentage 0x348B80 |
 | Layouts | `Shell.bdp`: ControlRoom, AttractMode, MainMenu, MonsterSelect, MonsterSheet, CitySelect, Options. Segments 1, 2 and 7 have other MainMenu / MonsterSelect / MonsterSheet versions; the port uses segment 0. `MemoryCard.bdp`: MemoryCard. `Loading_<City>.bdp`: Loading. `Loading.bdp`: Loading_Shell. `VShell.bdp`: Victory |
 | Texts | `Shell.loc`, `MemoryCard.loc`, and `Common.loc` (the monster and city names, in `VShell.bdp` and `Loading.bdp`). Fonts and frames are in `CommonGUI.bdp`; `TitleFont24` and `Lemiesz36` are in `Shell.bdp` |
@@ -95,7 +95,9 @@ SaveIcon, request 3, the KB needed, op 12 and popup state 13 [R]. The popup's st
 no card, 11 confirm overwrite, 12 the boot card check, 13 the autosave notice, 15 delete; 14, no data, is never
 stored); `isBootCheckDone` (0x306338) is state 1 [R].
 - **State 13, the autosave notice, at every power-on** whatever the card holds: `autosave_rect` alone (0.25 s before
-  an answer), Cross only (or the attract mode's timeout, result 3), then state 12 [R].
+  an answer), Cross only (or the attract mode's timeout, result 3), then state 12 [R]. The boot check sets the
+  interface's second effect, `AutoSaveIcon`, to `SaveIcon` (0x345C08); the notice starts it (0x3430E8) and the answer
+  stops it (0x343118): the memory card icon in the notice's frame, at the top (320, 91) [R; ported].
 - **State 12, the card check** (0x3432E0): status 0 with saves, status 20 (unformatted; `mcUnformattedAtBoot` is never
   used), or no saves and room enough: closed silently (close(1) in mode 12 sets only 0x100); no saves and no room:
   mcNoSpace (Retry / Don't Save); any other status: mcNoCard ("At least %dKB") with Retry / Don't Save. Retry waits:
@@ -108,9 +110,10 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   status 20, or 0 with saves, closes; else room is 0 < 140 < free (strict), closing, or mcNoSpace with Retry / Don't
   Save; status 5 can never reach mcNoCard (the branch tests 21, which +0x5C never answers). Retry waits for the
   card's status to change (the watcher restarts state 12); Don't Save goes to state 2, which with autosave off
-  closes (close(3)). The list's Create New Profile runs the same test first (0x343D38): mcNoSpace with Continue alone
-  (op 3), which tests again. A write fails below 140 free (0x1A2E00, error 11): mcNoSpace with Retry (the write
-  again) / Don't Save (a create back to the list, else state 2).
+  closes (close(3)). The list's Create New Profile runs the same test first (0x343D38, +0x2C4 = 11): error 11, mcNoSpace
+  with Continue alone (op 3), which goes back to the list, the op's state (0x342850). A write fails below 140 free
+  (0x1A2E00, error 11): mcNoSpace with Retry (the op's state: the write again) / Don't Save (state 2, warn-continue:
+  with autosave off it closes, close(3)).
 - The port: the notice, then the room test against `shell_set_card_free` (the viewer: `--card-free-kb N`, else the
   free room of the drive the profile file is on, looked at once a second; only the tests against 140 read the free
   KB, no text shows it [R 0x33FECC: the texts get the 140], so it needs no 8 MB card's cap;
@@ -138,8 +141,9 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   - Cross picks: item 0 opens the name entry (state 7), any other loads that profile (state 8). Both play `Click`.
     A load closes with 1 in op 3: flags 4 and 8 set (0x34559C).
   - Back is state 9 (Cancel), then state 2, warn-continue.
-- The port's events: `SHELL_EVT_PROFILE_LOAD` (the index into `ShellProfile.profiles`); the viewer sets
-  `allow_save` and `was_saving`.
+- A pick is state 6 (0x343D60: the name to +0x188; a save's request picks state 7), LOADING, whose read is the port's
+  `SHELL_EVT_PROFILE_LOAD` (the index into `ShellProfile.profiles`); a read that works sets `allow_save` and
+  `was_saving` in the viewer (close(1) in op 3 sets 4 and 8).
 - The attract mode's interrupt (0x341790) closes the autosave notice, or the list while show-profile (0x200) is
   clear [R].
 
@@ -171,10 +175,10 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
   again, the name lost) and Overwrite (Back: state 11); for a save Retry (state 5 again), Don't Save (state 2) and
   Overwrite (button0: state 11). State 11 (0x343868) asks "OVERWRITE FILE?" with NO (Cross: state 3 for the list,
   5 for a save) and YES (Back: op 9, state 5, writing into the file). A list request's new-profile hook (+0x2A0 =
-  0x33F0F0) runs 0x33F630 on the copy first (0x344444), so the old file gets a fresh profile. The port: DONE looks
-  among the saved names (the case counts, as the directory's crc32 does) and shows the same two messages; YES
-  creates the profile anew (`SHELL_EVT_PROFILE_CREATE`). A create closes with 1 in op 5: flags 4 and 8 stay.
-  CHECKING / SAVING are not shown (the host's write is at once).
+  0x33F0F0) runs 0x33F630 on the copy first (0x344444), so the old file gets a fresh profile. A create closes with 1
+  in op 5: flags 4 and 8 stay. The port runs state 5 as the game does ("The memory card's states" below): CHECKING,
+  then the name looked for among the saved ones (the case counts, as the directory's crc32 does), then SAVING and
+  the write (`SHELL_EVT_PROFILE_CREATE`).
 - The port's event: `SHELL_EVT_PROFILE_CREATE` with the name.
 - `shell_type` is not in the game: it types a character straight in.
 
@@ -182,6 +186,87 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
 - Cross gives 0x12 while the autosave notice or `btn_select` shows.
 - Back with `btn_cancel` gives 0x13.
 - Button 0 with `btn_button0` gives 0x14.
+
+## The memory card's states [R]
+
+**The panel (0x33FD10)**, called with the title, the text, a time, t0 and the three buttons' texts:
+- The answer (+0x350) and the answer passed on (+0x354) become 0xF (none); with no button at all the bottom bar is
+  hidden and the answer is 0x11, "done". The time goes to +0x358. Each text goes through sprintf with the KB a save
+  needs (140).
+- t0 (always for the list's request, 0x4D8134 = 1) shows the `messages` group and `background_quad` (0x4D8214), at
+  fade 1.0 for the boot's request (3) and 0.6 otherwise (0x33FE30); without it both are hidden: only the SaveIcon
+  shows. The group's fade goes to 0 (0x3401A8).
+- The rect keeps its 235 unless the text needs more (0x3400D4: 20 + the buttons' room + the text's y and height);
+  no message the port shows needs more [not ported].
+
+**The popup's update (0x341940):** the panel's group (+0x2D0: 1 the list, 2 the name entry, 3 the messages) fades
+in at 4 a second, the other two out (0x341990 .. 0x341C94); the three start at fade 0 (0x3402F4, 0x340AEC,
+0x345F0C). In panel 3 the time runs down and an answer is passed on once it is up (0x341C98). After a close (panel
+0) all three fade out and the interface goes when they are gone and the SaveIcon is no longer running (+0xB4 &
+0x200, 0x341DA4). `gCommon.isSaveGameActive()` (0x2C2F30) is the state (+0x2BC) not 1: false at the close itself.
+
+**The states** (+0x2BC, sub-state +0x2C0, op +0x2B8, request +0x2B4: 1 loadProfile, 2 saveProfile, 3 the boot).
+Every store of state 7 becomes 5 once flag 0x80 (an error was shown) is set; the close clears it (0x345690).
+
+| State | What it does |
+|---|---|
+| 5, check and write (0x344020) | op 5. Sub 0: flag 0x80 or the list's request: CHECKING (0.25 s, shown); else SAVING (1 s, shown unless flag 8, 0x3440C4) and the SaveIcon started. Sub 1, once the group's fade is 1 (0x344138): the card id (error 22), the card's status (vt +0x60, 0x1A0EE0), the name's file opened (0x3441D8): there (or status 18) without +0x2C4 = 9, error 24 (0x344398); not there: created (0x3442C8). SAVING again (1 s, shown after an error or for the list) at fade 1 (0x344334, 0x344418), the time stamp, the list's new-profile hook, the async write (sub 3, 0x3444A0). The callback (0x3424F0): sub 4, the file closed, the card's status (error), else sub 2 (0x342608). Sub 2: the answer 0x11 (the SAVING time out), then close(1) (0x3444F8) |
+| 6, load (0x344510) | op left as it was (3, the list's). Sub 0: LOADING (1 s, shown), flag 0x1000. Sub 1 at fade 1: open, read, the data's CRC and size (0x3445AC .. 0x34469C); bad: error 18 (0x344714); no file: error with the status (0x344728). Sub 2: 0x11, close(1) |
+| 7, save (0x344770) | op 7. Sub 0: flag 0x80: CHECKING; else SAVING shown unless flag 4 (0x3447FC): an autosave shows the SaveIcon alone; the SaveIcon started. Sub 1 at fade 1: the card id (error 22), the card's status, open (no file: the status), the file changed since its load (CRC against +0x2A4: error 23, 0x344AA8), the stamp, SAVING again if 0x80, the async write. Sub 2: 0x11, close(1) |
+| 8, an error's answer (0x342680) | below |
+| 11, overwrite? (0x343868) | NO / YES (0.25 s). In op 5: NO, a save's request state 7, else the list; YES, +0x2C4 = 9 and state 5 |
+| 2, warn-continue (0x3439E8) | above; Back is the op's state again (0x343B38) |
+
+**The errors (0x341DF0, table 0x435640):** each stops the SaveIcon (0x341E10), sets flag 0x80 and shows its message in
+state 8 (0.25 s; the title mcErrorTitle unless said):
+
+| Error | Message | Buttons (Cross / Back / Square) | Answer (0x342680) |
+|---|---|---|---|
+| 4 | mcWrongDevice | Retry / Don't Save | Retry: the op's state; Don't Save: state 2 |
+| 5 | (no card: state 10) | | |
+| 7 | op 6 mcRemovedOnLoad, op 7 with flag 0x40000 mcFailOnSave, op 9 mcFailOnFormat (Continue), else mcGeneralIOError | Retry / Don't Save | as 4 |
+| 8, 15, 19 | mcBadEncoding | Retry / Don't Save / Format | (0x342D08) |
+| 10, 11 | mcNoSpace | op 3: Continue; else Retry / Don't Save | 11: Retry (Continue) the op's state, Don't Save state 2; 10 none |
+| 17, 18 | mcCorruptTitle: mcCorrupt | Retry / Cancel | Retry: state 6; Cancel: the list |
+| 20 | mcUnformatted | Retry / Don't Save / Format | (0x342D08) |
+| 22 | mcCardChanged, or with 0x4000 mcWarningTitle: mcRemovedBeforeSave | Autosave / Don't Save | (0x342B18) |
+| 23 | mcFileChanged | Retry / Don't Save / Overwrite | (0x3429D0) |
+| 24 | mcDuplicate | the list's: Cancel / Overwrite; else Retry / Don't Save / Overwrite | the list's: Cancel the list, Overwrite state 11; else Retry state 5, Don't Save state 2, Overwrite state 11 |
+| any other | the error becomes 2: mcCorrupt | Retry / Don't Save | as 4 |
+
+The write's callback clears 0x40000 before it raises the card's status (0x3425D8), so a failed write shows
+mcGeneralIOError, not mcFailOnSave. After a failed autosave, Retry runs state 5 (0x80 is set): CHECKING, then the
+profile's own file is found, error 24, and the save goes on only through Overwrite and YES [R; as the port].
+
+**The card's statuses** (PS2MemoryCardManager +0x4, vt 0x444EE0) from libmc's results (0x1A1550 .. 0x1A1E40, tables
+0x417900 .. 0x417990): -3 11 (no room), -2 20 (unformatted), -4 6 (no such file), -5 5, -6 .. -8 1, below -9 7 (an
+I/O error); a bad CRC 18 (0x1A19B0); the write's room below 140 KB 11 (0x1A2E00).
+
+**The SaveIcon** (the interface's `<e>` `SaveIcon` at (-16.25, 11.75, 40), the bottom left at (66, 423)):
+saveProfile (0x345950) sets it to `SaveIcon` (MemoryCard.bdp's SAVEICON.EDF: three looping emitters, the card
+picture `Memcard_icon` with a soft additive copy behind it and the red `Mem_arrow` dropping into it every 0.5 s).
+States 5 and 7 start it with SAVING, an error and the close stop it (its particles die with their emitters).
+saveProfile loads the interface onto the screen there is (0x345990 -> 0x345D60): over the world's screens too.
+
+**The port** (`mc_update`, `mc_card_update`, `mc_error`, `mc_answered`): the panel, its fades, times and answers,
+states 5, 6, 7, 8 and 11 and the errors as above. The card is the viewer's profile file: each read and write is a
+request (`SHELL_EVT_PROFILE_LOAD`, `_CREATE`, `_SAVE`) answered by `shell_card_result` with the status:
+
+| The host | Status | The popup shows |
+|---|---|---|
+| read: no file | 6 | error 2: mcCorrupt, Retry (the list) / Don't Save |
+| read: not a profile (its sizes, magic, CRC, data size) | 18 | Corrupt Profile, Retry / Cancel |
+| write: cannot open or write the file | 7 | mcGeneralIOError, Retry / Don't Save |
+| write: the drive is full (ENOSPC) [G] | 11 | mcNoSpace |
+| the free room below 140 KB (`--card-free-kb`, the drive's) | 11 | mcNoSpace (the room test, as before) |
+
+A file that is there but no profile is still listed (by its header's name), as a card's directory would be.
+The game's screens get the popup alone (`shell_open_popup`: MemoryCard.bdp over the viewer's CommonGUI.bdp): the
+Results' saveProfile shows the SaveIcon over the screen, an error's message takes the pad, and the Results hold
+their answer while it is up (`hud_set_save_active`). With no card meaning: the card id and its watcher (errors 22,
+the 0x4000 / 0x80000 flags), the file changed since its load (23), unformatted cards and formatting (state 9,
+errors 8, 15, 19, 20; a PC drive has nothing to format and no state the game reaches needs it), the wrong device (4)
+and no card (5, state 10).
 
 ## The main menu (MainMenu.scr) [R]
 
@@ -525,9 +610,11 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
     and CitySelect);
   - the globe's brightness step at Greenwich, where its two halves meet: it stays with the lighting off, so it is in
     the halves' own art, not the port's lights.
-- **Popup** (traced above, not ported): the memory card's own states (CHECKING, SAVING, LOADING, the errors through
-  0x341DF0 and the table 0x435640, formatting; during an autosave, flag 4, only SaveIcon shows, 0x3447FC / 0x3440C4);
-  the list scrolling beyond six profiles (`mc_open_list` keeps the top at 0; the viewer has one profile).
+- **Popup:** the card's states are ported ("The memory card's states"); not the ones a PC has no meaning for (the
+  card id, formatting, unformatted, no card, the file changed). The list scrolling beyond six profiles: the viewer
+  has one profile file (`ShellProfile.nprofiles` 0 or 1), so `mc_open_list` keeps the top at 0 and the arrows stay
+  hidden. A buddy's load (MonsterSelect's R2) takes the pick at once, without LOADING [G]. The rect's growing to a
+  long text (0x3400D4) is not ported; no message needs it.
 - **Show-profile's life** [R]: bit 0x200 starts clear (.bss) and is set only at 0x34561C, on any close whose result is
   not 3 (mode 12 sets 0x100 only), buddy loads too; nothing clears it. As the port's `mc_close(result)`; the viewer
   keeps it (`ShellProfile.profile_shown`, `shell_profile_shown`) for the next shell. A buddy list's Back closes with

@@ -219,6 +219,8 @@ typedef struct Viewer {
     float card_poll;                                 /* seconds to the next look at the drive */
     int results_update;                              /* the Results' updateProfile is the campaign's */
     Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
+    Shell *popup;                                    /* the SaveGame popup over the game's screens (Results'
+                                                      * saveProfile: the SaveIcon, the card's messages) */
     struct GuiDraw *gd;                              /* its 3D objects: models, effects, this frame's layers */
     char data_path[512];                             /* RAMPAGE.VOL or the disc image (fx_open: the ELF beside / in it) */
     Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
@@ -289,6 +291,8 @@ static float mon_half_height(const Mon *mo);
 
 static void hud_frame(Viewer *v, int after);
 static void rage_started(Mon *mo);
+static void save_profile(Viewer *v);
+static void popup_step(Viewer *v, float dt);
 
 /* seconds into the monster's clip at the state's time: the game runs a clip on a 0 .. 1 clock that the state's rate
  * (node +0x0, 1 / its length) moves (0x2FFF10), so the state's time x rate x the clip's duration */
@@ -2811,9 +2815,7 @@ static void hud_frame(Viewer *v, int after)
         case HUD_CALL_SAVE_PROFILE:
             if (calls[i].arg && v->results_update)
                 profile_update(&v->prof);
-            if (v->prof_write && v->prof_path &&
-                profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000) < 0)
-                printf("could not write the profile %s\n", v->prof_path);
+            save_profile(v);                         /* the SaveGame popup writes it (shell.c) */
             break;
         case HUD_CALL_ALLOW_SAVE: v->prof.allow_save = 1; break;   /* setAllowSave(1): flag 4 alone */
         default: break;                              /* the cheats: nothing here */
@@ -4091,6 +4093,7 @@ static void play_step(Viewer *v, float dt, float aspect)
     if (v->hud && hud_paused(v->hud)) {              /* GameOver's pauseGame(1): only the screen runs */
         hud_update(v->hud, dt);
         hud_frame(v, 1);
+        popup_step(v, dt);
         return;
     }
     world_build(v);                                  /* the collision world as the frame begins */
@@ -4210,6 +4213,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         if (k == 0)
             hud_frame(v, 1);
     }
+    popup_step(v, dt);                               /* the SaveGame popup over the screens */
     for (int k = 0; k < v->nmon && v->challenge.up_state == CU_WAITING; k++) {   /* a monster's touch (TakeDamage,
                                                       * Collision): its collision spheres, armed or not [R 0x2E22B0] */
         Mon *mo = &v->mon[k];
@@ -4557,8 +4561,12 @@ static void play_script(Viewer *v, const char *script, float aspect)
             while (*p && *p != ' ' && *p != ',' && k < 15) name[k++] = *p++;
             name[k] = 0;
             for (size_t i = 0; i < sizeof EV / sizeof *EV; i++)
-                if (v->hud && _stricmp(name, EV[i].name) == 0)
-                    hud_input(v->hud, EV[i].ev, EV[i].button);
+                if (_stricmp(name, EV[i].name) == 0) {
+                    if (shell_popup_active(v->popup))    /* isSaveGameActive: the popup has the pad */
+                        shell_input(v->popup, EV[i].ev, EV[i].button);
+                    else if (v->hud)
+                        hud_input(v->hud, EV[i].ev, EV[i].button);
+                }
             continue;
         }
         if (_stricmp(word, "collapseall") == 0) {    /* every building of the block falls (the end of a block) */
@@ -4666,6 +4674,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->music = profile_music_volume(&v->prof);
     sp->rumble = profile_rumble(&v->prof);
     sp->cheats = profile_cheat_flags(&v->prof);
+    sp->changed = profile_needs_save(&v->prof);
     sp->nprofiles = v->prof_on_card ? 1 : 0;         /* one profile file: the "card" holds it or nothing */
     if (sp->nprofiles)
         snprintf(sp->profiles[0], sizeof sp->profiles[0], "%s", v->card_name[0] ? v->card_name : "Profile");
@@ -4800,14 +4809,14 @@ static Mat4 gui_effect_world(GuiDraw *g, const Shell3D *it)
 
 /* the effects follow their GuiEffects: one running is started (once) and kept where it is drawn, one that stops
  * running is shut down, one whose edf ended says so; then every effect world steps */
-static void gui3d_step(Viewer *v, float dt)
+static void gui3d_step(Viewer *v, Shell *sh, float dt)
 {
-    if (!v->shell)
+    if (!sh)
         return;
     if (!v->gd && !(v->gd = calloc(1, sizeof *v->gd)))
         return;
     GuiDraw *g = v->gd;
-    g->nitem = shell_3d(v->shell, g->item, GUI_ITEMS);
+    g->nitem = shell_3d(sh, g->item, GUI_ITEMS);
     for (int i = 0; i < g->nitem; i++) {
         const Shell3D *it = &g->item[i];
         if (it->kind != SHELL_3D_EFFECT)
@@ -4827,8 +4836,11 @@ static void gui3d_step(Viewer *v, float dt)
             x->lib = gui_lib(v, g, it->b);
         }
         FxWorld *w = x->lib >= 0 ? g->lib[x->lib].w : NULL;
-        if (!w)
+        if (!w) {                                    /* no effects here: one stopping is over at once */
+            if (it->stopping)
+                shell_effect_ended(sh, it->key);
             continue;
+        }
         if (x->gen != it->gen) {                     /* setEffect: the old one is freed */
             fx_kill(w, x->fx);
             x->fx = -1;
@@ -4852,7 +4864,7 @@ static void gui3d_step(Viewer *v, float dt)
                     printf("  gui effect %s at %.2f %.2f %.2f%s\n", it->name, pos[0], pos[1], pos[2],
                            x->fx < 0 ? ": none" : "");
                 if (x->fx < 0)
-                    shell_effect_ended(v->shell, it->key);
+                    shell_effect_ended(sh, it->key);
             } else if (fx_alive(w, x->fx)) {
                 if (it->stopping && !x->stopped) {   /* stopEffect: its particles play out */
                     fx_stop(w, x->fx);
@@ -4861,7 +4873,7 @@ static void gui3d_step(Viewer *v, float dt)
                 if (it->layer >= 0)
                     fx_place(w, x->fx, pos, R);
             } else {                                 /* it is over */
-                shell_effect_ended(v->shell, it->key);
+                shell_effect_ended(sh, it->key);
                 x->started = 0;
                 x->fx = -1;
             }
@@ -4876,16 +4888,16 @@ static void gui3d_step(Viewer *v, float dt)
 }
 
 /* this frame's 3D layers for the renderer, one per HUD_TEX_3D quad */
-static void gui3d_layers(Viewer *v, Scene *s)
+static void gui3d_layers(Viewer *v, Shell *sh, Scene *s)
 {
     s->gui3d = NULL;
     s->ngui3d = 0;
-    if (!v->shell)
+    if (!sh)
         return;
     if (!v->gd && !(v->gd = calloc(1, sizeof *v->gd)))
         return;
     GuiDraw *g = v->gd;
-    g->nitem = shell_3d(v->shell, g->item, GUI_ITEMS);
+    g->nitem = shell_3d(sh, g->item, GUI_ITEMS);
     int nl = 0, nm = 0, nq = 0;
     for (int i = 0; i < g->nitem; i++) {
         const Shell3D *it = &g->item[i];
@@ -4931,8 +4943,10 @@ static void gui3d_layers(Viewer *v, Scene *s)
     s->ngui3d = nl;
 }
 
+static void popup_free(Viewer *v);
 static void shell_enter(Viewer *v, const ShellStart *st)
 {
+    popup_free(v);                                   /* (before the textures are dropped: its bundle goes) */
     ShellProfile sp;
     shell_profile(v, &sp);
     v->shell = shell_open(&v->vol, st, &sp);
@@ -5000,6 +5014,110 @@ static void movie_step(Viewer *v)
     }
 }
 
+/* the SaveGame popup's card jobs on the profile's file (shell.h SHELL_CARD_*): the read of the list's profile (a
+ * missing file NOT_FOUND, a bad one CORRUPT; the profile is kept unless it was read), the write of a new one (the
+ * name entry; written before it becomes the profile) and of the profile as it is; each answered at once. A run
+ * that writes nothing (a --shot run without --profile) answers OK [G: as a card that took it] */
+static int card_status(int written) { return written >= 0 ? SHELL_CARD_OK : written == -2 ? SHELL_CARD_NO_SPACE :
+                                             SHELL_CARD_IO; }
+static int card_job(Viewer *v, Shell *sh, const ShellEvent *e)
+{
+    ShellProfile sp;
+    int st = SHELL_CARD_OK;
+    uint64_t now = (uint64_t)time(NULL) * 1000;
+    if (e->kind == SHELL_EVT_PROFILE_LOAD) {         /* the one profile file */
+        Profile p = v->prof;
+        int r = v->prof_write ? profile_read(&p, v->prof_path) : -1;
+        st = r > 0 ? SHELL_CARD_OK : r < 0 ? SHELL_CARD_NOT_FOUND : SHELL_CARD_CORRUPT;
+        if (st == SHELL_CARD_OK) {
+            v->prof = p;
+            v->prof.loaded = 1;
+            v->prof.allow_save = v->prof.was_saving = 1;   /* [R 0x34559C: close(1) in op 3] */
+            profile_restore_checkpoint(&v->prof);
+        }
+    } else if (e->kind == SHELL_EVT_PROFILE_CREATE) {
+        Profile p = v->prof;
+        profile_create(&p, e->name);
+        p.loaded = 1;
+        if (v->prof_write)
+            st = card_status(profile_write(&p, v->prof_path, 1, now));
+        if (st == SHELL_CARD_OK) {
+            v->prof = p;
+            if (v->prof_write) {
+                v->prof_on_card = 1;
+                snprintf(v->card_name, sizeof v->card_name, "%s", v->prof.block.name);
+            }
+        }
+    } else if (e->kind == SHELL_EVT_PROFILE_SAVE) {  /* saveProfile's write (0x33F230 clears the changed bytes) */
+        if (v->prof_write)
+            st = card_status(profile_write(&v->prof, v->prof_path, 1, now));
+        if (st == SHELL_CARD_OK)
+            v->prof.was_saving = 1;                  /* [R 0x34559C: close(1) in op 7 sets 4 and 8] */
+    } else
+        return 0;
+    if (st != SHELL_CARD_OK)
+        printf("the profile %s: %s\n", v->prof_path, st == SHELL_CARD_NO_SPACE ? "no room to write it" :
+               st == SHELL_CARD_IO ? "cannot write it" : st == SHELL_CARD_NOT_FOUND ? "not found" : "corrupt");
+    shell_profile(v, &sp);
+    shell_set_profile(sh, &sp);
+    shell_card_result(sh, st);
+    return 1;
+}
+
+/* gCommon.saveProfile (0x33E2D0) from the game's screens: nothing unless the profile changed, then the SaveGame popup
+ * (opened over the screens once, kept for the game), which writes only with autosave on [R 0x345950] */
+static void save_profile(Viewer *v)
+{
+    if (!profile_needs_save(&v->prof) || !v->prof.allow_save || !v->prof_write)
+        return;
+    ShellProfile sp;
+    shell_profile(v, &sp);
+    if (!v->popup && !v->shell)
+        v->popup = shell_open_popup(&v->vol, v->have_gui ? &v->gui_common : NULL, &sp);
+    Shell *sh = v->shell ? v->shell : v->popup;
+    if (!sh) {                                       /* no MemoryCard.bdp: written at once */
+        if (profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000) < 0)
+            printf("could not write the profile %s\n", v->prof_path);
+        return;
+    }
+    shell_set_profile(sh, &sp);
+    shell_save_profile(sh);
+}
+
+static void popup_free(Viewer *v)
+{
+    if (!v->popup)
+        return;
+    gui3d_free(v);
+    shell_close(v->popup);
+    v->popup = NULL;
+}
+
+/* the game's popup each frame: its time, its sounds and card jobs, its effects; the Results wait while it is up
+ * (isSaveGameActive) */
+static void popup_step(Viewer *v, float dt)
+{
+    if (!v->popup)
+        return;
+    shell_update(v->popup, dt);
+    gui3d_step(v, v->popup, dt);
+    ShellEvent ev[16];
+    int n;
+    while ((n = shell_events(v->popup, ev, 16)) > 0)
+        for (int i = 0; i < n; i++) {
+            if (ev[i].kind == SHELL_EVT_SOUND)
+                sound_play(ev[i].name, NULL, 1);
+            else if (ev[i].kind == SHELL_EVT_PROFILE_NONE) {   /* warn-continue's Don't Save: autosave off */
+                v->prof.allow_save = v->prof.was_saving = 0;
+                hud_set_allow_save(v->hud, 0);
+            }
+            else
+                card_job(v, v->popup, &ev[i]);
+        }
+    if (v->hud)
+        hud_set_save_active(v->hud, shell_popup_active(v->popup));
+}
+
 /* what the shell asked for since the last call; 1 when a game is to start */
 static int shell_answer(Viewer *v)
 {
@@ -5035,32 +5153,12 @@ static int shell_answer(Viewer *v)
                 v->sfx_vol = sv / 0.75f;
                 v->music_vol = v->music_now = mv / 0.75f;
                 sound_volume(v->sfx_vol, v->music_now);
-                if (v->prof_write)                   /* saveProfile: only with autosave on */
-                    profile_write(&v->prof, v->prof_path, 0, (uint64_t)time(NULL) * 1000);
+                break;                               /* (saveProfile: the popup asks for the write) */
+            case SHELL_EVT_PROFILE_LOAD:
+            case SHELL_EVT_PROFILE_CREATE:
+            case SHELL_EVT_PROFILE_SAVE:
+                card_job(v, v->shell, e);
                 break;
-            case SHELL_EVT_PROFILE_LOAD: {           /* the one profile file */
-                ShellProfile sp;
-                if (profile_read(&v->prof, v->prof_path) > 0) {
-                    v->prof.loaded = 1;
-                    v->prof.allow_save = v->prof.was_saving = 1;   /* [R 0x34559C: close(1) in op 3] */
-                    profile_restore_checkpoint(&v->prof);
-                }
-                shell_profile(v, &sp);
-                shell_set_profile(v->shell, &sp);
-                break;
-            }
-            case SHELL_EVT_PROFILE_CREATE: {
-                ShellProfile sp;
-                profile_create(&v->prof, e->name);
-                v->prof.loaded = 1;
-                if (v->prof_write && profile_write(&v->prof, v->prof_path, 1, (uint64_t)time(NULL) * 1000) > 0) {
-                    v->prof_on_card = 1;
-                    snprintf(v->card_name, sizeof v->card_name, "%s", v->prof.block.name);
-                }
-                shell_profile(v, &sp);
-                shell_set_profile(v->shell, &sp);
-                break;
-            }
             case SHELL_EVT_PROFILE_NONE: v->prof.allow_save = v->prof.was_saving = 0; break;
             case SHELL_EVT_BUDDY_PROFILE: shell_buddy_profile(v->shell, -1); break;   /* no second profile here */
             case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
@@ -5272,19 +5370,20 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
         { 'P', HUD_EV_START, 0 }, { 'C', HUD_EV_BUTTON, 0 }, { 'V', HUD_EV_BUTTON, 1 }, { 'R', HUD_EV_BUTTON, 4 } };
     const char *focus = shell_focus(v->shell);
     int typing = focus && !strcmp(focus, "MemoryCard");
+    unsigned char took[256] = { 0 };                 /* the keys the name entry took (the popup's other panels
+                                                      * take none: Enter / Backspace answer them) */
     for (int c = 'A'; typing && c <= 'Z'; c++)
         if (w->pressed[c])
-            shell_type(v->shell, c);
+            took[c] = (unsigned char)shell_type(v->shell, c);
     for (int c = '0'; typing && c <= '9'; c++)
         if (w->pressed[c])
-            shell_type(v->shell, c);
+            took[c] = (unsigned char)shell_type(v->shell, c);
     if (typing && w->pressed[VK_RETURN])             /* the name entry: Enter is DONE, Backspace rubs out */
-        shell_type(v->shell, '\r');
+        took[VK_RETURN] = (unsigned char)shell_type(v->shell, '\r');
     if (typing && w->pressed[VK_BACK])
-        shell_type(v->shell, '\b');
+        took[VK_BACK] = (unsigned char)shell_type(v->shell, '\b');
     for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
-        if (w->pressed[KEYS[k].key] && !(typing && ((KEYS[k].key >= 'A' && KEYS[k].key <= 'Z') ||
-                                                    KEYS[k].key == VK_RETURN || KEYS[k].key == VK_BACK)))
+        if (w->pressed[KEYS[k].key] && !took[KEYS[k].key & 255])
             shell_input(v->shell, KEYS[k].ev, KEYS[k].button);
     for (int k = 0; k < PAD_SLOTS; k++) {            /* GuiEvent.getController(): the controller's slot */
         int m = pad_menu(v, k, dt);
@@ -5297,7 +5396,7 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
     shell_pad_held(v->shell, pad0_x(v), held);
     card_free(v, dt);
     shell_update(v->shell, dt);
-    gui3d_step(v, dt);
+    gui3d_step(v, v->shell, dt);
     if (shell_answer(v))
         v->shell_go = 1;                             /* after this frame: the loading screen is drawn once */
 }
@@ -5324,7 +5423,7 @@ static const char *shell_script(Viewer *v, const char *script)
             for (int f = 0, frames = (int)(atof(arg) * 60 + 0.5); f < frames && !v->shell_go; f++) {
                 card_free(v, 1.0f / 60);
                 shell_update(v->shell, 1.0f / 60);
-                gui3d_step(v, 1.0f / 60);
+                gui3d_step(v, v->shell, 1.0f / 60);
                 if (shell_answer(v))
                     v->shell_go = 1;
             }
@@ -5342,7 +5441,7 @@ static const char *shell_script(Viewer *v, const char *script)
                 shell_type(v->shell, toupper((unsigned char)*c));
         card_free(v, 1.0f / 60);
         shell_update(v->shell, 1.0f / 60);
-        gui3d_step(v, 1.0f / 60);
+        gui3d_step(v, v->shell, 1.0f / 60);
         if (shell_answer(v))
             v->shell_go = 1;
     }
@@ -5553,7 +5652,8 @@ int main(int argc, char **argv)
     v.prof_write = !shot || v.prof_path;
     if (!v.prof_path)
         v.prof_path = "rampage_profile.bin";
-    if (!newprofile && v.prof_write && profile_read(&v.prof, v.prof_path) > 0) {
+    int prof_read = !newprofile && v.prof_write ? profile_read(&v.prof, v.prof_path) : -1;
+    if (prof_read > 0) {
         printf("profile %s\n", v.prof_path);
         v.prof_on_card = 1;
         snprintf(v.card_name, sizeof v.card_name, "%s", v.prof.block.name);
@@ -5561,6 +5661,22 @@ int main(int argc, char **argv)
             profile_init(&v.prof);
         else                                         /* straight into a game: as if picked from the list */
             v.prof.allow_save = v.prof.was_saving = 1;
+    } else if (prof_read == 0) {                     /* there but not a profile: the list still has it (its load
+                                                      * shows "Corrupt Profile"), by the header's name (+0x30) */
+        FILE *f = fopen(v.prof_path, "rb");
+        uint8_t head[PROFILE_FILE_HEADER] = { 0 };
+        if (f) {
+            if (fread(head, 1, sizeof head, f) != sizeof head)
+                head[0x30] = 0;
+            fclose(f);
+        }
+        head[0x30 + 15] = 0;
+        int ok = head[0x30] != 0;
+        for (int i = 0x30; ok && head[i]; i++)
+            ok = head[i] >= 32 && head[i] < 127;
+        v.prof_on_card = 1;
+        snprintf(v.card_name, sizeof v.card_name, "%s", ok ? (const char *)head + 0x30 : "Profile");
+        profile_init(&v.prof);
     }
     profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
     if (cheat && !profile_cheat_code(&v.prof, cheat))
@@ -5658,7 +5774,7 @@ int main(int argc, char **argv)
             static HudQuad sq[4096];
             v.shell_scene->hud = sq;
             v.shell_scene->nhud = shell_quads(v.shell, sq, 4096);
-            gui3d_layers(&v, v.shell_scene);
+            gui3d_layers(&v, v.shell, v.shell_scene);
             Camera none = { { 0, 0, 0 }, 0, 0, 60 };
             sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
             rnd_frame(v.rnd, &w, &none, now - start, 0);
@@ -5677,14 +5793,23 @@ int main(int argc, char **argv)
                 { VK_RETURN, HUD_EV_ACCEPT, 0 }, { VK_SPACE, HUD_EV_ACCEPT, 0 }, { VK_BACK, HUD_EV_BACK, 0 },
                 { VK_UP, HUD_EV_UP, 0 }, { VK_DOWN, HUD_EV_DOWN, 0 }, { VK_LEFT, HUD_EV_LEFT, 0 },
                 { VK_RIGHT, HUD_EV_RIGHT, 0 }, { 'C', HUD_EV_BUTTON, 0 }, { 'V', HUD_EV_BUTTON, 1 } };
+            int popup = shell_popup_active(v.popup); /* isSaveGameActive: the popup has the pad (pad 0) */
             for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
-                if (w.pressed[KEYS[k].key])
-                    hud_input(v.hud, KEYS[k].ev, KEYS[k].button);
+                if (w.pressed[KEYS[k].key]) {
+                    if (popup)
+                        shell_input(v.popup, KEYS[k].ev, KEYS[k].button);
+                    else
+                        hud_input(v.hud, KEYS[k].ev, KEYS[k].button);
+                }
             for (int k = 0; k < PAD_SLOTS; k++) {    /* and the controllers, each as its own pad */
                 int m = pad_menu(&v, k, dt > 0.1f ? 0.1f : dt);
                 for (size_t i = 0; m && i < sizeof PAD_MENU_EV / sizeof *PAD_MENU_EV; i++)
-                    if (m & PAD_MENU_EV[i].bit)
-                        hud_input_pad(v.hud, PAD_MENU_EV[i].ev, PAD_MENU_EV[i].button, k);
+                    if (m & PAD_MENU_EV[i].bit) {
+                        if (popup)
+                            shell_input_pad(v.popup, PAD_MENU_EV[i].ev, PAD_MENU_EV[i].button, k);
+                        else
+                            hud_input_pad(v.hud, PAD_MENU_EV[i].ev, PAD_MENU_EV[i].button, k);
+                    }
             }
         } else if (v.hud && hud_pause_showing(v.hud)) {   /* the Pause menu has the pad: the arrows choose, Enter /
                                                       * Space take, Backspace back, P (Start) takes too */
@@ -5850,7 +5975,11 @@ int main(int argc, char **argv)
             for (int k = 1; k < v.nmon; k++)
                 if (v.mon[k].hud && v.mon[k].hud != v.hud)
                     nq += hud_quads(v.mon[k].hud, hq + nq, 8192 - nq);
-            v.scene.nhud = nq + (v.hud ? hud_quads(v.hud, hq + nq, 8192 - nq) : 0);
+            nq += v.hud ? hud_quads(v.hud, hq + nq, 8192 - nq) : 0;
+            if (shell_popup_shown(v.popup))          /* the SaveGame popup over the screens */
+                nq += shell_quads(v.popup, hq + nq, 8192 - nq);
+            v.scene.nhud = nq;
+            gui3d_layers(&v, shell_popup_shown(v.popup) ? v.popup : NULL, &v.scene);
         }
         if (have_view) {
             Camera fixed = { { view[0], view[1], view[2] }, view[3] / 57.2957795f, view[4] / 57.2957795f, 60 };
@@ -5887,6 +6016,7 @@ int main(int argc, char **argv)
             frames = 0;
         }
     }
+    popup_free(&v);
     rnd_free(v.rnd);
     for (int k = 0; k < MONSTERS; k++)
         if (v.mon[k].have_graph) {

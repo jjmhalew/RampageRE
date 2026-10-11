@@ -371,7 +371,9 @@ static GLuint video_texture(Renderer *r)
 
 uint32_t rnd_triangles(const Renderer *r) { return r->drawn; }
 
-static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
+/* a bundle's texture by name index, 0 none (a material's or a mesh's); texture_at with zero_ok: index 0 is a name too (an
+ * effect's texture found by name: MemoryCard.bdp's Mem_arrow is name 0) */
+static GLuint texture_at(Renderer *r, const Bundle *b, uint32_t name, int zero_ok)
 {
     BundleTex *bt = NULL;
     for (int k = 0; k < r->ncache && !bt; k++)
@@ -385,7 +387,7 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
         bt->n = b->nnames;
         bt->tex = calloc(bt->n ? bt->n : 1, sizeof *bt->tex);
     }
-    if (!name || name >= bt->n)
+    if ((!name && !zero_ok) || name >= bt->n)
         return 0;
     if (!bt->tex[name]) {
         uint8_t *rgba;
@@ -419,6 +421,7 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
     }
     return bt->tex[name] == ~0u ? 0 : bt->tex[name];
 }
+static GLuint texture(Renderer *r, const Bundle *b, uint32_t name) { return texture_at(r, b, name, 0); }
 
 /* the texture a material shows at time t: itself, or an .ifl's frame then */
 static uint32_t shown_texture(Renderer *r, const Bundle *b, uint32_t name, double t)
@@ -890,7 +893,7 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam)
     glGetFloatv(GL_FOG_COLOR, fog_col);
     for (int i = 0; i < nfx; i++) {
         const FxQuad *q = &fx[i];
-        GLuint id = q->b ? texture(r, q->b, q->tex) : 0;
+        GLuint id = q->b ? texture_at(r, q->b, q->tex, 1) : 0;
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
