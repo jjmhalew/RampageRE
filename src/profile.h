@@ -83,8 +83,8 @@ typedef struct {
 /* ---- the saved block (0x4D79B0, 0x128 bytes): what goes to the memory card */
 typedef struct {
     uint32_t version, size;                          /* +0x00 8, +0x04 0x128 */
-    char name[24];                                   /* +0x08: the profile's name (a new profile clears 16 [R]; the
-                                                      * room up to +0x20 [G]) */
+    char name[24];                                   /* +0x08: the profile's name (a new profile clears 16 [R];
+                                                      * +0x18 .. +0x1F seen neither written nor read [G]) */
     uint64_t save_time;                              /* +0x20: stamped by the SaveGame popup before each card write
                                                       * (0x344434, 0x10D140: about ms since 2000) */
     ProfileStatus status;                            /* +0x28: where the profile is (Profile.getGameStatus) */
@@ -198,11 +198,12 @@ void profile_saved(Profile *p);
  * file could not be written, -2 no room on its drive (ENOSPC). now_ms: the block's +0x20 stamp (0: left as it is) */
 int profile_write(Profile *p, const char *path, int force, uint64_t now_ms);
 /* loadProfile: reads the file; a missing one (-1) or a bad one (0: shorter than its sizes, not the magic, a CRC that
- * is not 0 and does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C], not version 8 [G]) gives a
+ * is not 0 and does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C]; the version is not checked
+ * [R 0x3445E0]) gives a
  * new profile (0x33F0F0); read: restoreProfile, both changed bytes cleared (0x33F120 with 1), loaded = 1, 1 */
 int profile_read(Profile *p, const char *path);
 void profile_pack(const ProfileBlock *b, uint8_t out[PROFILE_SIZE]);
-int profile_unpack(ProfileBlock *b, const uint8_t in[PROFILE_SIZE]);   /* 0: not version 8 / size 0x128 */
+int profile_unpack(ProfileBlock *b, const uint8_t in[PROFILE_SIZE]);   /* 1 (no field is checked) */
 /* the whole file (header + block); 0: not valid */
 void profile_pack_file(const ProfileBlock *b, uint8_t out[PROFILE_FILE_SIZE]);
 int profile_unpack_file(ProfileBlock *b, const uint8_t *in, long size);

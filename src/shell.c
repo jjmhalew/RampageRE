@@ -491,6 +491,9 @@ typedef struct Node {
     TexRef hl_tex, endcap; int has_hl_tex, has_endcap;
     float hl_d[2];
     int sel, pulse, top;        /* list box: the selection, setHighlightPulse, the first item shown */
+    float growth[3];            /* <growth> (a count, then +0x13C the selected item's scale, +0x14C its rate up,
+                                 * +0x150 down) */
+    float grow, go[2];          /* an item's: its growth record (+0x50: +0x4 the scale, +0xC / +0x10 the offset) */
     float ep[4]; int has_ep;
     float lw;                                            /* a line's <width>: 3 without (GuiLine ctor 0x23BA10) */
     int sizer; unsigned sflags; /* <sz> (GuiSizer): <sflags>, <stretch>; an item's <si> room before and after it, */
@@ -785,6 +788,10 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
             nd->ep[2] = e[1 + 3 * (n - 1)]; nd->ep[3] = e[2 + 3 * (n - 1)];
             nd->has_ep = 1;
         }
+    } else if (strcmp(tag, "growth") == 0) {             /* "3 1.2 4 16": the count, then the three [R 0x22A640] */
+        float v[4] = { 0, nd->growth[0], nd->growth[1], nd->growth[2] };
+        parse_floats(text, v, 4);
+        memcpy(nd->growth, v + 1, sizeof nd->growth);
     } else if (strcmp(tag, "sflags") == 0) nd->sflags = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "stretch") == 0) nd->stretch = strtof(text, NULL);
     else if (strcmp(tag, "si") == 0) {
@@ -833,6 +840,10 @@ static Node *node_new(Layout *L, int kind)
                                                           * (0x244410, the `B` tag 0x22A9E0)] */
     nd->lw = 3;
     nd->sel = -1;
+    nd->growth[0] = 1;                                   /* [R 0x23E328: +0x13C 1, +0x14C 4, +0x150 16; hud.c] */
+    nd->growth[1] = 4;
+    nd->growth[2] = 16;
+    nd->grow = 1;
     nd->visible = 1;
     nd->fade = 1;
     nd->r3[0] = nd->r3[4] = nd->r3[8] = 1;
@@ -1205,15 +1216,21 @@ static void sizer_lay(const Gui *g, Node *sz)
 }
 
 static void list_settle(Node *l);
-/* the GUI lays its sizers out every frame [R 0x248B80 with F 0x100], and its lists (their selection, 0x23CF60) */
-static void layouts_lay(const Gui *g, Node *nd)
+static void list_colours(Node *l);
+static void list_grow(const Gui *g, Node *l, float dt);
+/* the GUI lays its sizers out every frame [R 0x248B80 with F 0x100], and its lists (their selection, colours and
+ * growth, 0x23CF60) */
+static void layouts_lay(const Gui *g, Node *nd, float dt)
 {
     for (; nd; nd = nd->next) {
         if (nd->sizer)
             sizer_lay(g, nd);
-        if (nd->kind == N_LIST)
+        if (nd->kind == N_LIST) {
             list_settle(nd);
-        layouts_lay(g, nd->child);
+            list_colours(nd);
+            list_grow(g, nd, dt);
+        }
+        layouts_lay(g, nd->child, dt);
     }
 }
 
@@ -1276,6 +1293,52 @@ static void list_set(Node *l, int i)
     if (t < 0)
         t = list_seek(l, i, -d);
     list_select(l, t < 0 ? 0 : t);
+}
+/* the item colours, every frame (0x23CF60) [R hud.c]: with the highlight on (+0x10C & 2, set by the constructor
+ * 0x23EF70) the selected item takes the highlight colour, the other shown ones the normal one, the hidden the
+ * disabled one */
+static void list_colours(Node *l)
+{
+    int j = 0;
+    for (Node *c = l->child; c; c = c->next, j++) {
+        if (c->kind != N_TEXT)
+            continue;
+        const float *col = j == l->sel ? (l->has_hl ? l->hl_col : NULL) :
+                           c->visible && c->text[0] ? (l->has_norm ? l->norm_col : NULL) :
+                           l->has_dis ? l->dis_col : NULL;
+        if (col) {
+            memcpy(c->tcol, col, sizeof c->tcol);
+            c->has_tcol = 1;
+        }
+    }
+}
+/* each item's growth (0x23CB20, from the layout every frame) [R hud.c]: towards growth[0] while it is the selected
+ * item shown, else 1: up g += rate 4 dt (target - g), taken as reached within 0.0001; down rate 16, not past the
+ * target. Its offset keeps it in place by its justify and origin: across 0.5 (w / g_old) (1 - g), with w the text's
+ * width (0x234BA0) and g_old the scale before, minus for the left, plus for the right, none centred; the same down
+ * by the height */
+static void list_grow(const Gui *g, Node *l, float dt)
+{
+    int j = 0;
+    for (Node *c = l->child; c; c = c->next, j++) {
+        if (c->kind != N_TEXT)
+            continue;
+        float target = j == l->sel && c->visible && c->text[0] ? l->growth[0] : 1.0f, old = c->grow, v = old;
+        if (v != target) {
+            if (v > target + 0.0001f) {
+                v += l->growth[2] * dt * (target - v);
+                if (v < target) v = target;
+            } else if (v < target) {
+                v += l->growth[1] * dt * (target - v);
+                if (v > target - 0.0001f) v = target;
+            }
+        }
+        c->grow = v;
+        float k = old > 0 ? 1.0f / old : 1.0f, bw = k * text_w(g, c), bh = k * text_h(g, c);
+        float dx = 0.5f * (bw - bw * v), dy = 0.5f * (bh - bh * v);
+        c->go[0] = c->justify == 0 ? dx : c->justify == 2 ? -dx : 0.0f;
+        c->go[1] = c->origin == 0 ? dy : c->origin == 2 ? -dy : 0.0f;
+    }
 }
 /* incrementSelection(delta, once) (0x23E360): setSelection(selection + delta), no wrap [R]. The list's sounds go with
  * it (+0xF0 on a move, +0x108 when it stays: with `once` only until it moves again), but no layout gives a list any */
@@ -1383,7 +1446,8 @@ static void hl_line_emit(Emit *e, const Node *l, const Frame *f, float x0, float
  * `b highlight` or `b endcap`), its line across each line of the selected item's text (one that shows): the text's
  * box placed by its justify and origin, each line's size (0x1B61B0; shrunk to maxwidth), both by the item's scale;
  * lines after the first moved by the text's line mode (m c / r); the line runs from pad + max(0, endcap width x scale
- * - pad - line width / 2) before the line's start to as far past its end, pad = the `d highlight` x by the scale,
+ * - pad - line width / 2: 0x23C89C halves the width, sp + 0xCC) before the line's start to as far past its end, pad
+ * = the `d highlight` x by the scale (the item's frame times its growth),
  * line height + its y across; in the selector colour, its alpha by the fade and, with setHighlightPulse, the GUI's
  * pulse (gp - 0x7DF4, flag 0x400's) */
 static void list_emit(Emit *e, const Gui *g, const Node *l, const Frame *f, float fade)
@@ -1394,13 +1458,11 @@ static void list_emit(Emit *e, const Gui *g, const Node *l, const Frame *f, floa
     const Node *it = list_item((Node *)l, l->sel);
     if ((!l->has_hl_tex && !l->has_endcap) || !it || !it->visible || it->kind != N_TEXT || !it->font)
         return;
-    float sc = node_xscale(it), tsc = it->tscale > 0 ? it->tscale : 1;
+    float sc = node_xscale(it) * it->grow, tsc = it->tscale > 0 ? it->tscale : 1;
     float w = text_w(g, it) * sc, h = text_h(g, it) * sc;
-    float x = it->p[0] - (it->justify == 1 ? 0.5f * w : it->justify == 2 ? w : 0);
-    float y = it->p[1] - (it->origin == 1 ? 0.5f * h : it->origin == 2 ? h : 0);
+    float x = it->p[0] + it->go[0] - (it->justify == 1 ? 0.5f * w : it->justify == 2 ? w : 0);
+    float y = it->p[1] + it->go[1] - (it->origin == 1 ? 0.5f * h : it->origin == 2 ? h : 0);
     float c[4] = { l->sel_col[0], l->sel_col[1], l->sel_col[2], l->sel_col[3] * fade };
-    if (l->pulse)
-        c[3] *= blink(g);
     float padx = l->hl_d[0] * sc, pady = l->hl_d[1] * sc;
     float cw = l->has_endcap ? (l->endcap.us > 0 ? l->endcap.w / l->endcap.us : l->endcap.w) * sc : 0;
     TextStyle ts;
@@ -1421,6 +1483,8 @@ static void list_emit(Emit *e, const Gui *g, const Node *l, const Frame *f, floa
         if (i > 0 && (ts.mode == 1 || ts.mode == 2))
             lx += (ts.mode == 1 ? 0.5f : 1.0f) * (w - lw);
         float ext = padx + fmaxf(0, cw - padx - 0.5f * lw);
+        if (l->pulse)                                    /* (once more each line, 0x23C8D0) */
+            c[3] *= blink(g);
         hl_line_emit(e, l, f, lx - ext, lx + lw + ext, y + 0.5f * lh, lh + pady, c);
         y += lh;
     }
@@ -1711,7 +1775,10 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             s[3] *= nf;
             TextStyle ts;
             text_style(nd, &ts);
-            Frame tf = { nd->tscale, 0, 0, nd->tscale, 0, 0 };   /* the text's own scale [R GuiText 0x234D88] */
+            /* the text's own scale [R GuiText 0x234D88]; a list's item also by its growth, moved by its offset
+             * (0x234D60: the record +0x50 when the parent is a list) [R hud.c] */
+            float gk = node_xscale(nd) > 0 ? 1.0f / node_xscale(nd) : 1.0f;
+            Frame tf = { nd->tscale * nd->grow, 0, 0, nd->tscale * nd->grow, nd->go[0] * gk, nd->go[1] * gk };
             tf = fr_mul(&tf, &df);
             text_emit(e, g, &ts, nd->text, &tf, c, s, nd->has_shadow ? nd->sh_dx : fo->shadow_dx,
                       nd->has_shadow ? nd->sh_dy : fo->shadow_dy);
@@ -2527,8 +2594,8 @@ static void mc_answered(Shell *s, int a)
     } else if (msg == MSG_NOSPACE_BOOT) {                /* [R 0x3434C0] */
         if (a == MCA_CANCEL || mc_room(s)) {             /* Don't Save: state 2, flag 4 clear: close(3) at once.
                                                           * Retry: the game waits for the card's status to change
-                                                          * (0x345100); here the check runs again [G: a host's room
-                                                          * comes back without a status change] */
+                                                          * (0x345100); here the check runs again [no PS2 meaning:
+                                                          * a host's room comes back without a status change] */
             m->boot_done = 1;
             mc_close(s, a == MCA_CANCEL ? 3 : 1);
         }
@@ -2929,7 +2996,8 @@ static void victory_next(Shell *s)
 static int attract_count = 3;
 
 /* a draw below n (0x308518 .. 0x308574): the state's next value / 2^31 times n, cut to an int; the game keeps it at
- * n at most [R], n itself is no city or monster: there the port takes n - 1 [G: a float rounded up to 1] */
+ * n at most [R], n itself is no city or monster: there the port takes n - 1 [G: a float rounded up to 1; what the
+ * game's lookups do with n was not followed] */
 static int attract_draw(uint32_t *seed, int n)
 {
     int v = (int)((float)wrand_pm_next(seed) * (1.0f / 2147483648.0f) * (float)n);
@@ -3390,7 +3458,8 @@ static void mm_num_player_select(Shell *s)             /* processNumPlayerSelect
     m->num_bots = m->num_players - sel;
     if (m->num_players == 1 || m->play_mode == 2) {
         m->num_bots = 0;
-        /* campaign: gCommon.restoreCheckpoint() (GameStatus 0x33D820: the profile's checkpoint) [G: the viewer's] */
+        /* campaign: gCommon.restoreCheckpoint() (GameStatus 0x33D820: the profile's checkpoint), the viewer's
+         * (profile.c `profile_restore`) */
         s->gs.num_players = m->num_players;
         s->gs.num_bots = m->num_bots;
         mm_to_monster_select(s);
@@ -3883,7 +3952,8 @@ static int ms_fill(Shell *s, int p, int prev)
             pl->monsters[pl->nmon++] = i;
         }
     if (pl->nmon == 0)
-        pl->monsters[pl->nmon++] = 0;                    /* [G: George, so a card shows] */
+        pl->monsters[pl->nmon++] = 0;                    /* George, so a card shows [G: never reached, the starting
+                                                          * monsters' flag 0x80 is in every profile] */
     return found;
 }
 
@@ -5009,7 +5079,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     s->gs = s->st.game;
     if (s->gs.num_players < 1) s->gs.num_players = 1;
     if (s->st.from == SHELL_FROM_BOOT && !st) {
-        for (int i = 0; i < 4; i++) s->gs.monster[i] = i;   /* [G: GameStatus' first monsters] */
+        for (int i = 0; i < 4; i++) s->gs.monster[i] = i;   /* [G: GameStatus' first monsters; its constructor
+                                                              * not traced, and MonsterSelect picks again] */
     }
     if (!s->gs.city[0])
         snprintf(s->gs.city, sizeof s->gs.city, "%s", city_name(s, s->gs.city_index));
@@ -5264,9 +5335,9 @@ void shell_update(Shell *s, float dt)
     effects_update(s->ld.L);
     for (int i = 0; i < IF_COUNT; i++)
         if (s->ifc[i])
-            layouts_lay(&s->gui, s->ifc[i]->root);
+            layouts_lay(&s->gui, s->ifc[i]->root, dt);
     if (s->mc.L)
-        layouts_lay(&s->gui, s->mc.L->root);
+        layouts_lay(&s->gui, s->mc.L->root, dt);
 }
 
 int shell_events(Shell *s, ShellEvent *out, int max)

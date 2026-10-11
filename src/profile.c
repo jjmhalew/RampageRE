@@ -469,7 +469,8 @@ void profile_card_dir(const char *name, char out[24])
 void profile_pack_file(const ProfileBlock *b, uint8_t out[PROFILE_FILE_SIZE])
 {
     uint8_t *d = out + PROFILE_FILE_HEADER;
-    memset(out, 0, PROFILE_FILE_HEADER);             /* [G] the game leaves heap bytes after the titles' NULs */
+    memset(out, 0, PROFILE_FILE_HEADER);             /* the game leaves heap bytes after the titles' NULs [no
+                                                      * host meaning] */
     profile_pack(b, d);
     put32(out + 0x00, PROFILE_SIZE);
     put32(out + 0x04, PROFILE_FILE_HEADER);
@@ -509,7 +510,8 @@ int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
     int room = errno != ENOSPC;
     ok = (fclose(f) == 0) && ok;
     if (!ok)
-        return room && errno != ENOSPC ? -1 : -2;    /* [G] the host's full drive: the card's -3, no room */
+        return room && errno != ENOSPC ? -1 : -2;    /* the host's full drive as the card's -3, no room [no PS2
+                                                      * meaning] */
     profile_saved(p);                                /* [R] 0x33F230 with 1 */
     p->loaded = 1;
     return 1;

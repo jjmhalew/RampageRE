@@ -59,7 +59,8 @@ Addresses are in `RAMPAGE.ELF`.
     (0x308390 returns at once in state 2 and is not called in 4). The shell's update does not run while a world plays,
     so a demo game starts with it at 0, unless the pad was touched in the last 120 s, and the shell comes back to the
     attract mode after it (above). The port counts the loading screen's half second the same way, without the attract
-    mode's start [G].
+    mode's start: the same in effect, since the press that started the game reset the timer and a demo's loading
+    starts in state 2, where 0x308390 does nothing.
   - It is reset (0x308240) by input the GUI takes: the screen's (RGuiScreen 0x2C5AD0, from GuiManager::input
     0x22F7A0, for a pad the controller table allows: 0x2C5E60) or the popup's (0x2328B0). The script's
     `resetAttractTimer` (0x306B78) is called only by AttractMode.scr. 0x33D740 is not pad input: it is the cheat flag
@@ -150,7 +151,8 @@ Natalie twice). The scaling multiplies (float) s by 2⁻³¹, then by the count 
   is the shell, 0x4D53F0).
 - A button: RControllerMgr's input (vtable 0x44A9F0 +0x8, 0x2C1B80) sets gWorld +0x1B (0x4D6A9B) for any event of a
   control from 4 on (the names at 0x3F67C0: 4 the d-pad's up .. 21 the left thumb; 0 .. 3, below them, are taken to be
-  the sticks [G]) of any pad. The world's update (0x324C80), in the demo and in states 4 .. 11, then stores state 6
+  the sticks [G: the ELF names none of them; the sticks are read apart, MenuController.getX / getY 0x24EF80 from the
+  floats at +0x10]) of any pad. The world's update (0x324C80), in the demo and in states 4 .. 11, then stores state 6
   without entering it, sets gShell's idle timer to 120 (0x308240) and ends the state: the same leave. The world's
   reset (0x325C50) clears the flag.
 - Back in the shell (activation, above): after the time up the timer is still 0: state 2, AttractMode, PostRandomGame,
@@ -168,10 +170,12 @@ Natalie twice). The scaling multiplies (float) s by 2⁻³¹, then by the count 
   the seeds into the profile's current record; a pad button (`attract_buttons`) or a `--do` button word calls
   `game_attract_button`; game.c's `GE_EXIT` 2 (b 1 for the button) goes back, `attract_end`: the timer, profile.c's
   `profile_restore` and the `ShellGame` taken from the restored record.
-- [G]: the keys that count as buttons (Enter, Space, Backspace, P, J, K, L, R, the keypad's); the GUI's own resets of
-  the timer by pad 0's events while the demo plays (RGuiScreen 0x2C5AD0, e.g. a stick pushed past the menus'
-  threshold) are not modelled, only the button's; a draw at the count itself (the game keeps it, past the list) is
-  taken as count − 1.
+- The keys that count as buttons are the ones that stand for the pad's controls from 4 on (main.c `keys_pad` and the
+  menus: Enter, Space, Backspace, P, J, K, L, R, the keypad's 0 1 3 7 9); W A S D, the arrows and the keypad's 8 4 2 6
+  5 / * are the sticks, which do not count [R in effect].
+- [G]: the GUI's own resets of the timer by pad 0's events while the demo plays (RGuiScreen 0x2C5AD0, e.g. a stick
+  pushed past the menus' threshold) are not modelled, only the button's; a draw at the count itself (a float rounded
+  up to 1: the game keeps it, past the list, and what its lookups then do was not followed) is taken as count − 1.
 
 ## The profile popup (SaveGame, MemoryCard.ifc) [R unless marked]
 
@@ -204,8 +208,8 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
 - The port: the notice, then the room test against `shell_set_card_free` (the viewer: `--card-free-kb N`, else the
   free room of the drive the profile file is on, looked at once a second; only the tests against 140 read the free
   KB, no text shows it [R 0x33FECC: the texts get the 140], so it needs no 8 MB card's cap;
-  unset or nothing written: room enough). Retry at the boot runs the test again [G: the host's room comes back
-  without a status change]. No card and unformatted have no host meaning; corruption is checked at the load (error
+  unset or nothing written: room enough). Retry at the boot runs the test again [no PS2 meaning: the host's room
+  comes back without a card status change, which the game's Retry waits for]. No card and unformatted have no host meaning; corruption is checked at the load (error
   18). An autosave from the game (Results) that finds no room is not shown: nothing is written.
 - Neither state sets autosave (flag 4), so the main menu that follows restores the profile and does not open the
   list (MainMenu.scr:207 asks `getShowProfile() && getAllowSave()`); the list opens from Back ("Profiles") [R].
@@ -283,8 +287,10 @@ stored); `isBootCheckDone` (0x306338) is state 1 [R].
 - t0 (always for the list's request, 0x4D8134 = 1) shows the `messages` group and `background_quad` (0x4D8214), at
   fade 1.0 for the boot's request (3) and 0.6 otherwise (0x33FE30); without it both are hidden: only the SaveIcon
   shows. The group's fade goes to 0 (0x3401A8).
-- The rect keeps its 235 unless the text needs more (0x3400D4: 20 + the buttons' room + the text's y and height);
-  no message the port shows needs more [not ported].
+- The rect (0x3400C0) [R]: the buttons' row is b = the largest max(30, a shown button's text height − 5) (0 with
+  none); `message_rect` keeps its layout's height (+0x3C, 0x244460 at the setup 0x3402E4: 235) unless the text's y +
+  its height + 20 + b is more, then that; `button_group` goes to that height − b − 5 (200 for 235 and one row of
+  buttons, the layout's 195 being the authoring tool's). As the port's `mc_panel`.
 
 **The popup's update (0x341940):** the panel's group (+0x2D0: 1 the list, 2 the name entry, 3 the messages) fades
 in at 4 a second, the other two out (0x341990 .. 0x341C94); the three start at fade 0 (0x3402F4, 0x340AEC,
@@ -344,7 +350,7 @@ request (`SHELL_EVT_PROFILE_LOAD`, `_CREATE`, `_SAVE`) answered by `shell_card_r
 | read: no file | 6 | error 2: mcCorrupt, Retry (the list) / Don't Save |
 | read: not a profile (its sizes, magic, CRC, data size) | 18 | Corrupt Profile, Retry / Cancel |
 | write: cannot open or write the file | 7 | mcGeneralIOError, Retry / Don't Save |
-| write: the drive is full (ENOSPC) [G] | 11 | mcNoSpace |
+| write: the drive is full (ENOSPC) [no PS2 meaning: the card's no room] | 11 | mcNoSpace |
 | the free room below 140 KB (`--card-free-kb`, the drive's) | 11 | mcNoSpace (the room test, as before) |
 
 A file that is there but no profile is still listed (by its header's name), as a card's directory would be.
@@ -415,7 +421,8 @@ English version only. Cross starts `gShell.startEmulator(n)` after 0.25 s:
 | 24902n | Start at block n + 1 |
 | 314159 | Shows the version text |
 
-The port reports the cheats as `SHELL_EVT_CHEATS`. What the flags do in the game is not traced.
+The port reports the cheats as `SHELL_EVT_CHEATS`. What the flags do: [PROFILE_NOTES.md](PROFILE_NOTES.md) "The
+cheats".
 
 ## The options (Options.scr) [R]
 
@@ -424,7 +431,9 @@ The port reports the cheats as `SHELL_EVT_CHEATS`. What the flags do in the game
 **Controls:**
 - Up and down choose the row. The chosen row's title pulses at 1 + 0.1 sin 4t.
 - The held left / right (or the stick) move the slider one step per frame.
-- On the vibration row, left and right turn it ON or OFF. Going from OFF to ON buzzes the pad (`rumble(250)`).
+- On the vibration row, left and right move between ON and OFF, `incrementSelection(dir, 1)`: no wrap (0x23E360 →
+  0x23E480), so right on OFF and left on ON stay; the 1 is only the list's end sound played once, and no layout gives
+  a list sounds. Going from OFF to ON buzzes the pad (`rumble(250)`).
 
 **Events:**
 - `setSfxVolume`: once the sound slider has moved and then stopped.
@@ -562,7 +571,7 @@ first 512's black pass before the reset to −1: George's card stays dark on the
 | City | `setCityIdx`: `CityData.City<i>` and its City |
 | Start block | `setStartBlock`: GameStatus +0x210, 0 = the city's BlockStart |
 | Night | `setNight` |
-| The world's seeds | GameStatus +0x0 / +0x4: drawn at the start (0x308890), but the demo's own (`ShellGame.seed`); the port keeps the profile's for the other play types [G] |
+| The world's seeds | GameStatus +0x0 / +0x4: drawn at the start (0x308890), but the demo's own (`ShellGame.seed`); the port keeps the profile's for the other play types [G: game.c's to follow] |
 
 A game that ends hands back, through `ShellStart`:
 - quit (0x4D7E4D);
@@ -577,8 +586,17 @@ These decide the first interface, as above.
 
 **The GUI core:** it is hud.c's (fonts, texts, layouts, rects, list boxes, faders), copied, because hud.c keeps it
 static. It is widened in four ways:
-- **Affine frames:** each object's frame is a full 2D affine map. `<x>` turns and mirrors draw, as do `yaw` and
-  `setScaleX`.
+- **Affine frames:** each object's frame is a full 2D affine map. `<x>` turns and mirrors draw, as do the scripts'
+  matrix calls (the GuiObject bindings: lookup 0x257940, dispatcher 0x2569B0, table 0x425750) [R]:
+  - `setScale(m)` (0x2570B8): the 3×3 becomes m times the identity: the turn and a `setScaleX` go;
+  - `setScaleX(v)` (0x2572F0): the first row becomes (v, 0, 0), the others kept: the x axis is v long, not v times
+    the scale (MonsterSelect's cards, `m` 1.15 with `setScaleX(1.15)`, and MonsterSheet's `blowup` are 1.15 wide,
+    no more);
+  - `yaw(a)` (0x2571F0 → 0x240AE0): Rz(a) (0x1015B0) times the 3×3, a turn on top of the one there (Loading.scr calls
+    `setScale` first each time);
+  - `findObject` (0x242200) is depth first among the descendants, each before its children, not the object itself;
+    `copyTree` (0x256BD0) a deep copy with F | 0x10, which `setParent` (0x2426F0 → 0x242540) appends as the last
+    child.
 - **3D objects:** shapes (`<s>`) and effects (`<e>`) put a quad with tex `HUD_TEX_3D` where they stand in the tree, and
   `shell_3d` lists them in that order: the shape's model, or the effect's edf, with its world in the GUI camera's
   (each object's full 3×3 and place, `<m>`, `setIdentity`, `setLookAt`, the `<DD>`s' pixels in GUI units), a shape's
@@ -599,7 +617,10 @@ static. It is widened in four ways:
   card glow's (1.32, streaks), as fx.c draws them.
 - **The 2D path:** an object outside every `<DD>` has its position in screen widths about the centre, x right and y
   down, and a `<DD>` inside it draws about (320, 240), moved there and scaled by it: the GUI camera at depth 1
-  **[R]**. The 1 / (1 + z) of a deeper `<o>` is left out: no shell `<DD>` lies in one.
+  **[R]**. The 1 / (1 + z) of a deeper `<o>` is left out: no shell `<DD>` lies in one. No picture is drawn outside a
+  `<DD>` either: the only ones there, MonsterSheet's `card_template`, are hidden and drawn as copies inside `cards`.
+- **Widescreen:** an untextured quad over the whole 640 × 480 (the popup's `background_quad` dim, the fills) is drawn
+  across the viewer's wider window [no PS2 meaning: the game's screen is 4:3].
 - **No depth sort:** the layouts draw in tree order **[R 0x241770]**. `<z>` is the fade **[R 0x22C450]**:
   MonsterSelect's title (0.388) and frost border (0.58) are partly see-through, MonsterSheet's `blowup` (0) starts
   unseen.
@@ -609,6 +630,33 @@ static. It is widened in four ways:
 - `shell_quads` gives hud.h's `HudQuad`: each picture's bounds, with the texture coordinates of its corners, and its
   four corners themselves (`corners`), which the renderer draws: a turned picture keeps its turn, so MonsterSelect's
   side frost tiles (turned 90°, `<x>`) fade inwards as the top and bottom rows do.
+
+**List boxes** [R; the same as hud.c's, PAUSE_NOTES.md "The list box"]:
+- `setSelection(i)` (0x23E480, the script's and `incrementSelection`'s): at or before the first item the first shown
+  one, at or past the last the last shown one (none: unchanged); between, item i if it shows, else the nearest shown
+  one onwards in the move's direction, then back the other way (none: 0). `incrementSelection(d, once)` (0x23E360)
+  is `setSelection(selection + d)`: no wrap.
+- `isEnabled(i)` (0x253A18 → 0x23E9F0): item i, or with i < 0 the selected one, is there, shows and is enabled (its
+  record's byte, 1 from 0x23BB70; no script calls `enableItem`). So MainMenu's up on the top item asks
+  `isEnabled(-1)`, true, and plays Rollover with the selection staying.
+- Every frame the list's layout (0x23CF60) gives a hidden selected item's selection to the next shown one after it,
+  else the nearest before it; sets the item colours (the selected the highlight one, the others the normal one, the
+  hidden the disabled one); grows the selected item to `<growth>` (0x23CB20: MainMenu's player counts 1.2, up at 4,
+  down at 16 a second), kept in place by its justify and origin.
+- The draw (GuiListBoxControl 0x23C250): the background, then with a `b highlight` / `b endcap` its GuiLine (ctor
+  0x23BA10, the pieces 0x23A8E0) across each line of the selected item's text: from pad + max(0, endcap width × s −
+  pad − the line's width / 2) before the line to as far past it, pad the `d highlight` x × s, s the item's scale
+  times its growth; the band the line's height + the `d highlight` y × s across; the endcap one picture wide at each
+  end (u 0 at the outer edge, the right one mirrored), the segment (HighlightEmpty, clear) between; in the
+  selector colour, with `setHighlightPulse(1)` times the GUI's pulse (0x242950's, as F 0x400). The profile list
+  has no `b`: no line, its bar instead.
+- A list whose items stand at one place (MainMenu's `nb_selection`, the human / computer counts) shows the selected
+  item alone: in effect the list's window (0x23BF10, the top at +0x124) holds the items that fit from its top,
+  scrolled to the selection, and its 46 holds one [R in effect; the window is not ported].
+- GuiRect (0x244500, rebuild 0x2449F0): the corners only when the first has a picture; the sides always, GuiLines B
+  wide at B / 2 in, the left down, the bottom left to right, the right up, the top right to left (v 0 the inner
+  edge); top and bottom from B to W − B, left and right from B to H − B, or the whole height without corner
+  pictures (MonsterSelect's card highlights: closed corners).
 
 **Pad events:**
 - Pad events go to the popup when it is up, else to the focused interface if `setupControllerTable` lets the pad
@@ -630,8 +678,9 @@ tag i at 0x3B28A0 + 16 i + 8; short and long names share them (`la`/`lighting` 0
 **The camera** (0x227AD0, GuiFixedCam 0x227F80): the GUI draws through the GuiCamera's view (controller +0x158,
 0x2319DC).
 - Vertical field of view 0.71808 rad: tan(fov / 2) = 0.375. Near 1, far 10000. The aspect is the viewport's times the
-  float at 0x4CB54C (renderer 0x4CB480 + 0xCC, zero in the file, so set at run time; read at 0x16B768)
-  **[not traced; 4:3 taken]**. The port keeps the vertical field and widens the view with the window, as the 2D.
+  float at 0x4CB54C (renderer 0x4CB480 + 0xCC, read at 0x16B768), set by the display's setup to 0.75 × the frame
+  buffer's width / height (+0x14 / +0x18, 0x25E6B4): the buffer's own shape taken out, a 4:3 screen **[R]**. The port
+  keeps the vertical field and widens the view with the window, as the 2D.
 - The eye at (0, −1, 0) looking at the origin, z up.
 - Each interface's frame is followed by rows (1, 0, 0), (0, 0, −1), (0, 1, 0) (+0x78, ctor 0x239230): GUI (x, y, z)
   is the world's (x, z, −y). A GUI point lands at px = 320 + 640 x / (1 + z), py = 240 + 640 y / (1 + z).
@@ -691,7 +740,6 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 
 - **Not drawn:**
   - the emulators, after v1 ([ARCADE_NOTES.md](ARCADE_NOTES.md); the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md); the demo game too, above);
-  - the turn of hud.c's quads (the shell's turn, above);
   - the main menu's two searchlights: `auto="false"`, and no script starts them **[R]**;
   - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the
     card glow) names a sound, so fx.c's sound start never fires for them (traced through the main menu, MonsterSelect
@@ -701,12 +749,15 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 - **Popup:** the card's states are ported ("The memory card's states"); not the ones a PC has no meaning for (the
   card id, formatting, unformatted, no card, the file changed). The list scrolling beyond six profiles: the viewer
   has one profile file (`ShellProfile.nprofiles` 0 or 1), so `mc_open_list` keeps the top at 0 and the arrows stay
-  hidden. A buddy's load (MonsterSelect's R2) takes the pick at once, without LOADING [G]. The rect's growing to a
-  long text (0x3400D4) is not ported; no message needs it.
+  hidden. A buddy's load (MonsterSelect's R2, gShell.loadBuddyProfile 0x3077B0 → 0x345700 with no "create
+  allowed") [R]: the list without Create New Profile (0x341508: item 0 hidden and disabled without flag 0x10), request 1
+  and flag 0x20 as loadProfile's; the pick goes to state 6, LOADING, like any load (0x343D60), and then
+  `SHELL_EVT_BUDDY_PROFILE`; its callback (0x307FF0) at the close. The viewer has one profile file, so its answer
+  (`shell_buddy_profile(-1)`) loads nothing.
 - **Show-profile's life** [R]: bit 0x200 starts clear (.bss) and is set only at 0x34561C, on any close whose result is
   not 3 (mode 12 sets 0x100 only), buddy loads too; nothing clears it. As the port's `mc_close(result)`; the viewer
-  keeps it (`ShellProfile.profile_shown`, `shell_profile_shown`) for the next shell. A buddy list's Back closes with
-  2 [G: its result].
+  keeps it (`ShellProfile.profile_shown`, `shell_profile_shown`) for the next shell. A buddy list's Back is any list's
+  (0x343DF8: state 2, warn-continue): with flag 0x20 or autosave off it closes with 3 [R].
 - **Bits and flags** [R]: `getButtons` (0x16A180) sets bit i from the pad's button byte i + 4 (names 0x3F67C0): Up 1,
   Down 2, Left 4, Right 8, Start 16, as shell.h; flag 0x400 is 0.6 .. 1 at 1 Hz (0x242950: 1 − (0.2 + 0.2 sin), read
   by the text, quad, line, rect, slider and list draws); a rect without `<B>` is 5 (setBorderWidth 0x244410 from the

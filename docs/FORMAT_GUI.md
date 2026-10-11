@@ -55,7 +55,12 @@ corners, inside the box, `FrameCorner` turned 0°, 270°, 180° and 90° (0x3B3E
 symmetric about its diagonal, so the turns are mirrors **[R]**); four GuiLines B wide between (left and right at x = B/2 from B to H − B, top and bottom at y = B/2; drawn
 left, bottom, right, top). The order: the background, the rect's own text (none in any layout), two more lines
 (+0x178), the sides, the corners. `FrameLine`'s opaque rows (9 .. 15) are the outside, where they meet the corner's
-arc **[R: the textures]**; the rebuild's point order for each line and the +0x178 lines were not decoded **[G]**.
+arc **[R: the textures]**. The rebuild's points (0x2449F0: eight sets of four mirrored points from B/2, B, 3B/2,
+2B) run the left down, the bottom left to right, the right up, the top right to left, so each line's v 0 is its
+inner edge (0x23A8E0: v 0 on the +perp side, perp = (d.y, −d.x)): FrameLine's opaque rows the outer **[R]**. Without
+a corner picture the corners are not drawn (0x244500 tests the first's texture) and the left and right lines run the
+whole height, 0 to H, closing the frame **[R]**. The +0x178 lines were not decoded **[G]**; the draw puts them before
+the sides.
 
 **The list box** **[R]** (ctor 0x23E280, draw 0x23C250, layout 0x23CF60; [PAUSE_NOTES.md](PAUSE_NOTES.md) "The list
 box"): the selection without wrap, the item colours set every frame, the selected item's growth, and the highlight

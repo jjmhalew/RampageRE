@@ -252,7 +252,7 @@ icon.sys and Rampage.icn are written only when icon.sys is not there yet.
 - the CRC matches, unless it is 0 (0x1A19B0);
 - the data's size is the 0x128 the caller asks for (0x34462C).
 
-The version word 8 was not seen checked.
+The version word 8 is not checked (0x3445E0 .. 0x3446B4 test the CRC and the data size alone) [R].
 
 ## The cheats (MainMenu.activateCheat) [R the codes; what they do where the users were read]
 | Code | Flags | What |
@@ -260,11 +260,11 @@ The version word 8 was not seen checked.
 | 141421 | 1, 2 | every finished monster (MonsterSelect / MonsterSheet) and every city |
 | 271828 | 2 | every city open and its stars shown (CitySelect) |
 | 011235 | 8 | every upgrade move (Monsters.bsf, Eyegore, Furby, Leon) |
-| 986960 | 4 | not traced |
+| 986960 | 4 | no monster can be hit (0x2D6A50 answers 0; below) |
 | 082864 | 0x10000 | no vibration; the world takes the status's seeds; the Pause menu's Quit clears it |
 | 874098 | 0x10000, 0x20000 | 0x324930 skips a block |
-| 071767 | 0x40000000 | not traced |
-| 000020 | 0x20000000 | not traced |
+| 071767 | 0x40000000 | one-hit buildings (Building::hit 0x2BC1F0; below) |
+| 000020 | 0x20000000 | nothing: its user 0x1A61F0 is empty (below) |
 | 66730n | 0x10 | movie n (the parameter; the shell reads it at 0x308390) |
 | 24902n | | `setCheatFlagsI(0x80000000, n)` stores nothing (0x2C3350), and `getCheatParam(0x80000000)` answers −1 (0x2C33B8), so CitySelect's cheat block is always 0: dead in this build |
 | 000000 | | clears every flag |
@@ -318,7 +318,7 @@ The cheats are not in the saved block.
 - The time stamp (0x10D140) [R]: (u64) difftime(now, epoch) × 1000, the epoch mktime of 1 Jan 2000 (tm_year 2000
   itself), now sceCdReadClock's raw BCD bytes in a tm (the month without − 1, the year + 2000). The port stores what
   the host passes.
-- The header's leftover bytes are heap leftovers in the game; the viewer's file leaves them zero.
+- The header's leftover bytes are heap leftovers in the game [no host meaning]; the viewer's file leaves them zero.
 - Cheats [R]: 4 (986960) no monster can be hit (0x2D6A50 answers 0; the reaction bindings 0x2ABB18 / 0x2ABB70 do
   nothing); 0x20000000 (000020) dead (0x1A61F0 is empty); 0x40000000 (071767) one-hit buildings (Building::hit
   0x2BC1F0: a standing building collapses at its first hit). 4 and 0x40000000 are ported (main.c
