@@ -8,6 +8,8 @@
 #include <GL/gl.h>
 #include "render_gl.h"
 #include "texpack.h"
+#include "postfx.h"
+#include "gtao.h"
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -17,8 +19,14 @@
 
 int plat_quiet;
 
-/* GL 3.0's framebuffer objects, or EXT_framebuffer_object's (the same enums); a GL that has neither fails: the
- * names alone do not tell (glXGetProcAddress hands out a stub for any name) */
+int gl_core_fbo(void)
+{
+    const char *ver = (const char *)glGetString(GL_VERSION), *ext = (const char *)glGetString(GL_EXTENSIONS);
+    return (ver && ver[0] >= '3' && ver[0] <= '9') || (ext && strstr(ext, "GL_ARB_framebuffer_object"));
+}
+
+/* GL 3.0's (or ARB_framebuffer_object's) framebuffer objects, or EXT_framebuffer_object's (the same enums); a GL that
+ * has none fails: the names alone do not tell (glXGetProcAddress hands out a stub for any name) */
 int gl_offscreen(int width, int height)
 {
     typedef void (APIENTRY *Gen)(GLsizei, GLuint *);
@@ -26,9 +34,8 @@ int gl_offscreen(int width, int height)
     typedef void (APIENTRY *Storage)(GLenum, GLenum, GLsizei, GLsizei);
     typedef void (APIENTRY *Attach)(GLenum, GLenum, GLenum, GLuint);
     typedef GLenum (APIENTRY *Status)(GLenum);
-    const char *ver = (const char *)glGetString(GL_VERSION), *ext = (const char *)glGetString(GL_EXTENSIONS);
-    const char *sfx = ver && ver[0] >= '3' && ver[0] <= '9' ? "" :
-                      ext && strstr(ext, "GL_EXT_framebuffer_object") ? "EXT" : NULL;
+    const char *ext = (const char *)glGetString(GL_EXTENSIONS);
+    const char *sfx = gl_core_fbo() ? "" : ext && strstr(ext, "GL_EXT_framebuffer_object") ? "EXT" : NULL;
     if (!sfx)
         return -1;
     char n[7][40];
@@ -128,6 +135,7 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
         swap(1);
     w->hwnd = hwnd; w->hdc = hdc; w->hglrc = rc_gl;
     w->width = width; w->height = height;
+    w->hidden = hidden;
     if (hidden && gl_offscreen(width, height) != 0) {
         SetWindowPos(hwnd, HWND_BOTTOM, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -148,6 +156,42 @@ void win_poll(Window *w)
 
 void win_swap(Window *w) { SwapBuffers((HDC)w->hdc); }
 void win_title(Window *w, const char *title) { SetWindowTextA((HWND)w->hwnd, title); }
+
+/* port extra (WoodyRE's): borderless fullscreen over the window's monitor, or a window centred on its work area */
+void win_mode(Window *w, int width, int height, int full)
+{
+    if (w->hidden)                               /* --shot: never shown, its size is the framebuffer object's */
+        return;
+    HWND h = (HWND)w->hwnd;
+    MONITORINFO mi = { sizeof mi };
+    GetMonitorInfoA(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+    if (full) {
+        SetWindowLongA(h, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(h, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        return;
+    }
+    RECT rc = { 0, 0, width, height };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    int fw = rc.right - rc.left - width, fh = rc.bottom - rc.top - height;
+    int aw = mi.rcWork.right - mi.rcWork.left - fw, ah = mi.rcWork.bottom - mi.rcWork.top - fh;
+    if (width > aw || height > ah) {             /* too big for the screen: shrunk, its shape kept */
+        float s = (float)aw / width < (float)ah / height ? (float)aw / width : (float)ah / height;
+        printf("window %dx%d does not fit the screen: %dx%d\n", width, height, (int)(width * s), (int)(height * s));
+        width = (int)(width * s);
+        height = (int)(height * s);
+    }
+    SetWindowLongA(h, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+    SetWindowPos(h, HWND_NOTOPMOST, mi.rcWork.left + (aw - width) / 2, mi.rcWork.top + (ah - height) / 2, width + fw,
+                 height + fh, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+}
+
+int win_vsync(Window *w, int interval)
+{
+    typedef BOOL (WINAPI *SwapInterval)(int);
+    SwapInterval swap = (SwapInterval)(void *)wglGetProcAddress("wglSwapIntervalEXT");
+    return !w->hidden && swap && swap(interval) ? 0 : -1;
+}
 
 void win_close(Window *w)
 {
@@ -177,6 +221,9 @@ typedef struct { const Bundle *b; GLuint *tex; uint32_t n; } BundleTex;   /* per
 #define IFL_FRAMES 64
 typedef struct { const Bundle *b; uint32_t name; int n; uint32_t frame[IFL_FRAMES]; float until[IFL_FRAMES]; } Ifl;
 
+/* a blended part held back while the ambient occlusion is on (rnd_frame): drawn after it with the modelview it had */
+typedef struct { float mv[16]; const SceneMesh *sm; const Skin *skin; uint32_t part, first; } HeldPart;
+
 struct Renderer {
     const Scene *scene;
     BundleTex cache[16]; int ncache;
@@ -184,7 +231,83 @@ struct Renderer {
     uint32_t drawn;
     const uint8_t *video; int video_w, video_h, video_new;   /* rnd_video */
     GLuint video_tex;
+    int tex_gen;                                     /* the texture settings the cache was made with */
+    int hold;                                        /* draw_mesh holds the blended parts back (gtao_active) */
+    int in_hud;                                      /* draw_hud: textures made now get no mips nor anisotropy */
+    HeldPart *held; int nheld, cheld;
 };
+
+/* ---- texture settings (port extra, docs/NATIVE.md "Graphics settings") */
+#define GL_TEXTURE_MAX_ANISOTROPY 0x84FE
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY 0x84FF
+static int g_aniso = 1, g_mips, g_tex_gen, g_aniso_max = -1;
+
+int rnd_aniso_max(void)
+{
+    if (g_aniso_max < 0) {
+        const char *e = (const char *)glGetString(GL_EXTENSIONS);
+        GLfloat m = 1;
+        if (e && (strstr(e, "GL_EXT_texture_filter_anisotropic") || strstr(e, "GL_ARB_texture_filter_anisotropic")))
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &m);
+        g_aniso_max = m >= 16 ? 16 : m >= 8 ? 8 : m >= 4 ? 4 : m >= 2 ? 2 : 1;
+    }
+    return g_aniso_max;
+}
+
+void rnd_set_textures(int aniso, int mips)
+{
+    aniso = aniso < 1 ? 1 : aniso;
+    mips = mips != 0;
+    if (aniso != g_aniso || mips != g_mips)
+        g_tex_gen++;
+    g_aniso = aniso;
+    g_mips = mips;
+}
+
+/* the bound texture's anisotropy, at most what the GL can */
+static void tex_aniso(void)
+{
+    int m = g_aniso > 1 ? rnd_aniso_max() : 1;
+    if (m > 1)
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, (GLfloat)(g_aniso < m ? g_aniso : m));
+}
+
+/* the levels below rgba (w x h, level 0 already uploaded) down to 1 x 1, each a 2x2 box of the one above, its colour
+ * weighted by alpha (so the see-through texels' colour does not bleed into the cut-outs' edges), trilinear filtering */
+static void upload_mips(const uint8_t *rgba, int w, int h)
+{
+    uint8_t *px = malloc((size_t)w * h * 4);
+    if (!px)
+        return;
+    memcpy(px, rgba, (size_t)w * h * 4);
+    int level = 0;
+    while (w > 1 || h > 1) {
+        int dw = w > 1 ? w / 2 : 1, dh = h > 1 ? h / 2 : 1;
+        for (int y = 0; y < dh; y++)
+            for (int x = 0; x < dw; x++) {
+                int x0 = 2 * x, x1 = 2 * x + 1 < w ? 2 * x + 1 : x0, y0 = 2 * y, y1 = 2 * y + 1 < h ? 2 * y + 1 : y0;
+                const uint8_t *s[4] = { px + ((size_t)y0 * w + x0) * 4, px + ((size_t)y0 * w + x1) * 4,
+                                        px + ((size_t)y1 * w + x0) * 4, px + ((size_t)y1 * w + x1) * 4 };
+                uint8_t *d = px + ((size_t)y * dw + x) * 4;   /* in place: d never passes the sources still to be read */
+                unsigned c[3] = { 0, 0, 0 }, cs[3] = { 0, 0, 0 }, a = 0;
+                for (int k = 0; k < 4; k++) {
+                    for (int q = 0; q < 3; q++) {
+                        c[q] += s[k][q] * s[k][3];
+                        cs[q] += s[k][q];
+                    }
+                    a += s[k][3];
+                }
+                for (int q = 0; q < 3; q++)
+                    d[q] = (uint8_t)(a ? (c[q] + a / 2) / a : (cs[q] + 2) / 4);
+                d[3] = (uint8_t)((a + 2) / 4);
+            }
+        w = dw;
+        h = dh;
+        glTexImage2D(GL_TEXTURE_2D, ++level, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    }
+    free(px);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+}
 
 Renderer *rnd_create(void) { return calloc(1, sizeof(Renderer)); }
 
@@ -213,6 +336,7 @@ void rnd_free(Renderer *r)
     drop_textures(r);
     if (r->video_tex)
         glDeleteTextures(1, &r->video_tex);
+    free(r->held);
     free(r);
 }
 
@@ -278,8 +402,13 @@ static GLuint texture(Renderer *r, const Bundle *b, uint32_t name)
             /* port extra: a texture pack's PNG (texpack.c), named after the decoded mip 0; hashed only with a pack
              * or --dumptex */
             uint64_t hash = tp_active() ? tp_hash('T', rgba, (uint32_t)w * (uint32_t)h * 4, w, h) : 0;
-            if (!hash || !tp_replace(hash, TP_ASIS))
+            if (!hash || !tp_replace(hash, TP_ASIS)) {
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+                if (g_mips && !r->in_hud)            /* port extra: mips= (the world's; the HUD's as before) */
+                    upload_mips(rgba, w, h);
+            }
+            if (!r->in_hud)
+                tex_aniso();                         /* port extra: aniso= */
             if (hash) {
                 tp_scope(b->scope);
                 tp_dump(hash, rgba, w, h);
@@ -364,115 +493,162 @@ static void look(const Camera *c)
     glTranslatef(-c->pos[0], -c->pos[1], -c->pos[2]);
 }
 
+/* a part drawn over what is behind it by its alpha (draw_part): a blended one, or a see-through material colour */
+static int part_blended(const SceneMesh *sm, const MeshPart *p)
+{
+    float mc[4];
+    material_color(sm->b, p->material, mc);
+    return p->blend || mc[3] < 0.98f;
+}
+
+static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32_t i, uint32_t first, double t);
+
+/* the mesh's parts in order; while r->hold (the ambient occlusion is on: rnd_frame) the blended ones are held back
+ * and drawn after it, so it does not darken what shows through them */
 static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double t)
 {
-    const Scene *s = r->scene;
     const Mesh *m = &sm->mesh;
     uint32_t first = 0;                                    /* the part's first vertex in the skin buffers */
     for (uint32_t i = 0; i < m->nparts; first += m->parts[i].nverts, i++) {
         const MeshPart *p = &m->parts[i];
         if (!p->ntris)
             continue;
-        GLuint id = texture(r, sm->b, shown_texture(r, sm->b, material_texture(sm->b, p->material), t));
-        if (material_flags(sm->b, p->material) & MAT_TWO_SIDED) glDisable(GL_CULL_FACE);
-        else glEnable(GL_CULL_FACE);
-        if (id) {
+        if (r->hold && part_blended(sm, p)) {
+            if (r->nheld == r->cheld) {
+                int n = r->cheld ? 2 * r->cheld : 256;
+                HeldPart *h = realloc(r->held, sizeof *h * (size_t)n);
+                if (!h) {
+                    draw_part(r, sm, skin, i, first, t);
+                    continue;
+                }
+                r->held = h;
+                r->cheld = n;
+            }
+            HeldPart *h = &r->held[r->nheld++];
+            glGetFloatv(GL_MODELVIEW_MATRIX, h->mv);
+            h->sm = sm; h->skin = skin; h->part = i; h->first = first;
+            continue;
+        }
+        draw_part(r, sm, skin, i, first, t);
+    }
+}
+
+/* the parts draw_mesh held back, in their order, each with its modelview */
+static void draw_held(Renderer *r, double t)
+{
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    for (int k = 0; k < r->nheld; k++) {
+        glLoadMatrixf(r->held[k].mv);
+        draw_part(r, r->held[k].sm, r->held[k].skin, r->held[k].part, r->held[k].first, t);
+    }
+    glPopMatrix();
+    r->nheld = 0;
+}
+
+static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32_t i, uint32_t first, double t)
+{
+    const Scene *s = r->scene;
+    const MeshPart *p = &sm->mesh.parts[i];
+    GLuint id = texture(r, sm->b, shown_texture(r, sm->b, material_texture(sm->b, p->material), t));
+    if (material_flags(sm->b, p->material) & MAT_TWO_SIDED) glDisable(GL_CULL_FACE);
+    else glEnable(GL_CULL_FACE);
+    if (id) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, id);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+    }
+    int scroll = s->cloud_material && sm->b == s->city && p->material == s->cloud_material;
+    if (scroll) {                                        /* the drifting cloud band (AnimatingSkyData) */
+        glMatrixMode(GL_TEXTURE);
+        glLoadIdentity();
+        glTranslatef((float)fmod(s->cloud_rate[0] * t, 1.0), (float)fmod(s->cloud_rate[1] * t, 1.0), 0);
+        glMatrixMode(GL_MODELVIEW);
+    }
+    glVertexPointer(3, GL_FLOAT, 0, skin ? skin->pos + 3 * first : p->pos);
+    if (skin) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, skin->nrm + 3 * first); }
+    else if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, p->nrm); }
+    else { glDisableClientState(GL_NORMAL_ARRAY); glNormal3f(0, 0, 1); }
+    if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, p->uv); }
+    else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    float mc[4];                                         /* the material's colour (white when textured) */
+    material_color(sm->b, p->material, mc);
+    if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
+    else { glDisableClientState(GL_COLOR_ARRAY); glColor4fv(mc); }
+    int see_through = !p->blend && mc[3] < 0.98f;        /* the glass of the saucer, the hover tank, the
+                                                          * helicopter's canopy: blended by the colour's alpha */
+    /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
+     * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
+     * 0x51), the facades and cracks the building light colours, the ground and top models lit with it */
+    int prelit = p->col && !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
+    if (prelit)
+        glDisable(GL_LIGHTING);
+    /* a damage layer (material_damage_layer, shader 0x7A): the vertex alpha is the layer's share, not see-through:
+     * the part itself is drawn opaque, without the alpha test */
+    uint32_t dmg = p->col && p->uv ? material_damage_layer(sm->b, p->material) : 0;
+    GLboolean dmg_test = dmg ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
+    if (dmg)
+        glDisable(GL_ALPHA_TEST);
+    if (p->blend || see_through) {                       /* over what is behind, by its alpha */
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glAlphaFunc(GL_GREATER, 0.01f);
+        glDepthMask(GL_FALSE);
+    }
+    glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+    if (p->blend || see_through) {
+        glDisable(GL_BLEND);
+        glAlphaFunc(GL_GREATER, 0.5f);
+        glDepthMask(GL_TRUE);
+    }
+    if (dmg) {                                           /* the second pass: the layer over the part, (Cs - Cd) x Ad + Cd,
+                                                          * Ad the alpha of the first: its opaque texture's x the vertex's */
+        GLuint id2 = texture(r, sm->b, dmg);
+        if (id2) {
+            glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT);
             glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, id);
-        } else {
-            glDisable(GL_TEXTURE_2D);
-        }
-        int scroll = s->cloud_material && sm->b == s->city && p->material == s->cloud_material;
-        if (scroll) {                                        /* the drifting cloud band (AnimatingSkyData) */
-            glMatrixMode(GL_TEXTURE);
-            glLoadIdentity();
-            glTranslatef((float)fmod(s->cloud_rate[0] * t, 1.0), (float)fmod(s->cloud_rate[1] * t, 1.0), 0);
-            glMatrixMode(GL_MODELVIEW);
-        }
-        glVertexPointer(3, GL_FLOAT, 0, skin ? skin->pos + 3 * first : p->pos);
-        if (skin) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, skin->nrm + 3 * first); }
-        else if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, p->nrm); }
-        else { glDisableClientState(GL_NORMAL_ARRAY); glNormal3f(0, 0, 1); }
-        if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, p->uv); }
-        else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        float mc[4];                                         /* the material's colour (white when textured) */
-        material_color(sm->b, p->material, mc);
-        if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
-        else { glDisableClientState(GL_COLOR_ARRAY); glColor4fv(mc); }
-        int see_through = !p->blend && mc[3] < 0.98f;        /* the glass of the saucer, the hover tank, the
-                                                              * helicopter's canopy: blended by the colour's alpha */
-        /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
-         * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
-         * 0x51), the facades and cracks the building light colours, the ground and top models lit with it */
-        int prelit = p->col && !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
-        if (prelit)
-            glDisable(GL_LIGHTING);
-        /* a damage layer (material_damage_layer, shader 0x7A): the vertex alpha is the layer's share, not see-through:
-         * the part itself is drawn opaque, without the alpha test */
-        uint32_t dmg = p->col && p->uv ? material_damage_layer(sm->b, p->material) : 0;
-        GLboolean dmg_test = dmg ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
-        if (dmg)
-            glDisable(GL_ALPHA_TEST);
-        if (p->blend || see_through) {                       /* over what is behind, by its alpha */
+            glBindTexture(GL_TEXTURE_2D, id2);
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glAlphaFunc(GL_GREATER, 0.01f);
-            glDepthMask(GL_FALSE);
-        }
-        glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
-        if (p->blend || see_through) {
-            glDisable(GL_BLEND);
-            glAlphaFunc(GL_GREATER, 0.5f);
-            glDepthMask(GL_TRUE);
-        }
-        if (dmg) {                                           /* the second pass: the layer over the part, (Cs - Cd) x Ad + Cd,
-                                                              * Ad the alpha of the first: its opaque texture's x the vertex's */
-            GLuint id2 = texture(r, sm->b, dmg);
-            if (id2) {
-                glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT);
-                glEnable(GL_TEXTURE_2D);
-                glBindTexture(GL_TEXTURE_2D, id2);
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                glEnable(GL_ALPHA_TEST);                 /* a share of 0 adds nothing */
-                glAlphaFunc(GL_GREATER, 0.0f);
-                glDepthFunc(GL_LEQUAL);
-                glDepthMask(GL_FALSE);
-                glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
-                glPopAttrib();
-                r->drawn += p->ntris;
-            }
-            if (dmg_test)
-                glEnable(GL_ALPHA_TEST);
-        }
-        r->drawn += p->ntris;
-        GLuint env = p->uv || p->nrm || skin ? texture(r, sm->b, material_env(sm->b, p->material)) : 0;
-        if (env && (p->nrm || skin)) {                       /* the reflection layer: its sphere map added over
-                                                              * the part [G: the blend and its strength] */
-            glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT | GL_LIGHTING_BIT);
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, env);
-            glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
-            glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
-            glEnable(GL_TEXTURE_GEN_S);
-            glEnable(GL_TEXTURE_GEN_T);
-            glDisable(GL_LIGHTING);
-            glDisableClientState(GL_COLOR_ARRAY);
-            glColor4f(1, 1, 1, 1);
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_ONE, GL_ONE);
+            glEnable(GL_ALPHA_TEST);                 /* a share of 0 adds nothing */
+            glAlphaFunc(GL_GREATER, 0.0f);
             glDepthFunc(GL_LEQUAL);
             glDepthMask(GL_FALSE);
             glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
             glPopAttrib();
+            r->drawn += p->ntris;
         }
-        if (prelit)
-            glEnable(GL_LIGHTING);
-        if (scroll) {
-            glMatrixMode(GL_TEXTURE);
-            glLoadIdentity();
-            glMatrixMode(GL_MODELVIEW);
-        }
+        if (dmg_test)
+            glEnable(GL_ALPHA_TEST);
+    }
+    r->drawn += p->ntris;
+    GLuint env = p->uv || p->nrm || skin ? texture(r, sm->b, material_env(sm->b, p->material)) : 0;
+    if (env && (p->nrm || skin)) {                       /* the reflection layer: its sphere map added over
+                                                          * the part [G: the blend and its strength] */
+        glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT | GL_LIGHTING_BIT);
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, env);
+        glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+        glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+        glEnable(GL_TEXTURE_GEN_S);
+        glEnable(GL_TEXTURE_GEN_T);
+        glDisable(GL_LIGHTING);
+        glDisableClientState(GL_COLOR_ARRAY);
+        glColor4f(1, 1, 1, 1);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE);
+        glDepthFunc(GL_LEQUAL);
+        glDepthMask(GL_FALSE);
+        glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+        glPopAttrib();
+    }
+    if (prelit)
+        glEnable(GL_LIGHTING);
+    if (scroll) {
+        glMatrixMode(GL_TEXTURE);
+        glLoadIdentity();
+        glMatrixMode(GL_MODELVIEW);
     }
 }
 
@@ -601,6 +777,7 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
     hud_state(aspect);
     if (s->ngui3d)
         glClear(GL_DEPTH_BUFFER_BIT);
+    r->in_hud = 1;
     int layer = 0;
     for (int i = 0; i < s->nhud; i++) {
         const HudQuad *q = &s->hud[i];
@@ -636,6 +813,7 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
         }
         glEnd();
     }
+    r->in_hud = 0;
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_BLEND);
     glEnable(GL_ALPHA_TEST);
@@ -784,16 +962,24 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
 {
     const Scene *s = r->scene;
     r->drawn = 0;
+    if (r->tex_gen != g_tex_gen) {                         /* the texture settings changed: loaded anew */
+        drop_textures(r);
+        r->tex_gen = g_tex_gen;
+    }
     glViewport(0, 0, w->width, w->height);
     float sky[3] = { 0.47f, 0.6f, 0.89f };
     if (s && s->fog_end > 0)
         memcpy(sky, s->fog_colour, sizeof sky);
     if (getenv("RAMPAGE_MAGENTA")) { sky[0] = 1; sky[1] = 0; sky[2] = 1; }
+    if (s && s->nitems)                                    /* port extra: MSAA / SMAA draw the 3D picture into their
+                                                            * target (postfx.c; nothing while they are off) */
+        postfx_begin(w->width, w->height);
     glClearColor(sky[0], sky[1], sky[2], 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!s)
         return;
-    perspective(cam->fov_deg, w->height ? (float)w->width / w->height : 1, 0.5f, 3000);
+    float aspect = w->height ? (float)w->width / w->height : 1;
+    perspective(cam->fov_deg, aspect, 0.5f, 3000);
     look(cam);
     glEnable(GL_DEPTH_TEST);
     glCullFace(GL_BACK);                                   /* one side, but for the two-sided materials (draw_mesh) */
@@ -858,6 +1044,8 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
             glEnable(GL_FOG);
     }
     for (int pass = 0; pass < 2; pass++) {               /* the street, its building shadows, then the rest */
+        r->hold = pass && gtao_active();                 /* port extra: the blended parts after the occlusion (the
+                                                          * street's lie on it, darkened as it is) */
         for (uint32_t i = 0; i < s->nitems; i++) {
             const DrawItem *it = &s->items[i];
             if (s->instances[it->instance].hidden || it->instance == s->sky || (it->instance == s->ground_inst) != !pass)
@@ -877,6 +1065,14 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         for (int k = 0; k < s->fx_nshapes[m->shape]; k++)
             draw_mesh(r, &s->fx_shapes[m->shape][k], NULL, t);
         glPopMatrix();
+    }
+    if (r->hold) {                                         /* port extra: the ambient occlusion over the opaque world
+                                                            * (gtao.c), faded out with the fog, then what it held back */
+        float f = 1.0f / tanf(cam->fov_deg * 3.14159265f / 360.0f);
+        int fogged = fog && s->fog_end > s->fog_start;
+        gtao_frame(0.5f, 3000, f / aspect, f, fogged ? s->fog_start : 0, fogged ? s->fog_end : 0);
+        r->hold = 0;
+        draw_held(r, t);
     }
     if (s->nwater)
         draw_water(r, s, cam);
@@ -914,6 +1110,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         glEnable(GL_DEPTH_TEST);
         glColor3f(1, 1, 1);
     }
+    postfx_end();                                          /* the HUD (and the shell's 3D layers in it) stay sharp */
     if (s->nhud)
         draw_hud(r, s, w->height ? (float)w->width / w->height : 4.0f / 3, t);
 }

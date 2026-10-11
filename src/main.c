@@ -48,6 +48,7 @@
 #include "texpack.h"
 #include "pad.h"
 #include "iso.h"
+#include "settings.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -5333,6 +5334,8 @@ int main(int argc, char **argv)
     double shot_time = 0;
     const char *script = NULL;
     char walk_script[48];
+    Settings gfx, gfx_flags;                         /* the graphics settings (settings.h), the flags among them */
+    settings_unset(&gfx_flags);
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {   /* no window, no sound, no message boxes */
             shot = argv[++i];
@@ -5375,8 +5378,10 @@ int main(int argc, char **argv)
                 view[k] = (float)atof(argv[++i]);
             have_view = 1;
         }
+        else if (settings_arg(&gfx_flags, argc, argv, &i)) { }   /* --ao --smaa N --msaa N --aniso N --mips ... */
         else if (npos < 3) pos[npos++] = argv[i];
     }
+    settings_resolve(&gfx, &gfx_flags, !shot);       /* a --shot run: the flags alone, never rampage.cfg */
     char found[1024], msg[1024];
     for (int i = 0; pos[0] && npos < 3 && i < NCITIES; i++)   /* "rampage Chicago 1": no path, a city */
         if (_stricmp(pos[0], CITIES[i]) == 0 && !plat_exists(pos[0])) {
@@ -5413,10 +5418,11 @@ int main(int argc, char **argv)
             city = i;
     uint32_t block = (uint32_t)(atoi(pos[2]) > 0 ? atoi(pos[2]) - 1 : 0);
     Window w;
-    if (win_open(&w, "RampageRE", 1280, 720, shot != NULL) != 0) {   /* a --shot run never shows a window */
+    if (win_open(&w, "RampageRE", gfx.width, gfx.height, shot != NULL) != 0) {   /* a --shot run never shows a window */
         plat_message("Cannot open an OpenGL window.", 1);
         return 1;
     }
+    settings_apply(&gfx, &w);
     if (!shot) {                                     /* the controllers: never for a --shot run (no light, no motor,
                                                       * the --do words alone drive it) */
         v.pads_live = 1;
@@ -5548,6 +5554,7 @@ int main(int argc, char **argv)
             pad_set_strength(v.vibrate ? 1.0f : 0.0f);
         }
         if (w.pressed[VK_ESCAPE]) w.quit = 1;
+        settings_keys(&gfx, &w);                     /* F5 .. F9 the graphics, F11 fullscreen */
         if (v.shell) {                               /* the front end has the screen and the pad */
             if (v.shell_go) {                        /* the loading screen was drawn: the game */
                 v.shell_go = 0;
@@ -5777,11 +5784,12 @@ int main(int argc, char **argv)
         win_swap(&w);
         frames++;
         if (now - title_at > 0.5) {
-            char title[256];
-            snprintf(title, sizeof title, "RampageRE - %s, %s%s%s%s - %u triangles, %.0f fps%s", CITIES[v.city_index],
+            char title[256], fx[96];
+            settings_describe(&gfx, fx, sizeof fx);
+            snprintf(title, sizeof title, "RampageRE - %s, %s%s%s%s - %u triangles, %.0f fps%s%s", CITIES[v.city_index],
                      v.nblocks ? v.blocks[v.block] : "-", v.night ? ", night" : "",
                      have_monster(&v) ? ", " : "", have_monster(&v) && v.scene.mon[0].clip ? v.scene.mon[0].clip : "",
-                     rnd_triangles(v.rnd), frames / (now - title_at), v.fog ? ", fog" : "");
+                     rnd_triangles(v.rnd), frames / (now - title_at), v.fog ? ", fog" : "", fx);
             win_title(&w, title);
             title_at = now;
             frames = 0;

@@ -46,7 +46,8 @@ byte 1,342,827,563), the viewer says so and goes on.
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
-the monster's clips, G play or the free camera, F12 a screenshot, Esc quit. In play (the default with `--monster`)
+the monster's clips, G play or the free camera, F5 .. F9 the graphics settings and F11 fullscreen ("Graphics
+settings"), F12 a screenshot, Esc quit. In play (the default with `--monster`)
 the keys are a pad: W A S D the left stick, the arrows the right stick (the head), Space Cross (jump), J Square
 (punch), K Triangle (kick), L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter
 or Space take, Backspace back); player 2 (`--players 2`) plays on the numeric keypad, Num Lock on: 8 4 2 6 (or 5)
@@ -174,6 +175,57 @@ lights alone). At exit the motors stop and the DualSense's light goes back to th
 **Tests.** A `--shot` run never opens a controller (no light, no motor, nothing read): the `--do` words drive the
 monsters' pads directly, so every shot is the same with and without controllers attached.
 
+## Graphics settings
+Port extras, WoodyRE's (its docs/DISPLAY.md §3, 5, 6): the PS2 draws its GS frame without antialiasing, ambient
+occlusion or texture filtering beyond its own, so every effect is **off by default**, and with all of them off the
+picture is exactly the one without them (the same bytes in a `--shot`). `src/settings.c` reads them, `src/postfx.c`
+(MSAA, SMAA), `src/gtao.c` (ambient occlusion) and `render_gl.c` (textures, window) do them.
+
+| Setting | `rampage.cfg` | Flag | Environment | Key | What it does |
+|---|---|---|---|---|---|
+| window size | `window=1280x720` | `--window WxH` | `RAMPAGE_WINDOW` | | the inside of the window, centred on the screen (shrunk to fit, its shape kept); a `--shot` is drawn at that size too |
+| fullscreen | `fullscreen=0` | `--fullscreen`, `--windowed` | `RAMPAGE_FULLSCREEN` | F11 | borderless over the whole monitor at the desktop's resolution (no mode switch) |
+| vsync | `vsync=1` | `--vsync 0\|1` | `RAMPAGE_VSYNC` | | the swap interval (`wglSwapIntervalEXT`, SDL's) |
+| ambient occlusion | `ao=0` | `--ao`, `--noao` | `RAMPAGE_AO` | F5 | GTAO: contact shadows where surfaces meet (building bases, ledges, under the monster's feet) |
+| its radius | `ao_radius=4` | `--ao-radius R` | `RAMPAGE_AO_RADIUS` | | how far (world units; a monster is about 25 tall) a surface looks for what hides the sky |
+| SMAA | `smaa=0` | `--smaa N` | `RAMPAGE_SMAA` | F6 (cycles) | edge smoothing, 0 off, 1 .. 4 (or `low`, `medium`, `high`, `ultra`, SMAA's presets): polygon edges and the alpha-tested cut-outs (fire escapes, trees, facade sheets) |
+| MSAA | `msaa=0` | `--msaa N` | `RAMPAGE_MSAA` | F7 (cycles) | multisampling, 0, 2, 4, 8 samples: polygon edges only |
+| anisotropy | `aniso=1` | `--aniso N` | `RAMPAGE_ANISO` | F8 (cycles) | `GL_TEXTURE_MAX_ANISOTROPY` 1 (off), 2, 4, 8, 16 on the world's textures: streets and walls at a grazing angle stay sharp |
+| mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
+
+**rampage.cfg** is read from the current directory (next to `rampage_profile.bin`) before the window opens: one
+`key=value` per line, `#` starts a comment, unknown keys are reported. The viewer never writes it; the keys change the
+running session and print the settings as `rampage.cfg` lines (`graphics: ao=1 ...`) and in the title. Order: the
+defaults, `rampage.cfg`, the environment, the flags. **A `--shot` run reads no `rampage.cfg`** (flags and environment
+only), so test pictures stay the same whatever the file says; there the window, fullscreen and vsync keys do nothing (the
+frame is the offscreen framebuffer object, F11 is a no-op for a hidden window), and the effects are drawn into the
+shot (they hand the picture back to the framebuffer that was bound, not to the window's).
+
+**Where they sit in a frame** (`rnd_frame`): with MSAA or SMAA on, `postfx_begin` binds an own target of the frame's
+size before the clear (RGBA8 + depth 24 / stencil 8, multisampled for MSAA) and `postfx_end` resolves it, runs SMAA's
+three passes (edges, blend weights with the AreaTex / SearchTex lookups, neighbourhood blending) and puts it into the
+frame just before the HUD, so the HUD, the shell's pages and its 3D layers (drawn among its 2D quads) and the movies stay
+sharp. The ambient occlusion runs after the opaque world, the monsters and the debris: the depth is copied into a
+texture (with MSAA resolved by a blit), a GLSL pass integrates 3 slices × 6 steps per side in the form of XeGTAO, a 4×4
+depth-aware blur multiplies `visibility^1.5` into the colour, faded out over the fog's range (the fixed-function fog is
+already in the colour, so a fogged distance would be darkened otherwise). Blended parts (glass, the see-through
+material colours, the parts drawn by their alpha) are held back while it is on and drawn after it in their order, so it
+never darkens what shows through them; the street's own blended parts lie on it and are darkened with it. That changes
+the draw order only while the ambient occlusion is on. The water, the decals and wall shadows, the particles and the HUD
+come after it and are never darkened.
+
+**Needs**: SMAA GLSL 1.30, the ambient occlusion GLSL 1.20, both and MSAA framebuffer objects of GL 3.0 or
+ARB_framebuffer_object (with the blit and multisampled renderbuffers); anisotropy GL_EXT/ARB_texture_filter_anisotropic;
+mips any GL. What the GL cannot do prints "not supported" once and stays off (an OpenGL 1.x driver draws as without
+them); the keys stop at what the GL offers.
+
+**Cost**, Intel UHD Graphics 770 (the CPU's own GPU), 1920×1080, Chicago 1 with George, per frame: 2.5 ms with everything
+off; ambient occlusion +13 ms (about +5 ms at 1280×720; it grows with the radius, +10 ms at 1, +16 ms at 12), SMAA
+medium +1.2 ms, ultra +2.4 ms, MSAA 4× +1.2 ms, 8× +3 ms, anisotropy 16× with mips +0, everything at maximum +20 ms. A
+discrete GPU does the ambient occlusion in well under a millisecond (WoodyRE: 0.1 - 0.5 ms at 1080p on an RX 6800).
+Golden `--shot` pictures only hold with everything off: the MSAA resolve and the shaders' rounding differ between
+drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels by more than 8 of 255, as without them).
+
 ## Source
 | File | |
 |---|---|
@@ -195,6 +247,9 @@ monsters' pads directly, so every shot is the same with and without controllers 
 | `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
 | `src/texpack.c` | texture packs: `mods/textures/` replacements and `--dumptex` (WoodyRE's, [TEXTURES.md](TEXTURES.md)); `src/stb/` stb_image and stb_image_write |
+| `src/settings.c` | the graphics settings: `rampage.cfg`, `RAMPAGE_*`, the flags, F5 .. F9 and F11 ("Graphics settings") |
+| `src/postfx.c`, `src/smaa/smaa.h` | MSAA and SMAA (WoodyRE's; `smaa.h` is SMAA by Jimenez et al., MIT) |
+| `src/gtao.c` | the ambient occlusion, GTAO (WoodyRE's) |
 | `src/main.c` | the viewer: arguments, camera, keys; the monsters in play (`Mon`), their pads and their world |
 | `src/director.c` | the game flow's choreography: the AI's goals (playMove, walkTo, the bots' DestroyBuildings) and the camera modes (docs/FLOW_NOTES.md, MULTIPLAYER_NOTES.md) |
 

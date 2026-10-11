@@ -154,6 +154,7 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
     }
     w->hwnd = sw; w->hglrc = gc;
     w->width = width; w->height = height;
+    w->hidden = hidden;
     SDL_GL_SetSwapInterval(hidden ? 0 : 1);
     if (hidden) {                                /* never shown: without a framebuffer object, no window at all */
         if (gl_offscreen(width, height) != 0) {
@@ -239,6 +240,35 @@ void win_poll(Window *w)
 
 void win_swap(Window *w) { SDL_GL_SwapWindow((SDL_Window *)w->hwnd); }
 void win_title(Window *w, const char *title) { SDL_SetWindowTitle((SDL_Window *)w->hwnd, title); }
+
+/* port extra (WoodyRE's): fullscreen on the desktop's resolution, or a window centred and shrunk to fit */
+void win_mode(Window *w, int width, int height, int full)
+{
+    SDL_Window *sw = (SDL_Window *)w->hwnd;
+    if (w->hidden)                               /* --shot: never shown, its size is the framebuffer object's */
+        return;
+    if (full) {
+        SDL_SetWindowFullscreen(sw, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        drawable(w);
+        return;
+    }
+    SDL_SetWindowFullscreen(sw, 0);
+    SDL_Rect r;
+    int d = SDL_GetWindowDisplayIndex(sw);
+    if (!SDL_GetDisplayUsableBounds(d < 0 ? 0 : d, &r) && (width > r.w || height > r.h)) {
+        float s = (float)r.w / width < (float)r.h / height ? (float)r.w / width : (float)r.h / height;
+        printf("window %dx%d does not fit the screen: %dx%d\n", width, height, (int)(width * s), (int)(height * s));
+        width = (int)(width * s);
+        height = (int)(height * s);
+    }
+    SDL_SetWindowSize(sw, width, height);
+    SDL_SetWindowPosition(sw, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    w->width = width;
+    w->height = height;
+    drawable(w);
+}
+
+int win_vsync(Window *w, int interval) { return !w->hidden && SDL_GL_SetSwapInterval(interval) == 0 ? 0 : -1; }
 
 void win_close(Window *w)
 {

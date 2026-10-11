@@ -17,3 +17,6 @@ tools/zig/
 
 # Texture packs and dumps (docs/TEXTURES.md)
 mods/
+
+# The viewer's own graphics settings (docs/NATIVE.md "Graphics settings")
+rampage.cfg
