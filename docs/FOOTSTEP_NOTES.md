@@ -299,5 +299,8 @@ at once and the walk is as fast as without the IK.
   pose; the posing now does the same (the hold and the turn on the root before the blend, and so in the kept pose).
   Now: −12.24 → −14.52 (0.3 of the slip a frame), the record stays at its planted place; mirrored the same on record
   1; Ralph −11.6 → −12.7, Rhett −14.4 → −15.7 (were −17.1, −27.8).
-- Not ported: the debug byte; the dynamic scale in 0x2E5C40 (+0xA78; the viewer draws at 1); the state command's own
-  0x33D490 refresh (the next frame's update does the same).
+- The dynamic scale in 0x2E5C40 (+0xA78) [R]: the feet's places (main.c `foot_pose`) are the drawn nodes through the
+  monster's base matrix, which carries the dynamic scale (the frame's `mo->scale`), so a grown or shrunk monster's
+  feet are where 0x2E5C40 puts them; the clip's own feet at its time 0 (0x33C5A0) go through the unscaled matrix, as
+  the game's (`to_world`).
+- Not ported: the debug byte; the state command's own 0x33D490 refresh (the next frame's update does the same).
