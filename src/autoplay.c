@@ -13,7 +13,8 @@
 #include <windows.h>
 #include <psapi.h>
 #include <dbghelp.h>                                 /* the crash's stack, by the program's .pdb */
-#else
+#elif !defined __SWITCH__                            /* (the Switch's libnx has no getrusage: no memory figures) */
+#define AP_RUSAGE 1
 #include <sys/resource.h>
 #include <unistd.h>
 #endif
@@ -65,7 +66,7 @@ double ap_peak_mb(void)
     if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc))
         return (double)pmc.PeakWorkingSetSize / (1024.0 * 1024.0);
     return -1;
-#else
+#elif defined AP_RUSAGE
     struct rusage ru;
     if (getrusage(RUSAGE_SELF, &ru) == 0)
 #ifdef __APPLE__
@@ -73,6 +74,8 @@ double ap_peak_mb(void)
 #else
         return (double)ru.ru_maxrss / 1024.0;
 #endif
+    return -1;
+#else
     return -1;
 #endif
 }
@@ -84,7 +87,7 @@ static double mem_now(void)                          /* the working set now (MB)
     if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc))
         return (double)pmc.WorkingSetSize / (1024.0 * 1024.0);
     return -1;
-#else
+#elif defined AP_RUSAGE
     long pages = 0, rss = 0;
     FILE *f = fopen("/proc/self/statm", "r");
     if (f) {
@@ -93,6 +96,8 @@ static double mem_now(void)                          /* the working set now (MB)
         fclose(f);
     }
     return rss > 0 ? (double)rss * (double)sysconf(_SC_PAGESIZE) / (1024.0 * 1024.0) : ap_peak_mb();
+#else
+    return -1;
 #endif
 }
 
@@ -254,7 +259,9 @@ Autoplay *ap_open(const char *log, const char *shots, const ApLimits *lim, const
     SetUnhandledExceptionFilter(crash_filter);
 #else
     signal(SIGSEGV, crash_signal);
+#ifdef SIGBUS
     signal(SIGBUS, crash_signal);
+#endif
     signal(SIGFPE, crash_signal);
 #endif
     signal(SIGABRT, crash_signal);
