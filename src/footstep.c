@@ -52,9 +52,11 @@ int foot_props_read(FootProps *p, Group monster_fx)
 
 /* [R] 0x301AE0 keeps the nodes named "Bip01 L Foot" (gp-0x71E8) and "Bip01 R Foot" (gp-0x71EC) at the animation
  * player's +0x72C0 / +0x72C4 (monster +0x7DA8 / +0x7DAC); 0x2E5C40 takes +0x7DA8 for foot 0 and +0x7DAC otherwise,
- * after the callers' mirror swap. The viewer poses the clip unmirrored and reflects the drawing, and its
- * scene_monster_node gives a mirrored monster's node of the other side reflected: so the clip's foot f is the
- * drawn bone of f ^ mirrored [G: the equivalence, from the two conventions]. */
+ * after the callers' mirror swap, from the model matrices MonsterXFormTree (0x301610) builds out of the keys
+ * 0x2FFF10 has mirrored (0x194BA0: the pairs swapped), so a mirrored monster's +0x7DA8 holds the clip's right foot
+ * reflected. The viewer poses the clip unmirrored and reflects the drawing, its scene_monster_node giving a mirrored
+ * monster's node of the other side reflected: the same node. So the clip's foot f is the drawn bone of
+ * f ^ mirrored [R]. */
 const char *foot_bone(int foot, int mirrored)
 {
     return ((foot != 0) != (mirrored != 0)) ? "Bip01 R Foot" : "Bip01 L Foot";
@@ -237,12 +239,14 @@ static void drag_setup(FootState *s, int r, const FootPose *m)
         float ey = m->foot[r ^ mi][1] - (wq[1] + s->rec[p].at[1] - wp[1]);
         lift = DRAG_SHARE * sqrtf(ex * ex + ey * ey);
     }
-    if (!s->lift_cap_set) {                          /* [R] once for the game [G: kept per monster here] */
-        s->lift_cap = 3 * s->ankle;
-        s->lift_cap_set = 1;
+    static float lift_cap;                           /* [R] gp-0x6C68, set once for the whole game (gp-0x6C64): */
+    static int lift_cap_set;                         /* the first monster to drag a foot sets it for all */
+    if (!lift_cap_set) {
+        lift_cap = 3 * s->ankle;
+        lift_cap_set = 1;
     }
-    if (!(lift <= s->lift_cap))
-        lift = s->lift_cap;
+    if (!(lift <= lift_cap))
+        lift = lift_cap;
     s->rec[r].lift = lift * s->drag_scale;
 }
 

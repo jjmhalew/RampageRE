@@ -332,10 +332,11 @@ static int solve3(const Mat4 *M[4], const float target[3], Mat4 sol[3])
 
 /* [R] 0x2F66D0 (the 3-link's vtable +0x18) around the solve: at the full share the three bones take the solution,
  * the foot the target when reached (else it rides on the horselink, 0x2F79A0) and the target's rotation; then
- * 0x1017F0 on each [G: an orthonormalisation; these matrices are rigid]. Below the full share [G: read as 0x2F7E10,
- * which has the same blocks with one bone less, as ik_arm ports it]: the thigh slerped in the model's frame, the calf
- * and the horselink in their parents', the foot riding with its rotation slerped. Then 0x2F9320: the nodes below
- * follow. */
+ * 0x1017F0 (a row Gram-Schmidt: a no-op on these rigid matrices) [R]. Below the full share [R: 0x2F7E10's blocks
+ * with one bone more, as ik_arm ports them: 0x2F6E04 the thigh in the model's frame, 0x2F6FCC and 0x2F726C the calf
+ * and the horselink each after a 0x101A90 into its parent's, 0x2F75D4 the foot as 0x2F87B8; each two 0x105090, the
+ * shorter way, 0x1042F0 .. 0x167DE0 the slerp, 0x104BB0]: the thigh slerped in the model's frame, the calf and the
+ * horselink in their parents', the foot riding with its rotation slerped. Then 0x2F9320: the nodes below follow. */
 void ik_leg3(Mat4 *node, const Tree *tree, const int chain[4], const float target[3], const float rot[9], float w)
 {
     if (w <= 0 || !tree || tree->n > 256)

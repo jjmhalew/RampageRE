@@ -40,8 +40,9 @@ int face_set(FaceQueue *q, const void *node, const char *name, int head, int loo
 
 /* [R] 0x2E8FB0 (queueFacialAnim, Monster script method 0x7E -> 0x2ABAC0): the same lookup and record, appended at the
  * back (+0xBBDC); nothing is started. [R] Its head flag is written into the face layer's mask slot (+0xBBE8 + 4 x
- * the animation player's +0x72D0) at once, as setFacialAnim's is; the effect on the face playing now is not traced
- * [G]. No script calls it (Monsters.scr and every .bsf: setFacialAnim only). */
+ * the animation player's +0x72D0) at once, as setFacialAnim's is, so the face playing now would take the queued
+ * one's head layer [G: not ported; no script calls queueFacialAnim (Monsters.scr and every .bsf: setFacialAnim only),
+ * so the data never exercises it]. */
 int face_queue(FaceQueue *q, const void *node, const char *name, int head, int loop, int plays)
 {
     if (!node || q->n >= FACE_RECORDS)
@@ -159,7 +160,8 @@ int look_update(HeadLook *h, const LookLimits *l, int has_target, uint32_t node_
  * 0x2FB9F0), elevations as pi / 2 - acos(z / |v|). yaw = heading(target - neck) - heading(fwd), pitch =
  * elevation(target - head) - elevation(fwd); then the pitch target is wrapped and kept to -A10 .. A0C, while the
  * clamp to +-A08 falls on the yaw now (+0xBC), not its target (+0xC0), which is not wrapped either [R, kept]. The
- * places are the previous frame's (the animator keeps them from its last pose, +0x80 / +0xB0) [G]. */
+ * places are the last built pose's [R: +0x80 .. +0x8C and +0xB0 .. +0xB8 are stored only by the pose build 0x2FBF90
+ * (0x2FC2A8 .., 0x2FC36C ..), which MonsterXFormTree runs when it draws; 0x2FB950 reads them in the update]. */
 void look_track(HeadLook *h, const LookLimits *l, const float target[3], const float neck[3], const float head[3],
                 const float fwd[3])
 {
@@ -331,7 +333,8 @@ float monster_knock_ground(float vel[3], const float dir[3], float dist, float t
 }
 
 /* [R] 0x2D7558 (mode 1 or 2): dir x dist / time, z = tan(+0x38 of the attack record) x |that|, then a spin (+0xBD3C ..
- * +0xBD50, not ported) and +0xF4 = 50 (0x2D77C8). What +0x38 holds (0 or 1) as an angle is [G]. */
+ * +0xBD50, not ported) and +0xF4 = 50 (0x2D77C8). +0x38 (0 or 1 in the data) goes to tanf (0x1576D8 at 0x2D7600) as
+ * it is: radians, so 1 lifts the victim at tan 1 = 1.56 x its speed [R]. */
 float monster_knock_air(float vel[3], const float dir[3], float dist, float time, float angle)
 {
     if (time <= 0)

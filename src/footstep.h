@@ -87,7 +87,6 @@ typedef struct {
     float drag_scale;                                /* monster +0xAC4: MiscData|FootIKDragHeightScale (1; 0.5) */
     int links;                                       /* the IK: 3 the 2-link legs, 4 MiscData|Use3LinkFootIK (Lizzie,
                                                       * Ralph); 0 none (no MiscData: 0x2E5640 makes no IK) */
-    float lift_cap; int lift_cap_set;                /* gp-0x6C68: 3 x the ankle, kept from the first drag */
 } FootState;
 
 /* an effect to start: fx_spawn(w, name, pos, NULL, 1) (the game: no direction, the identity frame, no scale) */

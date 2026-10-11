@@ -42,7 +42,7 @@ static void derive(GameCamera *c, float aspect_hw)
     c->sin_h = sinf(h);
     c->cos_h = cosf(h);
     c->inv_sin_h = 1 / c->sin_h;
-    float x = c->sin_h / aspect_hw, y = c->cos_h, n = 1 / sqrtf(x * x + y * y);   /* 0x4D32B4: the window's h / w here */
+    float x = c->sin_h / aspect_hw, y = c->cos_h, n = 1 / sqrtf(x * x + y * y);   /* 0x4D32B4 (CAMERA.md): the window's h / w */
     c->sin_hh = x * n;
     c->cos_hh = y * n;
     c->inv_sin_hh = 1 / c->sin_hh;

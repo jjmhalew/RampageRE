@@ -169,7 +169,9 @@ int shadow_object(ShadowList *out, const ShadowLighting *l, const ShadowData *d,
     vert(&q[2], cx + x[1] * m[0] + y[1] * m[3], cy + x[1] * m[1] + y[1] * m[4], 0.01f, 1, 1, c);
     vert(&q[3], cx + x[0] * m[0] + y[1] * m[3], cy + x[0] * m[1] + y[1] * m[4], 0.01f, 0, 1, c);
     /* primitive 6: a quad list the buffer turns into strips through the order 0 1 3 2 (gp-0x78D4) [R 0x326108] */
-    o = begin(out, d->texture, SHADOW_PASS_DECAL, 1, 0, 6);  /* depth test on, no write [G: shader 0x4D] */
+    /* depth test on, no write [R: shader 0x4D's TEST 0x51001: ZTE with ZTST GEQUAL, the alpha test NEVER with
+     * AFAIL FB_ONLY, so no Z is written] */
+    o = begin(out, d->texture, SHADOW_PASS_DECAL, 1, 0, 6);
     if (!o)
         return 0;
     {
@@ -287,7 +289,10 @@ void shadow_monster_draw(ShadowList *out, const ShadowLighting *l, const ShadowM
             vert(&q[i], t[0] + lx[i] * rot[0] + ly[i] * rot[3] + z * rot[6],
                  t[1] + lx[i] * rot[1] + ly[i] * rot[4] + z * rot[7],
                  t[2] + lx[i] * rot[2] + ly[i] * rot[5] + z * rot[8], (float)(i & 1), (float)(i >> 1), c);
-        o = begin(out, l->monster_blob, SHADOW_PASS_DECAL, 1, 0, 6);   /* [G: depth state left as it was] */
+        /* [R] 0x2FEA20 sets no render state (no 0x25ABA0 / 0x25A900 / 0x25A5B0): the material's shader 0x35, alpha
+         * test GREATER 0 (alpha_test 0 here: GL_GREATER 0) and the depth tested; it writes depth there, the decal
+         * pass here does not */
+        o = begin(out, l->monster_blob, SHADOW_PASS_DECAL, 1, 0, 6);
         if (o)
             strip4(o, q);
     }
@@ -331,7 +336,8 @@ void shadow_monster_draw(ShadowList *out, const ShadowLighting *l, const ShadowM
 }
 
 /* ---------------------------------------------------------------- 4. the ground grid */
-/* the stand-in for the game's ray against the building's model (0x27FFF0 on +0x74 with its matrix): its box */
+/* the game's ray against the building (0x27FFF0 on +0x74 with its matrix): +0x74 is its WCollisionInfo, the box of
+ * its grid (0x2BC920 / 0x2BDC70, COLLIDE_NOTES.md), so the ray meets its box [R] */
 static int ray_box(const float b[6], const float o[3], const float d[3], float maxdist, float *t)
 {
     float t0 = 0.0f, t1 = maxdist;

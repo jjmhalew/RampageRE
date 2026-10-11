@@ -27,8 +27,14 @@ loader 0x3134E0 → 0x3134F0; `Free` → 0x4D5E60 (loader 0x311590); `Follow` �
 | +0x38 | `ShowGroundHeight` | 30 | the lowest monster at or below this: the near state |
 
 Derived by the loader: +0x40 / +0x44 sin and cos of half the FOV, +0x3C their 1 / sin; +0x48 / +0x4C sin and cos
-of the horizontal half angle (tan = tan(FOV / 2) / r with r the global at 0x4D32B4, field +0x1B4 of the object at
-0x4D3100, which was not traced: the viewer uses the window's height / width), +0x50 its 1 / sin, +0x54 1 / tan.
+of the horizontal half angle (tan = tan(FOV / 2) / r with r the global at 0x4D32B4), +0x50 its 1 / sin, +0x54 1 / tan.
+r is +0x1B4 of `gCameraMgr` (the RCameraMgr at 0x4D3100), i.e. +0x13C of its view at +0x78 (made by 0x16BC10 at
+0x27F43C: 1.0, the screen 320 × 240 at +0x154 / +0x158), set by the view's projection 0x16B6C0 (fov, near, far,
+aspect): the mode passes aspect 0 (0x27F2F0), which makes it height / width (+0x158 / +0x154) × the global
+0x4CB54C [R]. That factor sits in the display context at 0x4CB480 (+0xCC, .bss; +0xD0 next to it is the refresh rate,
+which picks a 1/30 or 1/25 s world step at 0x2B7848); nothing stores to it by address, and the code that fills it
+through a pointer was not found [G: the display's pixel shape; the viewer uses its window's height / width, the
+picture's own shape, which such a factor would correct the frame buffer's to].
 State: +0x5C first frame, +0x60 quaternion and +0x70 position of the smoothed camera, +0x7C near (1) or above (0),
 +0x80 the time the other state has held, +0x84 the current tilt.
 

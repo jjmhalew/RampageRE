@@ -388,14 +388,16 @@ static void particle_normals(Cloth *c, const float (*skin)[16])
         }
         for (int i = p->first; i < p->first + p->n; i++)
             if (!c->held[i]) {
-                float *n = c->nrm + 3 * i, l2 = dot3(n, n), s = l2 > 0 ? 1 / sqrtf(l2) : 0;   /* the game: rsqrt [G] at 0 */
+                /* [R] 0x1D6E30's rsqrt.s of 0 is the EE's +MAX, never inf, and 0 x MAX = 0: the same 0 */
+                float *n = c->nrm + 3 * i, l2 = dot3(n, n), s = l2 > 0 ? 1 / sqrtf(l2) : 0;
                 n[0] *= s; n[1] *= s; n[2] *= s;
             }
     }
 }
 
 /* 0x1D9B80: every particle where its bones (or the object matrix) put it, at rest; the pins' velocity and top speed
- * cleared. The game puts a particle without bones at 0 when there is a skeleton [R]; none is so [G] */
+ * cleared. The game puts a particle without bones at 0 when there is a skeleton [R]; none is so [R: the 17 monster
+ * cloths bone every particle, the flags none, CLOTH_NOTES.md] */
 static void rest(Cloth *c, const float (*skin)[16])
 {
     for (int i = 0; i < c->n; i++) {
@@ -515,7 +517,8 @@ static void substep(Cloth *c, int k, float h, const float (*skin)[16])
             continue;
         float l2 = dot3(sum, sum);
         if (l2 <= 0)
-            continue;                                /* the game takes rsqrt regardless [G] */
+            continue;                                /* [R] the game's rsqrt.s (0x1D7F88) of 0 is +MAX on the EE
+                                                      * and the zero sum makes the force 0 all the same */
         m /= sqrtf(l2);
         float fs[3] = { sum[0] * m, sum[1] * m, sum[2] * m };
         for (int j = 0; j < 4; j++) {
@@ -894,7 +897,8 @@ float cloth_noise(float x)
     return total;
 }
 
-/* 0x3473B0: t = TimeOffset + the game's clock (+0x30 of the clock at gp-0x6CFC [G]: seconds). The direction swings
+/* 0x3473B0: t = TimeOffset + the game's clock (RWorld gp-0x6CFC +0x30: its step count +0x2C x the step +0x4, set
+ * each step by 0x284DA0: seconds [R]). The direction swings
  * between the min and max angle with |noise(t DirFreq)|, as (-sin a, cos a, 0); its strength HorizontalWindForce x
  * |noise(t ForceFreq)|; up z VerticalWindForce x |noise(t VerticalWindFreq)| [R] */
 void cloth_flag_wind(const ClothWind *w, float t, float out[3])

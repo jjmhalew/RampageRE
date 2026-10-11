@@ -251,9 +251,10 @@ static int finish(DirAI *ai, DirGoal *g, int running)
 /* PlayMoveGoal::update (0x2F1DB0) [R] */
 static int play_update(DirAI *ai, DirGoal *g, const DirGraph *ag, MoveRunner *r, MoveCall call, void *ctx)
 {
-    if (g->state < 0 || g->state >= r->g->n) {      /* no such state: over at once, a stand-in: the game installs the
-                                                      * NULL state (0x2C0E18) and is undefined; climbing it is stuck
-                                                      * forcing slot 34 (FLOW_NOTES.md) */
+    if (g->state < 0 || g->state >= r->g->n) {      /* no such state: over at once [G: the game installs the NULL
+                                                      * state node (0x2C0E18) and reads through it, which is undefined
+                                                      * and cannot be ported; climbing it is stuck forcing slot 34
+                                                      * (FLOW_NOTES.md)] */
         if (g->notify)
             ai->done++;
         return 0;
@@ -712,20 +713,23 @@ static int bot_cell(const DirBotView *v, int b, int storey, int col)
     return s < 0 ? 3 : s;
 }
 
-/* the cell it is at: the last hit's point (0x2BB7B0, at least 6.02 up, on the front), else its mount's [R; the
- * mount's column taken as the rail's left one when mirrored, its right one else [G]] */
+/* the cell it is at (0x2EEA90) [R]: without a hit the mount's own cell record as it is (+0xC628 face, +0xC62C
+ * storey, +0xC630 column, copied to +0x58 .. +0x60 at 0x2EEAB4: the column is the rail, mirrored or not); with one
+ * the mount's point on the target's face (0x2BB7A0 -> 0x2CF4B0: on the front x = min x + 5 x the column) at the
+ * monster's height, plus the hit's offset, at least 6.02 up, its cell (0x2BB7B0) */
 static void bot_update_cell(DirBot *bt, const DirBotView *v)
 {
     const DirBuilding *b = &v->b[bt->target];
     if (bt->use_hit) {
-        float x = v->pos[0] + bt->hit_off[0], z = v->pos[2] + bt->hit_off[2];
+        float at = v->mounted >= 0 ? b->min[0] + 5.0f * (float)v->rail : v->pos[0];   /* (off a face: its place) */
+        float x = at + bt->hit_off[0], z = v->pos[2] + bt->hit_off[2];
         if (z < b->min[2] + 6.02f)
             z = b->min[2] + 6.02f;
         bt->cur_col = (int)floorf((x - b->min[0]) / 5);
         bt->cur_storey = (int)floorf((z - b->min[2] - 6) / 3);
     } else {
         bt->cur_storey = v->storey;
-        bt->cur_col = v->rail - (v->mirror ? 1 : 0);
+        bt->cur_col = v->rail;
     }
     if (bt->cur_col < 0) bt->cur_col = 0;
     if (bt->cur_col > b->width - 1) bt->cur_col = b->width - 1;
@@ -873,11 +877,8 @@ static void bot_approach(DirAI *ai, const DirGraph *ag, MoveRunner *r, const Dir
     } else if (cm == -2 || cm == -3) {
         bot_street_punch(ai, ag, r, v, call, ctx);
     } else {
-        /* [G] the walk point beside the face reached and still no mount (canMount looks a little ahead): on to the
-         * mount point itself */
-        float dx = bt->walk[0] - v->pos[0], dy = bt->walk[1] - v->pos[1];
-        const float *to = dx * dx + dy * dy < 1 ? mp : bt->walk;
-        bot_walk(ai, ag, r, v, to, bot_in_air(v) ? 1 : 0, bt->target, call, ctx);
+        /* [R 0x2F00B8 ..] anything else: on to the walk point, jumping there while in the air (mode 1 or 2) */
+        bot_walk(ai, ag, r, v, bt->walk, bot_in_air(v) ? 1 : 0, bt->target, call, ctx);
     }
 }
 
@@ -1211,8 +1212,9 @@ static float frame_keep(float k, float dt, float hz)
 /* ================================================================ the script camera (RScriptCam) */
 
 /* the followers (0x13B1B0 place, 0x13AD70 rotation, 0x13B2E0 fov), built by the loader 0x3121C0 with (1000, 1000, 0.1),
- * (pi / 2, pi / 2, 0.001) and pi / 2 (camera.prb's Script group is empty), each times the frame's dt into per-frame
- * steps; here per second [G: the dt at load taken as one frame] */
+ * (pi / 2, pi / 2, 0.001) and pi / 2 (camera.prb's Script group is empty), each made per step with RWorld +0x4
+ * (0x312238 ..: the world step, 1 / 30 s, 1 / 25 at 50 Hz, 0x2B7898): the speed x h, the acceleration x h^2, the
+ * gain 2 accel / speed x h (0x13B1B0); here per second, the same at the game's fixed step [R] */
 #define POS_SPEED 1000.0f                            /* max speed, units / s */
 #define POS_ACCEL 1000.0f                            /* units / s^2 */
 #define POS_RADIUS 0.1f                              /* there: closer than this, slower than one frame's accel */
@@ -1250,7 +1252,9 @@ static int object_point(const DirObject *o, int n, int obj, int local, const flo
     if (obj < 0 || obj >= n || !o)
         return 0;
     const DirObject *b = &o[obj];
-    if (local) {                                     /* in its frame: forward is where it faces [G: the matrix's axes] */
+    if (local) {                                     /* in its frame [R 0x311884 ..]: off x its matrix's rows
+                                                      * (+0x8 x, +0x14 y, +0x20 z) + its place (+0x2C); a monster's
+                                                      * x row (cos h, sin h), y (-sin h, cos h), unmirrored */
         float c = cosf(b->facing), s = sinf(b->facing);
         out[0] = b->pos[0] + c * off[0] - s * off[1];
         out[1] = b->pos[1] + s * off[0] + c * off[1];

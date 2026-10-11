@@ -264,24 +264,30 @@ at once and the walk is as fast as without the IK.
   drag's arc and its end, the two IK classes and their chains, the 3-link solve at the full share, the ankle; the
   clip query (`ik_clip_node`: the clip's keys alone, the root as the clip has it, at time 0, 0x196D20 / 0x33C290).
 - The side convention [R]: the game's foot record is (f + 1) & 1 when mirrored, and the mirrored foot query
-  0x33C290 swaps a request for +0x72C0 (L) to +0x72C4 (R) and back (0x33C418 .. 0x33C424), so the mirrored R is the
-  clip's L chain, mirrored; the viewer's `foot_bone(0, 1)` ("Bip01 R Foot") through `scene_monster_node` (city.c) is
-  reflect(node[mirror(R)]), the clip's L reflected: the same partner. The reflection [R 0x194BA0, from 0x2FFF10 when
+  0x33C290 keys the node asked for and its parents, mirrors the array (0x194BA0: the pairs swap slots) and composes
+  from the other side's slot (0x33C418 .. 0x33C424): asked for +0x72C4 (R), as record 0 of a mirrored monster asks,
+  it gives the L slot, the clip's R chain reflected, which is the drawn left foot (the node 0x2E5C40 takes for record
+  0 from the pose MonsterXFormTree 0x301610 builds out of the mirrored keys); `ik_clip_node("Bip01 L Foot")` mirrored
+  is the same, reflect(clip R). Likewise the viewer's `foot_bone(0, 1)` ("Bip01 R Foot") through
+  `scene_monster_node` (city.c) is reflect(node[mirror(R)]), the clip's L reflected: the drawn right foot, record 1,
+  the script's foot 0. The reflection [R 0x194BA0, from 0x2FFF10 when
   +0x72B9 is set]: the bone-local transforms are reflected (a pair swapped, each (−qx, −qy, qz, qw; tx, ty, −tz),
   L' = Sz L Sz; Bip01 Sx L Sy through the constants 0x3B1790 .. 0x3B17B0; Pelvis Sy L Sz; Lift_Node Sy L Sy), so in
   the model M'_n = Sx M[mirror(n)] S_n, S_n the bone's y for Bip01 and Lift_Node, its z for the rest. The place is
   Sx's (the same as the viewer's old S M S), and so is the skin; the rotations differ by a half turn about the
   bone's axis, which the viewer now has (city.c `reflect_node`): the mirrored IK hand's target is Sx r Sz, the root's
   turn Sx R Sy (main.c `seen_root`). The root motion is mirrored with Bip01's rule (0x194A60 on the clip's start
-  root, from 0x2FFA00 / 0x2E6580 / 0x2DB130); 0x196F30 / 0x196E70 / 0x1859F0 only take the motion out of the
-  mirrored root;
+  root, from 0x2FFA00 / 0x2E6580 / 0x2DB130); 0x196F30 / 0x196E70 / 0x1859F0 are the composition (the rotations,
+  the place turned and added), in 0x196D20 and 0x33C290 alike;
   restarting a foot's effect (the game) versus starting a new one (the
-  viewer) is the same for these one-shot effects; the 3-link's blend below the full share, read as 0x2F7E10's (the
-  same blocks with one bone less, as ik_arm ports it) and not traced line by line; 0x1017F0 is a row Gram-Schmidt, a
-  no-op on rigid matrices [R]; the arc cap kept per monster (the game keeps the first monster's for the whole game); the shares applied
-  per world step, 1/30 s (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`); the mirrored 3-link solved on the other side's nodes
-  with the target reflected (as the arms), where the game solves the mirrored pose itself — the same up to the bend's
-  sense, which both put forward.
+  viewer) is the same for these one-shot effects; the 3-link's blend below the full share [R]: 0x2F66D0 runs
+  0x2F7E10's blocks with one bone more (0x2F6E04 the thigh in the model's frame, 0x2F6FCC and 0x2F726C the calf and
+  the horselink each after a 0x101A90 into its parent's, 0x2F75D4 the foot as 0x2F87B8), as ik_arm ports them;
+  0x1017F0 is a row Gram-Schmidt, a no-op on rigid matrices [R]; the arc cap set once for the game by the first
+  monster to drag (gp−0x6C68 / gp−0x6C64), a static in `drag_setup` [R]; the shares applied per world step, 1/30 s
+  (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`); the mirrored 3-link solved on the other side's
+  nodes with the target reflected (as the arms), where the game solves the mirrored pose itself — the same up to the
+  bend's sense, which both put forward.
 - Fixed: the stop that slid the monster on (up to 17 units for George, walking into Ground_Idle on NewYork 3:
   −12.2 → −29.4). Two causes: the foot lock asked the clip at its time now, with the root held and turned as the
   posing does (the game: time 0, the root as the clip has it); and the posing (city.c `pose_instance`) kept the pose

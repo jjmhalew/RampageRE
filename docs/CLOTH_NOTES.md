@@ -20,7 +20,7 @@ The hair, fur and whiskers of 16 monsters (`000<NAME>_CLOTH`, one per `.cmp`) an
 | 0x1D7490 | the triangles' normals |
 | 0x1D6E30 | the particles' normals (when drawn) |
 | 0x1D67B0, 0x1D89C0 | stop: snap to rest and blend from the kept positions; resume after |
-| 0x1D68F0 | the bounding sphere (not ported) |
+| 0x1D68F0 | the bounding sphere, kept at instance +0x4C .. +0x5C (not ported: the drawing's, not the simulation's) |
 | 0x1D6740 | add a force for this frame (instance +0x60) |
 | 0x3473B0 | ClothObject (a city flag, vtable 0x44BA50) each frame: its wind, then 0x1D90E0 |
 | 0x246B10 ... | a monster's cloth: 0x1D90E0 with the monster's world matrix, no force |
@@ -107,8 +107,10 @@ or more).
 The ClothObject's `ClothBit` property group (objects1 book: `HorizontalWindDirFreq = 1, HorizontalWindForce = 10,
 HorizontalWindForceFreq = 3, HorizontalWindMaxAngle = 6.28, HorizontalWindMinAngle = 0, TimeOffset = 0,
 VerticalWindForce = 10, VerticalWindFreq = 2` on the US flag pole) at +0x148 .. +0x168. With t = TimeOffset + the
-game clock, a = |N(t DirFreq)|, angle = a Max + (1 − a) Min, the force (−sin angle, cos angle, 0) × HorizontalWindForce
-× |N(t ForceFreq)| + (0, 0, VerticalWindForce × |N(t VerticalWindFreq)|) goes to 0x1D6740 before the frame. N
+game clock (RWorld +0x30, 0x347420: the world's step count +0x2C × its step +0x4, made each step by 0x284DA0, so
+seconds [R]), a = |N(t DirFreq)|, angle = a Max + (1 − a) Min, the force (−sin angle, cos angle, 0) ×
+HorizontalWindForce × |N(t ForceFreq)| + (0, 0, VerticalWindForce × |N(t VerticalWindFreq)|) goes to 0x1D6740 before
+the frame. N
 (0x13C160) is 1D value noise (0x13C220: the lattice hash 1 − ((n(n² 15731 + 789221) + 1376312589) & 0x7FFFFFFF) / 2³⁰,
 n = k ^ (k << 13), smoothed ¼ ½ ¼ and interpolated linearly) plus 5 octaves (the count at 0x44CA54) of half the
 strength at twice the frequency. The vertical force about cancels the gravity of 9.8: the flags fly.
@@ -148,6 +150,10 @@ Faithful: every step above, the reset/blend, the wind and its noise. Without ski
 goes by the object matrix, as the game's rest pose without a skeleton does (0x1D9BB4 -> 0x1DA2C0) [R]; with a
 skeleton the game puts a bone-less particle at 0 (0x1DA0AC, from the zero at 0x409FF8) [R], which no data has (the 17
 monster cloths bone every particle, the flags none). dt ≤ 0 is the game's: inv_dt = 0 (0x1D93A8 .. 0x1D93C4), the
-pins move with velocity 0, no sub-step runs, ADJUST_VEL zeroes the velocities [R]. Stand-ins: the
-skin matrices come from the caller (the game builds them from the skeleton for the bone list only); the collisions,
-the bounding sphere and the renderer's scale (+0x8C, 1; no use found in 0x1AA000 .. 0x1AC000) are left out.
+pins move with velocity 0, no sub-step runs, ADJUST_VEL zeroes the velocities [R]. A zero normal or a bend's zero
+axis: the game's rsqrt.s (0x1D6E30, 0x1D7F88) of 0 is the EE's +MAX (its FPU has no infinity) and 0 × MAX = 0, so the
+normal and the torque come out 0, as the port's guarded 0 [R]. The skin matrices come from the caller (the game
+builds them from the skeleton for the bone list only; the port's are the same matrices for those nodes). Left out:
+the collisions (no entry has a sphere: the count +0x44 is 0 on all 44 [R]), the bounding sphere (instance +0x4C ..
++0x5C, the drawing's), and the renderer's scale (+0x8C, 1) [G: no reader of it was found in 0x1AA000 .. 0x1AC000, and
+at 1 it would change nothing].

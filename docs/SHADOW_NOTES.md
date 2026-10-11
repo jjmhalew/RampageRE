@@ -74,8 +74,9 @@ on / fade, +0x20 its point, +0x2C / +0x30 wall blob on / fade, +0x34 the body po
 building's box, +0x58 the colour. Its +0x18 method (0x2FEEB0) runs 0x2FDA50, draws the ground blob, runs 0x2FDD00,
 draws the wall blob.
 
-**0x2FDA50, the ground point.** p = 0x2E4D30: the monster's position + its x axis · (MONSTER_DATA +0x1A0 + a move
-offset) · scale + its y axis · (+0x1A4 + …) · scale (George: 2.5 ahead). radius = +0x198 · scale (0x2E4D00; George 3).
+**0x2FDA50, the ground point.** p = 0x2E4D30: the monster's position + its x axis · (MONSTER_DATA +0x1A0 + the kept
+type-16 clip event record's +0xC) · scale + its y axis · (+0x1A4 + its +0x10) · scale (George: 2.5 ahead), z the
+position's. radius = +0x198 · scale (0x2E4D00; George 3).
 - climbing (monster +0xC644): no ground; fade out;
 - else the building under it (0x2D6150): if p ± 0.999 · radius lies inside its box in x and y, the ground is its
   roof (+0x1F0), else the street (0);
@@ -91,7 +92,10 @@ For George: 7.2 across by 4.8 long.
 
 ## 3. The monster's wall blob (0x2FDD00, 0x2FDEB0)
 
-0x2FDD00: +0x34 = the body point (0x2E61E0, a point of the body). While mounted (+0xC644) the box = the building's
+0x2FDD00: +0x34 = the body point (0x2E61E0: monster +0xB18, which is the animation player's (+0xAE8) model matrices
+from +0xC, 0x30 each, at node 0's place +0x30; × the dynamic scale +0xA78 while +0xA74; through the monster's matrix:
+**the skeleton's first node, `Bip01`, as posed**: George 4.17 up standing, Lizzie and Ralph 3.63 up and 1.3 ahead).
+While mounted (+0xC644) the box = the building's
 (+0xC640) +0x1DC … +0x1F0 + its position, max x + 0.1, max y − 0.1; the fade goes up at 1 / 0.4 s to 1, else down
 to 0 (off). 0x2FDEB0, with (x, y, z) the body point and the box:
 - z0 = max(z − 5, 0), z1 = min(z + 7, top); nothing unless z0 < z1. v = 0.5 − 0.1 (z − z0) … 0.5 + (z1 − z) / 14;
@@ -112,7 +116,8 @@ y = −2.5 + 5j (j 0 … 6), joined by two degenerate vertices: 0x128 triangles.
 **At block start (0x31FC40)**: enabled = `EnableGroundShadow` (1 if absent). For each building i (the list
 0x4D095C / 0x4D0958): its index into +0xCA4, its top (+0x1F0) into +0xA68[i]. For the 22 × 5 samples
 (x = −59.5 + 5c, y = 2.5 + 5r, z = −0.001: the inner vertices) a ray towards the light, (1, −1, 1) / √3, up to 100,
-against each building's model (0x27FFF0 on +0x74 with its matrix): up to four hits per sample are kept in its cell
+against each building (0x27FFF0 on +0x74 with its matrix: +0x74 is the building's WCollisionInfo, its grid's box,
+0x2BC920 / 0x2BDC70: the ray meets the box): up to four hits per sample are kept in its cell
 (0x18 bytes: count, lit, indices, the hit's height t · d.z). The dirty rectangle (+0x4) is everything.
 
 **A building's top changes** (0x31F790, from its damage 0x2BDC70): the new top is kept, and the old shadow's reach

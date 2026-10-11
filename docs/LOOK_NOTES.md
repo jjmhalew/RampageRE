@@ -44,6 +44,12 @@ MONSTER_DATA +0xA14 is set (all 30), the head's parent (+0x20; `Bip01 Neck`). It
 its target at its rate, half that while the stick holds it (+0x119), never past it. There is no blend weight: the
 angles themselves ease in and back to 0.
 
+**Mirrored** [R]: the pose is built by MonsterXFormTree (vtable 0x44B070, +0x14 = 0x301610) from the keys 0x2FFF10
+has already mirrored (0x194BA0 at 0x300264 / 0x3008F0), and it runs each node's animators' +0xC (0x30182C) as it
+goes, so the turn acts on the mirrored pose: the drawn head turns by the yaw as it is (−rx × 81° whatever the
+mirror). The viewer turns its unmirrored pose and reflects it, so it hands a mirrored monster −yaw (main.c); the
+pitch, about the head's own z, comes through the reflection (Sz Rz Sz = Rz) unchanged.
+
 **The right stick** [R]: the monster's command (0x2E70C0 in 0x2E6580), in a state whose node has flag 0x200: the
 held flag is the right stick off centre, and 0x2FBE30 gets pitch = ry × 45° (+0xA0C for ry > 0, +0xA10 otherwise) and
 yaw = −rx × 81°, the sticks being the clip request's +0x24 / +0x28 ÷ 255 (y down). Outside such a state the held flag
@@ -52,9 +58,10 @@ the head eases back. One state has 0x200: `Ground_Walk` (0x288, the same in Geor
 
 **Tracking** [R]: the update (0x2DE9C4) switches tracking on (+0x118) only when the monster's target handle (+0xADC:
 {monster, object, serial}) holds an object (0x2FF760) and the state node has flag 0x20. Then 0x2FB950 aims at the
-target's place in the monster's frame (+0xA5C, made at 0x2DE6C0): yaw = heading(target − neck) − heading(the
-Tracking_Node's x axis), pitch = elevation(target − head) − elevation(that axis) (heading = atan2(−x, y), elevation =
-π/2 − acos(z / |v|)). The pitch target is wrapped and clamped; the yaw clamp lands on the current yaw (+0xBC), not on
+target's place in the monster's frame (+0xA5C, made at 0x2DE6C0), the neck's and the head's places being the last
+built pose's (+0x80 .. and +0xB0 .., stored only by 0x2FBF90 at 0x2FC2A8 .. / 0x2FC36C ..): yaw = heading(target −
+neck) − heading(the Tracking_Node's x axis), pitch = elevation(target − head) − elevation(that axis) (heading =
+atan2(−x, y), elevation = π/2 − acos(z / |v|)). The pitch target is wrapped and clamped; the yaw clamp lands on the current yaw (+0xBC), not on
 its target. The handle is only ever cleared (0x2FF790, from the constructor 0x2EB740) and no node of the 30 monsters
 has flag 0x20, so **tracking never runs in this build**: the head turns only with the right stick. The handle is also
 the "melee range" test (+0xF9: within MONSTER_DATA +0x184 × scale, 0x2DE650), equally idle.
@@ -78,7 +85,7 @@ F (+0xF4) is 50 at spawn (0x2E98C0). A hit (0x2D6A50) sets it:
 | | velocity | F |
 |---|---|---|
 | a monster's attack, the victim on the ground (0x2D77D8) | dir × 2d / T | 2d / T²: it slides d in T and stops |
-| the same in the air, modes 1 and 2 (0x2D7558) | dir × d / T, z = tan(attack +0x38) × that speed, a spin | 50 (0x2D77C8) |
+| the same in the air, modes 1 and 2 (0x2D7558) | dir × d / T, z = tan(attack +0x38) × that speed (tanf 0x1576D8 of the record's 0 or 1 as radians), a spin | 50 (0x2D77C8) |
 | a shot's knock (army, 0x2D7928) | each axis the knock's if larger in size | 50 (0x2D79E0) |
 
 d is the attack record's +0x30 (15, 10; times its modifiers), T its +0x34 (0.2 … 0.4) (FORMAT_MONSTER.md "Clip

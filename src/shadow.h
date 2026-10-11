@@ -88,9 +88,10 @@ typedef struct {              /* the ROMonster fields (+0x14 .. +0x58), kept bet
 } ShadowMonster;
 void shadow_monster_init(ShadowMonster *s);
 /* once a frame (0x2FDA50, 0x2FDD00). dt in seconds.
- *   centre: the monster's body centre (0x2E4D30: its position + its matrix x axis x MONSTER_DATA +0x1A0 + y axis x
- *           +0x1A4, both x scale; the game adds a per-move offset there [G]);
- *   body:   the point the wall blob is centred on (0x2E61E0: a point of the body [G: use the pelvis / root]);
+ *   centre: the monster's body centre (0x2E4D30: its position + its matrix x axis x (MONSTER_DATA +0x1A0 + the kept
+ *           type-16 record's +0xC) + y axis x (+0x1A4 + its +0x10), both x scale; z its position's) [R];
+ *   body:   the point the wall blob is centred on (0x2E61E0: monster +0xB18, the animation player's node 0 place
+ *           (+0xAE8 + 0x30) x the dynamic scale, through its matrix: the skeleton's first node, Bip01, as posed) [R];
  *   radius: MONSTER_DATA +0x198 x scale (George 3);
  *   mounted / mount_box: climbing a building, and that building's world box (min xyz, max xyz);
  *   roof_box: the building the monster is over (0x2D6150), or NULL;

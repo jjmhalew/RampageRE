@@ -2368,8 +2368,17 @@ static void shadow_frame(Viewer *v, float dt)
     for (int k = 0; k < mon_world(v); k++) {        /* each monster's */
         Mon *mo = &v->mon[k];
         if (mon_in(mo) && !mon_in(mo)->hidden && v->play) {
-            float s = mo->scale > 0 ? mo->scale : 1, h = mo->heading / 57.2957795f, c = cosf(h), sn = sinf(h);
-            float centre[3] = { mo->mx, mo->my, mo->mz }, body[3] = { mo->mx, mo->my, mo->mz + 4 * s };   /* [G] the pelvis */
+            float h = mo->heading / 57.2957795f, c = cosf(h), sn = sinf(h), radius = mon_radius(mo);
+            /* the ground point: the body centre (0x2FDA50 -> 0x2E4D30); the wall's: the skeleton's first node
+             * (0x2FDD00 -> 0x2E61E0: monster +0xB18, the animation player's node 0 place (+0xAE8 + 0x30), through
+             * its matrix: Bip01 as posed); the radius MONSTER_DATA +0x198 x the scale (0x2E4D00) */
+            float centre[3], body[3] = { mo->mx, mo->my, mo->mz };
+            mon_body_centre(mo, centre);
+            Mat4 root;
+            const Instance *rin = mon_in(mo);
+            if (rin->tree.n && scene_monster_node(&v->scene, mo->slot, rin->tree.nodes[0].name, &root) == 0) {
+                body[0] = root.m[12]; body[1] = root.m[13]; body[2] = root.m[14];
+            }
             float mbox[6], rbox[6], *roof = NULL;
             int mounted = mo->mode == MODE_BUILDING && mo->mount.at.building >= 0 &&
                           (uint32_t)mo->mount.at.building < v->scene.nbuildings;
@@ -2378,18 +2387,16 @@ static void shadow_frame(Viewer *v, float dt)
                 memcpy(mbox, b->min, 3 * sizeof(float));
                 memcpy(mbox + 3, b->max, 3 * sizeof(float));
             }
-            for (uint32_t i = 0; i < v->scene.nbuildings && !roof; i++) {   /* the building it is over (0x2D6150) */
-                const Building *b = &v->scene.buildings[i].b;
-                if (mo->mx >= b->min[0] && mo->mx <= b->max[0] && mo->my >= b->min[1] && mo->my <= b->max[1] &&
-                    mo->mz >= b->max[2] - 1) {
-                    memcpy(rbox, b->min, 3 * sizeof(float));
-                    memcpy(rbox + 3, b->max, 3 * sizeof(float));
-                    roof = rbox;
-                }
+            int under = mon_building_below(mo);      /* the building it is over (0x2FDA98: 0x2D6150) */
+            if (under >= 0 && (uint32_t)under < v->scene.nbuildings) {
+                const Building *b = &v->scene.buildings[under].b;
+                memcpy(rbox, b->min, 3 * sizeof(float));
+                memcpy(rbox + 3, b->max, 3 * sizeof(float));
+                roof = rbox;
             }
-            shadow_monster_update(&mo->smon, dt, centre, body, MONSTER_HALF_WIDTH * s, mounted, mbox, roof, 0);
+            shadow_monster_update(&mo->smon, dt, centre, body, radius, mounted, mbox, roof, 0);
             float rot[9] = { c, sn, 0, -sn, c, 0, 0, 0, 1 };
-            shadow_monster_draw(&v->shl, &v->slight, &mo->smon, rot, MONSTER_HALF_WIDTH * s);
+            shadow_monster_draw(&v->shl, &v->slight, &mo->smon, rot, radius);
         }
     }
 }
@@ -4197,7 +4204,10 @@ static void mon_step(Mon *mo, float dt)
         look_step(&mo->head, &mo->look_lim, dt);
         mo->look_yaw = mo->head.yaw;
         mo->look_pitch = mo->head.pitch;
-        v->scene.mon[mo->slot].look_yaw = mo->mirror ? -mo->look_yaw : mo->look_yaw;   /* mirrored: not traced [G] */
+        /* [R] the game turns the head in the mirrored pose (0x2FFF10 mirrors the keys, 0x194BA0, before
+         * MonsterXFormTree 0x301610 builds the model and runs the animators' +0xC, 0x30182C): the drawn turn is the
+         * yaw as it is; the viewer turns the unmirrored pose and reflects it, so mirrored it turns by -yaw */
+        v->scene.mon[mo->slot].look_yaw = mo->mirror ? -mo->look_yaw : mo->look_yaw;
         v->scene.mon[mo->slot].look_pitch = mo->look_pitch;
     }
     if (mo->scale_left > 0) {                         /* the dynamic scale (0x2E1CF0 .. 0x2E1D74 [R]): the old one's
