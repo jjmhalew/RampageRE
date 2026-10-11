@@ -357,7 +357,8 @@ int edible_add_fixed(Edibles *e, int building, int storey, int column, const cha
     if (s >= 0)
         e->slot[s].kind = k;                         /* [R] +0xE of the slot there */
     else
-        s = new_slot(e, building, storey, column, 0, k);   /* [G] its side from 0x2D0460, not read */
+        s = new_slot(e, building, storey, column, 0, k);   /* [G] its side from 0x2D0460 (a tile byte per side, +0x100),
+                                                      * not followed: an edible's slot opens no window */
     return s;
 }
 
@@ -425,11 +426,13 @@ static void spawn(Edibles *e, int s)
     d->phase = EP_WINDOW;
     memcpy(d->pos, pos, sizeof d->pos);
     d->fx = -1;
-    d->pulse = -1;                                   /* [G] no pulse until a script sets one */
+    d->pulse = -1;                                   /* [R] the Actor's +0xF8: no pulse until a script sets one */
     const char *script = gstr(k->tmpl, "ScriptName");
     d->script = contains(script, "Cryotube") ? EK_CRYOTUBE : EK_EDIBLE;
-    /* the look and the lifetime: ActorAnimShape|Default { Duration, Shape|ShapeName } [G: that the actor plays its
-     * Default record, so onAnimComplete comes Duration seconds on] */
+    /* the look and the lifetime: ActorAnimShape|Default { Duration, Shape|ShapeName } [R] no edible has a
+     * DefaultAnim, so neither 0x317D3C nor the init (0x30D5D0) starts one; the current record (+0xE8) is 0 from the
+     * constructor (0x30E45C), which the update plays (0x30CE0C: the record's vtable +0xC; 2 = done -> onAnimComplete):
+     * their only record, Default, so onAnimComplete comes Duration seconds on */
     Group look = group_sub(k->tmpl, "ActorAnimShape|Default");
     const char *shape = look.at ? group_str(look, "Shape|ShapeName") : NULL;
     d->shape = shape && !same_text(shape, "InvisShape") ? shape : NULL;
@@ -473,7 +476,7 @@ static void tube_pickup(Edibles *e, Edible *d, int monster)
     d->mv.n = 3;
     d->mv.seg = 0;
     d->mv.t = 0;
-    if (d->slot >= 0 && d->slot < e->nslots) {       /* leaveBuilding [G: 0x318140, the slot forgets it] */
+    if (d->slot >= 0 && d->slot < e->nslots) {       /* [R] leaveBuilding (0x30C3D0 -> 0x318140(mgr, actor, 0)) */
         e->slot[d->slot].item = -1;
         e->slot[d->slot].kind = -1;
     }
@@ -619,25 +622,29 @@ void edible_update(Edibles *e, float dt)
         if (d->phase == EP_GONE)
             continue;
         d->age += dt;
-        if (d->rotate)                               /* [G] the RotationMover's (0, 0, pi): radians per second */
+        if (d->rotate)                               /* [R 0x31C540] the RotationMover: its rate x the world's step
+                                                      * added to the facing (0x101220 / 0x101330): radians a second */
             d->spin = fmodf(d->spin + PI * dt, 2 * PI);
         if (d->phase == EP_FALLING) {                /* the tube's LineMover, at 20 */
-            float left = 20.0f * dt;
-            while (left > 0 && d->mv.seg < d->mv.n - 1) {
-                const float *a = d->mv.pts[d->mv.seg], *b = d->mv.pts[d->mv.seg + 1];
-                float dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
-                float len = sqrtf(dx * dx + dy * dy + dz * dz);
-                float rest = len * (1 - d->mv.t);
-                if (len < 1e-5f || left >= rest) {
-                    left -= len < 1e-5f ? 0 : rest;
+            /* [R 0x315E10] the share of the segment grows by speed x dt / its length; past 1 the next segment starts
+             * from its beginning (the rest is dropped; callback 3, which Cryotube.bsf ignores), past the last it ends
+             * (callback 2) */
+            int landed = 0;
+            const float *a = d->mv.pts[d->mv.seg], *b = d->mv.pts[d->mv.seg + 1];
+            float dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+            float len = sqrtf(dx * dx + dy * dy + dz * dz);
+            if (len != 0)
+                d->mv.t += dt * 20.0f / len;
+            if (d->mv.t > 1) {
+                if (d->mv.seg < d->mv.n - 2) {
                     d->mv.seg++;
                     d->mv.t = 0;
                 } else {
-                    d->mv.t += left / len;
-                    left = 0;
+                    d->mv.t = 1;
+                    landed = 1;
                 }
             }
-            if (d->mv.seg >= d->mv.n - 1) {          /* [R] onMoverCallback(2): it landed */
+            if (landed) {                            /* [R] onMoverCallback(2): it landed */
                 memcpy(d->pos, d->mv.pts[d->mv.n - 1], sizeof d->pos);
                 effect(e, gstr(d->tmpl, "HitGroundFx"), d->pos, -1);
                 const char *snd = gstr(d->tmpl, "HitGroundSound");
@@ -648,7 +655,8 @@ void edible_update(Edibles *e, float dt)
                 remove_edible(e, d);
                 continue;
             }
-            const float *a = d->mv.pts[d->mv.seg], *b = d->mv.pts[d->mv.seg + 1];
+            a = d->mv.pts[d->mv.seg];
+            b = d->mv.pts[d->mv.seg + 1];
             for (int k = 0; k < 3; k++)
                 d->pos[k] = a[k] + (b[k] - a[k]) * d->mv.t;
         }
@@ -808,7 +816,8 @@ void edible_power_init(EdiblePower *p)
 {
     memset(p, 0, sizeof *p);
     p->speed = 1;
-    p->abilities = 0xF;                              /* [G] which moves the player has unlocked is not read */
+    p->abilities = 0xF;                              /* until the viewer sets them: [R] gCommon.getMonsterFlags,
+                                                      * the profile's (main.c profile_moves) */
 }
 
 void edible_power_set_energy(EdiblePower *p, float energy, int others_full)

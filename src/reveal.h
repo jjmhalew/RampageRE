@@ -32,7 +32,8 @@
 
 /* ---- the roster: GameStatus +0x10 (12-byte records, the name at +8), +0x18 the count; 0x33DAF0 finds a name in any
  * case. Its order is ShellData's MonsterData Monster0 .. Monster<NumMonsters - 1> (George, Lizzie, Ralph, ...,
- * Boosy 29), as MonsterSelect.getMonsterName reads it [G: the table's own loader was not read] */
+ * Boosy 29), as MonsterSelect.getMonsterName reads it [R: the loader 0x33E850 walks MonsterData's keys starting
+ * "mons", the index atoi(key + 7), at most 30] */
 typedef struct {
     const char *name[REVEAL_MONSTERS];
     int n;
@@ -112,14 +113,14 @@ enum {
 typedef struct { int type, slot; const char *name; float pos[3], v[2]; } RevealEvent;
 typedef struct {
     int slot, active, timer;                         /* timer: revealTimerHandle is valid */
-    float time, clock;                               /* revealTime; the seconds to the next tick */
+    float time, clock;                               /* revealTime; the timer's clock (0x28A4A0's) */
     RevealEvent ev[16]; int nev;
 } RevealWalk;
 /* the tube landed (reveal_start gave a slot): RW_SHOW, then onRevealNITick's first call: RW_AI, "Ground_Idle",
  * scale 0.1 at once then 1.0 over 1 s */
 void reveal_walk_start(RevealWalk *w, int slot, const float pos[3]);
-/* the timer's ticks, every 0.25 s [G: the first 0.25 s after the start]: revealTime 0.5 (the 3rd tick, 0.75 s)
- * "Ground_Taunt"; 4.0 (4.25 s): walkTo (100, -10, 0), x negated when the monster is left of the camera, radius 1,
+/* the timer's ticks, every 0.25 s [R 0x28A780: once a step, the first on the 8th step, 0.267 s]: revealTime 0.5 (the
+ * 3rd tick, about 0.77 s) "Ground_Taunt"; 4.0 (about 4.27 s): walkTo (100, -10, 0), x negated when the monster is left of the camera, radius 1,
  * speed 1.5 for 100000 s; 5.0 (5.25 s): the timer is removed. monster_x: its x now; camera_x: getCameraPos().x */
 void reveal_walk_update(RevealWalk *w, float dt, float monster_x, float camera_x);
 /* the walk's end callback (Monsters::onRevealNIEnd): gWorld.stopReveal, RW_HIDE for the slot reveal_stop returns */

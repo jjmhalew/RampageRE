@@ -268,7 +268,7 @@ void reveal_walk_start(RevealWalk *w, int slot, const float pos[3])
     wemit(w, RW_AI);
     w->timer = 1;
     w->time = 0;
-    w->clock = 0.25f;                                /* [G] the timer's first tick a period after it is installed */
+    w->clock = 0;                                    /* [R] installObjectTimer(0.25, 0, 0): its clock from 0 */
     wmove(w, "Ground_Idle");
     wscale(w, 0.1f, 0);
     wscale(w, 1.0f, 1.0f);
@@ -278,9 +278,11 @@ void reveal_walk_update(RevealWalk *w, float dt, float monster_x, float camera_x
 {
     if (!w->active || !w->timer)
         return;
-    w->clock -= dt;
-    while (w->timer && w->clock <= 0) {
-        w->clock += 0.25f;
+    /* [R] 0x28A780, each world step: the clock grows by the step; at the period it becomes min(clock - period, 1)
+     * and the timer fires, once a step: the first tick on the 8th step (0.267 s) */
+    w->clock += dt;
+    if (w->clock >= 0.25f) {
+        w->clock = w->clock - 0.25f < 1 ? w->clock - 0.25f : 1;
         if (w->time == 0.5f)                         /* [R] exact compares, revealTime in steps of 0.25 */
             wmove(w, "Ground_Taunt");
         else if (w->time == 4.0f) {

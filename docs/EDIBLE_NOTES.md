@@ -66,7 +66,12 @@ of 0x3196F0 works like this:
   - the template's `Effect` starts attached to the actor, and turns off when the actor dies;
   - `Rotate` gives it a `RotationMover` of (0, 0, π). Only `Hazard_Points_*` and the cryotube use it.
 - **onAnimComplete:** stops the effect and returns 4|8|16, so the actor is deleted. This comes after
-  `ActorAnimShape|Default`'s `Duration`, which is 30 s for all window edibles.
+  `ActorAnimShape|Default`'s `Duration`, which is 30 s for all window edibles [R]: no edible has a `DefaultAnim`, so
+  neither 0x317BC0 (0x317D3C) nor the init (0x30D5D0) starts an anim, but the current record (+0xE8) is 0 from the
+  constructor (0x30E45C) and the actor's update plays it (0x30CE0C, the record's vtable +0xC; done →
+  onAnimComplete): their only record, `Default`.
+- **Rotate's RotationMover** (frame 0x31C540) [R]: its rate × the world's step is added to the facing (0x101220,
+  then setFacing 0x101330): (0, 0, π) is half a turn a second.
 - **onPulse:** `requestDelete`.
 - **onPickup(monster, eat):**
   1. Stop the effect.
@@ -193,7 +198,8 @@ When its cell breaks:
    the cell, so the 500 points go to player 1.
 2. `PickupFx`, then `addStats(type 0)`, which is 500 points.
 3. A `LineMover` carries it 5 towards the street at 20, then 5 more and down to z = 1. It tumbles 2π / 24 every
-   1/24 s.
+   1/24 s (a pulse, at most one a frame). The mover is the people's (PEOPLE_NOTES.md, 0x315E10): the share of a
+   segment grows by 20 × dt / its length, and past 1 the next segment starts from its beginning, the rest dropped.
 4. When it lands: `HitGroundFx`, `HitGroundSound`, then `startReveal`, the "MonsterRevealed" banner and
    `V_Monster_Reveal_Seq`. Then it is deleted.
 
@@ -309,7 +315,12 @@ it. Then:
 
 `installObjectTimer(0.25, 0.0, 0)` (0x28A4A0; ticked by 0x28A780 each world step: acc += 1/30, at the period acc =
 min(acc − period, 1) and it fires, once a step) [R]: the first tick on the 8th step (0.267 s), the taunt (tick 3)
-about 0.77 s and the run (tick 17) about 4.27 s.
+about 0.77 s and the run (tick 17) about 4.27 s. reveal.c's timer is that one.
+
+**Hiding** (0x2D3F90) [R]: the monster's reset 0x2DCB40 (scale 1, speed scale 1 for 0 s, …) and its AI's goals
+cleared (0x2EE760), +0x109 = 1, then out of the world's list (0x2C1A80 / 0x2C1A90 on 0x4D3330 + 0x18); main.c's
+`extra_hide` does the same. **Showing** (0x2D40B0): +0x109 = 0, into the list, the matrix from the place and the
+facing π (0x1015B0), then the found `onRevealNITick` called with the monster.
 
 So the monster bursts out of the tube on the street, taunts, and runs off to the side. With two or more players it
 does not appear; only the banner shows and the profile changes. The HUD shows only Cryotube.bsf's banner: `"#" +
@@ -375,21 +386,19 @@ at the first block's end.
 ## Not traced (stand-ins in edible.c)
 - **Random numbers:** `rand()` is the lagged Fibonacci 0x106950 on the world's gWorld +0x82C (shared with the bots'
   rand01, seeded from GameStatus seed[1]; wrand.c) [R].
-- **Lifetime:** that the actor plays its `Default` record, so the 30 s lifetime comes from its `Duration`. The Actor's
-  init (0x30D280) starts only a `DefaultAnim`.
-- **Movers:**
-  - the RotationMover's units (taken as radians per second);
-  - the tube's LineMover end (it stops at its last point);
-  - placement stays fixed after the edible appears, as the game sets it once.
+- **Movers:** placement stays fixed after the edible appears [R as far as traced: 0x317BC0 places it once, and an
+  edible made after the block's start is not attached to its building (0x309E20 runs only then), so neither the
+  building's shake nor its fall moves it].
 - **The cryotube (reveal.c):**
-  - the roster's order (ShellData's MonsterData; the GameStatus table's loader was not read);
-  - which monsters the profile starts with (the memory card's; the host seeds `RevealRoster.flags`);
-  - that RevealLoc's Building indexes the block's building list in BlockDef order (0x4D095C), as `edible_add_building`
-    numbers them;
-  - the object timer's first tick (taken as 0.25 s after it is installed);
-  - the walk-on in the viewer (main.c `reveal_events`): the monster shown at the tube's landing place (1 up: it drops
-    onto the street through its landing), playMove and walkTo as goals of its AI, the walk's end callback when the
-    WalkTo goal is done;
+  - the roster's order [R: ShellData's MonsterData, as the loader 0x33E850 reads it]; which monsters a profile
+    starts with is the profile's (profile.c; main.c seeds `RevealRoster.flags` from it);
+  - that RevealLoc's Building indexes the block's building list in BlockDef order: the list is 0x4D095C (the RGridMgr
+    0x4D0900's +0x5C, its count +0x58), filled as the block's buildings are made; that they are made in BlockDef order
+    is taken, as `edible_add_building` numbers them;
+  - the walk-on in the viewer (main.c `reveal_events`): the monster is shown at the tube's landing place, z = 1 [R: the
+    tube's last point], and falls the last 1 to the street by the monster's own physics; `playMove` and `walkTo` go
+    to its AI as goals, and the walk's end callback comes when the WalkTo goal is done [G: the AI's goal machinery is
+    director.c's];
   - four RevealLocs name a floor their building does not have (Las Vegas blocks 2 and 6, Los Angeles 7, New York 9:
     floor 3 of a 1-storey building, 5 of 4, 4 of 3, 6 of 6). The port builds those buildings as the game does (one
     storey per `Floor|` entry but the last, empty one), and the Block is the world's index +0x878 that 0x302AF0
@@ -400,12 +409,14 @@ at the first block's end.
     the Building's +0x1B8, so building +0x200; ctor 0x2BFA10 -> 0x2D31F0, which zeroes +0x44, +0x94, +0x98 .. +0xBC
     and +0x658 .. +0x6EC but never +0x48 .. +0x93: room for 19), written only by that fill; the pool does not clear
     a freed slot (0x283BF0 rewrites +0 .. +0xC), so past it the game holds stale memory and the tube's id is
-    undefined (it could by chance be a real storey's). The port's floor number is a stand-in for that;
-  - what 0x2D40B0 / 0x2D3F90 do besides +0x109 and the world's list (0x2C1A80 / 0x2C1A90 on 0x4D3330 + 0x18).
+    undefined (it could by chance be a real storey's). The port's floor number is a stand-in for that.
 - **Building and banner details:**
-  - `b.getPosition()` / `getSizeZ()` without the host's `building_place`;
-  - the scale of `MessageColor` (taken as 0 … 255);
-  - a fixed slot's side (0x2D0460, taken as 0).
+  - `b.getPosition()` / `getSizeZ()` without the host's `building_place` (the viewer gives one);
+  - the scale of `MessageColor` (taken as 0 … 255, as the default's `set255`; the getColorProp binding's body was not
+    read);
+  - a fixed slot's side (0x2D0460: a byte of the cell's tile per side, at +0x100; taken as 0). An edible's slot opens
+    no window, so the side shows only if an occupant shares the cell.
 - **The rage's side:**
   - the rage's other parts (0x2F4710 / 0x2F46D0 on the monster `+0x7DFC`);
-  - which abilities the player has unlocked (`getMonsterFlags`, taken as all four).
+  - the abilities: `EdiblePower.abilities` starts at all four, until the viewer sets them from the profile
+    (gCommon.getMonsterFlags; main.c `profile_moves`) [R].
