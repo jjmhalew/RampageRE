@@ -25,6 +25,7 @@
 #define RAMPAGE_PEOPLE_H
 #include <stdint.h>
 #include "data.h"
+#include "collide.h"
 
 typedef struct People People;
 
@@ -64,11 +65,16 @@ typedef struct {
     struct { float pts[4][3]; int n, seg, active; float t, speed, resp2; uint32_t flags; } mv;
     /* the hold and the flight */
     float blend, blend_left, from_q[4], from_p[3];   /* HeldObjectMover: blending in from where it was */
-    float vel[3], spin[3], rot[3];                   /* SpherePhysicsMover */
+    float off_q[4], off_p[3];                        /* its +0x68 / +0x78: where it was, in the hold's frame */
+    int off_set;
+    float vel[3], spin[3];                           /* smashObject's velocity and turn rates */
+    CollideMover cm;                                 /* the SpherePhysicsMover it flies on (0x28DE70) */
+    float cmat[12];                                  /* its matrix while it flies (collide.h's 3 x 4) */
     /* Mime (curAnim, numAnimReps, endLoc, Stationary), RoyalGuard (marchDirection, idleTime, hutDestroyed, its hut) */
     int cur_anim, reps, stationary, hut_destroyed, hut;
     float end_loc[3], march_dir, idle_time;
     int anim_reverse;                                /* setAnimPlayDir(-1): anim_time runs backwards */
+    int fx;                                          /* its PE_FX_ON effects still on: 1 << PFX_* */
 } Person;
 
 typedef struct {                                     /* what the people see of a monster */
@@ -86,8 +92,20 @@ enum {
     PE_MONSTER_KNOCK,                                /* the monster: setVel(v, world) and setReaction(2) */
     PE_MONSTER_HP,                                   /* the monster: addHitPoints(amount) */
     PE_MONSTER_FART,                                 /* Monsters::doFart: Expression_Smile, the Fart effect, +20 up */
-    PE_WINDOW_CLOSE                                  /* closeWindow (0x30C3F0, WindowReEnter's end): the window at v
+    PE_WINDOW_CLOSE,                                 /* closeWindow (0x30C3F0, WindowReEnter's end): the window at v
                                                       * shuts over 0.5 s (city.h scene_window_close_at) */
+    PE_FX_ON,                                        /* an effect of the person's own that can be stopped: name at v;
+                                                      * on: its slot (PFX_*); amount 1: it follows the person
+                                                      * (FollowEffect attached), 0: it stays at v */
+    PE_FX_OFF                                        /* that slot's effect stops (on: the slot) */
+};
+enum {                                               /* PE_FX_ON's slots */
+    PFX_AMBIENT,                                     /* the Actor's AmbientEffect (+0x108; the priests' halo) */
+    PFX_CHALLENGE,                                   /* its ChallengeEffect (+0x110, NPC_Target): only when its
+                                                      * template is one of the block's challenge goals (0x3466A0,
+                                                      * challenge_is_goal), which the viewer decides */
+    PFX_SCRIPT                                       /* the script's own (StationaryPerson's idleEffect, a kid's
+                                                      * BalloonFX) */
 };
 /* monster: the monster slot it is about (PE_MONSTER_*: the one whose blow it was; otherwise 0) */
 typedef struct { int type, who, on; const char *name, *node; float v[3], amount; int monster; } PeopleEvent;
@@ -153,6 +171,9 @@ typedef struct { float min[3], max[3]; int width; int gone; } PeopleBox;   /* a 
 int people_probe(const PeopleBox *b, int nb, const float monster_pos[3], const float xyz[3], int mirrored,
                  int *building, int *storey, int *column);
 int people_window_at(const People *p, int building, int storey, int column);   /* the occupant there, -1 none */
+/* a window whose occupant was grabbed from it: grabBuildingOccupant's 0x318140(mgr, actor, 1) retires its slot (+0xD
+ * = 0xFF), which the spawner (0x318650) never fills again */
+int people_window_retired(const People *p, int building, int storey, int column);
 /* canGrabPerson(-, x, y, z): the window person the probe finds, -1 none */
 int people_can_grab(const People *p, const PeopleBox *b, int nb, const float monster_pos[3], const float xyz[3],
                     int mirrored);

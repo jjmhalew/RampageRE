@@ -17,16 +17,37 @@ actor). 0x800 means "deleting" (`requestDelete`, vtable +0x58, 0x285DD0), and 0x
 - **Length of one play** (+0xC): the `Duration` if there is one, otherwise the clip's own length. For example,
   `Female_Blonde_WindowLook` is 1.2 s long but plays in 1.0 s.
 - **Looping**: `AnimRepeat` sets flag 2, and the play loops.
-- **The script's second argument** to `startAnim` does not control looping. Traffic starts its crowds' looping
-  `Running` with 0.
+- **The script's second argument** to `startAnim` keeps the actor's mover (Actor binding 0x2D → 0x30C820(actor,
+  name, keep, 0)) [R]. With 0 the mover (+0x84) is deleted (0x283BF0) and the actor stands; the scripts that pass 0
+  either have no mover then or set one right after (Traffic's crowds, `Falling`). `BandMember`'s `Playing` (0) is what
+  ends a member's march.
+- **startAnimAtRandomOffset** (0x2F) passes frand (0 … 1) as an offset in seconds, which the record's setTime
+  (vtable +0x1C, 0x30C070) takes modulo the play's length [R]: a point within the first second of the play.
 - **End of a play**: a play that does not repeat ends in the script's `onAnimComplete`.
+
+## The Actor's own effects [R]
+- **AmbientEffect** (+0x108) and **ChallengeEffect** (+0x110): the world object's init (0x30D280) starts each,
+  attached to the actor (0x291ED0(effect, actor, node −1): it follows it). The AmbientEffect is the instance's, else
+  the template's (no `ActorInstance|` sets one): the priests' `Priest_Halo`, the Doomsayer's and the Singer's
+  highlights. The ChallengeEffect only when the template is one of the block's challenge goals (0x3466A0): every
+  actor inherits `NPC_Target` from `DefActorProps`, so the people a challenge wants stand in a red ring.
+- **The Actor binding `onPickup`** (id 0x44 → 0x30C5E0(actor, 0)) stops those two and does nothing else. The
+  scripts' `this.actor.onPickup()` in TakeDamage is this binding, not the script's own `onPickup` (script event 8).
+  The grabs stop them too (grabBuildingOccupant 0x2B344C, the ground grab 0x2DA45C).
+- **The scripts' own**: StationaryPerson's `IdleEffect` (the balloon seller's `balloons_hold`, 5 above it, left
+  there) stops in `playEffect`; a kid tourist's `KidBalloonHoldingFX` (attached) stops when it runs off.
+- In the port they are `PE_FX_ON` / `PE_FX_OFF` events, which main.c turns into effects that follow their person.
 
 ## LineMover (update 0x315E10, vtable 0x44B4E0)
 - **Points and progress**: the points are at +0x34 (12 bytes each), the count at +0x3C and the segment at +0x40.
   The share of the segment covered (+0x58) grows by speed × dt / length.
 - **Past the end of a segment**: the next segment starts from its beginning (callback 3, "a point reached").
   After the last segment, the person stays at the end (callback 2), unless flag 2 makes it loop.
-- **Facing**: flag 1 faces the way it moves (0x316E60), and flag 8 faces its target, the nearest monster.
+- **At the end** [R 0x315F70]: the share is set back to 1 and callback 2 comes again every frame, until the script
+  gives the actor another mover or none (`setMover`, `startAnim` with 0). A segment of length 0 (+0x50) does not move:
+  callback 1 every frame (the tourists' mover that holds them in place).
+- **Facing**: flag 1 faces the way it moves (0x316E60), and flag 8 faces its target, the nearest monster. The window
+  occupants get no facing (0x318A44 … 0x318B14 sets the place, the `DefaultAnim` and +0xEC / +0xF4 only).
 - **Monster response**: while it simply moves, a monster closer than `MonsterResponseDist` gives callback 4
   (+0x5C holds the distance squared).
 - **Callback return**: a script's `onMoverCallback` that returns 4|8|16 deletes the actor.
@@ -84,8 +105,9 @@ The Actor destructor (0x30DF80) also spawns an instance's `SpawnsItem<n>` only i
 - a kid tourist;
 - anyone already flying.
 
-The window and walker scripts call `onPickup` after `smash`, which sets the state back to 20 or 2. Read literally,
-a person punched this way is never deleted. The port keeps this behaviour.
+The scripts call `this.actor.onPickup()` after (or before) `smash`. That is the Actor binding (above), not the
+script's `onPickup`: the person keeps the state `smash` gave it, and its flight's countdown deletes it (3 s for a
+window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's TakeDamage runs `playEffect` once.
 
 ## Window occupants
 - **Spawning** (0x318650, from the world update 0x2B6CE0): the manager at 0x4D5F00 counts up to its interval and
@@ -114,9 +136,11 @@ a person punched this way is never deleted. The port keeps this behaviour.
   or, with `OpensH`, from the left (docs/FORMAT_BDP.md "Open windows"). The occupant leans out of that dark.
 - **The window shuts** only through the actor binding `closeWindow` (0x30C3F0: `openWindow(…, 0, 0.5)` on the slot's
   storey, column and `LRPos`, the slot found by the actor's +0xEC), which `Person_Window` and `Military_Window` call
-  at the end of `WindowReEnter`, then the actor is deleted: it closes over 0.5 s once the occupant has gone in. Falling
+  at the end of `WindowReEnter`, then the actor is deleted: it closes over 0.5 s once the occupant has gone in. The
+  port: `PE_WINDOW_CLOSE` at the occupant's place, which main.c passes to city.c's `scene_window_close_at`. Falling
   out (`leaveBuilding` 0x30C3D0 → 0x318140(mgr, actor, 0)), being grabbed (0x2B3350 → 0x318140(…, 1), which also
-  retires the slot: its +0xD = 0xFF, never filled again), the fall's 0x30C510 and the actor's end (0x30DF80) only
+  retires the slot: its +0xD = 0xFF, never filled again; `people_window_retired`, which city.c's spawner asks), the
+  fall's 0x30C510 and the actor's end (0x30DF80) only
   empty the slot: that window stays open. Damage to the cell drops it at once (0x2BB580). The edibles' slots (+0x10)
   never open a window.
 - **The fall** (0x317DC0, from cell damage 0x2BB580): when a front cell's state is 2 or more, every non-military
@@ -187,28 +211,52 @@ This works on an actor, or on an object of class 0x4D0720.
   narrows it on the side the monster faces: 20° when the monster faces +y, the full 120° when it faces the camera.
 - **The speed**: 15 along that yaw, and 15 × (0.8 + 0.5 r) up.
 - **The spin**: ±(2π + π/6 r) about x, and ±(π/16 + π/16 r) about y and z.
-- **The flight**: a `SpherePhysicsMover` (0x28DE70, properties from 0x28F220): `Gravity` 9.81, `Mass` 1 and
-  `Restitution` 0.8 unless the template sets them. People do not set them.
+- **The flight**: a `SpherePhysicsMover` (0x28DE70, properties from 0x28F220): `Gravity` 9.81, `Mass` 1,
+  `Restitution` 0.8, `SlidingFriction` 0.4 and `InertiaSolidity` 1 unless the template sets them (people do not);
+  its radius the person's shape's, `CollisionRadius` 2. Its frame is 0x28E440 (collide.c's `collide_mover_step`):
+  sub-steps, gravity, the street's push and impulse, the spin. The people scripts have no `OnHitGround`.
+
+## The scripts the books name for people [R]
+Every actor template the city books place (`ActorInstance|`, the blocks' `Occupants`, the runners Traffic makes from
+them, the actors a script creates) runs one of these, counted over the seven cities: `Tourist` 204,
+`WalkingAroundPerson` 151, `Person_Window` 133 (the occupants, and two Las Vegas instances), `Person_Runner` 132 (the
+crowds, a streaker), `Biker` 74 (parade.c), `StationaryPerson` 73, `Military_Window` 62 (army.c), `Mime` 23,
+`RoyalGuardHut` 2 with `RoyalGuard`, `Band` 1 with `BandMember`, `AnimatedSign` 1, and the soldiers of
+`CombatTruck` (army.c). All the people's are ported. Two others are not:
+- **AnimatedSign.bsf** (`VegasCowboySign`, an `ActorInstance|` of a Las Vegas `BuildingInstance|`, not a person): a
+  looping `Sign` that falls (z − 10 a second, turning (π/10, 3π/20) a second, `GroundEffect` at z ≤ −0.25, then
+  deleted) when a monster hits it (`HitEffect`, addStats), something thrown meets it or its building comes down
+  (`DetachEffect`). city.c places no building actor instance, so there is nothing to drive.
+- **ActorSwarm.bsf** (`ChildSwarm`, the school's recess: a bell, "RECESS", then 12 … 19 `ChildRunner0` … `2`
+  (Person_Child) running out at 11.5): only SchoolBuilding.bsf's `DamageCell` makes one, for a monster's hit of 2.5 or
+  more, at most every 20 s. Building::hit (0x2BC150) passes its own amount (f12) as `famount` (0x2BC8C0, script slot
+  0xC), and every hit the scripts make is `hitBuildingPt(…, 2.0)`. [G: so the scripts' hits would never start it,
+  unless the binding's way to 0x2BC150 changes the 2.0 (not followed); a native hit of more on a school was not
+  found.] Not ported.
+
+PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAnim`, no TakeDamage, no onPickup.
 
 ## Not traced (stand-ins in people.c)
 - **Random numbers**: `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R].
   `getTimeStep` is the world's step, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
-- **The physics mover's collision response**: a vertical bounce with restitution 0.8 on z = 0 stands in.
-- **Blending and the hit test**:
-  - the shape of the hold blend (taken as linear);
-  - the attack-sphere test against people (0x2D4390): `CollisionRadius` 2 about the person, 1 up.
-- **Occupant spawning**: the timing and rates (+0x44 … +0x50), the view check (0x318390) and the cell check
-  (0x31AD00 [R]: not on the ground storey (its record +0x10 is 0), the cell not hidden (0x400 by 0x2BE580), then
-  the last building whose box holds the point 10 out in front of the cell (y − 10; 0x2A3D20) must have fewer standing
-  storeys than the cell's live storey: a building in front does not hide it; city.c's spawn does both).
-  A grabbed occupant's slot is not retired.
-- **The windows** (city.c's spawner opens them, `scene_window_close` / `_at` shut them): the port's `closeWindow` is
-  for people.c and army.c to call (by the cell people_add_window got, or by the occupant's place); until they do, a
-  window stays open after its occupant went back in.
-- **The Actor bindings' bodies**: `startAnim`'s second argument, `onPickup` (taken as sending script event 8), and
-  `getStringProp` versus `getTemplateStringProp` (only the template is read).
-- **Scripts not ported**: any other script plays its `DefaultAnim`, and if smashed is deleted after 3 s.
-- **The LineMover's end**: it fires once; the port then stops the mover until a handler starts another.
-- **Band timing**: the band's members appear 0.25 s after `people_add_band` (its `onInit` pulse).
-- **The flying hut**: its flight is left to the viewer.
-- **Drawing**: `RenderScale` (`DefActorProps`: 0.65) is for the renderer to apply.
+- **The flight's objects**: the SpherePhysicsMover would also meet the frame's collision objects (0x287430); people
+  are not in the viewer's collision world, so only the street is met.
+- **The hit test**: the attack-sphere test against people is the monster against the objects (0x2E22B0: an armed
+  sphere's blow on an `OnlyHitWithEffNodes` person, against its shape: `CollisionRadius` about the model's bounding
+  sphere's centre, 0x28FD70); people are not in the viewer's collision world, so the centre is taken 1 up. Person_Child
+  sets no 0x8000, so in the game a mere touch (type 1) reaches it too; here only blows do.
+- **The hold blend** [R 0x310ED0 / 0x310B50]: the start kept in the hold's frame, w = 1 − left / blend, its turn w of
+  the way to none and its place scaled by 1 − w; the port takes the hand of the first held frame for the grab's.
+- **setFlags**: taken as or-ing (there is a separate `clearFlags`); the WorldObject binding's body (id 0x13) was not
+  located.
+- **The LineMover's flag 4** (the tourists' and ActorSwarm's; +0x68, 0x316380) is not ported: the tourists' mover has
+  no length, and nothing else that is ported sets it.
+- **The occupant spawning** is city.c's (`scene_people_spawn`): its timing and rates (+0x44 … +0x50), the view check
+  (0x318390) and the cell check (0x31AD00 [R]: not on the ground storey (its record +0x10 is 0), the cell not hidden
+  (0x400 by 0x2BE580), then the last building whose box holds the point 10 out in front of the cell (y − 10;
+  0x2A3D20) must have fewer standing storeys than the cell's live storey: a building in front does not hide it).
+- **The flying hut**: its `SphereMover` flight (−25 × the hit's direction in x and y) is city.c's
+  (`scene_huts_update`), until its next pulse deletes it; the mover's gravity there is not applied.
+- **Drawing**: `RenderScale` (`DefActorProps`: 0.65) scales the look (city.c's `people_sync`).
+- **Band timing** [R]: `Band`'s `onInit` (at the block's start, 0x2B6580) sets a 0.25 s pulse; the pulse comes once
+  its clock reaches the delay (0x309BA0, STREETOBJ_NOTES.md), on the 8th step; the members are made then.

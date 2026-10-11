@@ -190,6 +190,8 @@ typedef struct Viewer {
     struct { int id, fx, unit, shot; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
                                                       * (a beam's: its stream's head last frame, its rod) */
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
+    /* the people's own effects (PE_FX_ON): per person and slot, following it (follow) at off, until PE_FX_OFF */
+    struct { int fx, who, slot, follow; float off[3]; } ppfx[64]; int nppfx;
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
     ShadowList shl; ShadowGround sg; ShadowLighting slight;   /* the shadows (shadow.c) */
@@ -873,6 +875,7 @@ static void build(Viewer *v)
     }
     v->nfxa = 0;
     v->narmed_people = 0;
+    v->nppfx = 0;
     if (v->have_scene && have_monster(v)) {          /* the army comes for the monsters (the block's AIDef) */
         static ArmyHost host;
         host.find = army_find;
@@ -4304,6 +4307,27 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
             if (ev[i].type == PE_WINDOW_CLOSE)       /* back in: its window shuts */
                 scene_window_close_at(&v->scene, ev[i].v);
+            if (ev[i].type == PE_FX_ON && v->fxw && ev[i].name &&   /* the ChallengeEffect only on a goal */
+                (ev[i].on != PFX_CHALLENGE || challenge_is_goal(&v->challenge, people_get(v->scene.folk, ev[i].who)->name))) {
+                int id = fx_spawn(v->fxw, ev[i].name, ev[i].v, NULL, 1);
+                const Person *p = people_get(v->scene.folk, ev[i].who);
+                if (id >= 0 && p && v->nppfx < 64) {
+                    v->ppfx[v->nppfx].fx = id;
+                    v->ppfx[v->nppfx].who = ev[i].who;
+                    v->ppfx[v->nppfx].slot = ev[i].on;
+                    v->ppfx[v->nppfx].follow = ev[i].amount != 0;
+                    for (int k = 0; k < 3; k++)
+                        v->ppfx[v->nppfx].off[k] = ev[i].v[k] - p->world[12 + k];
+                    v->nppfx++;
+                }
+            }
+            if (ev[i].type == PE_FX_OFF)
+                for (int k = 0; k < v->nppfx; k++)
+                    if (v->ppfx[k].who == ev[i].who && v->ppfx[k].slot == ev[i].on) {
+                        if (v->fxw)
+                            fx_stop(v->fxw, v->ppfx[k].fx);
+                        v->ppfx[k--] = v->ppfx[--v->nppfx];
+                    }
             Mon *mo = ev_mon(v, ev[i].monster);
             if (ev[i].type == PE_MONSTER_HP)
                 mo->hp = fmaxf(0, fminf(200, mo->hp + ev[i].amount));
@@ -4313,6 +4337,18 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
             if (getenv("RAMPAGE_TRACE"))
                 printf("  people event %d (%s) from %d\n", ev[i].type, ev[i].name ? ev[i].name : "-", ev[i].who);
+        }
+        for (int k = 0; k < v->nppfx; k++) {          /* the ones that follow their person */
+            const Person *p = people_get(v->scene.folk, v->ppfx[k].who);
+            if (!p || !v->fxw || !fx_alive(v->fxw, v->ppfx[k].fx)) {
+                v->ppfx[k--] = v->ppfx[--v->nppfx];
+                continue;
+            }
+            if (v->ppfx[k].follow) {
+                float at[3] = { p->world[12] + v->ppfx[k].off[0], p->world[13] + v->ppfx[k].off[1],
+                                p->world[14] + v->ppfx[k].off[2] };
+                fx_move(v->fxw, v->ppfx[k].fx, at);
+            }
         }
     }
     uint8_t was[256];                                /* the buildings' states before their step (the pads only) */

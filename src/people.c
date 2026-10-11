@@ -37,6 +37,8 @@ struct People {
     void *visible_ctx;
     int band_flee, band_sound;                       /* BandMember.bsf's globals: flee, bandSFXAllocated */
     int hitter;                                      /* the monster slot whose blow is being dealt (people_hit) */
+    struct { int building, storey, column; } retired[64];   /* the windows grabbed from (0x318140(.., 1)) */
+    int nretired;
     /* the script objects that make people: Band.bsf (once, after 0.25 s) and RoyalGuardHut.bsf (pulsing each 1 s) */
     struct { int hut; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
     int nobj;
@@ -109,6 +111,31 @@ static void effect(People *p, Person *q, const char *key, const float at[3], con
     const char *s = tstr(q, key);
     if (s)
         emit(p, PE_EFFECT, who_of(p, q), s, node, at, 0, 1);
+}
+
+/* an effect of the person's own, which can be stopped: in slot (PFX_*), following the person or left at `at` */
+static void fx_on(People *p, Person *q, int slot, const char *name, const float at[3], int follow)
+{
+    if (!name)
+        return;
+    emit(p, PE_FX_ON, who_of(p, q), name, NULL, at, (float)follow, slot);
+    q->fx |= 1 << slot;
+}
+
+static void fx_off(People *p, Person *q, int slot)
+{
+    if (q->fx & (1 << slot))
+        emit(p, PE_FX_OFF, who_of(p, q), NULL, NULL, NULL, 0, slot);
+    q->fx &= ~(1 << slot);
+}
+
+/* [R] the Actor binding onPickup (id 0x44 -> 0x30C5E0(actor, 0)), which the scripts' TakeDamage call as
+ * this.actor.onPickup(): it stops the actor's AmbientEffect (+0x108) and ChallengeEffect (+0x110) and does nothing
+ * else (it is not the script's onPickup, script event 8). The grabs stop them the same way (0x2B344C, 0x2DA45C) */
+static void actor_on_pickup(People *p, Person *q)
+{
+    fx_off(p, q, PFX_AMBIENT);
+    fx_off(p, q, PFX_CHALLENGE);
 }
 
 static const PeopleMonster *nearest_monster(const People *p, const float pos[3])   /* getNearestMonster */
@@ -187,6 +214,18 @@ static void quat_mat(const float q[4], float m[16])
     m[15] = 1;
 }
 
+static void quat_mul(const float a[4], const float b[4], float out[4])   /* a then b in a's frame: R(a) R(b) */
+{
+    float x = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+    float y = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+    float z = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+    float w = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    out[3] = w;
+}
+
 static void slerp(const float a[4], const float b0[4], float f, float out[4])
 {
     float b[4] = { b0[0], b0[1], b0[2], b0[3] };
@@ -215,10 +254,15 @@ static void slerp(const float a[4], const float b0[4], float f, float out[4])
 /* ---------------------------------------------------------------- the actor's anim (0x30AAD0) */
 
 /* [R] startAnim: the look ActorAnimShape|<name>; one play lasts its Duration (+0xC) if it has one, else the clip's
- * (the AnimName's, or the shape's own); AnimRepeat sets flag 2, a play that repeats. [G] The script's second argument
- * to startAnim is not what loops (Traffic starts its crowds' looping Running with 0): taken as unused. */
-static void start_anim(People *p, Person *q, const char *name, int random_offset)   /* 1: startAnimAtRandomOffset */
+ * (the AnimName's, or the shape's own); AnimRepeat sets flag 2, a play that repeats. [R] The script's second argument
+ * keeps the actor's mover (Actor binding 0x2D -> 0x30C820(actor, name, keep, 0)): with 0 the mover (+0x84) is
+ * deleted (0x283BF0) and the actor stands; the scripts that pass 0 set their mover after it. startAnimAtRandomOffset
+ * (0x2F) passes an offset of frand (0 .. 1, seconds), which the record's setTime (vtable +0x1C, 0x30C070) takes
+ * modulo the play's length: a point within the first second of the play. */
+static void start_anim(People *p, Person *q, const char *name, int random_offset, int keep)
 {
+    if (!keep)
+        q->mv.active = 0;
     snprintf(q->anim, sizeof q->anim, "%s", name);
     char key[64];
     snprintf(key, sizeof key, "ActorAnimShape|%s", name);
@@ -236,7 +280,12 @@ static void start_anim(People *p, Person *q, const char *name, int random_offset
         }
     }
     q->anim_len = len;
-    q->anim_time = random_offset ? frand(p) * len : 0;
+    q->anim_time = 0;
+    if (random_offset) {
+        float r = frand(p);                          /* 0x2A9258: frand x 2^-31 of the world's Park-Miller */
+        if (r > 0.001f && len > 0)
+            q->anim_time = r - len * (float)(int)(r / len);
+    }
     q->anim_done = 0;
 }
 
@@ -265,7 +314,9 @@ static float heading_of(float dx, float dy) { return atan2f(-dx, dy) * DEG; }   
 /* [R] one frame: the share along the segment grows by speed x dt / its length (+0x58); past 1 the next segment
  * starts from its beginning (3, a point reached) or, after the last, it stays at the end (2) unless it loops (flag
  * 2); flag 1 faces the way it goes (0x316E60), flag 8 the nearest monster (the target, +0x84); while it simply moves
- * (1) a monster nearer than MonsterResponseDist (+0x5C holds its square) answers 4. 0: no mover. */
+ * (1) a monster nearer than MonsterResponseDist (+0x5C holds its square) answers 4. 0: no mover. [R 0x315F70] At its
+ * end the share is set back to 1 and the end (2) is told again every frame, until the script gives the actor another
+ * mover or none (startAnim with 0, setMover). A segment of length 0 (+0x50) does not move: 1 every frame. */
 static int mover_step(People *p, Person *q, float dt)
 {
     if (!q->mv.active || q->mv.n < 2)
@@ -288,7 +339,6 @@ static int mover_step(People *p, Person *q, float dt)
         } else {
             q->mv.t = 1;
             r = 2;
-            q->mv.active = 0;                        /* [G] the end is told once (a handler may start another) */
         }
     }
     s = q->mv.seg;
@@ -334,13 +384,21 @@ static void smash_object(People *p, Person *q, float monster_heading)
     q->spin[0] = (frand(p) < 0.5f ? 1 : -1) * (2 * PI + PI / 6 * frand(p));
     q->spin[1] = (frand(p) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(p));
     q->spin[2] = (frand(p) < 0.5f ? 1 : -1) * (PI / 16 + PI / 16 * frand(p));
-    q->rot[0] = q->rot[1] = q->rot[2] = 0;
     q->pos[0] = q->world[12];                        /* from where it is (in the hand, in a window) */
     q->pos[1] = q->world[13];
     q->pos[2] = q->world[14];
     q->mv.active = 0;
     q->flags &= ~(uint32_t)OF_HELD;
     q->phase = PP_FLYING;
+    /* [R] the SpherePhysicsMover (0x28DE70, its properties 0x28F220): Gravity 9.81, Mass 1, Restitution 0.8,
+     * SlidingFriction 0.4, InertiaSolidity 1 unless the template sets them (no person does); its radius the person's
+     * shape's (sqrt of +0x34: CollisionRadius, DefActorProps 2); the turn rates as given, about the world's axes
+     * (0x28DD80) */
+    collide_mover_init(&q->cm, tnum(q, "CollisionRadius", 2), tnum(q, "Gravity", 9.81f), tnum(q, "Mass", 1),
+                       tnum(q, "Restitution", 0.8f), tnum(q, "SlidingFriction", 0.4f), tnum(q, "InertiaSolidity", 1));
+    collide_mover_spin(&q->cm, q->spin);
+    memcpy(q->cm.vel, q->vel, sizeof q->cm.vel);
+    collide_matrix_from16(q->cmat, q->world);
 }
 
 static void leave_window(Person *q) { q->building = -1; }   /* leaveBuilding / closeWindow / 0x318140 */
@@ -359,24 +417,24 @@ static int window_anim_done(People *p, Person *q)
     if (q->state >= 20)
         return 1;
     if (q->state == 1) {
-        start_anim(p, q, "WindowLook", 0);
+        start_anim(p, q, "WindowLook", 0, 0);
         q->state = 2;
         q->state_time = q->delay_time = 0;
         q->pulse_time = -frand(p);
     } else if (q->state == 2) {
         float r = frand(p);
         if (q->state_time >= 7.5f) {
-            start_anim(p, q, "WindowReEnter", 0);
+            start_anim(p, q, "WindowReEnter", 0, 0);
             q->state = 3;
         } else if (q->delay_time > 0) {
-            start_anim(p, q, "WindowIdle", 0);
+            start_anim(p, q, "WindowIdle", 0, 0);
         } else if (r < 0.2f) {
-            start_anim(p, q, "WindowScared", 0);
+            start_anim(p, q, "WindowScared", 0, 0);
         } else if (r < 0.4f) {
-            start_anim(p, q, "WindowLook", 0);
+            start_anim(p, q, "WindowLook", 0, 0);
         } else {
             q->delay_time = 0.5f + 0.5f * frand(p);
-            start_anim(p, q, "WindowIdle", 0);
+            start_anim(p, q, "WindowIdle", 0, 0);
         }
     } else if (q->state == 3) {
         q->state = 0;
@@ -392,7 +450,7 @@ static int window_anim_done(People *p, Person *q)
             emit(p, PE_DROP, who_of(p, q), NULL, NULL, q->pos, 0, 1);
         return DELETE_ME;
     } else if (q->state == 6) {
-        start_anim(p, q, "Running", 0);
+        start_anim(p, q, "Running", 0, 1);
         q->mv.speed = 10;
         q->heading = 180;                            /* FACE_BACK: towards the street */
         q->state = 7;
@@ -423,7 +481,7 @@ static int window_mover(People *p, Person *q, int st)
     } else if (st == 3) {
         if (q->state == 5) {
             q->state = 6;
-            start_anim(p, q, "Landing", 0);
+            start_anim(p, q, "Landing", 0, 1);
             q->mv.speed = 0;
         } else if (q->state == 7 && q->sub == 0) {
             q->heading = q->run_heading;
@@ -436,9 +494,10 @@ static int window_mover(People *p, Person *q, int st)
 static void window_fall(People *p, Person *q)
 {
     q->state = 5;
-    start_anim(p, q, "Falling", 0);
+    start_anim(p, q, "Falling", 0, 0);
     leave_window(q);
-    q->flags |= OF_PICKUP;                           /* setFlags(65536) [G] taken as or-ing, as clearFlags exists */
+    q->flags |= OF_PICKUP;                           /* setFlags(65536) [G: or-ing, as clearFlags exists; the
+                                                      * WorldObject binding's body (id 0x13) was not located] */
     float dir = -1.0f + 2.0f * (float)(frand(p) > 0.5f);
     float start[3] = { q->pos[0], q->pos[1], q->pos[2] }, end[3] = { q->pos[0], q->pos[1] - 1, 0 };
     float next[3] = { end[0], dir * 1.0f - 3.0f, 0 }, run[3] = { -dir * 100.0f, next[1], 0 };
@@ -463,7 +522,7 @@ static void mime_anim(People *p, Person *q, int random_offset)
 {
     char name[16];
     snprintf(name, sizeof name, "Anim%d", q->cur_anim);
-    start_anim(p, q, name, random_offset);
+    start_anim(p, q, name, random_offset, 1);
 }
 
 static void mime_facing(Person *q)                   /* chooseFacing */
@@ -513,13 +572,13 @@ static int on_anim_done(People *p, Person *q)
                      NULL, m->pos, 0, 1);
                 q->weapon_off = 0.25f;
                 q->state = 5;
-                start_anim(p, q, "ThrowRecover", 0);
+                start_anim(p, q, "ThrowRecover", 0, 0);
             }
         } else if (q->state == 5) {
             if (m) {
                 emit(p, PE_WEAPON, who_of(p, q), NULL, NULL, m->pos, 0, 0);
                 q->state = 3;
-                start_anim(p, q, "Idle", 0);
+                start_anim(p, q, "Idle", 0, 0);
             }
         } else if (q->is_grenadier && q->state == 3 && m) {
             float dy = m->pos[1] - q->pos[1], dx = m->pos[0] - q->pos[0];
@@ -528,11 +587,11 @@ static int on_anim_done(People *p, Person *q)
             /* abs(diffX < 12.0 && monsterPos.z < 10.0): a signed x, so anywhere to the left counts */
             if (dx < 12.0f && m->pos[2] < 10.0f && q->reload <= 0) {
                 q->reload = tnum(q, "ReloadDelay", 5.0f);
-                start_anim(p, q, "Throw", 0);
+                start_anim(p, q, "Throw", 0, 0);
                 q->state = 4;
             } else {
                 q->state = 1;
-                start_anim(p, q, "Walk", 1);
+                start_anim(p, q, "Walk", 1, 1);
                 walk(p, q);
             }
         }
@@ -541,7 +600,7 @@ static int on_anim_done(People *p, Person *q)
         if (q->state == 1)
             decide(p, q);
         if (q->state == 3) {
-            start_anim(p, q, "PickedUp2", 0);
+            start_anim(p, q, "PickedUp2", 0, 1);
             q->pulse_delay = 10 * TIMESTEP;
             q->pulse_time = 0;
         }
@@ -568,9 +627,9 @@ static int on_anim_done(People *p, Person *q)
         if (q->state == 512) {
             if (q->reps > 0) {
                 q->reps--;
-                start_anim(p, q, "Perform", 0);
+                start_anim(p, q, "Perform", 0, 1);
             } else {
-                start_anim(p, q, "Idle", 0);
+                start_anim(p, q, "Idle", 0, 1);
                 q->idle_time = 2;
                 q->state = 32;
             }
@@ -655,7 +714,7 @@ static int on_pulse(People *p, Person *q)
         if (p->band_flee) {                          /* the whole band runs off */
             q->state = 8;
             float dir = frand(p) > 0.5f ? 1.0f : -1.0f;
-            start_anim(p, q, "Running", 1);
+            start_anim(p, q, "Running", 1, 0);
             float end[3] = { q->pos[0] + dir * frand(p) * 100.0f, -10.0f - 50.0f * frand(p), 0 };
             mover_init(q, q->pos, end, 15);
             q->mv.flags = 0;
@@ -667,7 +726,7 @@ static int on_pulse(People *p, Person *q)
             return fly_countdown(q);                 /* its flyDuration is never set: 0, so gone at the next pulse */
         if (q->state == 32 && (q->idle_time -= 1.0f) <= 0) {
             q->heading = 90.0f * q->march_dir;
-            start_anim(p, q, "March", 0);
+            start_anim(p, q, "March", 0, 1);
             guard_march(q, -5.0f * q->march_dir, 0);
             q->state = 64;
         }
@@ -698,7 +757,7 @@ static int on_pulse(People *p, Person *q)
         return 1;
     case PK_TOURIST:
         if (q->state == 5) {
-            start_anim(p, q, "Idle", 0);
+            start_anim(p, q, "Idle", 0, 1);
             q->state = 1;
             q->pulse_delay = 26 * TIMESTEP;
             q->pulse_time = 0;
@@ -713,7 +772,7 @@ static int on_pulse(People *p, Person *q)
         }
         return 1;
     default:
-        return q->state == 99 ? fly_countdown(q) : 1;
+        return 1;
     }
 }
 
@@ -729,7 +788,7 @@ static int on_mover(People *p, Person *q, int st)
             q->heading = q->pos[1] < -3.0f ? -90.0f : 90.0f;
         } else if (st == 3 && strcmp(q->anim, "StreakOut") == 0) {   /* out on the street: scurry off */
             q->heading = -90;
-            start_anim(p, q, "Streaking", 0);
+            start_anim(p, q, "Streaking", 0, 1);
             q->pulse_delay = 0.25f;
             if (q->pos[1] > -3.0f)                   /* going to -x while facing +x: the scurry played backwards */
                 q->anim_reverse = 1;
@@ -750,7 +809,7 @@ static int on_mover(People *p, Person *q, int st)
             if (q->state == 8)
                 return DELETE_ME;
             q->heading = 180;                        /* FACE_BACK */
-            start_anim(p, q, "Playing", 1);
+            start_anim(p, q, "Playing", 1, 0);
             q->state = 2;
         }
         return 1;
@@ -764,7 +823,7 @@ static int on_mover(People *p, Person *q, int st)
         } else if (q->state == 16) {
             q->heading = 180;
             q->reps = 2;
-            start_anim(p, q, "Perform", 0);
+            start_anim(p, q, "Perform", 0, 1);
             q->state = 512;
         } else if (q->state == 64) {
             q->heading = 0;
@@ -785,7 +844,7 @@ static int on_mover(People *p, Person *q, int st)
     case PK_WALKER:
         if (st == 2 && q->state == 1) {
             if (q->has_idle == 1) {
-                start_anim(p, q, "Idle", 0);
+                start_anim(p, q, "Idle", 0, 0);
                 q->mv.active = 0;                    /* setMover(an empty RWorldMover) */
                 q->state = 3;
                 const PeopleMonster *m = nearest_monster(p, q->pos);   /* lookAtMonster */
@@ -826,8 +885,9 @@ static int on_mover(People *p, Person *q, int st)
             float end[3] = { q->pos[0] + 160 * e[0], q->pos[1] + 160 * e[1], q->pos[2] };
             mover_init(q, q->pos, end, 7);
             q->mv.flags = (q->mv.flags & ~8u) | 1;
+            fx_off(p, q, PFX_SCRIPT);                /* BalloonFX.stop() */
             effect(p, q, "Effect|KidBalloonDetachFX", q->pos, NULL);
-            start_anim(p, q, "Running", 0);
+            start_anim(p, q, "Running", 0, 1);
             q->pulse_delay = 0;
             q->state = 6;
         }
@@ -837,37 +897,44 @@ static int on_mover(People *p, Person *q, int st)
     }
 }
 
-static void on_pickup(People *p, Person *q)          /* the script's onPickup (script event 8) */
+/* StationaryPerson::playEffect: its idleEffect stops, the PickedUpEffect 5 above it, the PickupSound */
+static void play_effect(People *p, Person *q)
 {
     float up[3] = { q->pos[0], q->pos[1], q->pos[2] + 5 };
+    fx_off(p, q, PFX_SCRIPT);
+    effect(p, q, "Effect|PickedUpEffect", up, NULL);
+    sound(p, q, "Sound|PickupSound");
+}
+
+static void on_pickup(People *p, Person *q)          /* the script's onPickup (script event 8) */
+{
     switch (q->kind) {
     case PK_WINDOW:
         if (q->state != 20) {
-            start_anim(p, q, "PickedUp", 0);
+            start_anim(p, q, "PickedUp", 0, 1);
             sound(p, q, "Sound|PickupSound");
             q->state = 20;
         }
         break;
     case PK_RUNNER:
-        start_anim(p, q, "PickedUp", 0);
+        start_anim(p, q, "PickedUp", 0, 1);
         sound(p, q, "Sound|PickupSound");
         q->heading = 0;
         break;
     case PK_WALKER:
-        start_anim(p, q, "PickedUp", 0);
+        start_anim(p, q, "PickedUp", 0, 1);
         q->state = 2;
         sound(p, q, "Sound|Voice");
         q->sub |= 1;
         break;
-    case PK_STATIONARY:                              /* playEffect: the idle effect stops, PickedUpEffect, PickupSound */
-        effect(p, q, "Effect|PickedUpEffect", up, NULL);
-        sound(p, q, "Sound|PickupSound");
-        start_anim(p, q, "PickedUp", 0);
+    case PK_STATIONARY:
+        play_effect(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
         break;
     case PK_TOURIST:
         if (q->state != 3) {
             sound(p, q, "Sound|PickupSound");
-            start_anim(p, q, "PickedUp2", 0);
+            start_anim(p, q, "PickedUp2", 0, 1);
             q->state = 3;
             q->pulse_delay = 10 * TIMESTEP;
             q->pulse_time = 0;
@@ -877,18 +944,17 @@ static void on_pickup(People *p, Person *q)          /* the script's onPickup (s
         break;
     case PK_BAND:
         if (q->state != 4) {
-            start_anim(p, q, "PickedUp", 1);
+            start_anim(p, q, "PickedUp", 1, 1);
             p->band_flee = 1;
             q->state = 4;
         }
         break;
     case PK_MIME:
     case PK_GUARD:
-        start_anim(p, q, "PickedUp", 0);
+        start_anim(p, q, "PickedUp", 0, 1);
         q->state = 2;
         break;
-    default:                                         /* [G] */
-        start_anim(p, q, "PickedUp", 0);
+    default:                                         /* no script: no onPickup */
         break;
     }
 }
@@ -907,48 +973,51 @@ static void smash(People *p, Person *q, float monster_heading)
     case PK_MIME: q->state = 8; q->pulse_delay = 1.0f; break;
     case PK_BAND: q->state = 16; break;              /* still pulsing every 0.25 s */
     case PK_GUARD: q->state = 8; break;              /* pulsing every 1 s */
-    default: q->state = 99; q->fly_duration = 3; q->pulse_delay = 1.0f; break;   /* [G] */
+    default: break;
     }
     q->pulse_time = 0;
 }
 
-/* TakeDamage from a monster: who flies off, and when */
+/* TakeDamage from a monster: who flies off, and when [R], each as its script has it. this.actor.onPickup() there is
+ * the Actor binding (actor_on_pickup), so a person keeps the state its smash() gave it and its flight's countdown
+ * deletes it (3 s for a window person, 3.5 a runner, 4 a walker, a mime ...) */
 static int take_damage(People *p, Person *q, float monster_heading, const char *move, int who)
 {
     switch (q->kind) {
-    case PK_WINDOW:
+    case PK_WINDOW:                                  /* only while it runs off after its fall (7) */
         if (q->state != 7)
             return 0;
         smash(p, q, monster_heading);
-        on_pickup(p, q);                             /* this.actor.onPickup(): after the smash, so state 20 */
-        start_anim(p, q, "PickedUp", 0);
+        actor_on_pickup(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
         return 1;
     case PK_RUNNER:
         if (q->state == 16)
             return 0;
         smash(p, q, monster_heading);
-        on_pickup(p, q);
-        start_anim(p, q, "PickedUp", 0);
+        actor_on_pickup(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
         return 1;
     case PK_WALKER:
         if (q->state == 6)
             return 0;
         smash(p, q, monster_heading);
-        start_anim(p, q, "PickedUp", 0);
-        on_pickup(p, q);                             /* state 2 again, as in the script */
+        start_anim(p, q, "PickedUp", 0, 1);
+        actor_on_pickup(p, q);
         return 1;
     case PK_STATIONARY:
         if (q->state == 2)
             return 0;
-        on_pickup(p, q);
-        on_pickup(p, q);                             /* playEffect + PickedUp, then this.actor.onPickup() */
+        play_effect(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
+        actor_on_pickup(p, q);
         smash(p, q, monster_heading);
         return 1;
     case PK_TOURIST:
         if (q->state == 4 || q->is_child)
             return 0;
-        start_anim(p, q, "PickedUp", 0);
-        on_pickup(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
+        actor_on_pickup(p, q);
         smash(p, q, monster_heading);
         return 1;
     case PK_MIME:
@@ -956,16 +1025,16 @@ static int take_damage(People *p, Person *q, float monster_heading, const char *
         if (q->state == 8)
             return 0;
         smash(p, q, monster_heading);
-        on_pickup(p, q);                             /* state 2 again, as in the scripts */
-        start_anim(p, q, "PickedUp", 0);
+        actor_on_pickup(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
         return 1;
     case PK_BAND:
         if (q->state == 16)
             return 0;
         smash(p, q, monster_heading);
         p->band_flee = 1;
-        on_pickup(p, q);                             /* state 4 again, as in the script */
-        start_anim(p, q, "PickedUp", 0);
+        actor_on_pickup(p, q);
+        start_anim(p, q, "PickedUp", 0, 1);
         return 1;
     case PK_CHILD:                                   /* a monster on the ground is thrown back by it */
         if (move && strncmp(move, "Ground", 6) == 0) {
@@ -973,11 +1042,8 @@ static int take_damage(People *p, Person *q, float monster_heading, const char *
             emit(p, PE_MONSTER_KNOCK, who, NULL, NULL, v, 0, 1);
         }
         return 0;
-    default:                                         /* [G] */
-        if (q->state == 99)
-            return 0;
-        smash(p, q, monster_heading);
-        return 1;
+    default:                                         /* no script: no TakeDamage */
+        return 0;
     }
 }
 
@@ -1022,7 +1088,12 @@ static Person *new_person(People *p, Group tmpl, const float pos[3], float headi
     if (flags && strstr(flags, "PushOutMonsters"))
         q->flags |= OF_PUSH_OUT;
     const char *def = tstr(q, "DefaultAnim");        /* the native actor starts in its DefaultAnim */
-    start_anim(p, q, def ? def : "Idle", 0);
+    start_anim(p, q, def ? def : "Idle", 0, 0);
+    /* [R] the world object's init (0x30D280): its AmbientEffect (the instance's, else the template's; no ActorInstance|
+     * sets one) and, when its template is a goal of the block's challenge (0x3466A0), its ChallengeEffect, each
+     * attached to it (0x291ED0(effect, actor, node -1): it follows the actor), kept at +0x108 / +0x110 */
+    fx_on(p, q, PFX_AMBIENT, tstr(q, "Effect|AmbientEffect"), q->pos, 1);
+    fx_on(p, q, PFX_CHALLENGE, tstr(q, "Effect|ChallengeEffect"), q->pos, 1);
     return q;
 }
 
@@ -1033,7 +1104,7 @@ static void construct(People *p, Person *q)
     switch (q->kind) {
     case PK_WINDOW:
         q->state = 1;
-        start_anim(p, q, "WindowEmerge", 0);
+        start_anim(p, q, "WindowEmerge", 0, 0);
         q->pulse_delay = 0.25f;
         q->flags |= OF_EFF_NODES;
         break;
@@ -1042,7 +1113,7 @@ static void construct(People *p, Person *q)
         break;
     case PK_WALKER:
         q->flags |= OF_EFF_NODES;
-        start_anim(p, q, "Walk", 1);
+        start_anim(p, q, "Walk", 1, 1);
         memcpy(q->start, q->pos, sizeof q->start);
         q->walk_range = tnum(q, "WalkRange", 5);
         q->has_idle = (int)tnum(q, "HasIdle", 0);
@@ -1082,7 +1153,7 @@ static void construct(People *p, Person *q)
     case PK_GUARD:
         q->flags |= OF_EFF_NODES | OF_PICKUP;
         q->heading = 180;
-        start_anim(p, q, "March", 0);
+        start_anim(p, q, "March", 0, 1);
         q->pulse_delay = 1;
         q->march_dir = 1;
         q->hut = -1;
@@ -1091,8 +1162,8 @@ static void construct(People *p, Person *q)
         break;
     case PK_STATIONARY:
         q->flags |= OF_EFF_NODES | OF_PICKUP;
-        start_anim(p, q, "Idle", 1);
-        effect(p, q, "Effect|IdleEffect", up, NULL);
+        start_anim(p, q, "Idle", 1, 1);
+        fx_on(p, q, PFX_SCRIPT, tstr(q, "Effect|IdleEffect"), up, 0);   /* idleEffect.createAndStart(pos + 5 up) */
         sound(p, q, "Sound|Sound");
         if (tstr(q, "Sound|AmbientSound"))
             q->pulse_delay = 7;
@@ -1106,7 +1177,7 @@ static void construct(People *p, Person *q)
         q->is_child = (int)tnum(q, "IsChild", 0);
         if (q->is_child) {
             float d = tnum(q, "MonsterResponseDist", 0);
-            effect(p, q, "Effect|KidBalloonHoldingFX", q->pos, NULL);
+            fx_on(p, q, PFX_SCRIPT, tstr(q, "Effect|KidBalloonHoldingFX"), q->pos, 1);   /* createAndStartAttached */
             q->mv.resp2 = d > 0 ? d * d : 0;
         } else {
             q->flags |= OF_EFF_NODES | OF_PICKUP;
@@ -1153,7 +1224,7 @@ int people_add(People *p, Group tmpl, const float pos[3], float heading_deg)
 
 int people_add_window(People *p, Group tmpl, const float at[3], int building, int storey, int column)
 {
-    int who = people_add(p, tmpl, at, 0);            /* [G] facing as placed (0): the window clips face out */
+    int who = people_add(p, tmpl, at, 0);            /* [R 0x318A44 .. 0x318B14] no facing is set: the identity */
     if (who >= 0) {
         p->v[who].building = building;
         p->v[who].storey = storey;
@@ -1175,7 +1246,7 @@ int people_crowd(People *p, const Group *tmpls, int ntmpls, const float centre[3
         if (who < 0)
             continue;
         Person *q = &p->v[who];
-        start_anim(p, q, "Running", 1);
+        start_anim(p, q, "Running", 1, 0);
         mover_init(q, s, d, 10);
         made++;
     }
@@ -1249,7 +1320,7 @@ static void create_band(People *p, int o)
         if (who < 0)
             continue;
         Person *q = &p->v[who];
-        start_anim(p, q, "Running", 1);
+        start_anim(p, q, "Running", 1, 0);
         mover_init(q, start, end, 4);
         q->mv.flags = 0;
         q->heading = 90;
@@ -1266,7 +1337,7 @@ static void create_guard(People *p, int o)
     if (who < 0)
         return;
     Person *q = &p->v[who];
-    start_anim(p, q, "March", 0);
+    start_anim(p, q, "March", 0, 0);
     q->march_dir = group_num(p->obj[o].t, "MarchDir", 1);   /* setMarchDirection */
     q->hut = o;
     float end[3] = { p->obj[o].pos[0], p->obj[o].pos[1] - 3, p->obj[o].pos[2] };
@@ -1369,7 +1440,7 @@ int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float
     if (who < 0)
         return -1;
     Person *q = &p->v[who];
-    start_anim(p, q, "StreakOut", 1);
+    start_anim(p, q, "StreakOut", 1, 0);
     mover_init(q, start, out, 2.241f);
     mover_add(q, end);
     q->mv.flags = 0;
@@ -1377,8 +1448,10 @@ int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float
     return who;
 }
 
-static void gone(Person *q)
+static void gone(People *p, Person *q)
 {
+    for (int k = PFX_AMBIENT; k <= PFX_SCRIPT; k++)   /* [G] its effects end with it (the effects' own side) */
+        fx_off(p, q, k);
     q->phase = PP_GONE;
     q->flags |= OF_DYING;                            /* requestDelete (vtable +0x58, 0x285DD0) */
     q->mv.active = 0;
@@ -1388,7 +1461,7 @@ static void gone(Person *q)
 void people_remove(People *p, int who)
 {
     if (who >= 0 && who < p->n && p->v[who].phase != PP_GONE)
-        gone(&p->v[who]);
+        gone(p, &p->v[who]);
 }
 
 void people_update(People *p, float dt, const PeopleMonster *m, int nm)
@@ -1434,21 +1507,18 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
             if (st >= 2)
                 r = on_mover(p, q, st);
             place_matrix(q->world, q->pos, q->heading, NULL);
-        } else if (r != DELETE_ME && q->phase == PP_FLYING) {   /* SpherePhysicsMover [R] Gravity 9.81, Restitution 0.8 */
-            float g = tnum(q, "Gravity", 9.81f), e = tnum(q, "Restitution", 0.8f);
-            q->vel[2] -= g * dt;
-            for (int k = 0; k < 3; k++) {
-                q->pos[k] += q->vel[k] * dt;
-                q->rot[k] += q->spin[k] * dt;
-            }
-            if (q->pos[2] < 0 && q->vel[2] < 0) {    /* [G] the bounce on the street; the collision response is not read */
-                q->pos[2] = 0;
-                q->vel[2] = -q->vel[2] * e;
-            }
-            place_matrix(q->world, q->pos, q->heading, q->rot);
+        } else if (r != DELETE_ME && q->phase == PP_FLYING) {
+            /* [R] the SpherePhysicsMover's frame (0x28E440, collide.c): sub-steps, gravity, the street's push and
+             * impulse (restitution and friction, the spin); the people scripts have no OnHitGround. [G: the objects
+             * of the frame's collision world it would meet (0x287430) are left out: people are not in the viewer's
+             * collision world] */
+            collide_mover_step(NULL, &q->cm, q->cmat, -1, dt, NULL, NULL);
+            collide_matrix_to16(q->cmat, q->world);
+            memcpy(q->pos, q->cmat + 9, sizeof q->pos);
+            memcpy(q->vel, q->cm.vel, sizeof q->vel);
         }
         if (r == DELETE_ME)
-            gone(q);
+            gone(p, q);
     }
 }
 
@@ -1505,6 +1575,14 @@ int people_window_at(const People *p, int building, int storey, int column)
     return -1;
 }
 
+int people_window_retired(const People *p, int building, int storey, int column)
+{
+    for (int i = 0; i < p->nretired; i++)
+        if (p->retired[i].building == building && p->retired[i].storey == storey && p->retired[i].column == column)
+            return 1;
+    return 0;
+}
+
 int people_can_grab(const People *p, const PeopleBox *b, int nb, const float monster_pos[3], const float xyz[3],
                     int mirrored)
 {
@@ -1546,14 +1624,23 @@ void people_grab(People *p, int who, float blend)
     q->blend_left = q->blend;
     mat_quat(q->world, q->from_q);
     memcpy(q->from_p, &q->world[12], sizeof q->from_p);
+    q->off_set = 0;
+    actor_on_pickup(p, q);                           /* 0x2B344C / 0x2DA45C: 0x30C5E0, its effects stop */
+    if (q->building >= 0 && p->nretired < 64) {      /* grabbed from its window: the slot is retired */
+        p->retired[p->nretired].building = q->building;
+        p->retired[p->nretired].storey = q->storey;
+        p->retired[p->nretired++].column = q->column;
+    }
     on_pickup(p, q);                                 /* script event 8 */
     leave_window(q);                                 /* 0x318140: the occupant record lets it go */
 }
 
 /* [R] HeldObjectMover (init 0x310ED0, held 0x3109E0): the object's MajorAxis (default 2, z) along the hand's z, the
  * next one ((MajorAxis + 1) % 3) along the hand's y, the last their cross product; at the hand's place plus
- * HoldOffset (MirroredHoldOffset when the monster plays mirrored) in the hand's frame. While the blend lasts (+0x84)
- * it comes in from where it was (0x310B50; [G] linearly). */
+ * HoldOffset (MirroredHoldOffset when the monster plays mirrored) in the hand's frame. [R] The init keeps where it was
+ * in that frame (its turn +0x68 and place +0x78, from the hand at the grab); while the blend lasts (+0x84 the time
+ * left, +0x88 one over the blend) 0x310B50 takes w = 1 - left / blend, turns that offset w of the way to none
+ * (0x104C60) and scales its place by 1 - w, on the hold's frame: linear in time, and it follows the hand. */
 void people_hold(People *p, int who, const float hand[16], int mirrored, float dt)
 {
     if (who < 0 || who >= p->n || p->v[who].phase != PP_HELD)
@@ -1588,14 +1675,25 @@ void people_hold(People *p, int who, const float hand[16], int mirrored, float d
         t[12 + k] = hand[12 + k] + off[0] * hand[k] + off[1] * hand[4 + k] + off[2] * hand[8 + k];
     t[15] = 1;
     if (q->blend_left > 0) {
-        q->blend_left -= dt;
-        float f = q->blend_left > 0 ? 1 - q->blend_left / q->blend : 1;
-        float tq[4], oq[4];
+        float tq[4], oq[4], bq[4];
+        static const float none[4] = { 0, 0, 0, 1 };
         mat_quat(t, tq);
-        slerp(q->from_q, tq, f, oq);
+        if (!q->off_set) {                           /* 0x310ED0: the offset from the hold's frame */
+            float c[4] = { -tq[0], -tq[1], -tq[2], tq[3] }, d[3];
+            quat_mul(c, q->from_q, q->off_q);
+            for (int k = 0; k < 3; k++)
+                d[k] = q->from_p[k] - t[12 + k];
+            for (int k = 0; k < 3; k++)              /* R_t^T d */
+                q->off_p[k] = t[4 * k] * d[0] + t[4 * k + 1] * d[1] + t[4 * k + 2] * d[2];
+            q->off_set = 1;
+        }
+        q->blend_left -= dt;
+        float w = q->blend_left > 0 ? 1 - q->blend_left / q->blend : 1;
+        slerp(q->off_q, none, w, bq);
+        quat_mul(tq, bq, oq);
         quat_mat(oq, q->world);
         for (int k = 0; k < 3; k++)
-            q->world[12 + k] = q->from_p[k] + (t[12 + k] - q->from_p[k]) * f;
+            q->world[12 + k] = t[12 + k] + (1 - w) * (t[k] * q->off_p[0] + t[4 + k] * q->off_p[1] + t[8 + k] * q->off_p[2]);
     } else {
         memcpy(q->world, t, sizeof t);
     }
@@ -1637,7 +1735,7 @@ PeopleEaten people_eat(People *p, int who)
         }
         fart_maybe(p);
     }
-    gone(q);                                         /* 0x2D9DC0: an eaten actor is deleted */
+    gone(p, q);                                      /* 0x2D9DC0: an eaten actor is deleted */
     return e;
 }
 
@@ -1676,7 +1774,9 @@ int people_hit(People *p, int monster, const float c[3], float radius, float mon
         Person *q = &p->v[i];
         if (q->phase != PP_SCRIPT)
             continue;
-        /* [G] the person's sphere: CollisionRadius (DefActorProps: 2) about its place, 1 up; 0x2D4390 not read */
+        /* the person's sphere: CollisionRadius (DefActorProps: 2) [R 0x28FD70: about the model's bounding sphere's
+         * centre; G: taken 1 up, as people are not in the viewer's collision world (the game's test is the monster
+         * against the objects, 0x2E22B0, an armed sphere's blow on an OnlyHitWithEffNodes person)] */
         float rr = tnum(q, "CollisionRadius", 2) + radius;
         float dx = q->pos[0] - c[0], dy = q->pos[1] - c[1], dz = q->pos[2] + 1 - c[2];
         if (dx * dx + dy * dy + dz * dz <= rr * rr)

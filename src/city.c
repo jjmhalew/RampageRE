@@ -1227,7 +1227,8 @@ void scene_people_spawn(Scene *s, float dt)
         const Building *b = &sb->b;
         int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
         if (b->state != BUILDING_STANDING || ls <= 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
-            people_window_at(s->folk, ws->building, ls, ws->column) >= 0)
+            people_window_at(s->folk, ws->building, ls, ws->column) >= 0 ||
+            people_window_retired(s->folk, ws->building, ls, ws->column))   /* its occupant grabbed: retired */
             continue;                                /* [R 0x31AD00] the ground storey (its record +0x10 is 0) none */
         {                                            /* [R 0x31AD00] 10 out in front of the cell, the last building
                                                       * whose box holds it (0x2A3D20) must stand lower than it */
