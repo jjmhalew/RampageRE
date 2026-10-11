@@ -230,12 +230,16 @@ def write_md(path, funcs, rules):
         if s in t:
             out.append(f'| {s} | {t[s][0]:,} | {kb(t[s][1])} | {100 * t[s][1] / b_all:.1f} % |')
     out.append(f'| all | {n_all:,} | {kb(b_all)} | |')
-    out += ['', '## Open', '', 'The game behaviour no port code has read yet (the `open` rules; the uncited bytes in each):', '',
-            '| Range | Uncited | What |', '|---|---:|---|']
-    for status, sel, note, text in rules:
-        if status == 'open':
-            b = sum(f['end'] - f['start'] for f in funcs if f['group'] == text and f['status'] == 'open')
-            out.append(f'| `{text}` | {b:,} B | {md(note)} |')
+    out += ['', '## Open', '']
+    opens = [(note, text) for status, sel, note, text in rules if status == 'open']
+    if not opens:
+        out.append('None: no `open` rule is left; every piece of game behaviour the sort found is ported.')
+    else:
+        out += ['The game behaviour no port code has read yet (the `open` rules; the uncited bytes in each):', '',
+                '| Range | Uncited | What |', '|---|---:|---|']
+    for note, text in opens:
+        b = sum(f['end'] - f['start'] for f in funcs if f['group'] == text and f['status'] == 'open')
+        out.append(f'| `{text}` | {b:,} B | {md(note)} |')
     if NOTES:
         out += ['', 'Also open or worth a look (from the sort, not tied to one range):', '']
         out += [f'- {n}' for n in NOTES]
@@ -286,6 +290,8 @@ def write_html(path, funcs, rules, fragment=False):
             rows.append(f'<tr><td class="mono">{html.escape(text)}</td><td class="num">{n:,}</td>'
                         f'<td>{html.escape(note)}</td></tr>')
     extra = ''.join(f'<li>{html.escape(n)}</li>' for n in NOTES)
+    if not rows:
+        rows.append('<tr><td colspan="3">None: every piece of game behaviour the sort found is ported.</td></tr>')
     page = HTML.replace('@BAR@', bar).replace('@LEGEND@', legend).replace('@OPEN@', ''.join(rows)) \
         .replace('@NOTES@', extra).replace('@ALLKB@', f'{b_all / 1024:,.0f}').replace('@NFUNC@', f'{len(funcs):,}') \
         .replace('@NAMES@', json.dumps(STATUSES)).replace('@DATA@', json.dumps(data, separators=(',', ':')))
