@@ -286,7 +286,9 @@ at 0.
   AIInstance).
 
 **Trucks and police cars** (`CombatTruck.bsf`) [R]:
-- **Arrival:** they come from x = ±100 to 8 past the nearest monster (within ±40), at 20.
+- **Arrival:** they come from x = ±100 to 8 past the nearest monster (within ±40), at 20. getNearestMonster finds
+  none beyond about 31.6 (below), so with the monster farther from the start than that the end is 8 in from x = 0
+  (the port's none) [G: what the script reads then].
 - **Troops:** they drop their `TroopType<n>` × `numTroop<n>Spawned`, one every 0.5 s, in a staggered line
   (`ExitTruck` from a truck), then drive off at 15.
 - **The police car** skids to a stop and becomes pickable.
@@ -343,9 +345,19 @@ at 0.
 - **The wobble:** `OscillationScale` 0.1, no offset: it rocks ±0.1 rad about x and y all its life (the facing is
   its own; "The wobble" of the helicopters above).
 
+**getNearestMonster** [R]: the Actor binding 0x42 (0x2A8FA0 -> 0x2B26F0) and the RScriptObject one 0x37 (0x2AA080 ->
+0x2B2CC0; the AttackObject's lookup 0x2A9F00 falls back to it) are the same code: the nearest player monster by
+squared 3D distance, starting at 1000, so none farther than about 31.6 (army.c `nearest_monster`) [G: with none the
+index is −1 and the script is handed gWorld +0x3C (0x4D17DC, the monsters' count in 0x2BD940) through the result's
+setter 0x27C8D0; what it then reads is not followed, here none]. The movers' own target (flag 8, LineMover.getTarget:
+the SWAT's and troops' aim, the facing) is not that: 0x316060 takes the nearest from FLT_MAX, no limit
+(`mover_target`).
+
 **Bombers** (`Bomber.bsf`) [R]:
 - **Path:** across at 20, at `Height` (from the AIInstance; 42 by default), at y = 5 (row 0) or 15 (row 1).
-- **Bombing:** `Carpet` bombers drop every pulse (1 s). `Targeted` ones drop when within 4.8 along x.
+- **Bombing:** `Carpet` bombers drop every pulse (1 s). `Targeted` ones drop when within 4.8 along x. Both only with
+  a monster within getNearestMonster's 31.6 in 3D (updateBombStatus): at the default `Height` 42 a monster high on a
+  building, not one on the street.
 - **Death:** one hit makes it fall (addStats type 2).
 - `reloadWeapon` (Actor id 0x3D; the AttackObject's id 0x3A takes cluster and weapon, −1 all) is the weapon's vtable
   +0x80 (0x296F70) [R]: ammo = Ammo (0 stays 0), the countdown at least ChargeTime + FiringOffset, the charge effect

@@ -271,10 +271,32 @@ static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx */
         emit(a, AE_SOUND, who(a, u), name, u->pos);
 }
 
-static int nearest_monster(const Army *a, const float pos[3])   /* getNearestMonster */
+/* getNearestMonster [R: the Actor binding 0x42 (0x2A8FA0 -> 0x2B26F0) and the RScriptObject / AttackObject one 0x37
+ * (0x2AA080 -> 0x2B2CC0) are the same code]: the nearest player monster by squared 3D distance, starting at 1000: none
+ * farther than sqrt(1000), about 31.6; -1 with none [G: the game then hands the script gWorld +0x3C (0x4D17DC, the
+ * monsters' count to 0x2BD940) as the monster, read by the result's setter 0x27C8D0; what the script sees is not
+ * followed] */
+static int nearest_monster(const Army *a, const float pos[3])
 {
     int best = -1;
-    float bd = 1e30f;
+    float bd = 1000;
+    for (int i = 0; i < a->nm; i++) {
+        float e[3] = { a->m[i].pos[0] - pos[0], a->m[i].pos[1] - pos[1], a->m[i].pos[2] - pos[2] };
+        float d = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+        if (d < bd) {
+            bd = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* the mover's target (flag 8; LineMover.getTarget, +0x8C) [R 0x316060]: given none (+0x84), the nearest player monster
+ * by squared 3D distance with no limit (from FLT_MAX); -1 none */
+static int mover_target(const Army *a, const float pos[3])
+{
+    int best = -1;
+    float bd = 3.4028235e38f;
     for (int i = 0; i < a->nm; i++) {
         float d = dist3(a->m[i].pos, pos);
         if (d < bd) {
@@ -1574,7 +1596,7 @@ static int mover_step(Army *a, ArmyUnit *u, float dt)
     if (face_path && (q[0] != p[0] || q[1] != p[1]))
         u->facing = facing_of(q[0] - p[0], q[1] - p[1]);
     if (u->mv.kind == 0 && (u->mv.flags & 8)) {
-        int m = nearest_monster(a, u->pos);
+        int m = mover_target(a, u->pos);
         if (m >= 0)
             u->facing = facing_of(a->m[m].pos[0] - u->pos[0], a->m[m].pos[1] - u->pos[1]);
     }
@@ -2554,7 +2576,7 @@ static int troop_pulse(Army *a, ArmyUnit *u)
                 u->aux[1] = unum(u, "CopReloadDelay", 5);
             }
         }
-        int m = u->mv.flags & 8 ? nearest_monster(a, u->pos) : -1;   /* the mover's target */
+        int m = u->mv.flags & 8 ? mover_target(a, u->pos) : -1;   /* the mover's target */
         float mp[3];
         memcpy(mp, m >= 0 ? a->m[m].pos : u->pos, sizeof mp);
         float dx = mp[0] - u->pos[0];
@@ -2601,7 +2623,7 @@ static int troop_mover(Army *a, ArmyUnit *u, int state)
 
 static void troop_anim_done(Army *a, ArmyUnit *u)
 {
-    int m = u->mv.flags & 8 ? nearest_monster(a, u->pos) : -1;
+    int m = u->mv.flags & 8 ? mover_target(a, u->pos) : -1;
     if (u->state == 2) {
         start_anim(a, u, "Running", 1);
         u->state = 4;

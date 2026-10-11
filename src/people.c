@@ -138,10 +138,30 @@ static void actor_on_pickup(People *p, Person *q)
     fx_off(p, q, PFX_CHALLENGE);
 }
 
-static const PeopleMonster *nearest_monster(const People *p, const float pos[3])   /* getNearestMonster */
+/* getNearestMonster [R 0x2B26F0, the Actor binding 0x42 of 0x2A8FA0]: the nearest player monster by squared 3D
+ * distance, starting at 1000: none farther than sqrt(1000), about 31.6; NULL with none [G: the game then hands the
+ * script gWorld +0x3C (0x4D17DC) as the monster; what the script sees is not followed] */
+static const PeopleMonster *nearest_monster(const People *p, const float pos[3])
 {
     const PeopleMonster *best = NULL;
-    float bd = 1e30f;
+    float bd = 1000;
+    for (int i = 0; i < p->nm; i++) {
+        float dx = p->m[i].pos[0] - pos[0], dy = p->m[i].pos[1] - pos[1], dz = p->m[i].pos[2] - pos[2];
+        float d = dx * dx + dy * dy + dz * dz;
+        if (d < bd) {
+            bd = d;
+            best = &p->m[i];
+        }
+    }
+    return best;
+}
+
+/* the mover's target (flag 8; LineMover.getTarget, +0x8C) [R 0x316060]: given none (+0x84), the nearest player monster
+ * by squared 3D distance with no limit (from FLT_MAX); NULL none */
+static const PeopleMonster *mover_target(const People *p, const float pos[3])
+{
+    const PeopleMonster *best = NULL;
+    float bd = 3.4028235e38f;
     for (int i = 0; i < p->nm; i++) {
         float dx = p->m[i].pos[0] - pos[0], dy = p->m[i].pos[1] - pos[1], dz = p->m[i].pos[2] - pos[2];
         float d = dx * dx + dy * dy + dz * dz;
@@ -348,7 +368,7 @@ static int mover_step(People *p, Person *q, float dt)
         q->pos[k] = a[k] + (b[k] - a[k]) * q->mv.t;
     if ((q->mv.flags & 1) && (b[0] != a[0] || b[1] != a[1]))
         q->heading = heading_of(b[0] - a[0], b[1] - a[1]);
-    const PeopleMonster *m = nearest_monster(p, q->pos);
+    const PeopleMonster *m = mover_target(p, q->pos);
     if ((q->mv.flags & 8) && m)
         q->heading = heading_of(m->pos[0] - q->pos[0], m->pos[1] - q->pos[1]);
     if (r == 1 && q->mv.resp2 > 0)
@@ -669,7 +689,7 @@ static void decide(People *p, Person *q)
 {
     if (q->is_child || q->state == 4)
         return;
-    const PeopleMonster *m = nearest_monster(p, q->pos);   /* the mover's target (flag 8) */
+    const PeopleMonster *m = mover_target(p, q->pos);   /* the mover's target (flag 8) */
     if (!m)
         return;
     if (fabsf(m->pos[0] - q->pos[0]) <= 15.0f) {

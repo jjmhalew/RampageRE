@@ -371,10 +371,13 @@ static float building_height(const StreetObjs *s, const StreetObj *o)
 {
     return o->building >= 0 && o->building < s->nb ? s->b[o->building].max[2] : 0;
 }
-static int nearest_monster(const StreetObjs *s, const float p[3])   /* getNearestMonster: -1 none */
+/* getNearestMonster [R 0x2B2CC0, the RScriptObject binding 0x37 of 0x2AA080, the same code as the Actor's 0x2B26F0]:
+ * the nearest player monster by squared 3D distance, starting at 1000: none farther than sqrt(1000), about 31.6; -1
+ * with none */
+static int nearest_monster(const StreetObjs *s, const float p[3])
 {
     int best = -1;
-    float bd = 1e30f;
+    float bd = 1000;
     for (int i = 0; i < s->nm; i++) {
         float d[3] = { s->m[i].pos[0] - p[0], s->m[i].pos[1] - p[1], s->m[i].pos[2] - p[2] };
         float q = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];

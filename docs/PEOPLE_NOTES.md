@@ -50,7 +50,8 @@ actor). 0x800 means "deleting" (`requestDelete`, vtable +0x58, 0x285DD0), and 0x
 - **At the end** [R 0x315F70]: the share is set back to 1 and callback 2 comes again every frame, until the script
   gives the actor another mover or none (`setMover`, `startAnim` with 0). A segment of length 0 (+0x50) does not move:
   callback 1 every frame (the tourists' mover that holds them in place).
-- **Facing**: flag 1 faces the way it moves (0x316E60), and flag 8 faces its target, the nearest monster. The window
+- **Facing**: flag 1 faces the way it moves (0x316E60), and flag 8 faces its target, the nearest monster with no limit (0x316060: from FLT_MAX; the scripts'
+  getNearestMonster, 0x2B26F0, finds none beyond about 31.6). The window
   occupants get no facing (0x318A44 … 0x318B14 sets the place, the `DefaultAnim` and +0xEC / +0xF4 only).
 - **Monster response**: while it simply moves, a monster closer than `MonsterResponseDist` gives callback 4
   (+0x5C holds the distance squared).
