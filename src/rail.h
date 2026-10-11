@@ -178,7 +178,8 @@ int rail_nearest_pickup(const Rail *r, const float hand[3], const float root[3],
 void rail_grab(Rail *r, int obj, int monster);       /* the hold (0x2DA310) and onPickup */
 /* each frame while held: the hand's world matrix; mirrored picks MirroredHoldOffset (HeldObjectMover 0x310ED0) */
 void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored);
-/* throwObject(eat, vel) (0x2D9DC0): the object flies with vel on a SpherePhysicsMover, then onThrow(monster, eat) */
+/* throwObject(eat, vel) (0x2D9DC0): the object flies with vel (in the world: Monsters.bsf's throwObject(vel, 0, eat)
+ * turned by the monster's matrix, the caller's) on a SpherePhysicsMover, then onThrow(monster, eat) */
 void rail_throw(Rail *r, int obj, int monster, int eat, const float vel[3]);
 
 #endif

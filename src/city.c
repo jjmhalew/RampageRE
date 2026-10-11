@@ -741,12 +741,31 @@ void scene_huts_update(Scene *s, float dt)
         if (!s->scripted[k].hut || id < 0 || s->scripted[k].hut_id < 0)
             continue;
         st = people_hut_state(s->folk, s->scripted[k].hut_id);
-        if (st == 1)                                 /* its SphereMover */
-            for (int j = 0; j < 3; j++) {
-                s->scripted[k].pos[j] += s->scripted[k].vel[j] * dt;
-                s->instances[id].base.m[12 + j] += s->scripted[k].vel[j] * dt;
+        if (st == 1) {
+            /* [R] its SphereMover: createSphereMover (World binding 0x23) is the SpherePhysicsMover (collide.c,
+             * 0x28E440) with the template's numbers (0x28F220: Gravity, DefObjectProps' 35; Mass, Restitution,
+             * SlidingFriction, InertiaSolidity) and the radius of its shape (no CollisionBox, CollisionRadius or
+             * AutoCollisionBox: the guardshack's own sphere, 0x184CB0); the street only (no script OnHitGround) */
+            Group t = s->scripted[k].t;
+            if (!s->scripted[k].cm_on) {
+                const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL;
+                float c[3], r = 1;
+                if (!shape || !s->owner || city_shape_sphere(s->owner, shape, c, &r) != 0 || r < 0.05f)
+                    r = 1;
+                collide_mover_init(&s->scripted[k].cm, r, group_num(t, "Gravity", 9.81f), group_num(t, "Mass", 1),
+                                   group_num(t, "Restitution", 0.8f), group_num(t, "SlidingFriction", 0.4f),
+                                   group_num(t, "InertiaSolidity", 1));
+                memcpy(s->scripted[k].cm.vel, s->scripted[k].vel, sizeof s->scripted[k].vel);
+                collide_matrix_from16(s->scripted[k].cm_m, s->instances[id].base.m);
+                s->scripted[k].cm_on = 1;
             }
-        else if (st == 2)
+            collide_mover_step(NULL, &s->scripted[k].cm, s->scripted[k].cm_m, -1, dt, NULL, NULL);
+            collide_matrix_to16(s->scripted[k].cm_m, s->instances[id].base.m);
+            for (int j = 0; j < 3; j++) {
+                s->scripted[k].pos[j] = s->instances[id].base.m[12 + j];
+                s->scripted[k].vel[j] = s->scripted[k].cm.vel[j];
+            }
+        } else if (st == 2)
             s->instances[id].hidden = 1;
     }
 }

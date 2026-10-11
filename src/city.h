@@ -209,7 +209,9 @@ typedef struct {
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
     /* the block's scripted objects for people.c: Band.bsf (a band marching in) and RoyalGuardHut.bsf (a guard's hut) */
-    struct { Group t; float pos[3]; int instance, hut, hut_id; float vel[3]; } scripted[8]; int nscripted;
+    /* a hut sent flying: its SpherePhysicsMover (cm, its matrix cm_m, made at the first flying frame: cm_on) */
+    struct { Group t; float pos[3]; int instance, hut, hut_id; float vel[3]; CollideMover cm; float cm_m[12];
+             int cm_on; } scripted[8]; int nscripted;
     /* the StreetObject.bsf and RoofItem.bsf objects of the block and its buildings as placed, for streetobj.c (main
      * adds them): the template, its ObjectInstance| group, its instances first .. last - 1 (the model, then its
      * flags' cloths), where it stands, the building whose ObjectInstance| it is (-1 the block's own); model: the

@@ -1232,7 +1232,9 @@ void parade_hold(Parade *p, int obj, const float hand[16], int mirrored, float d
 }
 
 /* throwObject(eat) (0x2D9DC0): onThrow(monster, eat). [R] Biker.bsf: eaten, addStats type 1 and a fart one time in
- * five 2 s later, then the engine deletes the eaten actor; not eaten, smash (state 5: deleted when it lands) */
+ * five 2 s later, then the engine deletes the eaten actor; not eaten, smash (state 5: deleted when it lands). The
+ * throw's own velocity (turned by the monster, 0x2D9DC0) is not kept: every onThrow here smashes or deletes the
+ * object in the same call, smashObject's velocity replacing it [R] */
 void parade_throw(Parade *p, int obj, int monster_i, int eat, float monster_heading)
 {
     if (!alive(p, obj) || p->o[obj].phase != PAP_HELD)
