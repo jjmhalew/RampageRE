@@ -270,9 +270,13 @@ emitter's instance, at +0xA0 the rod's head and at +0xA4 its tail, both 0 at its
 Only the +EmitterRelativeParticles emitters' particles are drawn through the emitter's matrix (0x222400); the others
 are in the world [R]. `fx_move` moves those back by the effect's move, so they stay (smoke trails stay behind), and
 `fx_place` turns the relative ones (their place, velocity, streak direction, mesh turn) with the new frame. An
-effect also has a velocity of its own (+0x5C, set through vtable +0x90, 0x1F24E0) that the emitters pass to their
-non-Stationary, non-relative particles (0x20F064, 0x212310); none is given here [G: which callers set it was not
-traced].
+effect also has a velocity of its own (+0x5C, 0 from the constructor; set through vtable +0x94, 0x1F24E0) that the
+emitters add to their non-Stationary, non-relative particles' (0x20F064, 0x212310; a carried emitter adds its
+carrier's too) [R]. A CompositeFx hands it to its parts (0x1E9B28: the parts whose +0xE has bit 8, which a
+ParticleSystemFx has, 0xB from 0x1F4608). Only a shot sets it, on its FireEffect (Projectile +0xD8): its velocity
+(direction +0xB0 x speed +0xBC) at the launch (0x294D24) and after each step (0x293B80); no FollowEffect or other
+caller does (the other +0x94 calls are on other classes). So a `Tank_Projectile`'s puffs (em_vel.y -50) travel on with
+the shell and fall back from it at 50, not at 50 through the world. `src/fx.c`: `fx_vel`, main.c's shot effects.
 
 ## Effects on a monster's bones
 The clip events of type 12 start and stop the effects of MONSTER_DATA's list in the monster's 32 effect slots, each a
@@ -332,4 +336,3 @@ offset [G: for GEQUAL's equal-depth pass; how two coplanar draws round on the GS
   address in the ELF. The update variants compute the same; they differ in the draws: 0x216470 picks the texture,
   tile and angle (0x2193A0, 0x219410, 0x219530: two randoms for a RandomStartRotation emitter, XForm or not), 0x20EFD0
   and 0x213F30 none of them (0x2122D0, 0x2119C0, 0x212240). The XForm emitters are taken as the latter [G].
-- The effect's own velocity (+0x5C) is not given ("Moving effects").

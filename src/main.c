@@ -4060,6 +4060,8 @@ static void army_step(Viewer *v, float dt)
                 v->fxa[k].head = sh->head;
                 continue;
             }
+            float sv[3] = { sh->dir[0] * sh->speed, sh->dir[1] * sh->speed, sh->dir[2] * sh->speed };
+            fx_vel(v->fxw, v->fxa[k].fx, sv);        /* the shot's velocity is its look's [R 0x293B80, 0x294D24] */
             memcpy(at, sh->pos, sizeof at);
         } else if (v->fxa[k].unit >= 0) {
             const ArmyUnit *u = army_unit(v->army, v->fxa[k].unit);

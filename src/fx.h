@@ -49,9 +49,12 @@ void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3]);
 int fx_alive(const FxWorld *w, int id);
 /* an effect that follows something (an army unit's, a shot's look): its origin moves, and with it the particles of its
  * +EmitterRelativeParticles emitters; the others are in the world and stay behind (a trail) [R 0x222400: only the
- * relative ones are drawn through the emitter's matrix]. The game's effects also pass a velocity of their own (+0x5C,
- * 0x20F064) to non-Stationary particles; none is given here [G: the callers' velocities are not traced] */
+ * relative ones are drawn through the emitter's matrix] */
 void fx_move(FxWorld *w, int id, const float pos[3]);
+/* the effect's own velocity (+0x5C, ParticleSystemFx vtable +0x94, 0x1F24E0; a CompositeFx hands it to its parts,
+ * 0x1E9B28): its non-Stationary, non-relative emitters add it to their new particles' (0x20F064, 0x212310). Only a
+ * shot sets it, on its FireEffect: its velocity at the launch (0x294D24) and after each step (0x293B80) [R] */
+void fx_vel(FxWorld *w, int id, const float vel[3]);
 /* a beam's hit t along its collision rod (world units from the rod's start): the rod's head, the reach of its
  * +RelativeDistanceLimit particles, is t now; it grows on from there by the rod's speed (ParticleSystemFx vtable
  * +0x80, 0x1F2520, called by the beam weapon on a hit, 0x295938) */

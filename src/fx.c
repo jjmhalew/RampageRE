@@ -924,7 +924,8 @@ typedef struct {
     int used, gen, nemit;      /* nemit: its live emitters */
     const Effect *e;
     float origin[3], R[3][3], scale;
-    int rod;                   /* the rod emitter (w->em), -1 none (+0x9C) */
+    float vel[3];              /* its own velocity (+0x5C; 0 from the constructor 0x1F45EC), fx_vel */
+    int rod;                  /* the rod emitter (w->em), -1 none (+0x9C) */
     float rod_speed, rod_len, head, tail;   /* the rod's (unscaled), +0xA0, +0xA4 */
     int counted;               /* started through the budget (fx_spawn): it counts by its priority while it lives */
 } Fx;
@@ -1296,9 +1297,11 @@ static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
     for (int i = 0; i < 3; i++)
         v[i] = p0[i] + f->vel[i] + f->velr[i] * (2 * rnd01(w) - 1);   /* em_vel + em_vel_r x (-1..1) [R 0x20F6C0] */
     vec_rows(e->R, v, p->vel);
-    if (e->parent >= 0 && !(d->eflags & (EF_STATIONARY | EF_RELATIVE)))
+    /* the speed passed on [R 0x20F024..0x20F090, 0x212310]: the effect's own velocity (+0x5C, fx_vel), and for a
+     * carried emitter its carrier's too; a Stationary or relative emitter's particles get none */
+    if (!(d->eflags & (EF_STATIONARY | EF_RELATIVE)))
         for (int i = 0; i < 3; i++)
-            p->vel[i] += w->p[e->parent].vel[i];            /* a carried emitter passes its carrier's speed on [R 0x212310] */
+            p->vel[i] += w->fx[e->fx].vel[i] + (e->parent >= 0 ? w->p[e->parent].vel[i] : 0);
     if (d->ptype == PT_STRETCH) {
         float l = len3(p->vel);
         if (l * l < 1e-6f) {
@@ -1595,6 +1598,7 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     f->e = &w->lib->fx[effect];
     memcpy(f->origin, pos, sizeof f->origin);
     f->scale = scale > 0 ? scale : 1;
+    f->vel[0] = f->vel[1] = f->vel[2] = 0;
     f->rod = -1;
     f->head = f->tail = 0;
     f->counted = w->budget && !w->exempt;
@@ -1670,6 +1674,13 @@ void fx_move(FxWorld *w, int id, const float pos[3])
         for (int k = 0; k < 2; k++)
             if (w->em[i].used && w->em[i].fx == slot && w->em[i].sound[k])
                 w->sound(w->sound_ctx, FXS_MOVE, NULL, pos, w->em[i].sound[k]);
+}
+
+void fx_vel(FxWorld *w, int id, const float vel[3])
+{
+    Fx *f = fx_of(w, id);
+    if (f)
+        memcpy(f->vel, vel, sizeof f->vel);
 }
 
 void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3])
