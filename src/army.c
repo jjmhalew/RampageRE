@@ -559,6 +559,8 @@ static int weapon_make(Army *a, ArmyWeapon *w, Group g)
     w->accel = 1e8f;
     w->init_vel = 1;
     w->axis = 2;
+    w->anim_min = group_num(g, "AnimPosMin", 0);    /* [R 0x30F1F0] the actor's weapon, of its own group alone */
+    w->anim_max = group_num(g, "AnimPosMax", 1);
     w->vis_range = 1;
     w->reaction = -1;
     weapon_read(w, book);
@@ -723,8 +725,8 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
     memcpy(s->dir, dir0, sizeof s->dir);
     norm3(s->dir);
     if (getenv("RAMPAGE_TRACE"))                     /* a unit's, or a person's (the punks' bottles) */
-        printf("  %.2f: %s fires %s from %.1f %.1f %.1f along %.2f %.2f %.2f\n", a->now,
-               u ? u->name ? u->name : "?" : "person",
+        printf("  %.2f: %s#%d fires %s from %.1f %.1f %.1f along %.2f %.2f %.2f\n", a->now,
+               u ? u->name ? u->name : "?" : "person", u ? who(a, u) : -1,
                w->name ? w->name : "?", from[0], from[1], from[2], s->dir[0], s->dir[1], s->dir[2]);
     s->damage = w->damage * w->scale;
     s->duration = w->duration;
@@ -944,7 +946,8 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
     } else {
         ArmyShot *s = new_shot(a);
         if (getenv("RAMPAGE_TRACE"))
-            printf("  %.2f: %s fires %s (a beam)\n", a->now, u && u->name ? u->name : "person", w->name ? w->name : "?");
+            printf("  %.2f: %s#%d fires %s (a beam)\n", a->now, u && u->name ? u->name : "person", u ? who(a, u) : -1,
+               w->name ? w->name : "?");
         w->beam_left = w->duration;                  /* [R] 0x295CDC */
         w->firing = 1;
         w->first = 1;
@@ -1128,6 +1131,11 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
         float from[3], dir[3], F[3][3];
         int aimed = weapon_aim(a, u, w, tp, has, from, dir, F, dt);
         int may = has && u->weapons_on && w->on && aimed && dist3(from, tp) <= w->range;
+        if (u->kind == AK_TROOP || u->kind == AK_WINDOW) {   /* [R 0x30EC10] an actor fires only within its clip's */
+            float at = u->anim_len > 0.001f ? u->anim_time / u->anim_len : 0;   /* AnimPosMin .. Max (0x30C020) */
+            if (at < w->anim_min || at > w->anim_max)
+                may = 0;
+        }
         weapon_tick(a, u, w, may, from, dir, (const float (*)[3])F, point ? -1 : u->target, dt);
     }
 }
@@ -1839,6 +1847,8 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     army_osc_init(&u->osc, tmpl, inst);
     unit_weapons(a, u);
     unit_matrix(u);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %.2f: unit %d made: %s\n", a->now, k, name ? name : "?");
     return k;
 }
 
@@ -1847,6 +1857,8 @@ static void unit_remove(Army *a, ArmyUnit *u)        /* requestDelete */
     if (u->phase == AU_GONE)
         return;
     u->phase = AU_GONE;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %.2f: unit %d gone: %s\n", a->now, who(a, u), u->name ? u->name : "?");
     for (int i = 0; i < u->nw; i++)
         if (u->w[i].shot >= 0)
             for (int s = 0; s < a->nshots; s++)

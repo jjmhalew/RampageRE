@@ -97,6 +97,14 @@ else 0.
   on the pulse): StreetPunkBottle's countdown starts at 0 (ChargeTime + FiringOffset), so one bottle a throw, a throw
   every `ReloadDelay` (5) at most [R]. Here army.c `army_person_weapon` / `persons_update` (a weapon per person,
   kept until `army_person_forget`).
+- **The actor's weapon** (0x30EC10 each frame; its keys read from the template's own Weapon group by 0x30F1F0:
+  `AnimPosMin` +0x18 (0), `AnimPosMax` +0x1C (1), `FromWindow` +0x24, `LimitAngle` +0x28 in degrees, `Direction`)
+  [R]: it tries to fire (vtable +0x68, with the target) only while it is enabled, has ammo (+0xEC > 0) and its
+  current clip's position (the record's time / its length, 0x30C020; 0 for a length under 0.001) is within
+  AnimPosMin .. AnimPosMax; otherwise it holds (+0x7C, 0x297090: the countdown at least ChargeTime + FiringOffset,
+  the charge effect stopped). Only `SoldierGrenadierFromWindow` (0.5 .. 0.75 of its 1 s throw) and the `Biker`
+  (0.4 .. 1) narrow it. Here `unit_weapons_tick` for Swat.bsf and Military_Window.bsf units; the biker's weapon is
+  made from the book alone (parade.c passes the name) [G: its AnimPosMin not applied].
 
 The cluster (0x299640) [R]: RotationRate and ElevationRate are radians a second as read (the step 0x29BA50 is rate ×
 the frame's dt; the angles wrap at 0x298E70 / 0x298F40). The defaults: ElevationRate 0.5, ElevationRange ±40°,
