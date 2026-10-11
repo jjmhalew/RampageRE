@@ -469,7 +469,7 @@ typedef struct Node {
     char name[32];
     float p[3], m;              /* <p> x y z, <m> scale (GuiObject.setScale) */
     float rot[4]; int has_rot;  /* <x>'s 3x3 (its 2D part) over its scale: a turn and / or a mirror; GuiObject.yaw */
-    float sx;                   /* GuiObject.setScaleX: the object's x axis by this [G: on top of m] */
+    float sx; int has_sx;       /* GuiObject.setScaleX (0x2572F0): the 3x3's first row is (sx, 0, 0) [R] */
     float d[2]; int has_d;
     float col[4];
     unsigned F, Q, M;
@@ -480,7 +480,7 @@ typedef struct Node {
     float tscale, maxwidth, wrap;
     int tmode, has_tslant; float tslant;   /* <g> m (3: each line by j) and i */
     float tcol[4]; int has_tcol;
-    float shadow[4]; int sh_dx, sh_dy, has_shadow;   /* <sh>: a text's own shadow (colour AABBGGRR [G], dx, dy) */
+    float shadow[4]; int sh_dx, sh_dy, has_shadow;   /* <sh>: a text's own shadow (colour AABBGGRR, dx, dy) */
     float val, vmin, vmax;
     int mask_bar;
     float bar_col[4], mask_col[4];
@@ -562,7 +562,7 @@ static void node_text(Node *nd, const char *s)
     if (nd)
         snprintf(nd->text, sizeof nd->text, "%s", s ? s : "");
 }
-/* GuiText.localizeString: a key without a text keeps the key [G] */
+/* GuiText.localizeString / the `L` tag */
 static void node_localize(const Gui *g, Node *nd, const char *key)
 {
     /* [R 0x235800] a key starting with a digit is the text itself; one the strings lack shows "0x key x0" */
@@ -619,16 +619,60 @@ static void apply_g(Node *nd, const char *attr, const char *val)
     }
 }
 
-/* GuiObject.yaw(a): the object's turn about the screen's normal, replacing the one it had [G: the scripts give the
- * whole angle each time; Loading.ifc's <x> holds the turn yaw(-4.15 pi) gives, 27 degrees] */
+/* GuiObject.yaw(a) (0x2571F0 -> 0x240AE0): the 3x3 becomes Rz(a) times it (0x1015B0 rows (c, s, 0), (-s, c, 0),
+ * (0, 0, 1); 0x101A90 a x b), a turn about the screen's normal on top of the one it had [R]. Loading.scr calls
+ * setScale first each time, so its yaw(-4.15 pi) gives the 27 degrees Loading.ifc's <x> holds. (setScaleX's row
+ * would turn with it; no script yaws a stretched object.) */
 static void node_yaw(Node *nd, float a)
 {
     if (!nd)
         return;
-    nd->rot[0] = cosf(a); nd->rot[1] = sinf(a);
-    nd->rot[2] = -sinf(a); nd->rot[3] = cosf(a);
+    float c = cosf(a), s = sinf(a);
+    float r0[2] = { 1, 0 }, r1[2] = { 0, 1 };
+    if (nd->has_rot) {
+        r0[0] = nd->rot[0]; r0[1] = nd->rot[1];
+        r1[0] = nd->rot[2]; r1[1] = nd->rot[3];
+    }
+    nd->rot[0] = c * r0[0] + s * r1[0]; nd->rot[1] = c * r0[1] + s * r1[1];
+    nd->rot[2] = -s * r0[0] + c * r1[0]; nd->rot[3] = -s * r0[1] + c * r1[1];
     nd->has_rot = 1;
+    if (nd->r3_own) {
+        float o[9];
+        memcpy(o, nd->r3, sizeof o);
+        for (int j = 0; j < 3; j++) {
+            nd->r3[j] = c * o[j] + s * o[3 + j];
+            nd->r3[3 + j] = -s * o[j] + c * o[3 + j];
+        }
+    }
 }
+
+/* GuiObject.setScale(m) (0x2570B8): the 3x3 becomes m times the identity, the place kept [R]: the turn (<x>, yaw)
+ * and setScaleX's row go */
+static void node_set_scale(Node *nd, float m)
+{
+    if (!nd)
+        return;
+    nd->m = m;
+    nd->has_rot = 0;
+    nd->has_sx = 0;
+    if (nd->r3_own) {
+        memset(nd->r3, 0, sizeof nd->r3);
+        nd->r3[0] = nd->r3[4] = nd->r3[8] = 1;
+        nd->m3 = m;
+    }
+}
+
+/* GuiObject.setScaleX(v) (0x2572F0): the 3x3's first row becomes (v, 0, 0), the others kept [R] */
+static void node_set_scale_x(Node *nd, float v)
+{
+    if (!nd)
+        return;
+    nd->sx = v;
+    nd->has_sx = 1;
+}
+
+/* an object's x axis' length in its parent: setScaleX's, else its scale */
+static float node_xscale(const Node *nd) { return nd->has_sx ? fabsf(nd->sx) : nd->m; }
 
 static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, const Attr *at, int na)
 {
@@ -694,8 +738,9 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
             apply_g(nd, at[i].k, at[i].v);
         nd->font = find_font(g, text);
     } else if (strcmp(tag, "sh") == 0) {
-        /* "3 0xFF000000 -4 4" on the cards' names: taken as flags, colour (the engine's AABBGGRR: opaque black), dx,
-         * dy [G] */
+        /* "3 0xFF000000 -4 4" on the cards' names: a count, then (0x229FF0) the colour into OFont +0x18 (the .fdf's
+         * shadow colour, the engine's AABBGGRR: opaque black), dx and dy as bytes into +0x12 / +0x13 [R; the count as
+         * <ep>'s] */
         char *e1, *e2;
         strtoul(text, &e1, 0);
         uint32_t c = (uint32_t)strtoul(e1, &e2, 0);
@@ -921,7 +966,7 @@ static int xml_element(Gui *g, Layout *L, Xml *x, Node *parent)
 done:
     if (nd) {
         if (nd->F & 1)
-            nd->visible = 0;                             /* [G hud.c: F 0x1 = starts hidden] */
+            nd->visible = 0;                             /* [R 0x241770: F & 0x201 is not drawn; F 0x1 hidden] */
         if (!parent)
             L->root = nd;
     }
@@ -966,8 +1011,9 @@ static void layout_free(Layout *L)
     }
 }
 
-/* GuiObject.findObject(name): depth first among the object's descendants [G: not the object itself; CitySelect's
- * cityStats.findObject("city_stats") must reach the rect inside the quad of that name] */
+/* GuiObject.findObject(name) (0x256E18 -> 0x242200): depth first among the object's descendants, each before its
+ * children (0x242290), not the object itself [R] (CitySelect's cityStats.findObject("city_stats") reaches the rect
+ * inside the quad of that name) */
 static Node *find_in(Node *nd, const char *name)
 {
     for (; nd; nd = nd->next) {
@@ -998,7 +1044,8 @@ static int child_count(const Node *nd)
     for (const Node *c = nd ? nd->child : NULL; c; c = c->next) n++;
     return n;
 }
-/* GuiObject.copyTree + setParent: a deep copy as the parent's last child [G: last] */
+/* GuiObject.copyTree (0x256BD0: 0x240F80, the copy's F | 0x10) + setParent (0x2426F0 -> addChild 0x242540 after
+ * none: after the last): a deep copy as the parent's last child [R] */
 static Node *node_copy(Layout *L, const Node *src, Node *parent)
 {
     if (!src || L->n >= L->cap)
@@ -1077,7 +1124,7 @@ static void node_span(const Gui *g, const Node *nd, float *x0, float *x1)
         b = fmaxf(b, q + w);
     }
     for (const Node *c = nd->child; c; c = c->next) {
-        float c0, c1, k = c->m * c->sx;
+        float c0, c1, k = node_xscale(c);
         node_span(g, c, &c0, &c1);
         a = fminf(a, c->p[0] + k * c0);
         b = fmaxf(b, c->p[0] + k * c1);
@@ -1141,7 +1188,7 @@ static void sizer_lay(const Gui *g, Node *sz)
     if (!(sz->sflags & 1))
         return;
     for (Node *c = sz->child; c && n < N; c = c->next, n++) {
-        float k = c->m * c->sx;
+        float k = node_xscale(c);
         node_span(g, c, &mn[n], &mx[n]);
         mn[n] *= k;
         mx[n] *= k;
@@ -1157,12 +1204,15 @@ static void sizer_lay(const Gui *g, Node *sz)
         it[i]->p[0] = pos[i];
 }
 
-/* the GUI lays its sizers out every frame [R 0x248B80 with F 0x100] */
+static void list_settle(Node *l);
+/* the GUI lays its sizers out every frame [R 0x248B80 with F 0x100], and its lists (their selection, 0x23CF60) */
 static void layouts_lay(const Gui *g, Node *nd)
 {
     for (; nd; nd = nd->next) {
         if (nd->sizer)
             sizer_lay(g, nd);
+        if (nd->kind == N_LIST)
+            list_settle(nd);
         layouts_lay(g, nd->child);
     }
 }
@@ -1194,46 +1244,73 @@ static void list_select(Node *l, int i)
         else if (j != i && l->has_norm) { memcpy(c->tcol, l->norm_col, sizeof c->tcol); c->has_tcol = 1; }
     }
 }
-/* incrementSelection(delta, 0): to the next item shown, no wrap [G hud.c] */
-static void list_increment(Node *l, int delta)
+static int list_shown(Node *l, int i)                  /* F & 0x41 clear */
+{
+    Node *c = i >= 0 ? list_item(l, i) : NULL;
+    return c && c->visible;
+}
+/* the nearest shown item from i on, going by d (-1 when none) */
+static int list_seek(Node *l, int i, int d)
+{
+    for (int n = list_count(l); i >= 0 && i < n; i += d)
+        if (list_shown(l, i))
+            return i;
+    return -1;
+}
+/* GuiListBox's setSelection(i) (0x23E480, also the script's) [R]: at or before the first item, the first shown one;
+ * at or past the last, the last shown one (none: the selection stays); between, item i if it shows, else the nearest
+ * shown one onwards in the direction of the move, then back the other way (none: item 0) */
+static void list_set(Node *l, int i)
 {
     if (!l)
         return;
-    int n = list_count(l);
-    for (int j = l->sel + delta; j >= 0 && j < n; j += delta) {
-        Node *c = list_item(l, j);
-        if (c && c->visible) {
-            list_select(l, j);
-            return;
-        }
-    }
-}
-/* incrementSelection(delta, 1): the same, going round [G hud.c] */
-static void list_increment_wrap(Node *l, int delta)
-{
-    int n = list_count(l);
-    if (!l || n <= 0)
+    int n = list_count(l), t;
+    if (i <= 0 || i >= n - 1) {
+        t = i <= 0 ? list_seek(l, 0, 1) : list_seek(l, n - 1, -1);
+        if (t >= 0)
+            list_select(l, t);
         return;
-    for (int k = 1, j = l->sel; k <= n; k++) {
-        j = ((j + delta) % n + n) % n;
-        Node *c = list_item(l, j);
-        if (c && c->visible) {
-            list_select(l, j);
-            return;
-        }
     }
+    int d = i < l->sel ? -1 : 1;
+    t = list_seek(l, i, d);
+    if (t < 0)
+        t = list_seek(l, i, -d);
+    list_select(l, t < 0 ? 0 : t);
 }
-/* GuiListBox.isEnabled(i) [G: an item that exists and shows] */
+/* incrementSelection(delta, once) (0x23E360): setSelection(selection + delta), no wrap [R]. The list's sounds go with
+ * it (+0xF0 on a move, +0x108 when it stays: with `once` only until it moves again), but no layout gives a list any */
+static void list_increment(Node *l, int delta)
+{
+    if (l)
+        list_set(l, l->sel + delta);
+}
+/* GuiListBox.isEnabled(i) (0x253A18 -> 0x23E9F0) [R]: item i (i < 0: the selected one) is there, shows and is enabled
+ * (its record's byte, 1 from 0x23BB70; no script calls enableItem) */
 static int list_enabled(Node *l, int i)
 {
-    Node *c = list_item(l, i);
-    return c && c->visible;
+    return list_shown(l, i < 0 && l ? l->sel : i);
+}
+/* the list's layout, every frame (0x23CF60) [R]: a selected item that does not show gives the selection to the next
+ * shown one after it, else the nearest before it */
+static void list_settle(Node *l)
+{
+    if (!l || l->sel < 0 || list_shown(l, l->sel))
+        return;
+    int t = list_seek(l, l->sel + 1, 1);
+    if (t < 0)
+        t = list_seek(l, l->sel - 1, -1);
+    if (t >= 0)
+        list_select(l, t);
 }
 
 /* ---------------------------------------------------------------- drawing a layout */
 /* GuiRect [R hud.c]: the background inset by -bbias / 2 within d, then the frame inside d: the corner picture
- * mirrored to each corner, the side picture between (the left and right sides as one-pixel strips of it); a rect with
- * no pictures (MonsterSelect's highlights) gets plain bars B wide [G] */
+ * mirrored to each corner (FrameCorner is symmetric about its diagonal, so the game's turns of it draw the same), the
+ * side picture between (the left and right sides as one-pixel strips of it). The draw (0x244500) draws the four
+ * corners only when the first has a picture (+0x17C's texture), the four sides always: GuiLines B wide at B / 2 in
+ * from the edges (0x2449F0), the left down, the bottom left to right, the right up, the top right to left, so v 0
+ * is each one's inner edge (FrameLine's opaque rows the outer); top and bottom from B to W - B, left and right from B
+ * to H - B, or the whole height without corner pictures (MonsterSelect's highlights): a plain band each [R] */
 static void rect_emit(Emit *e, const Node *nd, const Frame *f, float fade)
 {
     float w = nd->has_d ? nd->d[0] : 0, h = nd->has_d ? nd->d[1] : 0;
@@ -1250,10 +1327,10 @@ static void rect_emit(Emit *e, const Node *nd, const Frame *f, float fade)
     if (x1 - x0 < 2 * B) x1 = x0 + 2 * B;
     if (y1 - y0 < 2 * B) y1 = y0 + 2 * B;
     if (!nd->has_corner && !nd->has_side) {
-        emit_quad(e, f, x0, y0, x1, y0 + B, 0, 0, 1, 1, bc, NULL, 0);
-        emit_quad(e, f, x0, y1 - B, x1, y1, 0, 0, 1, 1, bc, NULL, 0);
-        emit_quad(e, f, x0, y0 + B, x0 + B, y1 - B, 0, 0, 1, 1, bc, NULL, 0);
-        emit_quad(e, f, x1 - B, y0 + B, x1, y1 - B, 0, 0, 1, 1, bc, NULL, 0);
+        emit_quad(e, f, x0, y0, x0 + B, y1, 0, 0, 1, 1, bc, NULL, 0);
+        emit_quad(e, f, x0 + B, y1 - B, x1 - B, y1, 0, 0, 1, 1, bc, NULL, 0);
+        emit_quad(e, f, x1 - B, y0, x1, y1, 0, 0, 1, 1, bc, NULL, 0);
+        emit_quad(e, f, x0 + B, y0, x1 - B, y0 + B, 0, 0, 1, 1, bc, NULL, 0);
         return;
     }
     if (nd->has_corner) {
@@ -1267,47 +1344,90 @@ static void rect_emit(Emit *e, const Node *nd, const Frame *f, float fade)
         const TexRef *t = &nd->side;
         emit_quad(e, f, x0 + B, y0, x1 - B, y0 + B, 0, t->vs, t->us, 0, bc, t->b, t->name);
         emit_quad(e, f, x0 + B, y1 - B, x1 - B, y1, 0, 0, t->us, t->vs, bc, t->b, t->name);
-        float sc = sqrtf(fabsf(f->a * f->d - f->b * f->c));
+        float sc = sqrtf(fabsf(f->a * f->d - f->b * f->c)), sy0 = nd->has_corner ? y0 + B : y0;
+        float sy1 = nd->has_corner ? y1 - B : y1;
         int ns = (int)(B * sc + 0.5f);
         if (ns < 1) ns = 1;
         if (ns > 32) ns = 32;
         for (int i = 0; i < ns; i++) {
             float a = B * (float)i / (float)ns, b = B * (float)(i + 1) / (float)ns;
             float v = t->vs * (1.0f - ((float)i + 0.5f) / (float)ns);
-            emit_quad(e, f, x0 + a, y0 + B, x0 + b, y1 - B, 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b, t->name);
-            emit_quad(e, f, x1 - b, y0 + B, x1 - a, y1 - B, 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b, t->name);
+            emit_quad(e, f, x0 + a, sy0, x0 + b, sy1, 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b, t->name);
+            emit_quad(e, f, x1 - b, sy0, x1 - a, sy1, 0.5f * t->us, v, 0.5f * t->us, v, bc, t->b, t->name);
         }
     }
 }
 
-/* the list's highlight behind its selected item [G hud.c] */
+static float blink(const Gui *g);
+/* the highlight's GuiLine (ctor 0x23BA10; its pieces rebuilt by 0x23A8E0) from x0 to x1 at cy, wd across [R]: with
+ * an endcap (`b endcap`, 0x23BD40: sprites +0x6C, +0xEC) one picture's width long at each end, u 0 at the outer
+ * edge (the right one mirrored), and the segment (`b highlight`, 0x23BE10: +0x16C) between them, on its sprite's
+ * own coordinates (0x17CC50; HighlightEmpty is clear anyway); a segment alone spans the line, u 1 at its start; v 0
+ * along the top */
+static void hl_line_emit(Emit *e, const Node *l, const Frame *f, float x0, float x1, float cy, float wd,
+                         const float c[4])
+{
+    float y0 = cy - 0.5f * wd, y1 = cy + 0.5f * wd;
+    const TexRef *k = &l->endcap, *t = &l->hl_tex;
+    if (l->has_endcap) {
+        float cw = k->us > 0 ? k->w / k->us : k->w;      /* the texture's width (+0x20) */
+        emit_quad(e, f, x0, y0, x0 + cw, y1, 0, 0, k->us, k->vs, c, k->b, k->name);
+        emit_quad(e, f, x1 - cw, y0, x1, y1, k->us, 0, 0, k->vs, c, k->b, k->name);
+        if (l->has_hl_tex)
+            emit_quad(e, f, x0 + cw, y0, x1 - cw, y1, 0, 0, t->us, t->vs, c, t->b, t->name);
+    } else
+        emit_quad(e, f, x0, y0, x1, y1, t->us, 0, 0, t->vs, c, t->b, t->name);
+}
+
+/* GuiListBoxControl's draw (0x23C250) [R]: the background (c, alpha times the fade), then, with a highlight line (a
+ * `b highlight` or `b endcap`), its line across each line of the selected item's text (one that shows): the text's
+ * box placed by its justify and origin, each line's size (0x1B61B0; shrunk to maxwidth), both by the item's scale;
+ * lines after the first moved by the text's line mode (m c / r); the line runs from pad + max(0, endcap width x scale
+ * - pad - line width / 2) before the line's start to as far past its end, pad = the `d highlight` x by the scale,
+ * line height + its y across; in the selector colour, its alpha by the fade and, with setHighlightPulse, the GUI's
+ * pulse (gp - 0x7DF4, flag 0x400's) */
 static void list_emit(Emit *e, const Gui *g, const Node *l, const Frame *f, float fade)
 {
     if (l->col[3] > 0 && l->has_d)
         emit_quad(e, f, 0, 0, l->d[0], l->d[1], 0, 0, 1, 1,
                   (const float[4]){ l->col[0], l->col[1], l->col[2], l->col[3] * fade }, NULL, 0);
     const Node *it = list_item((Node *)l, l->sel);
-    if (!l->has_hl_tex || !it || !it->visible || it->kind != N_TEXT)
+    if ((!l->has_hl_tex && !l->has_endcap) || !it || !it->visible || it->kind != N_TEXT || !it->font)
         return;
-    float w = text_w(g, it) * it->m, h = text_h(g, it) * it->m;
-    float x0 = it->p[0] - (it->justify == 1 ? 0.5f * w : it->justify == 2 ? w : 0), x1 = x0 + w;
-    float cy = it->p[1] + (it->origin == 0 ? 0.5f * h : it->origin == 2 ? -0.5f * h : 0);
-    float bh = l->hl_d[1] > 0 ? l->hl_d[1] : h, cap = 0.5f * bh;
+    float sc = node_xscale(it), tsc = it->tscale > 0 ? it->tscale : 1;
+    float w = text_w(g, it) * sc, h = text_h(g, it) * sc;
+    float x = it->p[0] - (it->justify == 1 ? 0.5f * w : it->justify == 2 ? w : 0);
+    float y = it->p[1] - (it->origin == 1 ? 0.5f * h : it->origin == 2 ? h : 0);
     float c[4] = { l->sel_col[0], l->sel_col[1], l->sel_col[2], l->sel_col[3] * fade };
     if (l->pulse)
-        c[3] *= 0.7f + 0.3f * sinf(2.0f * SH_PI * 1.5f * g->time);
-    float y0 = cy - 0.5f * bh, y1 = cy + 0.5f * bh;
-    const TexRef *t = &l->hl_tex;
-    emit_quad(e, f, x0, y0, x1, y1, 0, 0, t->us, t->vs, c, t->b, t->name);
-    if (l->has_endcap) {
-        const TexRef *k = &l->endcap;
-        emit_quad(e, f, x0 - cap, y0, x0, y1, k->us, 0, 0, k->vs, c, k->b, k->name);
-        emit_quad(e, f, x1, y0, x1 + cap, y1, 0, 0, k->us, k->vs, c, k->b, k->name);
+        c[3] *= blink(g);
+    float padx = l->hl_d[0] * sc, pady = l->hl_d[1] * sc;
+    float cw = l->has_endcap ? (l->endcap.us > 0 ? l->endcap.w / l->endcap.us : l->endcap.w) * sc : 0;
+    TextStyle ts;
+    text_style(it, &ts);
+    TLine L[MAX_LINES];
+    int nl = text_lines(g, ts.f, it->text, ts.spacing, ts.slant, ts.wrap, L, MAX_LINES);
+    for (int i = 0; i < nl; i++) {
+        float lw = L[i].w, lh = L[i].h;
+        if (lw <= 0 || lh <= 0)
+            break;
+        if (ts.maxwidth > 0 && lw > ts.maxwidth) {
+            lh *= ts.maxwidth / lw;
+            lw = ts.maxwidth;
+        }
+        lw *= tsc * sc;
+        lh *= tsc * sc;
+        float lx = x;
+        if (i > 0 && (ts.mode == 1 || ts.mode == 2))
+            lx += (ts.mode == 1 ? 0.5f : 1.0f) * (w - lw);
+        float ext = padx + fmaxf(0, cw - padx - 0.5f * lw);
+        hl_line_emit(e, l, f, lx - ext, lx + lw + ext, y + 0.5f * lh, lh + pady, c);
+        y += lh;
     }
 }
 
-/* an object's own frame in its parent's: position, then scale m, its turn (<x>, yaw) and setScaleX's stretch of its
- * x axis */
+/* an object's own frame in its parent's: position, then scale m and its turn (<x>, yaw); setScaleX replaces the x
+ * axis */
 static Frame node_local(const Node *nd)
 {
     Frame l = { nd->m, 0, 0, nd->m, nd->p[0], nd->p[1] };
@@ -1315,15 +1435,18 @@ static Frame node_local(const Node *nd)
         l.a = nd->m * nd->rot[0]; l.b = nd->m * nd->rot[1];
         l.c = nd->m * nd->rot[2]; l.d = nd->m * nd->rot[3];
     }
-    l.a *= nd->sx;
-    l.b *= nd->sx;
+    if (nd->has_sx) {
+        l.a = nd->sx;
+        l.b = 0;
+    }
     return l;
 }
 
 /* The GUI's 3D objects: an object outside every 2D root (<DD>) has its position in screen widths about the screen's
  * centre, x right and y down (MonsterSelect's cards at x -0.325 -0.108 0.108 0.325 for four players stand 139 pixels
  * apart, as their "P1".."P4" texts at 54 193 332 470 do; two players' 0.025 down puts the card's top at 117, the masks'
- * edge) [G: the GUI camera is not traced], and a 2D root inside one draws its pixels about (320, 240) moved to that
+ * edge) [R: the GUI camera, 0x227AD0 / 0x2363F0, at depth 0: SHELL_NOTES.md], and a 2D root inside one draws its
+ * pixels about (320, 240) moved to that
  * point and scaled by it, so setScaleX on a card squashes it about its own centre [R MonsterSelect.scr's flip]. */
 static Frame unit_to_pixels(const Frame *u)
 {
@@ -1367,8 +1490,10 @@ static M34 node_local3(const Node *nd)
     if (nd->r3_own && !pix) {
         for (int i = 0; i < 9; i++)
             l.r[i] = nd->r3[i] * nd->m3;
-        for (int i = 0; i < 3; i++)
-            l.r[i] *= nd->sx;
+        if (nd->has_sx) {
+            l.r[0] = nd->sx;
+            l.r[1] = l.r[2] = 0;
+        }
     } else {
         Frame f = node_local(nd);
         l.r[0] = f.a; l.r[1] = f.b; l.r[3] = f.c; l.r[4] = f.d;
@@ -1486,7 +1611,8 @@ static void effects_update(Layout *L)
 static float blink(const Gui *g) { return 0.8f - 0.2f * sinf(2.0f * SH_PI * g->time); }
 
 /* a list box whose items all stand at one place (MainMenu's nb_selection: the human / computer counts) shows its
- * selected item alone [G: GuiListBox's layout is not traced] */
+ * selected item alone [R in effect: the list's layout (0x23CF60) admits the items that fit its window from the top
+ * (+0x124, 0x23BF10), scrolled to keep the selection in, and nb_selection's 46 holds one; the window is not ported] */
 static int list_stacked(const Node *l)
 {
     const Node *a = l ? l->child : NULL;
@@ -1529,13 +1655,16 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             layout_emit(e, g, nd->child, &f, c2d, nf, NULL);
             continue;
         }
-        Frame df = in2d || nd->kind == N_2D ? f : unit_to_pixels(&f);   /* a 3D object's own picture [G] */
+        /* a 3D object's own picture [G: never drawn: the only pictures outside a <DD> are MonsterSheet's card_template,
+         * hidden (F 0x1), whose copies sit in the cards' <DD>] */
+        Frame df = in2d || nd->kind == N_2D ? f : unit_to_pixels(&f);
         if (nd->kind == N_QUAD) {
             float w = nd->has_d ? nd->d[0] : nd->has_tex ? nd->tex.w : 0;
             float h = nd->has_d ? nd->d[1] : nd->has_tex ? nd->tex.h : 0;
             float x0 = nd->Q & 2 ? -0.5f * w : 0, y0 = nd->Q & 4 ? -0.5f * h : 0;
             float c[4] = { nd->col[0], nd->col[1], nd->col[2], nd->col[3] * nf };
-            /* M 0x200 (the 0x310 boxes): a mask, not drawn [G hud.c]; an untextured 0xFFFFFE quad without it (the
+            /* M 0x200 (the 0x310 boxes): a depth-only shader, not drawn [R 0x22B210 -> 0x17D0B0: FORMAT_GUI.md]; an
+             * untextured 0xFFFFFE quad without it (the
              * title boxes of MonsterSelect and MonsterSheet) is drawn, a faint white bar: neither the colour's handler
              * (0x22C650 -> 0x22B530) nor the draw (0x2439E0) tests that colour [R] */
             int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
@@ -1543,6 +1672,14 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
                 float wc[4] = { 1, 1, 1, c[3] };
                 emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, 1, 1, wc, NULL, HUD_TEX_VIDEO);
             } else if (drawn && w > 0 && h > 0) {
+                /* an untextured quad over the whole 640 x 480 screen (the popup's background_quad, the fills): across
+                 * the viewer's wider window too [no PS2 meaning: the game's screen is 4:3] */
+                if (!nd->has_tex && fabsf(df.a - 1) < 1e-3f && fabsf(df.d - 1) < 1e-3f && fabsf(df.b) < 1e-3f &&
+                    fabsf(df.c) < 1e-3f && fabsf(df.x + x0) < 0.5f && fabsf(df.y + y0) < 0.5f && w >= 639.5f &&
+                    h >= 479.5f) {
+                    x0 -= 640.0f;
+                    w += 1280.0f;
+                }
                 e->additive = (nd->M & 0x80) != 0;       /* CitySelect's `basic` glow over the globe */
                 emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, nd->has_tex ? nd->tex.us : 1,
                           nd->has_tex ? nd->tex.vs : 1, c, nd->has_tex ? nd->tex.b : NULL,
@@ -1593,9 +1730,7 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
     }
 }
 
-/* one interface's quads, in the layout's order [G: no depth sort here: the shell's <z> would put MonsterSelect's
- * frost border (0.58) under its background and MonsterSheet's "P2" stamps (0.769) under their cards if a larger z
- * were drawn first, as hud.c takes it] */
+/* one interface's quads, in the layout's order [R 0x241770: the tree's order, no sort; <z> is the fade (0x22C450)] */
 static void emit_layout(Emit *e, const Gui *g, const Layout *L)
 {
     e->layout = L;
@@ -1651,7 +1786,9 @@ static void fader_update(Faders *fd, float dt)          /* UpdateObjectFader: 2 
 }
 
 /* ---------------------------------------------------------------- the shell's state */
-#define TICK (1.0f / 60.0f)                              /* a script frame [G: 60 a second] */
+#define TICK (1.0f / 60.0f)                              /* a script frame: the display's rate (0x4CB550: 60, or 50
+                                                          * for PAL without option flag 0x80, 0x25E1A0) [R]; the
+                                                          * port takes 60 */
 #define IDLE_SECONDS SHELL_IDLE_SECONDS                  /* [R 0x308710: 120.0 (0x42F0) into the shell's +0x18] */
 
 /* the GuiEvent ids [R the scripts] */
@@ -1755,7 +1892,8 @@ typedef struct {
     Node *profiles, *keyboard, *messages;
     /* the messages (0x3401E0) */
     Node *message_rect, *autosave_rect, *nodata_rect, *title, *text, *btn_select, *btn_cancel, *btn_button0;
-    Node *bottom_bar;
+    Node *bottom_bar, *button_group;
+    float rect_h;                                        /* +0x3C: message_rect's height in the layout (0x244460) */
     /* the profile list (+0x2D8) */
     Node *list, *bar, *pl_name, *pl_id, *arrow_up, *arrow_down;
     int nentries;
@@ -1941,7 +2079,10 @@ static void mm_update_faders(Shell *s, float dt);
  * the time before an answer counts (+0x358); shown (t0, always for the list's request): the messages group and
  * background_quad, at fade 1 for the boot's request and 0.6 otherwise (0x33FE30), else both hidden (an autosave: the
  * SaveIcon alone); the buttons' texts, NULL hidden; none at all: the bottom bar hidden and the answer 0x11 ("done")
- * once the time is up. The answers reset to 0xF (none), the messages group to fade 0 (it fades in, 0x341BE0) */
+ * once the time is up. The answers reset to 0xF (none), the messages group to fade 0 (it fades in, 0x341BE0). Then
+ * the rect (0x3400C0): the row's height b = the largest of max(30, a shown button's text height - 5) (0 with none);
+ * message_rect is as tall as its layout's (+0x3C) or, when more is needed, the text's y + its height + 20 + b; the
+ * button_group at that height - b - 5 */
 static void mc_panel(Shell *s, int msg, const char *title, const char *text, float time, int shown, const char *sel,
                      const char *can, const char *b0)
 {
@@ -1976,6 +2117,17 @@ static void mc_panel(Shell *s, int msg, const char *title, const char *text, flo
         show(bn[i], bt[i] != NULL);
     }
     show(m->bottom_bar, sel || can || b0);
+    float bh = 0;
+    for (int i = 0; i < 3; i++)
+        if (bt[i] && bn[i])
+            bh = fmaxf(bh, fmaxf(30.0f, text_h(&s->gui, bn[i]) - 5.0f));
+    if (m->message_rect && m->text && m->rect_h > 0) {
+        float need = m->text->p[1] + text_h(&s->gui, m->text) + 20.0f + bh;
+        float h = need > m->rect_h ? need : m->rect_h;
+        m->message_rect->d[1] = h;
+        if (m->button_group)
+            m->button_group->p[1] = h - bh - 5.0f;
+    }
     m->answer = sel || can || b0 ? MCA_NONE : MCA_DONE;
     m->delivered = MCA_NONE;
     m->timer = time;
@@ -2080,6 +2232,9 @@ static void mc_open_list(Shell *s, int purpose, int buddy)
     set_fade(m->bg, 0.6f);
     m->nentries = s->prof.nprofiles;
     int n = list_count(m->list);
+    show(list_item(m->list, 0), purpose != MCP_BUDDY);   /* [R 0x341508: Create New Profile shows (and is enabled)
+                                                          * with flag 0x10, gCommon.loadProfile's; loadBuddyProfile
+                                                          * passes none (0x3077B0 -> 0x345700, t1 0)] */
     for (int i = 1; i < n; i++)
         show(list_item(m->list, i), 0);
     for (int i = 0; i < m->nentries && i + 1 < n; i++) {
@@ -2090,7 +2245,7 @@ static void mc_open_list(Shell *s, int purpose, int buddy)
     }
     if (m->pl_id)
         set_text(m->pl_id, buddy > 0 ? (buddy == 1 ? "P2:" : buddy == 2 ? "P3:" : "P4:") : "P1:");
-    list_select(m->list, m->nentries > 0 ? 1 : 0);       /* [R 0x3415EC: 0x23E480(list, count > 0)] the first profile */
+    list_set(m->list, m->nentries > 0 ? 1 : 0);          /* [R 0x3415EC: 0x23E480(list, count > 0)] the first profile */
     if (m->list) m->list->top = 0;
     mc_list_update(s);
 }
@@ -2127,9 +2282,12 @@ static void mc_open_keyboard(Shell *s)
  * notice. Nothing sets show-profile again. Both icons are stopped, flag 0x80 cleared, the state 1 (isSaveGameActive
  * 0 at once); the panels fade out and the interface goes once they are gone and the SaveIcon has played out
  * (0x341CD8) */
+static void mc_finish_buddy(Shell *s, int player);
 static void mc_close(Shell *s, int result)
 {
     MemCard *m = &s->mc;
+    if (m->purpose == MCP_BUDDY && m->mode != MC_OFF)   /* loadBuddyProfile's callback (0x307FF0) */
+        mc_finish_buddy(s, -1);
     if (result != 3 && !(m->mode == MC_MESSAGE && m->msg == MSG_AUTOSAVE))
         s->show_profile = 0;
     m->mode = MC_OFF;
@@ -2300,22 +2458,17 @@ static void mc_list_input(Shell *s, int ev)
             mc_error(s, 11);                             /* [R 0x343D38: +0x2C4 11, the room test first] */
         else if (sel <= 0)
             mc_open_keyboard(s);                         /* state 4: create */
-        else if (m->purpose == MCP_BUDDY) {              /* [G] a buddy's load: at once (no second profile here) */
-            event(s, SHELL_EVT_BUDDY_PROFILE, s->prof.profiles[sel - 1], m->buddy, (float)(sel - 1));
-            mc_close(s, 1);
-        } else {                                         /* the name to +0x188; state 6, the load (a save's request:
-                                                          * 7) [R 0x343D60] */
+        else {                                           /* the name to +0x188; state 6, the load (a save's request:
+                                                          * 7) [R 0x343D60]; a buddy's too, into its own block */
             m->load_index = sel - 1;
             snprintf(m->name, sizeof m->name, "%s", s->prof.profiles[sel - 1]);
             mc_card(s, m->req == MCR_SAVE ? 7 : 6);
         }
     } else if (ev == EV_BACK) {
-        sound(s, "Cancel");                              /* state 9 */
-        if (m->purpose == MCP_BUDDY) {
-            mc_close(s, 2);                              /* [G: the result] */
+        sound(s, "Cancel");
+        mc_warn(s);                                      /* [R the list's Back, 0x343DF8: state 2, a buddy's too] */
+        if (m->purpose == MCP_BUDDY && m->mode == MC_OFF)
             mc_finish_buddy(s, -1);
-        } else
-            mc_warn(s);                                  /* [R the list's Back, 0x343DF8: state 2] */
     }
 }
 
@@ -2450,6 +2603,12 @@ static void mc_card_update(Shell *s)
     if (m->sub == 1) {
         if (get_fade(m->messages) < 1.0f)
             return;
+        if (st == 6 && m->purpose == MCP_BUDDY) {        /* loadBuddyProfile's block (0x4D5218): the viewer's answer
+                                                          * is shell_buddy_profile, no card result */
+            event(s, SHELL_EVT_BUDDY_PROFILE, m->name, m->buddy, (float)m->load_index);
+            m->sub = 2;
+            return;
+        }
         if (st == 6) {                                   /* the open, the read and its checks (0x3445AC .. 0x344718) */
             mc_request(s, SHELL_EVT_PROFILE_LOAD, m->name, m->load_index);
             m->sub = 3;
@@ -2562,6 +2721,8 @@ static void mc_load(Shell *s)
     m->btn_cancel = find(m->message_rect, "btn_cancel");
     m->btn_button0 = find(m->message_rect, "btn_button0");
     m->bottom_bar = find(m->message_rect, "bottom_bar");
+    m->button_group = find(m->message_rect, "button_group");
+    m->rect_h = m->message_rect && m->message_rect->has_d ? m->message_rect->d[1] : 0;
     m->list = find(m->profiles, "profile_list");
     m->bar = find(m->profiles, "profile_bar");
     m->pl_name = find(m->profiles, "profile_name");
@@ -2679,7 +2840,7 @@ static void show_loading(Shell *s, int shell)
     set_fade(l->text, 1);
     set_fade(l->image, 1);
     set_pos(l->image, 320, 240, 0);
-    if (l->image) l->image->m = 2;
+    node_set_scale(l->image, 2);
     node_yaw(l->image, l->no_intro ? 0.0f : -SH_PI * 4.15f);
     /* 512 (the focus) -> setupUI */
     l->intro = 1;
@@ -2691,11 +2852,11 @@ static void show_loading(Shell *s, int shell)
     l->s1 = 2.0f;
     l->rot = -SH_PI * 4.15f;
     set_pos(l->image, l->start[0], l->start[1], 0);
-    if (l->image) l->image->m = l->s0;
+    node_set_scale(l->image, l->s0);
     if (l->no_intro) {
         l->intro = 3;
         set_pos(l->image, l->end[0], l->end[1], 0);
-        if (l->image) l->image->m = l->s1;
+        node_set_scale(l->image, l->s1);
         node_yaw(l->image, 0);
         set_fade(l->image, 1);
         set_fade(l->text, 1);
@@ -2717,7 +2878,7 @@ static void loading_update(Shell *s, float dt)
         }
         float k = ct / 0.5f;
         set_pos(l->image, l->start[0] + (l->end[0] - l->start[0]) * k, l->start[1] + (l->end[1] - l->start[1]) * k, 0);
-        if (l->image) l->image->m = l->s0 + (l->s1 - l->s0) * k;
+        node_set_scale(l->image, l->s0 + (l->s1 - l->s0) * k);
         node_yaw(l->image, l->rot * k);
         set_fade(l->fill, k * 2.0f);
     } else if (l->intro == 2) {
@@ -3086,7 +3247,7 @@ static void mm_icons(Shell *s, float dt)               /* updateIconSelection */
             if (sc < 1.4f) {
                 sc = fminf(sc + dt * 2.0f, 1.4f);
                 if (dt == 0) sc = 1.4f;
-                q->m = sc;
+                node_set_scale(q, sc);
             }
         } else {
             float c[4];
@@ -3095,7 +3256,7 @@ static void mm_icons(Shell *s, float dt)               /* updateIconSelection */
             if (sc > 0.9f) {
                 sc = fmaxf(sc - dt * 2.0f, 0.9f);
                 if (dt == 0) sc = 0.9f;
-                q->m = sc;
+                node_set_scale(q, sc);
             }
         }
     }
@@ -3207,12 +3368,7 @@ static void mm_play_mode_select(Shell *s)              /* processPlayModeSelect 
     show(find(m->lb_players, "1 Player"), m->play_mode == 2 || m->play_mode == 5);
     s->gs.play_type = m->play_mode;
     m->state = 1;
-    /* the list's selection on a shown item [G: the list keeps its own] */
-    if (!list_enabled(m->lb_players, m->lb_players ? m->lb_players->sel : -1)) {
-        int n = list_count(m->lb_players);
-        for (int i = 0; i < n; i++)
-            if (list_enabled(m->lb_players, i)) { list_select(m->lb_players, i); break; }
-    }
+    list_settle(m->lb_players);                         /* the list's own layout moves its selection [R 0x23CF60] */
     fader_go(&m->fd, m->icons, -1);
     fader_go(&m->fd, m->numplayers, 1);
 }
@@ -3260,7 +3416,7 @@ static void mm_num_player_select(Shell *s)             /* processNumPlayerSelect
         } else
             show(item, 0);
     }
-    list_select(m->lb_bots, m->num_players - 1);
+    list_set(m->lb_bots, m->num_players - 1);
 }
 
 static void mm_num_bot_select(Shell *s)                /* processNumBotSelect */
@@ -3453,7 +3609,7 @@ static void op_setup(Shell *s)                         /* setupItems */
     o->rumble_on = s->prof.rumble;
     if (o->sound) o->sound->val = 100.0f * o->f_sound / 0.75f;
     if (o->music) o->music->val = 100.0f * o->f_music / 0.75f;
-    list_select(o->rumble, !o->rumble_on);
+    list_set(o->rumble, !o->rumble_on);
     for (int i = 0; i < 3; i++)
         if (o->titles[i]) o->titles[i]->tscale = 1.0f;
 }
@@ -3559,7 +3715,7 @@ static void op_event(Shell *s, int ev, int pad, float dt)
         sound(s, "Rollover");
     } else if ((ev == EV_LEFT || ev == EV_RIGHT) && o->mode >= 2) {
         int sel = o->rumble ? o->rumble->sel : 0;       /* updateLists */
-        list_increment_wrap(o->rumble, ev == EV_RIGHT ? 1 : -1);
+        list_increment(o->rumble, ev == EV_RIGHT ? 1 : -1);
         if (sel && o->rumble && sel != o->rumble->sel) {
             event(s, SHELL_EVT_RUMBLE, NULL, 1, 0);
             event(s, SHELL_EVT_RUMBLE_PULSE, NULL, 250, 0);
@@ -3695,7 +3851,7 @@ static void spin_step(int *spin, float *amount, Node *base, float scale_base, fl
             *amount = 1.0f;
         }
     }
-    if (base) base->sx = *amount * scale_base;
+    node_set_scale_x(base, *amount * scale_base);
 }
 
 static void ms_ready(Shell *s, int p, int ready)       /* setCardToReadyState */
@@ -3782,7 +3938,7 @@ static void ms_setup_from_main_menu(Shell *s)
         pl->spin = 0;
         pl->spin_amount = 0;
         pl->scale_base = CARD_SCALES[n > 0 ? n - 1 : 0];
-        if (pl->base) pl->base->sx = pl->scale_base;
+        node_set_scale_x(pl->base, pl->scale_base);
     }
     show(find(r, "nb_loadmonsters"), m->num_players > 1);
     int bot = 1;
@@ -3990,6 +4146,8 @@ static void ms_event(Shell *s, int ev, int button, int pad, float dt)
                      * popup for that player) */
                     if (s->mc.L) {
                         mc_show(s);
+                        s->mc.req = MCR_LIST;            /* [R 0x345700, as loadProfile's: request 1, flag 0x20] */
+                        s->mc.had = s->prof.was_saving && s->prof.loaded;
                         mc_open_list(s, MCP_BUDDY, c);
                     }
                 }
@@ -4255,7 +4413,7 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
         set_fade(h->arrows, 1);
         h->scale_base = h->blowup ? h->blowup->m : 1;
         h->offset = find(h->cards, "offset");
-        h->selrect = find(r, "selectRect");             /* setPulse(1): its F 0x400 blinks [G] */
+        h->selrect = find(r, "selectRect");             /* setPulse(1): F | 0x400, it blinks [R 0x2577C8] */
         h->arrow_r = find(h->arrows, "ArrowR");
         h->arrow_l = find(h->arrows, "ArrowL");
         Node *tpl = find(r, "card_template"), *row0 = find(r, "row0"), *row1 = find(r, "row1");
@@ -4754,7 +4912,10 @@ static void idle_update(Shell *s, float dt)
 {
     if (!s->cr_on || s->vi.on)
         return;
-    if (s->state == 2 || s->state == 4 || s->ld.on) {   /* (the loading screen's half second counts alone [G]) */
+    if (s->state == 2 || s->state == 4 || s->ld.on) {   /* (the loading screen's half second counts alone: R in
+                                                          * effect, the press that started the game reset the timer,
+                                                          * and a demo's starts in state 2, where 0x308390 does
+                                                          * nothing) */
         s->idle = s->idle - dt > 0 ? s->idle - dt : 0;
         return;
     }
@@ -4841,7 +5002,7 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     s->cheats = s->prof.cheats;
     s->cheat_param_block = -1;
     s->cheat_param_video = -1;
-    s->platform = 2;                                     /* gApp.getPlatform(): the PS2 [G: the value 2] */
+    s->platform = 2;                                     /* gApp.getPlatform(): 2 [R 0x28B1A0, a constant] */
     s->region = 0;
     s->idle = IDLE_SECONDS;
     if (st) s->st = *st;
@@ -5089,8 +5250,9 @@ void shell_update(Shell *s, float dt)
     }
     if (s->cr_on) {
         fader_update(&s->cr_fd, dt);
-        /* the frame event goes to the interface with the focus alone [G; R in effect: Options.scr runs
-         * MainMenu::updateObjectFader itself while it has the focus, so MainMenu gets no frames of its own then] */
+        /* the frame event goes to the interface with the focus alone [R 0x2416C0 / 0x2416E8: 0x800 to an object
+         * with a script and F 0x80, else while the stack's top is the focused interface; no menu has 0x80] (Options.scr
+         * runs MainMenu::updateObjectFader itself while it has the focus, so MainMenu gets no frames of its own then) */
         ifc_event(s, s->focus, EV_FRAME, 0, 0, dt);
         idle_update(s, dt);
     }
@@ -5210,7 +5372,8 @@ int shell_3d(Shell *s, Shell3D *out, int max)
                     o->parent = j;
                     o->attach = nd->attach;
                     M34 l = node_local3(nd), pw = node_world3(nd->parent);
-                    w = m34_mul(&l, &pw);                /* [G: its own frame taken in the node's] */
+                    w = m34_mul(&l, &pw);                /* its own frame in the node's (R in effect: the city
+                                                          * rings, the only <k> effects, have no frame of their own) */
                 }
         gui_to_world(&w, o->world);
         memcpy(nd->w3, o->world, sizeof nd->w3);
