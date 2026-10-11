@@ -3,13 +3,28 @@
  * over USB and Bluetooth), Xbox pads, Nintendo's and the Steam Deck's controls, all with the same button names as pad.h.
  * Nintendo pads go by place, not label (SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS 0): the bottom button is A, where the
  * PS2's Cross is. A pad's player index is its slot, which SDL shows on the player lights and the Sony light bar
- * (RAMPAGE_PADNOLIGHT=1 leaves them be). Input and rumble pause while the window is not in front, as in pad.c. */
+ * (RAMPAGE_PADNOLIGHT=1 leaves them be). Input and rumble pause while the window is not in front, as in pad.c.
+ * On the Switch SDL lists all eight players' controllers, there or not, with its mapping by place too (A = the bottom
+ * button, a single Joy-Con turned sideways the same); libnx says which are there, and a single Joy-Con's stick, which
+ * SDL hands over as the d-pad, is made the left stick. */
 #ifndef _WIN32
 #include "pad.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __SWITCH__
+#include <switch/services/hid.h>                 /* not switch.h: its runtime/pad.h has another PadState */
+static int nx_there(SDL_JoystickID id)           /* SDL's joystick k is player k's controller (0: also handheld) */
+{
+    return hidGetNpadStyleSet((HidNpadIdType)id) != 0 || (id == 0 && hidGetNpadStyleSet(HidNpadIdType_Handheld) != 0);
+}
+static int nx_single(SDL_JoystickID id)          /* one Joy-Con held sideways, a player of its own */
+{
+    u32 s = hidGetNpadStyleSet((HidNpadIdType)id);
+    return (s & (HidNpadStyleTag_NpadJoyLeft | HidNpadStyleTag_NpadJoyRight)) && !(s & HidNpadStyleTag_NpadJoyDual);
+}
+#endif
 
 static const char *penv(const char *n) { const char *v = getenv(n); return v && *v ? v : NULL; }
 static double pad_clock(void) { return (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency(); }
@@ -58,11 +73,17 @@ static void open_new(void)
         SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(j); int have = 0, i = -1;
         for (int k = 0; k < NPADS; k++) { if (P.p[k].c && P.p[k].id == id) have = 1; if (!P.p[k].c && i < 0) i = k; }
         if (have || i < 0) continue;
+#ifdef __SWITCH__
+        if (!nx_there(id)) continue;
+#endif
         SDL_GameController *c = SDL_GameControllerOpen(j); if (!c) continue;
         int t = SDL_GameControllerGetType(c), kind = t == SDL_CONTROLLER_TYPE_PS5 ? PADK_DS5 : t == SDL_CONTROLLER_TYPE_PS4 ? PADK_DS4 : PADK_XBOX;
         if (t == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO) kind = PADK_SWITCH;
 #if SDL_VERSION_ATLEAST(2, 24, 0)
         if (t == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR) kind = PADK_SWITCH;
+#endif
+#ifdef __SWITCH__
+        kind = PADK_SWITCH;                      /* the Joy-Cons, handheld, a Pro Controller */
 #endif
         memset(&P.p[i], 0, sizeof P.p[i]);
         P.p[i].c = c; P.p[i].id = id; P.p[i].kind = kind; P.p[i].sent = -1; P.p[i].slot = -1;
@@ -71,7 +92,11 @@ static void open_new(void)
 }
 static void close_gone(void)
 {
-    for (int i = 0; i < NPADS; i++) if (P.p[i].c && !SDL_GameControllerGetAttached(P.p[i].c)) {
+    for (int i = 0; i < NPADS; i++) if (P.p[i].c && (!SDL_GameControllerGetAttached(P.p[i].c)
+#ifdef __SWITCH__
+                                                     || !nx_there(P.p[i].id)
+#endif
+                                                     )) {
         printf("pad: %s disconnected\n", pad_kind_name(P.p[i].kind));
         if (P.p[i].slot >= 0) P.slots &= ~(1u << P.p[i].slot);
         SDL_GameControllerClose(P.p[i].c); memset(&P.p[i], 0, sizeof P.p[i]);
@@ -93,6 +118,14 @@ static void read_pad(int i)
     st->lt = ax(c, SDL_CONTROLLER_AXIS_TRIGGERLEFT); st->rt = ax(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
     if (st->lt >= 0.25f) m |= 1u << PAD_LT;
     if (st->rt >= 0.25f) m |= 1u << PAD_RT;
+#ifdef __SWITCH__
+    if (nx_single(P.p[i].id)) {                  /* SDL reads no axes of it: its stick comes as the d-pad */
+        float x = (float)((m >> PAD_RIGHT & 1) - (m >> PAD_LEFT & 1)), y = (float)((m >> PAD_DOWN & 1) - (m >> PAD_UP & 1));
+        float k = x != 0 && y != 0 ? 0.7071f : 1.0f;
+        st->lx = x * k; st->ly = y * k;
+        m &= ~(1u << PAD_UP | 1u << PAD_DOWN | 1u << PAD_LEFT | 1u << PAD_RIGHT);
+    }
+#endif
     st->kind = P.p[i].kind;
     st->buttons = m;
 }
@@ -120,6 +153,10 @@ unsigned pad_poll(PadState st[PAD_SLOTS], int focused, unsigned devchanges)
         atexit(pad_close); open_new(); P.seen = devchanges;
     }
     if (P.inited == 2) return 0;
+#ifdef __SWITCH__
+    devchanges = P.seen + 1;                     /* SDL sends no device events there: look every frame (libnx's
+                                                  * shared memory, cheap) */
+#endif
     if (devchanges != P.seen) { P.seen = devchanges; close_gone(); open_new(); }
     double now = pad_clock();
     SDL_GameControllerUpdate();

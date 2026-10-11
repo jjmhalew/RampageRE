@@ -51,6 +51,11 @@ FILE *plat_fopen(const char *path, const char *mode);   /* fopen; to read, a pat
 int plat_exists(const char *path);
 void (*plat_gl_proc(const char *name))(void);
 void plat_message(const char *text, int warn);
+#ifdef __SWITCH__
+#define SWITCH_HOME "sdmc:/switch/rampagere"     /* the Switch's folder: the data, rampage.cfg, the profile, the log */
+void plat_switch_home(void);                     /* SWITCH_HOME made and the current folder, stdout / stderr into its
+                                                  * rampage.log */
+#endif
 /* the free room in KB on the file system that holds path's folder, -1 unknown */
 static inline long long plat_free_kb(const char *path)
 {

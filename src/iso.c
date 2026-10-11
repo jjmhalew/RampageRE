@@ -257,6 +257,8 @@ static void exe_dir(char *out, size_t cap)
     DWORD n = GetModuleFileNameA(NULL, out, (DWORD)cap);
     if (n == 0 || n >= cap)
         out[0] = 0;
+#elif defined __SWITCH__
+    (void)cap;                                   /* no /proc: SWITCH_HOME stands for it */
 #else
     ssize_t n = readlink("/proc/self/exe", out, cap - 1);
     out[n > 0 ? n : 0] = 0;
@@ -297,6 +299,10 @@ int data_find(char *out, size_t cap)
     }
     exe_dir(exe, sizeof exe);
     user_dir(user, sizeof user);
+#ifdef __SWITCH__
+    if (vol_in(SWITCH_HOME, out, cap) || iso_in(SWITCH_HOME, out, cap))   /* the SD card's sdmc:/switch/rampagere */
+        return 1;
+#endif
     return vol_in("build" SEP "disc", out, cap) || vol_in(".", out, cap) || vol_in("data", out, cap) ||
            vol_in(exe, out, cap) || iso_in(exe, out, cap) || iso_in(".", out, cap) || iso_in("data", out, cap) ||
            vol_in(user, out, cap) || iso_in(user, out, cap);
@@ -306,6 +312,8 @@ const char *data_where(void)
 {
 #ifdef _WIN32
     return "build\\disc, the current folder, data\\, beside rampage.exe, %LOCALAPPDATA%\\RampageRE";
+#elif defined __SWITCH__
+    return SWITCH_HOME " (the disc image, or RAMPAGE.VOL with RAMPAGE.ELF or SLES_538.00)";
 #else
     return "build/disc, the current folder, data/, beside rampage, $XDG_DATA_HOME/RampageRE (~/.local/share/RampageRE)";
 #endif

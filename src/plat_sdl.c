@@ -3,7 +3,9 @@
  * arrive as SDL scancodes and are stored as the Windows virtual-key codes the rest uses: letters by the layout (as VK
  * letters are on Windows), everything else by position; Ctrl / Shift / Alt set both their side and the plain code.
  * A hidden window (--shot) is never shown and draws into a framebuffer object; headless, SDL_VIDEODRIVER=offscreen.
- * Built with GLES=1 the context is OpenGL ES 3.0 (else 2.0) and the renderer draws through src/gles's shim. */
+ * Built with GLES=1 the context is OpenGL ES 3.0 (else 2.0) and the renderer draws through src/gles's shim. The
+ * Switch (build_switch.sh, __SWITCH__) is that ES build: the whole screen at 1280x720, messages in the system's error
+ * dialog, its folder sdmc:/switch/rampagere the current one and stdout / stderr in rampage.log there. */
 #ifndef _WIN32
 #include "plat.h"
 #undef fopen
@@ -84,12 +86,47 @@ void (*plat_gl_proc(const char *name))(void) { return (void (*)(void))SDL_GL_Get
 
 static int g_hidden;                             /* the window is hidden (--shot): no boxes either */
 
+#ifdef __SWITCH__
+#include <switch/applets/error.h>                /* not all of switch.h: its PadState is not pad.h's */
+#include <switch/services/applet.h>
+/* SDL has no message box on the Switch: the system's error dialog shows the text with one button */
+void plat_message(const char *text, int warn)
+{
+    (void)warn;
+    fprintf(stderr, "%s\n", text);               /* rampage.log */
+    if (!plat_quiet && !g_hidden) {
+        ErrorApplicationConfig c;
+        errorApplicationCreate(&c, text, NULL);
+        errorApplicationShow(&c);
+    }
+}
+
+void plat_switch_home(void)
+{
+    mkdir("sdmc:/switch", 0777);
+    mkdir(SWITCH_HOME, 0777);
+    if (chdir(SWITCH_HOME) != 0)
+        return;
+    FILE *f = fopen("rampage.log", "w");         /* a new log each start; both streams append to it */
+    if (!f)
+        return;
+    fclose(f);
+    if (freopen("rampage.log", "a", stdout))
+        setvbuf(stdout, NULL, _IOLBF, 0);
+    if (freopen("rampage.log", "a", stderr))
+        setvbuf(stderr, NULL, _IONBF, 0);
+    AppletType t = appletGetAppletType();
+    if (t != AppletType_Application && t != AppletType_SystemApplication)   /* the Album: about 400 MB */
+        printf("started as an applet, with less memory: hold R while starting a game for all of it\n");
+}
+#else
 void plat_message(const char *text, int warn)
 {
     if (plat_quiet || g_hidden ||
         SDL_ShowSimpleMessageBox(warn ? SDL_MESSAGEBOX_WARNING : SDL_MESSAGEBOX_INFORMATION, "RampageRE", text, NULL))
         fprintf(stderr, "%s\n", text);
 }
+#endif
 
 /* ---- window */
 static int vk_of(const SDL_Keysym *k)
@@ -152,6 +189,14 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
 #endif
     /* SDL's default context is a compatibility one: the renderer is GL 1.1's fixed function */
     Uint32 flags = SDL_WINDOW_OPENGL | (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#ifdef __SWITCH__
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");   /* no mouse: the touch screen is not one */
+    if (!hidden) {                               /* the whole screen, docked (scaled up) or handheld */
+        flags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
+        width = 1280;
+        height = 720;
+    }
+#endif
     SDL_Window *sw = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
 #ifdef RAMPAGE_GLES
     SDL_GLContext gc = sw ? SDL_GL_CreateContext(sw) : NULL;
@@ -267,6 +312,11 @@ void win_mode(Window *w, int width, int height, int full)
     SDL_Window *sw = (SDL_Window *)w->hwnd;
     if (w->hidden)                               /* --shot: never shown, its size is the framebuffer object's */
         return;
+#ifdef __SWITCH__
+    (void)width; (void)height; (void)full; (void)sw;
+    drawable(w);                                 /* always the whole screen */
+    return;
+#endif
     if (full) {
         SDL_SetWindowFullscreen(sw, SDL_WINDOW_FULLSCREEN_DESKTOP);
         drawable(w);

@@ -5336,6 +5336,12 @@ int main(int argc, char **argv)
     char walk_script[48];
     Settings gfx, gfx_flags;                         /* the graphics settings (settings.h), the flags among them */
     settings_unset(&gfx_flags);
+#ifdef __SWITCH__
+    plat_switch_home();                              /* sdmc:/switch/rampagere: the data, rampage.cfg, the profile,
+                                                      * rampage.log */
+    if (argc < 2)                                    /* from the Homebrew Menu: the front end, played on the pads */
+        v.shell_mode = 1;
+#endif
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {   /* no window, no sound, no message boxes */
             shot = argv[++i];

@@ -1,9 +1,11 @@
 # Builds the native viewer on every push to main, every pull request and every tag v*: rampage.exe with
-# build_viewer.bat (Windows, Zig) and rampage with build_viewer.sh (Linux, SDL2). No game data is involved: the
-# programs hold only the port's own code, the submodules (PS2Recomp, which with recomp/ needs the disc) are not checked
-# out and build.ps1 never runs. Each package is listed file by file and checked for disc files before it is uploaded.
-# A pushed tag v* also publishes a GitHub release with RampageRE-windows-<tag>.zip and
-# RampageRE-linux-x86_64-<tag>.tar.gz (the program, README.md, LICENSE, docs/NATIVE.md, docs/TEXTURES.md).
+# build_viewer.bat (Windows, Zig), rampage with build_viewer.sh (Linux, SDL2) and rampage.nro with build_switch.sh
+# (Switch homebrew, devkitPro). No game data is involved: the programs hold only the port's own code, the submodules
+# (PS2Recomp, which with recomp/ needs the disc) are not checked out and build.ps1 never runs. Each package is listed
+# file by file and checked for disc files before it is uploaded. A pushed tag v* also publishes a GitHub release with
+# RampageRE-windows-<tag>.zip and RampageRE-linux-x86_64-<tag>.tar.gz (the program, README.md, LICENSE,
+# docs/NATIVE.md, docs/TEXTURES.md) and RampageRE-switch-<tag>.zip (switch/rampagere/ with rampage.nro, README.md,
+# LICENSE: unpacked onto the SD card as it is).
 name: build
 
 on:
@@ -173,10 +175,52 @@ jobs:
           if [ -e smoke.png ]; then echo "::error::a picture was written"; exit 1; fi
           rm -f smoke.out smoke.err
 
+  # Nintendo Switch homebrew (.nro) in devkitPro's own image, which holds devkitA64, libnx, switch-sdl2 and switch-mesa
+  # (and sets DEVKITPRO). The same sources on OpenGL ES through src/gles, as linux-gles; nothing to run it on here.
+  switch:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Build
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then RAMPAGE_VERSION="$GITHUB_REF_NAME"; else RAMPAGE_VERSION=$(printf '%.7s' "$GITHUB_SHA"); fi
+          export RAMPAGE_VERSION
+          sh build_switch.sh rampage && ls -l rampage.nro
+
+      - name: Package
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="$GITHUB_REF_NAME"; else ver=$(printf '%.7s' "$GITHUB_SHA"); fi
+          name="RampageRE-switch-$ver"
+          # file by file, never a folder or a glob: nothing else can end up in the zip; laid out as on the SD card
+          mkdir -p pkg/switch/rampagere
+          cp rampage.nro README.md LICENSE pkg/switch/rampagere/
+          (cd pkg && zip -q -r "../$name.zip" switch)
+          echo "PKG=$name.zip" >> "$GITHUB_ENV"
+
+      - name: Check the package (no game data)
+        run: |
+          unzip -Z1 "$PKG" | tee pkg.txt
+          if grep -iE '\.(vol|elf|iso|bin|cue)$|(^|/)SLES_|(^|/)build/' pkg.txt; then
+            echo "::error::game data in the package"; exit 1
+          fi
+          printf 'switch/rampagere/%s\n' rampage.nro README.md LICENSE | sort > want.txt
+          grep -v '/$' pkg.txt | sort > have.txt
+          diff want.txt have.txt || { echo "::error::the package does not hold exactly the listed files"; exit 1; }
+          rm -f pkg.txt want.txt have.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RampageRE-switch
+          path: ${{ env.PKG }}
+
   # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start.
   release:
     if: github.ref_type == 'tag'
-    needs: [windows, linux]
+    needs: [windows, linux, switch]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -197,7 +241,7 @@ jobs:
         run: |
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           new=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed -e 's/[[:space:]]*$//')
-          start="Windows: unzip and start rampage.exe with the path to RAMPAGE.VOL from the root of your own European PS2 disc (SLES-53800), e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1. Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Keys and options: docs/NATIVE.md. The game files are not included - see README.md."
+          start="Windows: unzip and start rampage.exe with the path to RAMPAGE.VOL from the root of your own European PS2 disc (SLES-53800), e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1. Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. Keys and options: docs/NATIVE.md. The game files are not included - see README.md."
           if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --title "RampageRE $GITHUB_REF_NAME" --notes-file notes.md

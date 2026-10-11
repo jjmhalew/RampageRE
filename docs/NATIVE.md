@@ -38,6 +38,8 @@ Without a path (or with a city name first: `rampage.exe NewYork 6`) it looks, in
 4. the user's data folder, `RAMPAGE.VOL` or an image in it: `%LOCALAPPDATA%\RampageRE` on Windows,
    `$XDG_DATA_HOME/RampageRE` (else `~/.local/share/RampageRE`) elsewhere
 
+On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below).
+
 It never asks and never searches drives: with nothing found it says where it looked and exits with 1 (a `--shot` run
 prints that to stderr, as every message). An image without `RAMPAGE.VOL` is refused ("not Rampage - Total
 Destruction"). The supported release is the European SLES-53800 version 1.00: when `SYSTEM.CNF` (in the image, or
@@ -134,6 +136,53 @@ Not there (the renderer uses none): point and spot lights, specular, `glMaterial
 GTAO, SMAA and MSAA report "not supported" (no blit, no GLSL 3.00). Shots on llvmpipe, ES against desktop GL: a
 mean difference of 0.0001-0.0006 per channel (alpha-tested edges, the movie's clamped edge), the same with `--ao`,
 `--smaa`, `--msaa`; ES 2.0 and 3.0 give the same picture.
+
+### Nintendo Switch
+Homebrew, for a Switch that runs custom firmware such as Atmosphère; experimental and **not yet tried on a Switch**.
+`./build_switch.sh` builds `rampage.nro` with devkitPro's devkitA64, libnx, switch-sdl2 and switch-mesa
+(`dkp-pacman -S switch-dev switch-sdl2 switch-mesa`); without `$DEVKITPRO` it runs itself in the official
+`devkitpro/devkita64` Docker image, which has all of them. It is the OpenGL ES build above: the SRC list of
+`build_viewer.sh` (keep the three scripts in step) with `src/gles/gles2.c`, `-D__SWITCH__ -fsigned-char`, linked
+with `-lSDL2 -lGLESv2 -lEGL -lglapi -ldrm_nouveau -lnx`, then `nacptool` and `elf2nro` with `res/switch_icon.jpg`
+(the ELF, map and NACP stay in `build/switch/`). CI builds it (the `switch` job, in that image) and a release has
+`RampageRE-switch-<tag>.zip`, laid out as on the SD card.
+
+| | |
+|---|---|
+| Where | `/switch/rampagere/rampage.nro` on the SD card, started from the Homebrew Menu. That folder (`sdmc:/switch/rampagere`) is made at start and becomes the current one |
+| Game data | in the same folder: your disc image (`*.iso`, read in place as on a PC) or `RAMPAGE.VOL` with `RAMPAGE.ELF` or `SLES_538.00`; `data_find` looks there first (`__SWITCH__` only). `RAMPAGE.VOL` is 1.34 GB; an image larger than 4 GB does not fit on a FAT32 card (exFAT, or copy the two files out of it) |
+| Files | `rampage.cfg`, `rampage_profile.bin` (the save), `mods/textures/` and `rampage.log` there: stdout and stderr go to the log, a new one each start. A message (no game data, another release) shows in the system's error dialog |
+| Start | without arguments the front end (`--shell`); the Pause menu's Quit goes back to its main menu, HOME closes the program |
+| Screen | the whole screen at 1280×720 (docked the system scales it up); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` work (ES 3.0) at a cost not measured |
+| Pads | through `pad_sdl.c`, see below |
+
+**Controls.** The Joy-Cons attached (handheld), a detached pair, a Pro Controller: SDL's Switch mapping goes by place,
+so B (the bottom button) is Cross (jump), A Circle (grab), Y Square (punch), X Triangle (kick), ZR R2 (roar), ZL L2,
+R / L R1 / L1, + Start, − Select, the sticks the sticks. Up to four players, one controller each, in the order the
+system numbers them: SDL lists all eight of the system's players whether a controller is there or not, so
+`pad_sdl.c` asks libnx (`hidGetNpadStyleSet`) which are, and only those take a slot (players 3 and 4 without one are
+the computer's, as on a PC). A single Joy-Con held sideways, when the system makes it a player of its own (in its
+controller screen, which SDL opens when the controllers change, SL + SR on the Joy-Con): its four buttons by place
+as above, SR R2 (roar), SL L2, pressing the stick Start; SDL hands its stick over as the d-pad, which `pad_sdl.c`
+turns into the left stick (no right stick: the head is not turned). Not done: making single Joy-Cons the default
+from the program (libnx `hidSetNpadJoyAssignmentModeSingleByDefault`), since SDL's Switch driver opens the
+controller screen on every change of style. A USB keyboard plays as on a PC; the touch screen does nothing (no
+mouse). Rumble goes through SDL's Switch driver (one strength, on or off).
+
+**Memory.** The viewer reads what it needs from `RAMPAGE.VOL` into memory. Peak resident size of the Linux GLES build
+(`/usr/bin/time -v`, `SDL_VIDEODRIVER=offscreen`, Mesa llvmpipe, whose textures are in that memory too):
+`--players 4 --bots 2` on block 1 and 6 of each city 187 - 214 MB (New York 6 the largest), 222 MB after a
+minute's play, 246 MB with `--ao --smaa 4 --mips`, the front end 148 MB. On the Switch the GPU's memory comes out of
+the same heap, with the 16 MB program and the driver's own on top. Homebrew in applet mode (started from the Album)
+gets roughly 400 MB, which should hold it with little room, so start it with title takeover: hold R while starting
+a game, which gives the Homebrew Menu the game's memory (about 3 GB). Started as an applet, `rampage.log` says so in
+its first line.
+
+**Untested** (no Switch here): that it starts at all, the speed of Mesa's nouveau driver on the Tegra X1 with the
+shim (four lights per vertex, one shader for everything), the error dialog, the log, sound (SDL's audio), rumble,
+docked / handheld changes, several controllers and single Joy-Cons. The build itself is: the `devkitpro/devkita64`
+image's devkitA64 (GCC 15.2), libnx 4.12, switch-sdl2 2.28.5 and switch-mesa 20.1 build `rampage.nro` (7 MB), GCC
+warning only about shared code (collide.c, movie.c, shell.c, water.c), none in the Switch parts.
 
 ## Input
 Keys as above, and today's controllers (port extra, WoodyRE's pad code: `src/pad.h`, `src/pad.c` on Windows,
@@ -265,7 +314,8 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 | `src/building.c` | a building's cells and the game's hit on them: 0x2BC150, 0x2BB7B0, 0x2BB950, the roof stomp's 0x2BBE80 (docs/FORMAT_BDP.md "Damage") |
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
-| `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms") |
+| `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms"); the Switch's folder, log and error dialog |
+| `build_switch.sh`, `res/switch_icon.jpg` | the Switch homebrew `rampage.nro` and its icon ("Nintendo Switch") |
 | `src/gles/GL/gl.h`, `src/gles/gles2.c` | the fixed function on OpenGL ES 2.0 / 3.0 (`GLES=1`, WoodyRE's shim with lighting, fog and sphere maps; "OpenGL ES") |
 | `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |

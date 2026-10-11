@@ -76,11 +76,19 @@ beside itself, in the current folder and in `%LOCALAPPDATA%\RampageRE` (`~/.loca
 whole list is in [docs/NATIVE.md](docs/NATIVE.md) "Game data"). The viewer does not need `build.ps1`. The recompiled
 game (`build.ps1`) is not built there, as it needs the disc.
 
+**Nintendo Switch** (homebrew, experimental, not yet tried on a Switch): unpack `RampageRE-switch-<tag>.zip` onto the
+SD card (or build `rampage.nro` with `./build_switch.sh`, devkitPro or its Docker image), put your disc image (or
+`RAMPAGE.VOL` with `RAMPAGE.ELF`) into `/switch/rampagere/` beside it and start it from the Homebrew Menu, preferably
+by holding R while starting a game (title takeover: more memory than the Album applet). It starts in the front end;
+B is Cross, the buttons go by place; `rampage.cfg`, the profile and `rampage.log` live in `/switch/rampagere/`
+([docs/NATIVE.md](docs/NATIVE.md) "Nintendo Switch").
+
 ## Repository layout
 | Path | |
 |---|---|
 | `build.ps1` | the whole pipeline: disc → split ELF → C++ → `ps2EntryRunner.exe` |
 | `build_viewer.bat`, `src/` | the native viewer `rampage.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
+| `build_viewer.sh`, `build_switch.sh` | the same viewer for Linux (SDL2) and for the Switch (homebrew `rampage.nro`) |
 | `recomp/config.toml` | PS2Recomp config: stub bindings for the SCE libraries and newlib, plus Rampage fixes |
 | `recomp/funcmap.csv` | function map (Ghidra CSV format) the current state was tested with |
 | `tools/split_elf.py` | splits the retail ELF's single code+data segment into real sections |
