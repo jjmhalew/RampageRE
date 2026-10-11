@@ -315,7 +315,14 @@ for that destination alpha, the same while both textures are opaque [G: the fram
 24-bit one would make Ad 0x80].
 
 Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees, cloth, teeth), bit 1 see-through
-(fog masks, skylines, tree cards), 0xC the monsters' own; 0x100 on 78 city materials, not decoded.
+(fog masks, skylines, tree cards), 0xC the monsters' own. 0x100 (78 materials, all kind 2) is the texture region
+(0x16F540 → 0x25F960, above): the 4 floats after the texture index, u0, v0, width, height in the texture, a tile of
+a 4 × 4 atlas (`Taxi_normal` (0.5, 0, 0.25, 0.25) of `RampageVehicles_01`, `Taxi_Damaged` (0.75, 0, …); the
+backdrops' `stucco`, `solid_wall_block`, `*_redbricksolid`, `*_windows` of their `*Base00` / `Window_sheet`), the
+parts' UVs in tile units: the taxi's run 0.035 … 0.239 by 0 … 0.249, the backdrops' −0.83 … 0.83 (they tile).
+Not ported: the viewer samples the atlas at the UVs as they are, so these parts show the atlas's first tile, or run
+across the atlas [G: whether the GS wraps within the tile (CLAMP REGION_REPEAT) or only offsets is not followed
+past 0x25F960; the tiling backdrops say a wrap].
 
 A mesh part's material name index does not always name a material: 3,768 of the 6,292 parts do, the other 2,524
 name a texture entry (type 9) directly (people, the city backdrops, many props).
@@ -406,9 +413,11 @@ A building is a grid of cells (the Building's grid at +0x1B8, built by 0x2D1A30)
 by depth × 5 (depth is 2 in every city) and 6 + 3 × storeys + 1.5 high (the last 1.5 is the roof's band), and every
 storey above the ground floor has a cell per facade column: the left side (depth columns, back to front), the right
 side (front to back) and the front (width columns), 16 bytes each: damage state 0 … 3 (the `TextureSheet` row), HP
-(10 at the start, 0x2CBEB4), the sheet's column (from the `Floor|` list), a tint and flags (`FloorFlags`; 0x400 hidden
-behind a front-row building, 0x800 hits ignored, 0x100 / 0x200 its `Openable` window `LRPos` 0 / 1 is open: see
-"Open windows"). Each floor holds `FloorHP` (8 ×
+(10 at the start, 0x2CBEB4), the sheet's column (from the `Floor|` list), a tint and flags (+0xE: `FloorFlags`, read
+by 0x2CBB50 at 0x2CC014 in the list's order, left, front, right, as the columns; 1 mirrored, 0x400 hidden behind a
+front-row building, 0x800 hits ignored, 0x100 / 0x200 its `Openable` window `LRPos` 0 / 1 is open: see "Open
+windows"). The books' FloorFlags are all 0 but 22 cells of New York with 1 (`ConcretePink` and `ConcretePinkShort`,
+NY05 and the buffer block, `Broadway_3x9`, `Empire_3x18`): the front's right column, a side's front cell [R]. Each floor holds `FloorHP` (8 ×
 width unless set), and the building `BuildingHP` (6 × width × storeys unless set). Script bindings read and set them
 (`getCellDamage`, `setCellDamage(face, storey, column, state)`, `getDestructionFrac` = HP left / HP at the start,
 `disableAutoCollapse`, ...; 0x2ADF00 → 0x2AD610).
@@ -544,8 +553,8 @@ the `ColumnDef|` entries (G+0xEC + column × 0x38, 0x2D0FB0).
   `Skeleton` models. The game's camera stays in front.
 - **Pass 1, the facade** (front 0x2C81A0, right 0x2C8760, left 0x2C8D30): one quad per cell in every damage state, a
   sheet of no thickness.
-  - u is the cell's column / 4 (mirrored by cell flag bit 0); v runs from state / 4 at the top to (state + 1) / 4 at
-    the bottom.
+  - u is the cell's column / 4, u0 and u1 swapped for a mirrored cell (flag bit 0: 0x2C82AC, 0x2C886C, 0x2C8E14); v
+    runs from state / 4 at the top to (state + 1) / 4 at the bottom.
   - The corners take the dent offsets of their grid vertices: +0x14 along the face, +0x18 up, and on the sides +0x1C
     along the normal.
   - The colour is the vertex's times the cell's tint (u16, 256 = 1).
@@ -553,15 +562,25 @@ the `ColumnDef|` entries (G+0xEC + column × 0x38, 0x2D0FB0).
 - **Inner corner walls** (0x2C63A0, before the front): while the first or the last front cell is damaged, a piece 5 deep
   just inside the side wall (0.3 in), textured from column `InnerWallColumn` at the side cell's state, grey.
 - **Pass 0, window glass** (front 0x2C92F0): only for cells in state 0 whose column has an `Outline`; it goes once the
-  cell is damaged.
+  cell is damaged. A mirrored cell's outline is at 5 − x (x0' = 5 − x1, x1' = 5 − x0: 0x2C9470 and the other faces'
+  0x2C9910, 0x2C9DB4, 0x2CA278, 0x2CA960, 0x2CAD48); the cracks' pass (0x2C7A90) reads no flag, so their window
+  hole stays where the column has it.
   - The quad is the outline grown by 0.3 on each side, 0.03 inside the face, tinted `CubeTint`.
   - It shows one of 16 tiles of `InnerWindow` (the cell's byte +6), or, with no inner window texture, a reflection
-    (the 0x3F5818 variant, from the vertex normals).
+    (the 0x3F5818 variant, from the vertex normals). Byte +6 is rand() & 15 (0x2CBAD8) of a Park-Miller state the
+    grids keep for themselves (gp − 0x6CC0, which also jitters each grid vertex's normal by two draws × 0.02,
+    0x2CB86C), seeded once, at the first grid made, from the EE timer's count (0x2CBB74: the flag gp − 0x7240, then
+    0x106C80) [R]; so which tile a window shows is hardware timing [G in city.c: a hash].
   - An `Outline` (x0, z0, x1, z1 in tile pixels) becomes cell units: x = (o & (Wt − 1)) × 5 / Wt and z = (Ht − o) × 3 / Ht.
   - The pass does not look at the open-window flags: an open window keeps its glass, and is covered from the front
     (see "Open windows").
 - **Pass 2, cracks** (front 0x2C6A30, right 0x2C7340, left 0x2C7A90; emit 0x2C7020): `CrackTexture` just inside the
-  face, faded in by the dent level.
+  face (0.015: y = 0.015 − D / 2 on the front, 0x2C6A3C), faded in by the dent level.
+  - The materials (0x2D0AB0): the glass +0x1F0 shader 0x51 (`InnerWindowTexture`) or 0x22 (the reflection), the
+    facade +0x1F4 shader 0x7C (`ShellTexture`), the cracks +0x1F8 shader 0x4C; 0x7C and 0x4C are one pass in GS state
+    2 (ALPHA 0x44, TEST 0x5000D: the alpha test GREATER 0, Z test GEQUAL, Z written; PRMODE 0x78), the glass state 1
+    (opaque) [R]. With the passes drawn in order the cracks would be behind the facade's depth; how they show over it
+    [G: the VU1 programs' depth or the draw order outside the grid; city.c draws them just in front].
   - The fade is the grid vertex's alpha, level × 85; a cell with no level at its corners is skipped.
   - Below state 2 a column with an `Outline` gets 4 bands around the window, otherwise one quad.
   - The texture runs on across the unwrapped faces at 1 / `CrackScale` per unit.
@@ -614,8 +633,9 @@ The port: `building_window_open` / `building_window_is_open` and the list in bui
 in cell units), the `Openable`s in city.c's `sheet_columns`, the drawing as part 4 of the facade mesh (city.c
 `open_windows`, every frame: in the facade's frame, so it sways with it; the game's 0x2BECC0 takes the per-building
 vector the facade draws get too (0x320280), which holds its shake (0x2BAD50) [R]),
-and `scene_window_close` / `scene_window_close_at` for the occupants' `closeWindow`. Not ported: a mirrored cell
-(flag bit 0) mirrors the rect (0x2CC420), as the port mirrors no cells.
+and `scene_window_close` / `scene_window_close_at` for the occupants' `closeWindow`. A mirrored cell (flag bit 0)
+mirrors the slot's `Openable` rect (0x2CFF30 -> 0x2CC420: x0' = 5 − x1, x1' = 5 − x0), for the occupant's place and
+its window [R]: city.c `cell_rect` (the facade's u and the glass too).
 
 ### Spawns
 A block definition also says who is in the street (names found through the property name table at 0x3F5990;

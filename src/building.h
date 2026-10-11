@@ -20,11 +20,13 @@ enum {                                               /* +0x14C */
     BUILDING_CRACKING = 4, BUILDING_SHAKING = 5, BUILDING_FALLING = 6   /* destroyed, in that order */
 };
 
-enum { CELL_WINDOW_OPEN = 0x100 };                   /* +0xE: 0x100 << LRPos, its Openable window is open */
+/* +0xE: FloorFlags (0x2CC014, the list in the Floor| order left, front, right) and the state bits: 1 the cell is
+ * mirrored (its tile's u, its glass's and its Openables' x: 5 - x), 0x100 << LRPos its Openable window is open */
+enum { CELL_MIRRORED = 0x1, CELL_WINDOW_OPEN = 0x100 };
 
 typedef struct {
     uint8_t state, hp, tile;                         /* +0 damage state, +4 HP (10), +5 the sheet's column */
-    uint16_t flags;                                  /* +0xE: CELL_WINDOW_OPEN << LRPos (only these are kept) */
+    uint16_t flags;                                  /* +0xE: CELL_MIRRORED, CELL_WINDOW_OPEN << LRPos (only these) */
 } BuildingCell;
 
 /* an open window (a record of 0x24 bytes in the building's list at +0xFC, count +0x104; openWindow 0x2BE8B0): one of

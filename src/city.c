@@ -1167,6 +1167,28 @@ static void people_sync(Scene *s, double t)
 }
 
 static uint32_t spawn_seed = 12345;
+/* a cell's FloorFlags entry (0x2CBB50 reads the list at 0x2CC014 into +0xE: the list in the Floor| order, left, front,
+ * right); 0 without one */
+static int cell_flags(Group floor, int k)
+{
+    Record r[64];
+    Group g = group_sub(floor, "FloorFlags");
+    uint32_t n = g.at ? group_items(g, r, 64) : 0;
+    return k >= 0 && (uint32_t)k < n ? (int)record_num(r[k]) : 0;
+}
+
+/* a rect in the cell (x0, z0, x1, z1; x0 < 0 none) as the cell has it: a mirrored one (flag 1) at 5 - x (0x2CC420:
+ * x0' = 5 - x1, x1' = 5 - x0) [R] */
+static const float *cell_rect(const BuildingCell *cell, const float in[4], float out[4])
+{
+    memcpy(out, in, 4 * sizeof(float));
+    if ((cell->flags & CELL_MIRRORED) && in[0] >= 0) {
+        out[0] = CELL - in[2];
+        out[2] = CELL - in[0];
+    }
+    return out;
+}
+
 static float spawn_rand(void)                        /* the LCG of the stand-ins, 0 .. 1 */
 {
     spawn_seed = spawn_seed * 1664525u + 1013904223u;
@@ -1286,7 +1308,8 @@ void scene_people_spawn(Scene *s, float dt)
         }
         /* 0x2BE660: the bottom middle of the slot's Openable (0x2CFF30), on the front */
         int tile = b->cell[ws->storey][ci].tile & 3;
-        const float *ol = sb->openable[tile][ws->lr];
+        float olm[4];                                /* a mirrored cell's at 5 - x (0x2CFF30 -> 0x2CC420) [R] */
+        const float *ol = cell_rect(&b->cell[ws->storey][ci], sb->openable[tile][ws->lr], olm);
         if (ol[0] < 0)
             continue;
         float at[3] = { b->min[0] + CELL * (float)ws->column + (ol[0] + ol[2]) / 2, b->min[1],
@@ -1529,11 +1552,16 @@ static void face_normal(int face, float n[3])
 /* the facade's other passes (0x2C92F0 .., 0x2C6A30 .., 0x2C63A0), made again whenever the building changes:
  * - the window glass, for every cell in state 0 whose column has an outline: the outline grown by 0.3, 0.03 behind
  *   the face (seen through the sheet's clear windows), one of 16 InnerWindow tiles, tinted CubeTint (/ 256: the
- *   game halves its vertex colours, 0x80 = 1);
+ *   game halves its vertex colours, 0x80 = 1). The tile is the cell's +6, rand() & 15 of a Park-Miller state of the
+ *   grids' own (gp - 0x6CC0, 0x2CBAD8, after two draws per grid vertex for the reflection's normals), seeded once from
+ *   the EE timer's count at the first grid made (0x2CBB80 -> 0x106C80) [G: hardware timing, not in the ELF: here a
+ *   hash of the storey, the cell and the building];
  * - the cracks on the front, faded in by the vertex rows' levels (level x 85, halved: level / 3), around the window
- *   below state 2, CrackTexture running on across the faces at 1 / CrackScale (here just in front of the face: the
- *   game puts it 0.015 behind and must draw it over the facade some other way), coloured by the building light at
- *   its grid vertex times CrackTint (the vertex's +0x0, 0x2CE7B8), drawn unlit as the facade;
+ *   below state 2, CrackTexture running on across the faces at 1 / CrackScale, coloured by the building light at its
+ *   grid vertex times CrackTint (the vertex's +0x0, 0x2CE7B8), drawn unlit as the facade. Here just in front of the
+ *   face: the game puts them 0.015 behind it (0x2C6A3C: y = 0.015 - D / 2) with the facade's own state (shaders 0x4C
+ *   and 0x7C, both GS state 2: TEST 0x5000D, Z test GEQUAL and Z written; the passes drawn glass, facade, cracks)
+ *   [G: how they then show over the facade is the VU1 programs' or the GS's, not settled from the ELF];
  * - while a corner front cell is damaged, a wall 5 deep just inside the side wall (0.3 in at its back), the sheet's
  *   InnerWallColumn at the side cell's state, grey (0x80 halved). */
 static void facade_passes(Scene *s, SceneBuilding *sb)
@@ -1566,9 +1594,11 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
                     continue;
                 const BuildingCell *cell = &b->cell[o][ci];
                 const float *ol = sb->outline[cell->tile & 3];
+                float gl[4];                         /* [R 0x2C9470]: a mirrored cell's glass at 5 - x (the cracks' */
+                cell_rect(cell, ol, gl);             /* pass 0x2C7A90 reads no flag: their hole stays) */
                 if (cell->state == 0 && ol[0] >= 0) {
-                    unsigned t = ((unsigned)o * 7u + (unsigned)ci * 13u + b->seed * 5u) & 15u;   /* cell +6 */
-                    float a0 = ol[0] - 0.3f, a1 = ol[2] + 0.3f, z0 = ol[1] - 0.3f, z1 = ol[3] + 0.3f;
+                    unsigned t = ((unsigned)o * 7u + (unsigned)ci * 13u + b->seed * 5u) & 15u;   /* cell +6 [G] */
+                    float a0 = gl[0] - 0.3f, a1 = gl[2] + 0.3f, z0 = gl[1] - 0.3f, z1 = gl[3] + 0.3f;
                     float az[4][2] = { { a0, z0 }, { a1, z0 }, { a1, z1 }, { a0, z1 } }, pos[4][3], uv[4][2], col4[4][4];
                     for (int k = 0; k < 4; k++) {
                         face_point(sb, face, col, az[k][0], az[k][1], 0.03f, bottom, height, pos[k]);
@@ -1975,6 +2005,16 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
                 if (i >= 0) {
                     sb->quad[st][i] = v;
                     sb->b.cell[st][i].tile = (uint8_t)((int)record_num(tiles[st][k]) % 4);
+                    if (cell_flags(floors[st], k) & CELL_MIRRORED) {   /* [R 0x2C82AC]: its u0 and u1 swapped */
+                        sb->b.cell[st][i].flags |= CELL_MIRRORED;
+                        MeshPart *fp = mesh >= 0 ? &s->meshes[mesh].mesh.parts[0] : NULL;
+                        if (fp && fp->uv && (uint32_t)v + 4 <= fp->nverts)
+                            for (int q = 0; q < 2; q++) {
+                                float u = fp->uv[2 * (v + q)];
+                                fp->uv[2 * (v + q)] = fp->uv[2 * (v + 2 + q)];
+                                fp->uv[2 * (v + 2 + q)] = u;
+                            }
+                    }
                 }
                 v += 4;
             }
