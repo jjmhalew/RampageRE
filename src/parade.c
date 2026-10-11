@@ -1311,7 +1311,8 @@ void parade_collide_add(Parade *p, CollideWorld *w)
             collide_set_mover(w, o->cobj, &o->cm, o->cmat, o->sphere.vel);
         else if (!o->sphere.on && (o->line.on || o->phase == PAP_HELD)) {   /* driven (a LineMover, held): the
                                                       * exchange moves only the flying one [R 0x28F220, collide.h] */
-            collide_mover_kinematic(&o->cm, tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f), tnum(o, "SlidingFriction", 0.4f));
+            collide_mover_kinematic(&o->cm, tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f),
+                                    tnum(o, "SlidingFriction", 0.4f));
             o->cm_on = 0;
             collide_set_mover(w, o->cobj, &o->cm, NULL, NULL);
         }
