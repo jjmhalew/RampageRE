@@ -3843,9 +3843,9 @@ static void pause_challenge(Hud *h, Screen *s)
 static void pause_boss(Hud *h, Screen *s)
 {
     Node *r = s->L->root;
-    /* gApp.getLanguage() > 2 (French and on) and gApp.getPlatform() == 2 (this build's answer, App case 0x28B1A0
-     * [R]): the wider card */
-    int foreign = h->gui.lang > 2;
+    /* gApp.getLanguage() > 2 and gApp.getPlatform() == 2 (this build's answer, App case 0x28B1A0 [R]): the wider
+     * card; getLanguage() is the .loc column + 1 (shell.c get_language, 0x441470) */
+    int foreign = h->gui.lang + 1 > 2;
     float padding = foreign ? 0.0f : 8.0f;
     Node *head = layout_find(r, foreign ? "boss_group_foreign" : "boss_group");
     if (!head)
@@ -3961,7 +3961,8 @@ static void pause_options_setup(Hud *h, Screen *s)
     list_select(s->l_rumble, !s->b_rumble);              /* item 0 ON, 1 OFF */
     for (int i = 0; i < 3; i++)
         if (s->titles[i]) s->titles[i]->tscale = 1.0f;
-    if (h->gui.lang == 7 && s->l_rumble) {               /* Dutch: the list moved, its words smaller, 30 apart */
+    if (h->gui.lang + 1 == 7 && s->l_rumble) {           /* getLanguage() == 7, Spanish: the list moved, its words
+                                                          * smaller, 30 apart */
         s->l_rumble->p[0] = 185; s->l_rumble->p[1] = 180; s->l_rumble->p[2] = 0;
         s->l_rumble->lsp = 30;
         Node *on = layout_find(s->l_rumble->child, "ON"), *off = layout_find(s->l_rumble->child, "OFF");
