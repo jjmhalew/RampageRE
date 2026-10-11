@@ -1313,7 +1313,7 @@ static void line_emit(Emit *e, const Node *l, float x0, float x1, float y, float
  * item's scale s is its frame's times its growth; its box (the text's width and height, 0x234BA0, times s) placed by
  * its justify and origin from its place plus its growth's offset; for each line of it (the line's measure, held to
  * maxwidth) the line from ext before its start to ext past its end at the line's middle, where ext = max(dh0 s,
- * s cap - h / 2) (dh = <d highlight>, cap the end cap picture's width) and the band is h + dh1 s across; in the
+ * s cap - w / 2) (dh = <d highlight>, cap the end cap picture's width, w the line's) and the band is h + dh1 s across; in the
  * selector colour, times the GUI's pulse with setHighlightPulse(1) (once more each line) */
 static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, float sc, float z, float fade)
 {
@@ -1328,7 +1328,7 @@ static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, 
     float x = it->p[0] + it->go[0] - (it->justify == 1 ? 0.5f * W : it->justify == 2 ? W : 0);
     float y = it->p[1] + it->go[1] - (it->origin == 1 ? 0.5f * H : it->origin == 2 ? H : 0);
     float c[4] = { l->sel_col[0], l->sel_col[1], l->sel_col[2], l->sel_col[3] * fade };
-    float d0 = l->hl_d[0] * s, d1 = l->hl_d[1] * s, cap = l->has_endcap ? l->endcap.w : 0;
+    float d0 = l->hl_d[0] * s, d1 = l->hl_d[1] * s, cap = l->has_endcap ? (l->endcap.us > 0 ? l->endcap.w / l->endcap.us : l->endcap.w) : 0;
     TextStyle ts;
     text_style(it, &ts);
     TLine L[MAX_LINES];
@@ -1344,7 +1344,7 @@ static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, 
         float lx = x;
         if (i > 0)                                       /* the lines after the first by the block's mode */
             lx += it->tmode == 1 ? 0.5f * (W - lw) : it->tmode == 2 ? W - lw : 0.0f;
-        float ext = fmaxf(d0, s * cap - 0.5f * lh);
+        float ext = fmaxf(d0, s * cap - 0.5f * lw);     /* 0x23C89C halves the line's width (sp + 0xCC) */
         if (l->pulse)
             c[3] *= gui_pulse(g);
         line_emit(e, l, lx - ext, lx + lw + ext, y + 0.5f * lh, 0.5f * (lh + d1), ox, oy, sc, c, z);
