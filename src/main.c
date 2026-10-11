@@ -2032,9 +2032,10 @@ static int monster_spheres(Mon *mo, float out[][4], int max)
 
 /* the frame's collision world (collide.c; the game's RGridMgr 0x4D0900 and RSceneryMgr 0x4D0B00), built once a frame
  * before anything moves: the block's buildings (tag COLLIDE_TAG(COLLIDE_OWN_BUILDING, scene index)), the monster's
- * spheres (flags 4 | COLLIDE_F_MONSTER: what the shots' rays hit; WCISpheres 0x449A20 [G: as separate spheres]),
- * then every module's objects with their shapes and flags (army, vehicles, rail, parade, street and roof objects,
- * the bosses' parts and VolumeTriggers). The monster (push_out), the shots and the flying objects ask it */
+ * spheres (flags 4 | COLLIDE_F_MONSTER: what the shots' rays hit; WCISpheres 0x449A20, one object each: its ray
+ * 0x29A300 keeps the nearest sphere's hit, as the world's ray does across them [R]; their radii x the dynamic scale,
+ * 0x2DAB60), then every module's objects with their shapes and flags (army, vehicles, rail, parade, street and roof
+ * objects, the bosses' parts and VolumeTriggers). The monster (push_out), the shots and the flying objects ask it */
 static void world_build(Viewer *v)
 {
     CollideWorld *w = &v->cw;
@@ -2057,7 +2058,7 @@ static void world_build(Viewer *v)
         for (int k = 0; k < ns; k++) {
             CollideShape sh;
             float m[12], zero[3] = { 0, 0, 0 };
-            collide_shape_sphere(&sh, zero, sp[k][3]);
+            collide_shape_sphere(&sh, zero, sp[k][3] * (mo->scale > 0 ? mo->scale : 1));
             collide_matrix(m, 0, sp[k]);
             if (collide_add(w, &sh, m, COLLIDE_F_WORLD | COLLIDE_F_MONSTER, COLLIDE_TAG(COLLIDE_OWN_MONSTER, j), k) >= 0)
                 mo->nmsph++;
@@ -2073,15 +2074,19 @@ static void world_build(Viewer *v)
     collide_finish(w);
 }
 
-/* the monster's spheres moved with it: their objects in the frame's world follow (before the modules update) */
+/* the monster's spheres moved with it: their objects in the frame's world follow (before the modules update). The
+ * WCISpheres entries (0x2DA9E0) take the shape's radius x the dynamic scale (+0xA78 while +0xA74, 0x2DAB60 ..
+ * 0x2DAB84: +0x10 it, +0xC its square) [R]; the touch test (0x2E22B0) the shape's own, as monster_spheres gives */
 static void world_monster_moved(Mon *mo, const float (*sp)[4], int ns)
 {
     Viewer *v = mo->v;
+    float s = mo->scale > 0 ? mo->scale : 1;
     for (int k = 0; k < ns && k < mo->nmsph; k++) {
         CollideObj *o = &v->cw.o[mo->msph0 + k];
+        float r = sp[k][3] * s;
         memcpy(o->m + 9, sp[k], 3 * sizeof(float));
-        o->shape.radius = o->shape.half[0] = o->shape.half[1] = o->shape.half[2] = sp[k][3];
-        o->shape.raw[3] = sp[k][3] * sp[k][3];
+        o->shape.radius = o->shape.half[0] = o->shape.half[1] = o->shape.half[2] = r;
+        o->shape.raw[3] = r * r;
     }
 }
 

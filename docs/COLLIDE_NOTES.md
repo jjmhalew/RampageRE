@@ -180,6 +180,23 @@ a thrown object rests r above the street [R].
 - WCISpheres (vtable 0x449A20, the monster's spheres as one shape for rays) [R]: a type 3 shape, which 0x27FD70 never
   meets (0x27F620 passes the higher type first), so a thrown object does not meet its thrower or any monster: the
   viewer's movers leave the monsters out (`collide_mover_step_ex`'s exclude COLLIDE_F_MONSTER), as the game.
+  Its entries (+0x40, count +0x44, 0x14 each: the centre in the monster's frame, r² at +0xC, r at +0x10) are filled
+  once a frame by 0x2DA9E0: the shape's offset through its bone's matrix, × the dynamic scale (+0xA78 while +0xA74),
+  the radius × the same scale (0x2DAB60 .. 0x2DAB84); then 0x29A880 sets the bound (sphere 0 merged with the rest by
+  0x103770) [R]. The touch test 0x2E22B0 takes the graph's radius unscaled with the world centres +0x6D4 [R].
+- WCISpheres' ray (vtable +0x18, 0x29A300; reached only through 0x27FFF0 from the world's ray 0x283730, whose
+  callers are the shots 0x293CB4, the beams 0x295800, the effects' FxWorldAdapter +0x4C 0x282210 and the debug
+  overlay 0x288B90; 0x31FC40's direct 0x27FFF0 calls are the buildings' ground-shadow grid) [R]: no hit when the start
+  is farther than the bound's radius + maxt from its centre (0x102DA0) or the line misses the bound; then each sphere
+  by 0x100900 (the unit ray: 0 none, 1 touching at t = -b/2, 2 two roots): a start inside one (t0 < 0 ≤ t1) is a hit
+  at t = 0 at once, its normal away from that sphere's centre (its frame's x below 1e-6 squared), its index 0; else
+  t0 ≤ maxt is kept and maxt becomes t0, the normal (the hit − the centre) made 1 long, the index the sphere's. The
+  base WCollisionInfo's sphere (0x280780) is the same test with the same fallback. The port adds each sphere as its
+  own object (main.c `world_build`, radius × the scale), which the world's ray takes the nearest of: the same t and
+  normal [R]. Left as it is: an inside hit's index is the sphere's, not 0, and a fallback normal is the world's x,
+  not the monster's (the spheres' objects are world-aligned), and a ray with `any` stops at the first sphere it
+  meets, not the monster's nearest (only the FxWorldAdapter's ray passes its caller's flag); nothing in the port
+  reads the index or asks with `any`.
 - The monster's touch damage (TakeDamage of type Collision, 2.0, every frame, to an object without
   OnlyHitWithEffNodes; boss.c, rail.c, city.c's huts) [R]: the monster's object test 0x2E22B0, its unarmed spheres
   against each object's shape (0x280470), not 0x2E2C50.

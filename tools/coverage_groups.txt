@@ -272,7 +272,7 @@ unused    0x292D50-0x293020  Projectile +0x78: the script impact callback, only 
 engine    0x293020-0x295450  Projectile / ROProjectile (the look is its FireEffect): army.c's shots
 engine    0x295450-0x298980  WBeamWeapon, WProjectileWeapon, WWeapon, their descs and render objects: army.c, boss.c
 engine    0x298980-0x29A260  WWeaponProcAnimator, WWeaponCluster: army.c, boss.c
-engine    0x29A260-0x29BC20  WCISpheres: main.c's world_build adds the monster's spheres for the rays [G: 0x29A300 not compared]
+engine    0x29A260-0x29BC20  WCISpheres: main.c's world_build adds the monster's spheres for the rays, one object each (0x29A300's nearest hit and normal: collide.c)
 engine    0x29BC20-0x29CC50  WWeaponSystem, an object's cloth setup: army.c, city.c
 engine    0x29CC50-0x29D180  ClothBlob (objects' cloth, flags): cloth.c, city.c [G]
 
@@ -332,6 +332,5 @@ engine    0x4373C0-0x43B880  C++ static constructors: fonts, script types, the j
 platform  0x43B880-0x440590  the static constructor filling the renderers' VU1 microprogram tables (sizes of the microcode at 0x34BCB0 ..): render_gl.c
 engine    0x440590-0x443B50  C++ static constructors: TypedObject / WorldObject type registry, gWorld's managers, the RWorld singletons: main.c, collide.c
 # --- found while sorting (shown under "Open" in docs/COVERAGE.md)
-note WCISpheres' ray against the monster's spheres (0x29A300): main.c `world_build` adds the spheres itself; its nearest hit and normal are not compared with the game's.
 note enableSfx pauses the sound event player for a frame at block teardown and game over (0x2B6760, 0x324584); sound.c has none [G: inaudible].
 note funcmap.csv splits some functions at jump-table targets (e.g. 0x107838, 0x107BF0, 0x108558 are cases of 0x1072B0; 0x1900B0 is the tail of 0x18F9C0), so a few "functions" here are pieces of one.

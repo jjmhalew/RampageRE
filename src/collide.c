@@ -245,7 +245,9 @@ int collide_obj_sphere(const CollideObj *o, const float c[3], float r, float nor
 
 /* 0x280780 -> 0x100420 (box) and 0x100900 (sphere), in the object's frame: the entry; a ray starting inside meets it
  * at t = 0 [R] (the box: the face of least depth, ties to z then y, on the start's side; the sphere: away from its
- * centre) */
+ * centre, its frame's x when the start is within 0.001 of it: 0x280A4C / 0x29A5E0, the length squared below 1e-6).
+ * A monster's spheres (WCISpheres 0x29A300: the same test per sphere, the nearest within maxt, in the monster's
+ * frame) come here as one object each, which gives the same nearest hit and normal [R] */
 int collide_obj_ray(const CollideObj *o, const float start[3], const float dir[3], float maxt, float *t, float normal[3])
 {
     float s[3], d[3], ln[3] = { 0, 0, 0 };
@@ -257,13 +259,13 @@ int collide_obj_ray(const CollideObj *o, const float start[3], const float dir[3
     if (o->shape.type == COLLIDE_SPHERE) {
         float a = dot3(d, d), b = dot3(s, d), c = dot3(s, s) - o->shape.radius * o->shape.radius;
         if (c <= 0) {                                /* inside */
-            float l = sqrtf(dot3(s, s));
+            float l2 = dot3(s, s);
             *t = 0;
-            if (l > 1e-6f)
+            if (l2 >= 1e-6f)
                 for (int k = 0; k < 3; k++)
-                    ln[k] = s[k] / l;
+                    ln[k] = s[k] / sqrtf(l2);
             else
-                ln[2] = 1;
+                ln[0] = 1;
             to_world_dir(o->m, ln, normal);
             return 1;
         }
