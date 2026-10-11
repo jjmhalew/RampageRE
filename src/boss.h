@@ -164,7 +164,7 @@ typedef struct {
 
 Boss *boss_new(const BossHost *host);
 void boss_free(Boss *b);
-/* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
+/* [G] gWorld.isSphereVisible's stand-in without host.visible: the street's x range the camera sees (-45 .. 45) */
 void boss_set_view(Boss *b, float xmin, float xmax);
 /* gCommon.isCityDestroyed (0x4D7E4F): set once the city's last block is finished; the bosses then leave */
 void boss_set_city_destroyed(Boss *b, int on);
@@ -196,8 +196,8 @@ int boss_main(const Boss *b);
 int boss_defeated(const Boss *b);
 
 /* ---- the monster's side */
-/* an armed attack sphere reaching boss parts: their TakeDamage(monster, amount, 0 [G: Concussive], the way from
- * the monster). How many it hit */
+/* an armed attack sphere reaching boss parts: their TakeDamage(monster, amount, 0 (Concussive: an armed sphere's,
+ * 1 an unarmed touch's, 0x2E25F4) [R], the way from the monster). How many it hit */
 int boss_hit(Boss *b, int monster, const float centre[3], float radius, float amount, unsigned record);
 
 /* ---- the collision world (collide.c) */

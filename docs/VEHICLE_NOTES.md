@@ -156,7 +156,8 @@ replaces the LineMover, so the end never comes: a held car stays counted in its 
   target is 10 in front of the building (+y), at the roof's height (storeys × 3 + 1.5 + 6; above 15 a random height
   between 15 and that).
 - **The stream:** while stopped, FireDuration falls by the frame. At 0 the target is let go, the truck drives on at
-  MaxVelocity, and `setWeaponFlags(-1, 16)` holds its weapons. It is deleted at the end of its line.
+  MaxVelocity, and `setWeaponFlags(-1, 16)` turns on ReCenterWhenNoTarget: the ladder swings back. It is deleted at
+  the end of its line.
 - **The weapon:** `FireEngineStream` (RBeamWeapon on `WeaponNode_Y`; Ammo 1, Duration 4, ImpactDamage 5,
   DamagePerSec 10, Velocity 275, ReactionLevel 1, FireEffect `Blimp_laser_fire`), on a WeaponCluster (rotation 360°
   at 2.5, elevation −10 … 90° at 2.5). With 1 ammo a truck makes one 4 s stream. A monster in its way takes 5, then
@@ -218,8 +219,13 @@ reports every award with its template name, so the viewer can count challenge go
   the model's box, else the sphere the model keeps (0x184CB0, the union of its parts' spheres) [R]; here
   the union of its meshes' header spheres, city.c `city_shape_sphere`), read once. The traffic is PushOutMonsters: the
   monster is pushed out of a car's box (collide_monster).
-- **A blow's shape:** the model's box (AutoCollisionBox) from the host, else the `ShadowRect` 2.5 high; the game
-  tests the monster's spheres against the object's collision shape (0x2E22B0 → 0x280470) [R].
+- **A blow:** the armed sphere against the object's collision shape (0x2E22B0 → 0x280470, collide.c
+  `collide_obj_sphere`) [R].
+- **Properties** [R]: the book's reader keeps a typed key's name past its `Type|` (0x1B4300), so the scripts' bare
+  names find `Effect|DamageEffect` and the like; getStringProp reads the instance book first (0x27C230), which the
+  traffic (made from its template, 0x332D90) and the rockets (ObjectInstances of Location and Name only) do not have.
+- **Effects on an object** (createAndStartAttached, id 0x2C): an identity offset, no node (0x277100 → 0x291ED0): at
+  its origin, following it [R].
 - **The hold:** the HeldObjectMover's `MajorAxis` frame (0x310ED0) [R]: the cars and the fire truck have MajorAxis 1
   (x = −hand x, y = hand z, z = hand y). A thrown object keeps the held turn and does not spin (0x2D9DC0) [R].
 - **The fire truck:**
@@ -233,7 +239,10 @@ reports every award with its template name, so the viewer can count challenge go
     end, is the firing frame as drawn (main.c `vehicle_node_world`) [R];
   - the stream's reach is Blimp_Laser_Fire's collision rod (500 a second up to 125; ARMY_NOTES.md) [R];
   - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; as here
-    (vehicle.c casts the collision world's ray beside the monsters'); `setWeaponFlags(-1, 16)` holds every weapon (0x29AB60: +0x38 |= 16, untargeted) [R];
+    (the collision world's ray, the monsters in it; without a world the monsters' spheres alone);
+  - `setWeaponFlags(-1, 16)` (0x29AB60: every cluster's +0x38 |= 16) sets ReCenterWhenNoTarget (the flag names at
+    0x3F3EA0; BOSS_NOTES.md) [R]: with its target let go, the ladder swings back to rest as the truck drives on; a
+    stream still running runs out its Duration;
   - the weapon node: the host's `node_world`, else 3 above the truck.
 - **Testing it:** no block spawns `FireTruck` (checked: every city's TrafficDef names `FireTruckVehicle`, the plain
   Vehicle.bsf car with the same `FireTruck` model, and no script asks for `FireTruck`), so the viewer's

@@ -131,9 +131,11 @@ static void set_facing(VehObj *o, float f)           /* setFacingZ */
 /* ---------------------------------------------------------------- properties */
 
 /* getStringProp / getFloatProp: the books keep a record's type before a '|' ("Effect|DamageEffect",
- * "Sound|HornSound", "OTRef|Base"); the scripts ask by the bare name, so the typed names are tried too [G, as army.c].
- * Lookups follow ParentPropertySet (DefObjectProps: Gravity 35, Points 10). The objects here have no instance book of
- * their own, so getStringProp and getTemplateStringProp read the same template [G] */
+ * "Sound|HornSound", "OTRef|Base"), and the book's reader keeps its name past the "Type|" (0x1B4300: + (kind >> 16)
+ * + 1), so the scripts' bare name finds it [R]; here the types the books use are tried. Lookups follow
+ * ParentPropertySet (DefObjectProps: Gravity 35, Points 10). getStringProp reads the instance book (+0x7C) first, then
+ * the template (0x27C230); the traffic is made from its template alone (0x332D90) and the rockets' ObjectInstances
+ * hold only Location and Name, so here both read the template [R] */
 static const char *const TYPED[] = { "", "Effect|", "Sound|", "Shape|", "OTRef|", "Script|" };
 
 static int find_rec(Group g, const char *key, Record *out)
@@ -219,7 +221,8 @@ static int effect_at(Vehicles *v, const char *name, const float pos[3])
     VehicleEvent *e = emit(v, VE_EFFECT, -1, name, pos);
     return e->id = v->next_fx++;
 }
-/* FollowEffect.createAndStartAttached(object, name): [G] at the object's origin, following it */
+/* FollowEffect.createAndStartAttached(object, name): at the object's origin, following it (id 0x2C: an identity
+ * offset and node -1 to 0x291ED0, 0x277100) [R] */
 static int effect_on(Vehicles *v, VehObj *o, const char *name)
 {
     if (!name)
@@ -335,7 +338,8 @@ static void line_init(VehObj *o, const float a[3], const float b[3], float speed
 }
 
 /* the LineMover's frame (0x315E10) [R]: the share grows by dt x speed / length (not when the length is 0); past 1 it
- * stops at the end and calls back 2 [G: once]; while it simply moves, a monster nearer than MonsterResponseDist
+ * stops at the end and calls back 2, every frame after in the game: here once, as every handler of it deletes its
+ * object or gives it a new line at the first [R]; while it simply moves, a monster nearer than MonsterResponseDist
  * (3D, squared) calls back 4. Returns the callback, 0 none (1, "moving", is not passed on) */
 static int line_step(Vehicles *v, VehObj *o, float dt)
 {
@@ -377,7 +381,8 @@ static const float *book_box(Group g, float b[6])
 }
 
 /* the object's shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius or
- * AutoCollisionBox with the model's box; else the model's bounding sphere [G: taken as its box's, the host's] */
+ * AutoCollisionBox with the model's box; else the sphere the model keeps (the host's shape_sphere, below) [R]; a host
+ * without it gets the sphere round the model's box */
 static void obj_shape_read(const Vehicles *v, const VehObj *o, CollideShape *s)
 {
     float tb[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
@@ -744,7 +749,8 @@ static int car_pulse(Vehicles *v, VehObj *o)
 }
 
 /* onThrow(monster, eaten) [R]: an Edible (the bicycle) leaves the manager; eaten it counts (addStats type 1, a fart
- * one time in five, 2 s later) [G: and the engine takes it away]; not eaten it is smashed away with its
+ * one time in five, 2 s later) and the engine takes it away (throwObject 0x2D9DC0: requestDelete, vtable +0x58,
+ * 0x2DA2A0) [R]; not eaten it is smashed away with its
  * FlyingSound, flags 4056, pulsing every 0.25 s. Anything else counts as a destroyed vehicle (addStats type 2), can
  * no longer be picked up, and is "thrown" (32) for 5 s, pulsing every 0.5 s. Returns 1 when it is gone */
 static int car_throw(Vehicles *v, VehObj *o, int monster, int eaten, float heading)
@@ -813,8 +819,8 @@ static int car_damage(Vehicles *v, VehObj *o, int monster, const float direction
 }
 
 /* OnHitGround [R]: 5 for the first touch since the last pulse, 1 for each after; over 40 it is wrecked (it explodes
- * on its next pulse); a touch after a whole pulse in the air plays its DamageEffect again. [G] The SphereMover calls
- * it every frame the object touches the street while it still moves */
+ * on its next pulse); a touch after a whole pulse in the air plays its DamageEffect again. The SpherePhysicsMover
+ * calls it every sub-step the object touches the street (0x28E440, flight_contact) [R] */
 static void car_hit_ground(Vehicles *v, VehObj *o)
 {
     o->bounce_count += (o->flags & CF_GROUNDED) ? 1 : 5;
@@ -917,8 +923,6 @@ static void ft_init(Vehicles *v, VehObj *o)
     o->tc.gravity = wnum(own, book, "Gravity", 0);
 }
 
-/* [G] gWorld.getRandomBuilding: any standing building; Building.getPosition: the middle of its footprint, on the
- * ground */
 /* gWorld.getRandomBuilding (0x2AEC40) [R]: from (int)(n x frand) round the list, the first not gone */
 static int ft_pick_building(Vehicles *v)
 {
@@ -941,21 +945,19 @@ static void building_pos(const ArmyBox *b, float out[3])
     out[2] = 0;
 }
 
-static void ft_weapons_off(Vehicles *v, VehObj *o)   /* setWeaponFlags(-1, 16) [G: 16 holds every weapon] */
+/* setWeaponFlags(-1, 16) (0x29AB60): every cluster's flags (+0x38) |= 16, ReCenterWhenNoTarget (the names at
+ * 0x3F3EA0: 1 RequiresElevClearToFire, 2 RequiresRotClearToFire, 4 DeactivateReload, 8 WeaponsDisabled, 16
+ * ReCenterWhenNoTarget, 32 AdjustWeaponNTP, 64 FireOnceCommited) [R]: with its target let go the ladder steps back
+ * to rest as the truck drives on; a stream still running runs out its Duration */
+static void ft_recenter(VehObj *o)
 {
-    o->w.on = 0;
-    if (o->w.firing) {
-        o->w.firing = 0;
-        o->beam.on = 0;
-        effect_stop(v, o->beam_fx);
-        o->beam_fx = -1;
-    }
+    o->tc.recenter = 1;
 }
 
 /* onPulse, every frame [R]: on its way, within TargetDistance of its building along x it stops (setVelocity 0) and
  * aims at a point 10 in front of the building (+y) at its roof's height (storeys x 3 + 1.5 + 6; above 15 a random
  * height between 15 and that); stopped, FireDuration runs down by the frame, and at 0 the target is let go, it drives
- * on at MaxVelocity and its weapons are held */
+ * on at MaxVelocity with ReCenterWhenNoTarget set (setWeaponFlags(-1, 16)) */
 static void ft_pulse(Vehicles *v, VehObj *o)
 {
     if (o->ft_building == -2)
@@ -985,12 +987,13 @@ static void ft_pulse(Vehicles *v, VehObj *o)
         if (o->ft_fire_left <= 0) {
             o->ft_has_target = 0;
             o->line.speed = o->ft_velocity;
-            ft_weapons_off(v, o);
+            ft_recenter(o);
         }
     }
 }
 
-/* [G] what the beam meets first: a monster's collision sphere (its box without spheres); t along dir, -1 none */
+/* without a collision world: what the beam meets first among the monsters' collision spheres (their box without
+ * spheres); t along dir, -1 none. With one the world's ray decides (the monsters are in it, as for army.c) */
 static float ray_monster(const Vehicles *v, const float p[3], const float d[3], float maxlen, int *mon)
 {
     float best = -1;
@@ -1110,8 +1113,8 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
                 from[k] += dir[k] * tail;
             reach -= tail;
             (void)tdist;                             /* [R 0x295750] the beam is not cut at its target */
-            int mon;
-            float t = reach > 0.001f ? ray_monster(v, from, dir, reach, &mon) : -1;
+            int mon = -1;
+            float t = !v->cw && reach > 0.001f ? ray_monster(v, from, dir, reach, &mon) : -1;
             /* [R 0x295750] the beam's ray is the world's (include -1, exclude 8 with the truck flagged 8 while it is
              * cast): the street, the buildings and every object stop it, the nearest wins */
             if (v->cw && reach > 0.001f) {
@@ -1123,7 +1126,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
                 int got = collide_ray(v->cw, from, dir, reach, 0xFFFFFFFFu, COLLIDE_F_RAYSKIP, 0, &h);
                 if (oo >= 0)
                     v->cw->o[oo].flags = keep;
-                if (got && (t < 0 || h.t < t - 1e-4f)) {
+                if (got) {
                     t = h.t;
                     mon = -1;
                     if (h.obj >= 0 && COLLIDE_TAG_OWNER(v->cw->o[h.obj].tag) == COLLIDE_OWN_MONSTER) {
@@ -1434,23 +1437,6 @@ void vehicle_update(Vehicles *v, float dt, const ArmyMonster *m, int nm, const A
 
 /* ---------------------------------------------------------------- the monster's side */
 
-/* [G] an object's shape for a blow: its model's box (AutoCollisionBox) from the host, else its ShadowRect
- * (x0, y0, x1, y1) 2.5 high, else 2 x 2 x 2 */
-static void obj_box(const Vehicles *v, const VehObj *o, float mn[3], float mx[3])
-{
-    if (o->shape && v->host.shape_box && v->host.shape_box(v->host.ctx, o->shape, mn, mx))
-        return;
-    Group sd = group_sub(o->tmpl, "ShadowData"), sr = group_sub(sd, "ShadowRect");
-    Record r[4];
-    if (sr.at && group_items(sr, r, 4) == 4) {
-        mn[0] = record_num(r[0]); mn[1] = record_num(r[1]); mn[2] = 0;
-        mx[0] = record_num(r[2]); mx[1] = record_num(r[3]); mx[2] = 2.5f;
-        return;
-    }
-    mn[0] = mn[1] = -1; mn[2] = 0;
-    mx[0] = mx[1] = 1; mx[2] = 2;
-}
-
 int vehicle_hit(Vehicles *v, int monster, const float centre[3], float radius, float amount)
 {
     (void)amount;                                    /* Vehicle.bsf and Rocket.bsf do not look at it */
@@ -1461,15 +1447,14 @@ int vehicle_hit(Vehicles *v, int monster, const float centre[3], float radius, f
             continue;
         if (o->kind == VK_CAR && !(o->oflags & VF_EFF_NODES))
             continue;                                /* wrecked: no longer hit */
-        float mn[3], mx[3], d[3] = { centre[0] - o->pos[0], centre[1] - o->pos[1], centre[2] - o->pos[2] }, l[3], q = 0;
-        obj_box(v, o, mn, mx);
-        for (int r = 0; r < 3; r++)                  /* into its frame: rot^T d */
-            l[r] = o->rot[r * 3] * d[0] + o->rot[r * 3 + 1] * d[1] + o->rot[r * 3 + 2] * d[2];
-        for (int k = 0; k < 3; k++) {
-            float c = l[k] < mn[k] ? mn[k] : l[k] > mx[k] ? mx[k] : l[k];
-            q += (l[k] - c) * (l[k] - c);
-        }
-        if (q > radius * radius)
+        /* [R 0x2E22B0 -> 0x280470] the armed sphere against the object's collision shape (0x28FD70, obj_shape) */
+        float d[3] = { centre[0] - o->pos[0], centre[1] - o->pos[1], centre[2] - o->pos[2] }, n[3], pt[3], push[3];
+        CollideObj co;
+        memset(&co, 0, sizeof co);
+        obj_shape(v, o, &co.shape);
+        collide_matrix_from16(co.m, o->world);
+        co.building = -1;
+        if (!collide_obj_sphere(&co, centre, radius, n, pt, push))
             continue;
         int took = 0;
         if (o->kind == VK_CAR)
@@ -1552,7 +1537,7 @@ void vehicle_grab(Vehicles *v, int obj, int monster)
 }
 
 /* the HeldObjectMover (init 0x310ED0): [R] HoldOffset (MirroredHoldOffset while the monster is mirrored, +0x7DA1)
- * taken along the hand's axes; [G] the object turned as the hand is (the MajorAxis frame it builds is not ported) */
+ * taken along the hand's axes, the object turned in its MajorAxis frame (below) */
 void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored)
 {
     if (obj < 0 || obj >= v->n || v->o[obj].phase != VP_HELD)
@@ -1583,8 +1568,8 @@ void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored
     update_world(o);
 }
 
-/* throwObject (0x2D9DC0): [R] the thrown object gets its mover with the throw's velocity, then onThrow(monster,
- * eat); [G] the mover is the SphereMover above, the object keeping the hand's turn as it flies */
+/* throwObject (0x2D9DC0): [R] the thrown object (a non-actor) gets a SpherePhysicsMover with the throw's velocity,
+ * then onThrow(monster, eat); it keeps the hand's turn as it flies, with no spin [R, VEHICLE_NOTES "The hold"] */
 void vehicle_throw(Vehicles *v, int obj, int monster, int eat, const float vel[3], float monster_heading)
 {
     if (obj < 0 || obj >= v->n || v->o[obj].phase != VP_HELD)

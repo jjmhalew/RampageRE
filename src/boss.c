@@ -40,7 +40,7 @@ typedef struct {                                     /* LineMover (0x315E10, doc
     float p[MAX_LP][3];
     int n, seg;
     float t, speed;
-    unsigned flags;                                  /* 1 face the way it goes, 2 loop, 4 [G: rounds its corners] */
+    unsigned flags;                                  /* 1 face the way it goes, 2 loop, 4 turn into the next leg */
 } Line;
 
 typedef struct { int fx, trig; } Barrier;            /* Boss_NY_Blimp.bsf's Barrier: FollowEffect + VolumeTrigger */
@@ -103,7 +103,6 @@ typedef struct Obj {
     float lrot[9];                                   /* the LineMover's frame: its x, y and z axes */
     uint32_t oflags;
     float pulse_delay, pulse_time;                   /* setPulseDelay; 0: every frame */
-    float lo[3], hi[3];                              /* its collision shape's box in its own frame */
     CollideShape cshape;                             /* its collision shape (WCollisionInfo, 0x28FD70) */
     int weapons_on, target;                          /* setTarget: a monster, or -1 */
     int has_point;                                   /* setTarget(a DummyObject): aim at point */
@@ -111,6 +110,7 @@ typedef struct Obj {
     int fx_die[MAX_FX_DIE], nfx_die;                 /* effects with setTurnOffWhenObjectDies(1) */
     int spawner, pending, anim_done;                 /* pending: onInit waits for the first update */
     ArmyOsc osc;                                     /* the AttackObject's wobble (army.h) [R 0x315330, 0x314EF0] */
+    float zrot;                                      /* adjustZRot's turn after its facing (the rotors), radians */
     union {
         TankDef tank;
         TankBombDef tbomb;
@@ -228,17 +228,20 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 
 /* ---------------------------------------------------------------- properties */
 
-/* getStringProp / getFloatProp: the instance book (obj +0x7C) first, then the template [R 0x2C51A0, as army.c]. The
- * books keep a record's type before a '|' ("Effect|HitEffect"); the scripts ask by the bare name. A key with dots
- * (".Path0.NumPoints", Boss_Helicopter) walks down through the groups [G: the reader is not traced] */
+/* getStringProp / getFloatProp: the instance book (obj +0x7C) first, then the template [R 0x2C51A0, 0x27C230]. The
+ * books keep a record's type before a '|' ("Effect|HitEffect"), and the book's reader keeps its name past the "Type|"
+ * (0x1B4300: + (kind >> 16) + 1), so the scripts' bare name finds it [R]; here the types the books use are tried. A
+ * key that starts with a dot (".Path0.NumPoints", Boss_Helicopter) is cut at its dots, each part found in the group
+ * before and its group taken (0x1B43C0 -> 0x1B4490); any other key is looked up whole [R] */
 static const char *const TYPED[] = { "", "Effect|", "Sound|", "Shape|", "OTRef|", "Anim|", "Script|" };
 
 static Group walk(Group g, const char **key)
 {
     const char *k = *key, *dot;
     char part[64];
-    if (*k == '.')
-        k++;
+    if (*k != '.')
+        return g;
+    k++;
     while (g.at && (dot = strchr(k, '.')) != NULL) {
         size_t n = (size_t)(dot - k);
         if (n >= sizeof part)
@@ -406,7 +409,9 @@ static void completion(Boss *b, Obj *o, const char *callback)   /* gWorld.iCallS
 
 /* ---- what the scripts do to a monster */
 static int m_valid(const Boss *b, int i) { return i >= 0 && i < b->nm; }
-static void m_pos(const Boss *b, int i, float out[3])   /* an invalid monster's place reads as 0 [G] */
+/* an invalid monster's place reads as 0 [G: the WorldObject cases test the handle and then write nothing (0x277E30),
+ * so the script reads what its Point3 held] */
+static void m_pos(const Boss *b, int i, float out[3])
 {
     if (m_valid(b, i))
         copy3(out, b->m[i].pos);
@@ -463,15 +468,15 @@ static int bld_by_pos(const Boss *b, const float p[3])
     return found;
 }
 /* findBuildingNearPosition(p, r) (0x2B4D50) [R]: of the buildings whose box meets the box p.x +- r, p.y +- r,
- * z 0 .. 1000, the one nearest along x (p.x - its right edge when it stands left of p, its left edge - p.x else;
- * below 1000). [G] only the standing ones */
+ * z 0 .. 1000 (0x103A60), the one nearest along x (p.x - its right edge when it stands left of p, its left edge -
+ * p.x else; below 1000). Every building of the world's list (0x4D095C) counts, fallen or not: no state is tested */
 static int bld_near_pos(const Boss *b, const float p[3], float r)
 {
     int best = -1;
     float bd = 1000;
     for (int i = 0; i < b->nb; i++) {
         const BossBuilding *g = &b->bl[i];
-        if (!g->standing || g->max[0] < p[0] - r || g->min[0] > p[0] + r || g->max[1] < p[1] - r ||
+        if (g->max[0] < p[0] - r || g->min[0] > p[0] + r || g->max[1] < p[1] - r ||
             g->min[1] > p[1] + r || g->max[2] < 0 || g->min[2] > 1000)
             continue;
         float d = g->pos[0] <= p[0] ? p[0] - g->max[0] : g->min[0] - p[0];
@@ -837,6 +842,14 @@ static void obj_matrix(Obj *o)
         }
     } else                                           /* setFacing(x, y, z): Rz Rx Ry (0x101330) */
         army_facing_turn(o->p.facing, w);
+    if (o->zrot != 0) {                              /* adjustZRot: about its own z, after (rows: Rz x the turn) */
+        float c = cosf(o->zrot), sn = sinf(o->zrot);
+        for (int k = 0; k < 3; k++) {
+            float x = w[k], y = w[4 + k];
+            w[k] = c * x + sn * y;
+            w[4 + k] = -sn * x + c * y;
+        }
+    }
     w[3] = w[7] = w[11] = 0;
     w[12] = o->p.pos[0];
     w[13] = o->p.pos[1];
@@ -896,17 +909,53 @@ static void obj_weapons(Boss *b, Obj *o)
         }
     }
 }
-static void weapon_ammo(Obj *o, int n, int i)        /* setWeaponAmmo(n, 0, i) [G: the weapon's ammo, as army.c] */
+/* setWeaponAmmo(n, cluster 0, i): the weapon's vtable +0x84 (0x296F50): ammo = min(n, Ammo) [R, as army.c] */
+static void weapon_ammo(Obj *o, int n, int i)
 {
     if (i >= 0 && i < o->p.nw)
-        o->p.w[i].ammo = n;
+        o->p.w[i].ammo = n < o->p.w[i].ammo_max ? n : o->p.w[i].ammo_max;
 }
-static void weapon_reload(Obj *o, int i)             /* reloadWeapon(i, 0) [G: back to its Ammo, as army.c] */
+/* reloadWeapon(cluster i, weapon 0) (the AttackObject's id 0x3A; each boss cluster here has one weapon where it is
+ * called, so it is weapon i): the weapon's vtable +0x80 (0x296F70): ammo = Ammo (0 stays 0), the countdown at least
+ * ChargeTime + FiringOffset (the charge effect restarted: not here) [R, as army.c] */
+static void weapon_reload(Obj *o, int i)
 {
-    if (i >= 0 && i < o->p.nw)
-        o->p.w[i].ammo = o->p.w[i].ammo_max > 0 ? o->p.w[i].ammo_max : 1;
+    if (i >= 0 && i < o->p.nw) {
+        ArmyWeapon *w = &o->p.w[i];
+        float t = w->charge_time + w->firing_offset;
+        w->ammo = w->ammo_max;
+        if (w->timer < t)
+            w->timer = t;
+    }
 }
-static void weapons_enable(Obj *o, int on) { o->weapons_on = on; }   /* enableWeapons */
+/* enableWeapons(on) (the AttackObject's id 0x38, 0x3151C0): its +0x17C, set when its weapon system is made
+ * (0x3157DC), so the weapons are on from the start; the system (the turn, the countdowns, the fire) runs only while
+ * it is set (0x315170) [R]. Turned off, every weapon stops (0x29AA40 -> 0x298B90 -> the weapon's vtable +0x7C, a
+ * beam's 0x295650): the beam and the charge end, the countdown at least ChargeTime + FiringOffset [R] */
+static void weapons_enable(Boss *b, Obj *o, int on)
+{
+    if (o->weapons_on && !on)
+        for (int i = 0; i < o->p.nw; i++) {
+            ArmyWeapon *w = &o->p.w[i];
+            if (w->firing && b->host.weapon_tick) {  /* the army ends the beam and its shot */
+                float down[3] = { 0, 0, -1 };
+                w->beam_left = 0;
+                b->host.weapon_tick(b->host.ctx, w, 0, o->p.pos, down, NULL, -1, 0);
+            }
+            float t = w->charge_time + w->firing_offset;
+            w->charging = 0;
+            if (w->timer < t)
+                w->timer = t;
+        }
+    o->weapons_on = on;
+}
+/* setWeaponFlags / clearWeaponFlags(-1, 16) (0x29AB60): every cluster's flags (+0x38) get or lose 16,
+ * ReCenterWhenNoTarget (the names at 0x3F3EA0) [R] */
+static void weapons_recenter(Obj *o, int on)
+{
+    for (int i = 0; i < o->p.nw; i++)
+        o->p.w[i].recenter = on;
+}
 static void set_target(Obj *o, int monster)          /* setTarget(monster) / setTarget(nullTarget) */
 {
     o->target = monster;
@@ -976,7 +1025,7 @@ static void obj_weapons_tick(Boss *b, Obj *o, float dt)
             else if (have_node)
                 army_frame_turn(F, front, w->yaw, w->pitch);
         }
-        int may = has && o->weapons_on && aimed && dist3(from, tp) <= w->range;
+        int may = has && aimed && dist3(from, tp) <= w->range;
         b->host.weapon_tick(b->host.ctx, w, may, from, dir, have_node ? (const float (*)[3])F : NULL,
                             o->has_point ? -1 : o->target, dt);
     }
@@ -1044,13 +1093,14 @@ static Obj *obj_new(Boss *b, const char *name, Group tmpl, Group inst, const flo
     o->target = -1;
     o->spawner = -1;
     o->pulse_delay = 0.25f;                          /* [R as army.c] an AttackObject's pulse */
-    o->weapons_on = 1;                               /* [G] Boss_Helicopter never calls enableWeapons, yet fires */
+    o->weapons_on = 1;                               /* [R 0x3157DC] on from the start (weapons_enable) */
     /* [R 0x315810 .. 0x3159F0, the AttackObject's init] its wobble's keys (army_osc_init). Of the bosses only
      * BossSaucerAmbient has one (0.075) */
     army_osc_init(&o->osc, tmpl, inst);
     /* its shape (0x28FD70, collide_shape_pick): the template's CollisionBox { min x y z, max x y z } (the
      * generators'), CollisionRadius or AutoCollisionBox (the blimp) with the model's box, then the instance's; else
-     * the model's bounding sphere [G: taken as its box's; no model: radius 1 at the origin]. lo / hi: its box */
+     * the sphere the model keeps (the host's shape_sphere, below) [R]; a host without it gets the sphere round the
+     * model's box, no model at all radius 1 at the origin */
     {
         float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, rr = 1;
         int have = o->p.shape && b->host.shape_box && b->host.shape_box(b->host.ctx, o->p.shape, mb, mb + 3);
@@ -1069,10 +1119,6 @@ static Obj *obj_new(Boss *b, const char *name, Group tmpl, Group inst, const flo
                            group_num(tmpl, "AutoCollisionBox", 0) != 0, inst.at ? book_box(inst, ib) : NULL,
                            inst.at ? group_num(inst, "CollisionRadius", -1) : -1,
                            inst.at && group_num(inst, "AutoCollisionBox", 0) != 0, have ? mb : NULL);
-        for (int k = 0; k < 3; k++) {
-            o->lo[k] = o->cshape.centre[k] - o->cshape.half[k];
-            o->hi[k] = o->cshape.centre[k] + o->cshape.half[k];
-        }
     }
     const char *def = gstr(tmpl, "DefaultAnim");     /* an actor starts in its DefaultAnim */
     char key[64];
@@ -1110,14 +1156,9 @@ static const char *numbered(char *buf, size_t n, const char *key, int i)   /* "H
     return buf;
 }
 
-static float wrap_pi(float a)                        /* [G] getFacing().z read back in (-pi, pi] */
-{
-    while (a > PI)
-        a -= 2 * PI;
-    while (a <= -PI)
-        a += 2 * PI;
-    return a;
-}
+/* getFacing().z (WorldObject id 9, 0x277E10 -> 0x101220): read back from its matrix, atan2(-w[4], w[5]), in
+ * (-pi, pi] [R] */
+static float facing_z(const Obj *o) { return atan2f(-o->p.world[4], o->p.world[5]); }
 static void horizontal_knock(float v[3], const float d[3], float across, float up)   /* the scripts' throw */
 {
     set3(v, d[0], d[1], 0);
@@ -1147,7 +1188,7 @@ static int knock_points(Boss *b, const float pos[3], const float mp[3], float li
     scale3(dir, 5);
     if (len3(dir) < 7.5f)
         scale3(dir, 2);
-    for (int j = 0; climb && dir[2] < 5 && j < 32; j++)   /* [G] the script's loop never ends for a level way */
+    for (int j = 0; climb && dir[2] < 5 && j < 160; j++)  /* [G] at 0 the script loops for ever (a hang) */
         dir[2] = dir[2] > 0 ? dir[2] * 2 : 5;
     copy3(cur, pos);
     int n = 0;
@@ -1405,12 +1446,12 @@ static int tank_process(Boss *b, Obj *o, float dt)  /* Process, every frame */
         p[0] += p[0] > 0 ? 10 : -10;
         if (visible(b, p, 1)) {
             t->weapons_off = 0;
-            weapons_enable(o, 1);
+            weapons_enable(b, o, 1);
         }
     }
     if (t->leave_delay <= 0) {                       /* LeaveDuration up: it drives off */
         t->leave = 1;
-        weapons_enable(o, 0);
+        weapons_enable(b, o, 0);
     }
     if (t->retarget <= 0) {                          /* every 5 s, half the time, another monster */
         t->retarget = 5;
@@ -1469,7 +1510,7 @@ static int tank_damage(Boss *b, Obj *o, int monster, float amount)   /* TakeDama
             t->hit_retreat_t = 1.25f;
             t->leave_delay = -1;
             t->leave = 1;
-            weapons_enable(o, 0);
+            weapons_enable(b, o, 0);
             sfx(b, o, "V_Boss_Damaged");
         }
     }
@@ -1485,7 +1526,7 @@ static int tank_damage(Boss *b, Obj *o, int monster, float amount)   /* TakeDama
     if (t->hp <= 0) {
         add_stats(b, o, monster, 2);
         sfx(b, o, "V_Boss_Defeated");
-        weapons_enable(o, 0);
+        weapons_enable(b, o, 0);
         t->destroyed = 1;
         t->leave = 1;
         t->monster = monster;
@@ -1566,6 +1607,7 @@ static int tbomb_mover(Boss *b, Obj *o, int state)  /* onMoverCallback: it lands
 static void heli_flight_path(Boss *b, Obj *o)        /* createFlightPath: one of the AIInstance's Path<n> */
 {
     HeliDef *h = &o->s.heli;
+    weapons_recenter(o, 1);                          /* setWeaponFlags(-1, 16) */
     o->sp.flags |= 2;
     h->monster = any_monster(b);
     h->flight_state = 0;
@@ -1593,7 +1635,7 @@ static void heli_flight_path(Boss *b, Obj *o)        /* createFlightPath: one of
             }
         }
     }
-    if (n < 2) {                                     /* [G] no paths (the script asserts): straight across */
+    if (n < 2) {                                     /* [G] no paths (the script asserts; SF10 has 4): across */
         n = 2;
         set3(pts[0], 150, -10, 22);
         set3(pts[1], -150, -10, 22);
@@ -1649,6 +1691,7 @@ static void heli_init(Boss *b, Obj *o)               /* Construct + onInit */
 
 static void heli_flee_path(Obj *o)          /* createFleePath: up, round and down behind the city */
 {
+    weapons_recenter(o, 1);                          /* setWeaponFlags(-1, 16) */
     float pts[6][3] = { { 0, 0, 0 }, { 100, 0, 75 }, { 0, -40, 75 }, { -34, 10, 24 }, { -10, 76, 54 }, { -4, 165, 0 } };
     copy3(pts[0], o->p.pos);
     if (pts[0][0] < 0)
@@ -1772,6 +1815,7 @@ static int heli_damage(Boss *b, Obj *o, int monster)   /* TakeDamage: any blow i
     float pts[8][3];
     copy3(pts[0], o->p.pos);                         /* createKnockedAwayPath: 7 steps at its Velocity */
     knock_points(b, o->p.pos, b->m[monster].pos, 9, 7, 1, 0, pts + 1);
+    weapons_recenter(o, 0);                          /* clearWeaponFlags(-1, 16) */
     sp_clear(&o->sp);
     o->sp.flags &= ~2u;
     o->sp.vel = h->vel;
@@ -2350,7 +2394,7 @@ static void saucer_init(Boss *b, Obj *o)             /* Construct + onInit */
     sp_add(&o->sp, end, 1, 0);
     o->sp.vel = s->vel;
     copy3(o->p.pos, start);
-    weapons_enable(o, 1);
+    weapons_enable(b, o, 1);
     weapon_ammo(o, 0, 0);
     weapon_ammo(o, 0, 1);
     weapon_ammo(o, 0, 2);
@@ -2372,7 +2416,9 @@ static int saucer_process(Boss *b, Obj *o, float dt)   /* Process, every frame *
         copy3(bl->p.pos, o->p.pos);
         float fz = o->p.facing[2] + s->blade_rot;
         copy3(bl->p.facing, occ);
-        bl->p.facing[2] += fz;                       /* adjustZRot [G: adds to its turn] */
+        /* adjustZRot(a) (the AttackObject's id 0x36, 0x2AA4E0): the turn becomes Rz(a) (0x1015B0) x the turn
+         * (0x101A90, row vectors): a turn about its own z after its facing [R] */
+        bl->zrot = fz;
     }
     if (s->fly_away && s->fly_away < 2) {
         s->fly_away++;
@@ -2737,7 +2783,7 @@ static void barrier_fire(Boss *b, int m)             /* NewYork::BlimpBarrierFir
     }
 }
 
-/* the monster's box (or its spheres' bounds) in the world [G: the game's trigger test is not read] */
+/* the monster's box (or its spheres' bounds) in the world: what touches tests without spheres */
 static void m_bounds(const BossMonster *m, float lo[3], float hi[3])
 {
     if (m->box_max[2] > m->box_min[2]) {
@@ -2826,7 +2872,7 @@ static void blimp_up(Boss *b, Obj *o, float y, const char *left, const char *rig
 {
     float end[3] = { -25, y, 38 };
     const char *path = left;
-    if (wrap_pi(o->p.facing[2]) < 0) {               /* facing +x: the right side */
+    if (facing_z(o) < 0) {                           /* facing +x: the right side */
         end[0] = -end[0];
         path = right;
     }
@@ -2858,7 +2904,7 @@ static void blimp_init(Boss *b, Obj *o)              /* Construct + onInit */
     o->ln.speed = 15;
     o->ln.flags = 1 | 2 | 4;
     if (o->ln.n > 0)
-        copy3(o->p.pos, o->ln.p[0]);                 /* [G] it starts at the path's first point */
+        copy3(o->p.pos, o->ln.p[0]);                 /* [R 0x3173D0] it starts at the path's first point */
     k->hp = 3;
     k->retarget = 6.5f;
     k->bomb_drop = 0.25f;
@@ -3171,7 +3217,7 @@ static int blimp_damage(Boss *b, Obj *o, int monster, const float dir[3])   /* T
         o->ln.flags &= ~(1u | 2u);
     } else {                                         /* beaten: it falls into the street at (-12, -10) */
         k->state = 6;
-        weapons_enable(o, 0);
+        weapons_enable(b, o, 0);
         fx_stop(b, k->engine_fx);
         k->engine_fx = -1;
         blimp_pulse_delay(o, 0);
@@ -3321,7 +3367,7 @@ static int amb_process(Boss *b, Obj *o, float dt)   /* Boss_Saucer_Ambient Proce
         copy3(bl->p.pos, o->p.pos);
         float fz = o->p.facing[2] + a->blade_rot;
         copy3(bl->p.facing, o->p.facing);
-        bl->p.facing[2] += fz;
+        bl->zrot = fz;                               /* adjustZRot (0x2AA4E0): its facing's z counts twice */
     }
     if (a->state == 0) {                             /* crossing its hover point: it slows to a stop */
         float prev = a->hover_loc;
@@ -3448,35 +3494,46 @@ static int take_damage(Boss *b, Obj *o, int monster, float amount, int type, con
 
 /* ---------------------------------------------------------------- touching */
 
-/* the distance from c to a part's box (in its own frame; its turn is orthonormal, its scale left out) */
-static float box_distance(const Obj *o, const float c[3])
+static void part_obj(const Obj *o, CollideObj *co)  /* the part as the collision world has it */
 {
-    const float *w = o->p.world;
-    float d[3] = { c[0] - w[12], c[1] - w[13], c[2] - w[14] }, l[3], q = 0;
-    for (int k = 0; k < 3; k++)
-        l[k] = d[0] * w[4 * k] + d[1] * w[4 * k + 1] + d[2] * w[4 * k + 2];
-    for (int k = 0; k < 3; k++) {
-        float e = l[k] < o->lo[k] ? o->lo[k] - l[k] : l[k] > o->hi[k] ? l[k] - o->hi[k] : 0;
-        q += e * e;
-    }
-    return sqrtf(q);
+    memset(co, 0, sizeof *co);
+    co->shape = o->cshape;
+    collide_matrix_from16(co->m, o->p.world);
+    co->building = -1;
 }
-static int touches(const Obj *o, const BossMonster *m)   /* [G] a monster's spheres (or its box) in the part's box */
+/* a monster's sphere against the part's collision shape (0x2E22B0 -> 0x280470, collide.c collide_obj_sphere) [R] */
+static int sphere_meets(const Obj *o, const float c[3], float r)
+{
+    CollideObj co;
+    float n[3], pt[3], push[3];
+    part_obj(o, &co);
+    return collide_obj_sphere(&co, c, r, n, pt, push);
+}
+/* the monster's touch: each of its spheres against the part's shape [R]; a monster without spheres: its box against
+ * the shape (0x2801A0) */
+static int touches(const Obj *o, const BossMonster *m)
 {
     for (int s = 0; s < m->nspheres; s++)
-        if (box_distance(o, m->spheres[s]) <= m->spheres[s][3])
+        if (sphere_meets(o, m->spheres[s], m->spheres[s][3]))
             return 1;
     if (m->nspheres == 0) {
-        float lo[3], hi[3], c[3];
+        CollideObj co;
+        float n[3], pt[3], push[3];
+        part_obj(o, &co);
+        float lo[3], hi[3], c[3], e[3];
         m_bounds(m, lo, hi);
-        for (int k = 0; k < 3; k++)
+        for (int k = 0; k < 3; k++) {
             c[k] = (lo[k] + hi[k]) / 2;
-        float r = (hi[0] - lo[0]) / 2;
-        return box_distance(o, c) <= r;
+            e[k] = (hi[k] - lo[k]) / 2;
+        }
+        return collide_obj_box(&co, c, e, n, pt, push);
     }
     return 0;
 }
-static void away_from(const Obj *o, const BossMonster *m, float dir[3])   /* TakeDamage's direction [G: as army.c] */
+/* TakeDamage's direction: here from the monster to the part [G: the game's is a direction out of the sphere test,
+ * 0x280470's third result (0x2E2598), made 1 long (0x2E2654; (1, 0, 0) when too short), not followed into the
+ * shape's test] */
+static void away_from(const Obj *o, const BossMonster *m, float dir[3])
 {
     sub3(dir, o->p.pos, m->pos);
     norm3(dir);
@@ -3589,7 +3646,7 @@ static void obj_update(Boss *b, Obj *o, float dt)
     if (wobble && o->oriented)                       /* a mover's frame: its facing (0x101220) + the change, made
                                                       * again (0x101330) */
         army_osc_turn(o->p.world, d);
-    if (o->p.nw)
+    if (o->p.nw && o->weapons_on)                    /* [R 0x315170] */
         obj_weapons_tick(b, o, dt);
 }
 
@@ -3603,7 +3660,7 @@ Boss *boss_new(const BossHost *host)
     if (host)
         b->host = *host;
     b->main = -1;
-    b->view[0] = -45;                                /* [G] what the camera sees of the street, along x (army.c) */
+    b->view[0] = -45;                                /* [G] without host.visible (main.c sets it): the x range */
     b->view[1] = 45;
     return b;
 }
@@ -3622,7 +3679,7 @@ void boss_clear(Boss *b)
     b->active = 0;
     b->ntrig = 0;
     b->nwobj = 0;
-    b->num_generators = 0;                           /* [G] the script's global, taken as starting again per block */
+    b->num_generators = 0;                           /* [G] the script global's life (the loader) not traced */
     memset(b->play, 0, sizeof b->play);
     b->main = -1;
     b->defeated = 0;
@@ -3773,7 +3830,7 @@ int boss_hit(Boss *b, int monster, const float centre[3], float radius, float am
     int n = 0;
     for (int i = 0; i < b->n; i++) {
         Obj *o = &b->o[i];
-        if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || box_distance(o, centre) > radius)
+        if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || !sphere_meets(o, centre, radius))
             continue;
         if ((o->oflags & OF_EFF_NODES) && !collide_hit_once(&o->hits, monster, record))
             continue;

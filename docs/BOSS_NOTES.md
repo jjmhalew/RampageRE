@@ -424,23 +424,46 @@ falling back one loses its barriers too.
 - **The saucer:** at 24. It slows to a hover at a random x in −30 … 30 for 5 … 8 s, then speeds off at 40/s².
   Its rotor is not deleted with it (kept).
 
-## Not traced (stand-ins in boss.c)
-- **Collision:**
-  - the touch's test: the port takes the monster's spheres within the part's box, the game the spheres against the
-    part's shape (0x280470);
-  - the parts' shapes (0x28FD70, `collide_shape_pick`: CollisionBox (the generators'), CollisionRadius or
-    AutoCollisionBox (the blimp) with the model's box, else the sphere the model gives (its vtable +0x14, at
-    0x290384): SimpleShape's 0x184CB0, the union of its parts' spheres (0x185AA0) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`.
-- **Weapons:**
-  - `setWeaponAmmo` / `reloadWeapon` (the weapon's ammo, as army.c);
-  - `setWeaponFlags(-1, 16)` (Boss_Helicopter: not done);
-  - AttackObject weapons being on from the start (the helicopter and blimp never call enableWeapons, yet fire).
-- **Odds and ends:**
-  - `adjustZRot` (taken as adding to the turn);
-  - getFacing().z read back in (−π, π];
-  - the numGenerators global and the play values (taken as starting again per block);
+## The engine's side, as read
+- **Collision** [R]: a monster's touch and an armed attack sphere are each of its spheres against the part's
+  collision shape (0x2E22B0 → 0x280470, collide.c `collide_obj_sphere`; `sphere_meets`). The shapes are 0x28FD70's
+  (`collide_shape_pick`: CollisionBox (the generators'), CollisionRadius or AutoCollisionBox (the blimp) with the
+  model's box, else the sphere the model gives (its vtable +0x14, at 0x290384): SimpleShape's 0x184CB0, the union of
+  its parts' spheres (0x185AA0)); here the union of its meshes' header spheres, city.c `city_shape_sphere`. The
+  damage type is 0 for an armed sphere, 1 for an unarmed touch (0x2E25F4).
+- **Weapons** [R]:
+  - `setWeaponAmmo(n, cluster, weapon)` is the weapon's vtable +0x84 (0x296F50, through 0x29AC90 / 0x298D20):
+    ammo = min(n, Ammo); `reloadWeapon(cluster, weapon)` its +0x80 (0x296F70): ammo = Ammo, the countdown at least
+    ChargeTime + FiringOffset (the charge effect restarted: not here);
+  - `setWeaponFlags` / `clearWeaponFlags(-1, f)` (0x29AB60 / 0x29AAE0) set or clear f in every cluster's flags
+    (+0x38). The flag names (0x3F3EA0): 1 RequiresElevClearToFire, 2 RequiresRotClearToFire, 4 DeactivateReload,
+    8 WeaponsDisabled, 16 ReCenterWhenNoTarget, 32 AdjustWeaponNTP, 64 FireOnceCommited. So Boss_Helicopter's
+    `setWeaponFlags(-1, 16)` (createFlightPath, createFleePath) and `clearWeaponFlags(-1, 16)` (createKnockedAwayPath)
+    switch its ReCenterWhenNoTarget: on its paths it levels out without a target, while tumbling it keeps its turn;
+  - `enableWeapons(on)` (id 0x38, 0x3151C0) is the AttackObject's +0x17C, set when its weapon system is made
+    (0x3157DC): the weapons are on from the start (the helicopter and the blimp never call it). The system (the
+    turn, the countdowns, the fire) runs only while it is set (0x315170); turned off, each weapon stops (0x29AA40 →
+    0x298B90 → the weapon's vtable +0x7C; a beam's 0x295650 ends the beam and the charge and holds the countdown at
+    ChargeTime + FiringOffset), so the beaten blimp's beam goes out and the leaving Carbonator's gun stops turning.
+- **Odds and ends** [R]:
+  - `adjustZRot(a)` (id 0x36, 0x2AA4E0): the turn becomes Rz(a) × the turn (0x1015B0, 0x101A90, row vectors), a turn
+    about the part's own z after its facing (`Obj.zrot`, the rotors);
+  - `getFacing()` (WorldObject id 9, 0x277E10) is read back from the matrix (0x101220), so its z is in (−π, π];
   - the facing the oscillation takes apart (0x101220) is `army_turn_facing`'s asin / atan2, read for the mover-turned
-    parts only: the others carry their facing as the script set it, plus the wobble.
+    parts only: the others carry their facing as the script set it, plus the wobble;
+  - `findBuildingNearPosition` (0x2B4D50) tests every building of the world's list, fallen or not;
+  - a key with a leading dot (".Path0.NumPoints") is cut at its dots by the book's reader (0x1B43C0), others are
+    looked up whole; a typed key is found by its bare name (0x1B4300).
+
+## Not traced (stand-ins in boss.c)
+- **TakeDamage's direction** (the blimp's knock follows it): here from the monster to the part; the game's is
+  0x280470's third result (0x2E2598), made 1 long (0x2E2654), not followed into the shape's test.
+- **The numGenerators global and the play values:** taken as starting again per block (the life of a script's
+  globals is the loader's, not traced; only NY10 has generators).
+- **An invalid monster's place** reads as 0: the WorldObject cases test the handle and then write nothing
+  (0x277E30), so the script reads what its Point3 held.
+- **Never reached with the shipped data:** Boss_Helicopter without paths (the script asserts; SF10 has 4), and its
+  knock's `dir.z` doubling loop at exactly 0, which would never end (a hang); here 5.
 - **Sounds:** a `--shot` run moves no sound on (`sound_update(0)`), so there a part's 16 slots fill up and later
   sounds are refused (the trace says so); in play an ended sound frees its slot, as 0x274CF0 does.
 
