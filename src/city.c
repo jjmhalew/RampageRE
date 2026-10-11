@@ -3493,6 +3493,11 @@ void scene_buildings_update(Scene *s, float dt)
             sb->light_pending = 0;
         }
         sb->moving = moving;
+        for (int k = 0; k < sb->b.nhit_debris; k++) {   /* a ground floor hit's Wall_Small at its point (0x2BC88C) */
+            float in[3] = { 0, 1, 0 };
+            scene_fx(s, sb->fx_wall_small, sb->b.hit_debris[k], in);
+        }
+        sb->b.nhit_debris = 0;
         open_windows(s, sb);                         /* the open windows, as they now are (0x2BECC0) */
         if (!sb->b.dirty || sb->mesh < 0) {
             if (moving || relit)

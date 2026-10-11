@@ -329,8 +329,17 @@ int building_hit(Building *b, const float p[3], float radius)
     else if (left < right) q[0] = b->min[0];
     else q[0] = b->max[0];
     /* 0x2CCCA0: the face, storey and column, and where in the cell (f); against z itself (the street is at 0) */
-    if (q[2] < GROUND_H + 0.01f || q[2] >= b->max[2] - ROOF_H - 0.01f)
-        return 0;                                    /* the ground floor and the roof take no cell damage */
+    if (q[2] < GROUND_H + 0.01f) {
+        /* [R 0x2BC5C4, 0x2BC6F4, 0x2BC840 .. 0x2BC890] the ground floor (face 4) takes no cell damage and no dents; a
+         * hit of radius 2 or more by an attacker that is not an Actor (0x2842F0 with 0x4D5BF0) gives Wall_Small (0x35)
+         * at the hit's own point. Every hit here is a monster's or a flying object's (an actor's Mass is 1: radius
+         * 0.001), so none is an Actor's */
+        if (radius >= 2.0f && b->nhit_debris < 8)
+            memcpy(b->hit_debris[b->nhit_debris++], p, 3 * sizeof(float));
+        return 0;
+    }
+    if (q[2] >= b->max[2] - ROOF_H - 0.01f)
+        return 0;                                    /* the roof takes no cell damage */
     float zr = q[2] - GROUND_H;
     if (b->collapse > 0 && zr >= STOREY_H * (float)b->collapse - STOREY_H * b->progress)
         zr += STOREY_H * b->progress;                /* the storeys coming down are still their own */

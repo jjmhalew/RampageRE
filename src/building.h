@@ -82,6 +82,9 @@ typedef struct {
     /* the debris effects its front cells asked for since the host last took them (0x3101C0 on the building's effect
      * spawner +0x8F4, at the cell's face point 2.5 along and 1.5 up): the host plays them and sets ndebris to 0 */
     struct { uint8_t o, col, kind; } debris[BUILDING_DEBRIS]; int ndebris;
+    /* and the ground floor's: Wall_Small at a hit's own point (0x2BC88C -> 0x30FCB0 -> 0x30FD40); the host plays them
+     * and sets nhit_debris to 0 */
+    float hit_debris[8][3]; int nhit_debris;
 } Building;
 
 void building_init(Building *b, const float min[3], const float max[3], int width, int depth, int storeys);

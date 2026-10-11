@@ -297,7 +297,8 @@ key's index into the table 0x3F5990; `Glass_Small` 0x33 is never asked for) [R]:
   member is 1 (the world's init 0x285A20, from RWorld's 0x2B7800; its setter, vtable +0x14 0x284AF0, has no caller),
   so a cell gets it half the time [R] (`src/building.c` `crack_step`);
 - a floor's collapse (0x2BAE70) none per cell: `Floor_Large` for the floor (0x2BD610, 0x2BD7D0);
-- a hit of kind 4 `Wall_Small` at the hit point (0x2BC88C, through 0x30FCB0; not ported).
+- a hit on the ground floor (face 4) of radius 2 or more by an attacker not an Actor: `Wall_Small` at the hit's own
+  point (0x2BC840 .. 0x2BC890, through 0x30FCB0 / 0x30FD40) [R] (`Building.hit_debris`; a monster's kick at z 3).
 They are placed in the cell's face frame (0x30F710: the matrix of the face from 0x430F10, the front's the identity) at
 2.5 along and 1.5 up the cell. `src/building.c` queues them (`Building.debris`), `src/city.c` plays them.
 
