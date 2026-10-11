@@ -138,6 +138,18 @@ passes the flying module's impact on to `streetobj_take_impact`.
 **onPickup**: `DamageShape`, `PickupSound` (add3DSfx(…, 0)), `HitEffect`, no longer PushOutMonsters. **onThrow**:
 addStats, no longer Pickupable. **OnHitGround**: `HitEffect` where it is, deleted.
 
+**The pick-up** [R]: the Pickupable ones (0x10000: CarParkedCoup / Sedan / Taxi, with their `Car_Alarm`, and the
+roof cars CarParkedCoupRoof / SedanRoof, whose RoofItem.bsf has no onPickup, onThrow or OnHitGround) are found by
+doGrabObject's search (0x2D99C0: within 15 of the hand, in front of the root, not 0x20840) like the people. The hold
+(0x2DA310) makes one BeingHeld, neither Pickupable nor PushOutMonsters, then onPickup; the HeldObjectMover (0x310ED0)
+keeps it in the hand's MajorAxis frame (the parked cars set none: 2) at its HoldOffset. throwObject (0x2D9DC0, from
+Monsters.bsf's `throwObject(vel, 0, eat)`): with its second argument 0 the clip's velocity is in the monster's frame,
+turned by its matrix (and by its +0x2560 angle) into the world; the object gets a SpherePhysicsMover with it, no
+spin, then onThrow. It flies (0x28E440) in the frame's collision world: the street calls OnHitGround (the car breaks
+in its `HitEffect` and goes), the objects it meets get TakeImpact (a building is hit at radius Mass / 1000, main.c
+`impact_route`) and so does it (its `HitEffect`, deleted). `isHoldlingEdible` (hasGrabbedObject == 2, an actor) is 0
+for it, so a car is thrown, never eaten.
+
 ## RoofItem.bsf [R]
 **Construct.** State 1; the `AttachEffect` at (0, 0, `AttachEffectZOffset`) on it, off when it dies;
 `SpansTwoBuildings`: a pulse every 5 frames.
@@ -188,7 +200,8 @@ street at 6 takes (its z / 6 / a frame; 0.01 for 0, after a dbgAssert); a frame'
   `scene_street_shape(k, shape)` puts a new model in place of the old; `scene_instance_node` finds the node an
   attached effect sits on.
 
-Checked in the viewer: in HK04_Shrines a kick deletes a street gong in its `Gong_hit` (its ring stops) and the
+Checked in the viewer: in Las Vegas block 2 George picks a parked sedan up from the lot (its `Car_Alarm`), throws
+it (25 points) and it breaks where it lands; in HK04_Shrines a kick deletes a street gong in its `Gong_hit` (its ring stops) and the
 challenge counts 1/6; collapsing a pagoda drops its roof gong, hut and legs as its first storey falls, tumbling to
 the street; in SF06 a punch tips a street lamp away from the monster (sparks, 1/4); in SF07 the skywalk falls in its
 damaged shape when either of its buildings comes down; in GB06 a roof top falls with its flag. A test program on
@@ -218,12 +231,13 @@ leans away, held while the monster stays within 7.
   (0x284A90) puts a named object (flag 0x1000, from the instance's `Name`, 0x287DF0) at its chain's head and removal
   (0x284A10) unlinks it, so the newest one of that name wins. Here the newest roof object of that name; the three
   HK palace names (Boss_Jumper.scr:132-134, the only callers) are unique.
-- `rotateAA` turns about the object's own axis, right-handed (so a pole falls away from the monster); `setFacing` is
-  Rz × Rx × Ry (0x277E78 → 0x101330).
+- `rotateAA` turns about the object's own axis, right-handed (so a pole falls away from the monster; 0x278320, above);
+  `setFacing` is Rz × Rx × Ry (0x277E78 → 0x101330) [R].
 - The building's shake on an attached object is not added to its matrix (the viewer's building objects sway with
   their building through `building_place` until they move on their own).
 - `gWorld.frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]. FollowEffects follow the object's place (and node), not its turn.
 - The objects are in the frame's collision world (`streetobj_collide_add`: tag `COLLIDE_TAG(COLLIDE_OWN_STREET, i)`,
   flags 4 and their own): the PushOutMonsters ones (the gongs, the chimneys) push the monster out (collide_monster),
-  a flying object's TakeImpact reaches them. The pick-up of the Pickupable parked cars (`streetobj_pickup` /
-  `_throw` / `_hit_ground`) is there but no grab reaches it.
+  a flying object's TakeImpact reaches them, and a thrown one flies in it (`streetobj_nearest_pickup`, `_grab`,
+  `_hold`, `_fly`, main.c's doGrabObject and throwObject). The hold's blend in (0x310B50, 0.1 s from the ground) is
+  left out, as vehicle.c's; the throw's +0x2560 angle is taken as 0.

@@ -975,7 +975,10 @@ static void smash(People *p, Person *q, float monster_heading)
     case PK_GUARD: q->state = 8; break;              /* pulsing every 1 s */
     default: break;
     }
-    q->pulse_time = 0;
+    /* [R] setPulseDelay only sets the delay (Actor binding 0x39: +0xF8): the pulse's clock runs on; Mime's smash()
+     * alone also calls setPulseTime(0) */
+    if (q->kind == PK_MIME)
+        q->pulse_time = 0;
 }
 
 /* TakeDamage from a monster: who flies off, and when [R], each as its script has it. this.actor.onPickup() there is
@@ -1495,7 +1498,9 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
                 r = on_anim_done(p, q);
             }
         }
-        if (r != DELETE_ME && q->pulse_delay >= 0 && q->phase != PP_GONE) {
+        /* [R 0x30CEA0] the pulse's clock (+0xFC) runs only with a delay (+0xF8) of 0.01 or more; at the delay it is
+         * taken off and onPulse runs, once a frame. setPulseDelay(0) stops the pulses */
+        if (r != DELETE_ME && q->pulse_delay >= 0.01f && q->phase != PP_GONE) {
             q->pulse_time += dt;
             if (q->pulse_time >= q->pulse_delay) {
                 q->pulse_time = q->pulse_delay > 0 ? q->pulse_time - q->pulse_delay : 0;
@@ -1763,7 +1768,10 @@ void people_throw(People *p, int who, float monster_heading)
         return;
     }
     q->thrown = 1;
+    float clock = q->pulse_time;
     smash(p, q, monster_heading);                    /* onThrow(monster, 0) */
+    if (q->kind == PK_MIME)                          /* Mime's onThrow smashes without its smash(): no setPulseTime */
+        q->pulse_time = clock;
 }
 
 int people_hit(People *p, int monster, const float c[3], float radius, float monster_heading, const char *move)

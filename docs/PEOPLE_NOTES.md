@@ -37,6 +37,10 @@ actor). 0x800 means "deleting" (`requestDelete`, vtable +0x58, 0x285DD0), and 0x
 - **The scripts' own**: StationaryPerson's `IdleEffect` (the balloon seller's `balloons_hold`, 5 above it, left
   there) stops in `playEffect`; a kid tourist's `KidBalloonHoldingFX` (attached) stops when it runs off.
 - In the port they are `PE_FX_ON` / `PE_FX_OFF` events, which main.c turns into effects that follow their person.
+- **getStringProp** reads the instance book first, then the template (0x27C230, VEHICLE_NOTES.md);
+  **getTemplateStringProp** only the template [R]. No `ActorInstance|` sets a key the people scripts read (they hold
+  only `Location`, `Name`, `ZRotation`, `SpawnsItem0`, `SpawnedItem`, `DelayedSpawn`, `SpawnDelay`), so the port reads
+  the template for both.
 
 ## LineMover (update 0x315E10, vtable 0x44B4E0)
 - **Points and progress**: the points are at +0x34 (12 bytes each), the count at +0x3C and the segment at +0x40.

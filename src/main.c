@@ -106,6 +106,7 @@ typedef struct Mon {
     int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
     int held_parade;                                 /* or a biker or a cart's food (parade.c), -1 none */
     int held_rail, rail_knock;                       /* or a rail object (rail.c), -1 none; a knock taken */
+    int held_sobj;                                   /* or a parked car (streetobj.c), -1 none */
     int streaker;                                    /* the defeated monster's streaker (people.c), -1 none */
     EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
@@ -496,6 +497,7 @@ static void start_moves(Mon *mo)
     mo->held_vehicle = -1;
     mo->held_rail = -1;
     mo->held_parade = -1;
+    mo->held_sobj = -1;
     mo->pending_slot = -1;
     mo->defeated = 0;
     mo->scale = mo->scale_to = 1;
@@ -927,6 +929,8 @@ static void build(Viewer *v)
     streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
     v->sobj = NULL;
     v->nsofx = 0;
+    for (int k = 0; k < v->nmon; k++)
+        v->mon[k].held_sobj = -1;
     if (v->have_scene) {
         static StreetHost sh;
         sh.shape_box = army_shape_box;
@@ -1298,7 +1302,9 @@ static int answer(void *ctx, const char *call, const float *a)
     if (strstr(call, "::canGrabPowerup") || strstr(call, "::checkForHazard"))
         return edible_call(mo, call, a + 1) > 0;
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
-        return mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 || mo->held_parade >= 0;                         /* hasGrabbedObject: 2 for an actor (0x2E5590) */
+        return mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 || mo->held_parade >= 0 ||
+               (mo->held_sobj >= 0 && call[10] == 'p');   /* hasGrabbedObject: 2 for an actor (0x2E5590);
+                                                      * isHoldlingEdible wants 2, and a parked car is no actor */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&mo->mount, sc, &c, mo->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
@@ -1658,6 +1664,9 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         } else if (v->rail && mo->held_rail < 0 && (who = rail_nearest_pickup(v->rail, hand, root, fwd, 15)) >= 0) {
             rail_grab(v->rail, who, mo->slot);
             mo->held_rail = who;
+        } else if (v->sobj && mo->held_sobj < 0 && (who = streetobj_nearest_pickup(v->sobj, hand, root, fwd, 15)) >= 0) {
+            streetobj_grab(v->sobj, who);            /* a parked car */
+            mo->held_sobj = who;
         }
         return;
     }
@@ -1690,6 +1699,15 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         if (mo->held_rail >= 0 && v->rail) {
             rail_throw(v->rail, mo->held_rail, mo->slot, e->p[0] != 0, e->p + 1);
             mo->held_rail = -1;
+            return;
+        }
+        if (mo->held_sobj >= 0 && v->sobj) {         /* [R 0x2D9DC0] throwObject(vel, 0, eat): the velocity in the
+                                                      * monster's frame, turned by its matrix (x mirrored with it)
+                                                      * [G: and by its +0x2560 angle, taken as 0] */
+            float h = mo->heading / 57.2957795f, lx = mo->mirror ? -e->p[1] : e->p[1];
+            float vel[3] = { cosf(h) * lx - sinf(h) * e->p[2], sinf(h) * lx + cosf(h) * e->p[2], e->p[3] };
+            streetobj_fly(v->sobj, mo->held_sobj, mo->slot, e->p[0] != 0, vel);
+            mo->held_sobj = -1;
             return;
         }
         if (mo->held < 0 || !v->scene.folk)
@@ -3198,6 +3216,8 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
         Mat4 h;
         if (mo->held_vehicle >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
             vehicle_hold(v->veh, mo->held_vehicle, h.m, mo->mirror);
+        if (v->sobj && mo->held_sobj >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            streetobj_hold(v->sobj, mo->held_sobj, h.m, mo->mirror);   /* a parked car in its hand */
     }
 }
 
@@ -3474,6 +3494,7 @@ static void street_step(Viewer *v, float dt)
                 break;
             case SE_SOUND: sound_play(e->name, e->pos, 1); break;
             case SE_SHAPE: scene_street_shape(&v->scene, k, e->name); break;
+            case SE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;   /* a thrown car met it */
             case SE_STATS:                           /* gCommon.addStats(obj, monster, 0) */
                 if (v->army)
                     army_add_stats(v->army, e->monster, e->tmpl, 0);
@@ -4608,7 +4629,7 @@ static void block_left(Viewer *v)
 {
     for (int k = 0; k < v->nmon; k++) {
         Mon *mo = &v->mon[k];
-        mo->held = mo->held_unit = mo->held_vehicle = mo->held_parade = mo->held_rail = -1;
+        mo->held = mo->held_unit = mo->held_vehicle = mo->held_parade = mo->held_rail = mo->held_sobj = -1;
     }
     if (v->fxw) {
         for (int i = 0; i < v->nfxa; i++) fx_stop(v->fxw, v->fxa[i].fx);

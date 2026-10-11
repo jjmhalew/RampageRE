@@ -31,6 +31,7 @@ struct StreetObjs {
     float acc;
     int next_id, frame;
     uint32_t seed;
+    CollideWorld *cw;                                /* the frame's collision world (streetobj_collide_add) */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -749,8 +750,9 @@ static const float *book_box(Group g, float b[6])
 }
 
 /* its collision shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius or AutoCollisionBox
- * with the model's box (the host measures it), then the instance's; else the model's bounding sphere [G: taken as
- * its box's; no model: radius 1 at the origin]. box_min / box_max: the shape's box (a sphere's bounding cube) */
+ * with the model's box (the host measures it), then the instance's; else the sphere the model keeps (0x184CB0, the
+ * host's shape_sphere; without one the box's bounding sphere; no model: radius 1 at the origin). box_min / box_max:
+ * the shape's box (a sphere's bounding cube) */
 static void object_box(StreetObjs *s, StreetObj *o)
 {
     float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
@@ -831,6 +833,60 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
     }
 }
 
+/* the flight's contacts (collide_mover_step): the street, and the objects of the frame's world its shape reaches */
+typedef struct { StreetObjs *s; StreetObj *o; int ground, met[8], nmet; float at[8][3]; } FlyCtx;
+
+static void fly_contact(void *user, int other, const float p[3], const float n[3])
+{
+    FlyCtx *c = user;
+    (void)n;
+    if (other < 0) {
+        c->ground = 1;
+        return;
+    }
+    for (int k = 0; k < c->nmet; k++)
+        if (c->met[k] == other)
+            return;
+    if (c->nmet < 8) {
+        memcpy(c->at[c->nmet], p, sizeof c->at[0]);
+        c->met[c->nmet++] = other;
+    }
+}
+
+/* [R] a thrown object's frame: its SpherePhysicsMover (0x28E440, collide.c) at the game's step; the objects it meets
+ * get TakeImpact (SE_IMPACT; a street object of this module its own TakeImpact) and so does it, the street calls
+ * OnHitGround (StreetObject.bsf: its HitEffect where it is, requestDelete). RoofItem.bsf has neither: it flies on */
+static void fly_step(StreetObjs *s, StreetObj *o)
+{
+    int i = idx(s, o);
+    FlyCtx c = { s, o, 0, { 0 }, 0, { { 0 } } };
+    int self = s->cw ? collide_check(s->cw, o->cobj, COLLIDE_TAG(COLLIDE_OWN_STREET, i), 0) : -1;
+    collide_mover_step_ex(s->cw, &o->cm, o->cmat, self, TIMESTEP, COLLIDE_F_MONSTER, fly_contact, &c);
+    collide_matrix_to16(o->cmat, o->world);
+    for (int r = 0; r < 3; r++)
+        for (int k = 0; k < 3; k++)
+            o->rot[r * 3 + k] = o->world[r * 4 + k];
+    o->moved = 1;
+    for (int k = 0; k < c.nmet && s->cw; k++) {
+        const CollideObj *w = &s->cw->o[c.met[k]];
+        if (COLLIDE_TAG_OWNER(w->tag) == COLLIDE_OWN_STREET) {
+            if (COLLIDE_TAG_INDEX(w->tag) != i)
+                streetobj_take_impact(s, COLLIDE_TAG_INDEX(w->tag));
+        } else {
+            StreetEvent *e = emit(s, SE_IMPACT, o, o->name, c.at[k]);
+            if (e) {
+                e->id = w->tag;
+                e->level = w->kind;
+                e->amount = o->cm.mass;
+            }
+        }
+    }
+    if (c.nmet && o->kind == SK_STREET)              /* its own TakeImpact */
+        streetobj_take_impact(s, i);
+    else if (c.ground && o->kind == SK_STREET && o->alive)
+        streetobj_hit_ground(s, i);
+}
+
 static void step(StreetObjs *s)
 {
     for (int i = 0; i < s->n; i++) {
@@ -854,6 +910,8 @@ static void step(StreetObjs *s)
             if (o->kind == SK_ROOF)
                 roof_building_gone(s, o);           /* StreetObject.bsf has none */
         }
+        if (o->flying && !s->deleting[i])
+            fly_step(s, o);
         float d[3];                                  /* [R 0x314EF0] an AttackObject's wobble, after 0x309AC0: onto
                                                       * the turn it has (the sway's, the fall's), made again */
         if (!s->deleting[i] && army_osc_step(&o->wobble, TIMESTEP, d)) {
@@ -973,6 +1031,7 @@ int streetobj_take_impact(StreetObjs *s, int i)
 
 void streetobj_collide_add(StreetObjs *s, CollideWorld *w)
 {
+    s->cw = w;
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
         o->cobj = -1;
@@ -1053,6 +1112,100 @@ void streetobj_hit_ground(StreetObjs *s, int i)      /* OnHitGround [R] */
     StreetObj *o = &s->o[i];
     effect(s, o, ostr(o, "HitEffect"), pos_of(o), 0, NULL, NULL, 0, 0);
     delete_now(s, o);
+}
+
+int streetobj_nearest_pickup(const StreetObjs *s, const float hand[3], const float root[3], const float forward[3],
+                             float radius)
+{
+    int best = -1;
+    float bd = 3.4e38f;
+    for (int i = 0; i < s->n; i++) {
+        const StreetObj *o = &s->o[i];
+        if (!o->alive || s->deleting[i] || o->flying || !(o->oflags & SF_PICKUP) || (o->oflags & SF_HELD))
+            continue;
+        const float *at = pos_of(o);
+        float dx = at[0] - hand[0], dy = at[1] - hand[1], dz = at[2] - hand[2], d = dx * dx + dy * dy + dz * dz;
+        if (d > radius * radius || d >= bd)
+            continue;
+        if ((at[0] - root[0]) * forward[0] + (at[1] - root[1]) * forward[1] <= 0)   /* in front of the root */
+            continue;
+        best = i;
+        bd = d;
+    }
+    return best;
+}
+
+void streetobj_grab(StreetObjs *s, int i)
+{
+    if (i < 0 || i >= s->n || !s->o[i].alive)
+        return;
+    StreetObj *o = &s->o[i];
+    o->oflags = (o->oflags | SF_HELD) & ~(uint32_t)(SF_PICKUP | SF_PUSH_OUT);   /* [R] 0x2DA310 */
+    o->flying = 0;
+    o->oflags &= ~(uint32_t)SF_ATTACHED;             /* its mover is the hand's now */
+    if (o->kind == SK_STREET)
+        streetobj_pickup(s, i);                      /* script event 8 */
+}
+
+/* [R] the HeldObjectMover (0x310ED0): the MajorAxis row (default 2) is the hand's z, the next its y, the third their
+ * cross; at the hand's place plus HoldOffset (MirroredHoldOffset when mirrored) in the hand's frame. [G: its blend
+ * in (0x310B50, 0.1 s from the ground) is left out, as vehicle.c's] */
+void streetobj_hold(StreetObjs *s, int i, const float hand[16], int mirrored)
+{
+    if (i < 0 || i >= s->n || !s->o[i].alive || !(s->o[i].oflags & SF_HELD))
+        return;
+    StreetObj *o = &s->o[i];
+    float off[3] = { 0, 0, 0 };
+    Group g = group_sub(o->tmpl, mirrored ? "MirroredHoldOffset" : "HoldOffset");
+    Record r[3];
+    if (g.at && group_items(g, r, 3) == 3)
+        for (int k = 0; k < 3; k++)
+            off[k] = record_num(r[k]);
+    int major = (int)onum(o, "MajorAxis", 2);
+    if (major < 0 || major > 2)
+        major = 2;
+    int i1 = (major + 1) % 3, i2 = (major + 2) % 3;
+    float *ax = o->rot;
+    for (int k = 0; k < 3; k++) {
+        ax[major * 3 + k] = hand[8 + k];
+        ax[i1 * 3 + k] = hand[4 + k];
+    }
+    ax[i2 * 3 + 0] = ax[major * 3 + 1] * ax[i1 * 3 + 2] - ax[major * 3 + 2] * ax[i1 * 3 + 1];
+    ax[i2 * 3 + 1] = ax[major * 3 + 2] * ax[i1 * 3 + 0] - ax[major * 3 + 0] * ax[i1 * 3 + 2];
+    ax[i2 * 3 + 2] = ax[major * 3 + 0] * ax[i1 * 3 + 1] - ax[major * 3 + 1] * ax[i1 * 3 + 0];
+    for (int c = 0; c < 3; c++) {
+        for (int k = 0; k < 3; k++)
+            o->world[c * 4 + k] = ax[c * 3 + k];
+        o->world[c * 4 + 3] = 0;
+    }
+    for (int k = 0; k < 3; k++)
+        o->world[12 + k] = hand[12 + k] + hand[k] * off[0] + hand[4 + k] * off[1] + hand[8 + k] * off[2];
+    o->world[15] = 1;
+    o->moved = 1;
+}
+
+void streetobj_fly(StreetObjs *s, int i, int monster, int eat, const float vel[3])
+{
+    if (i < 0 || i >= s->n || !s->o[i].alive)
+        return;
+    StreetObj *o = &s->o[i];
+    o->oflags &= ~(uint32_t)SF_HELD;
+    /* [R] 0x28DE70 / 0x28F220: the template's Gravity (DefObjectProps 35), Mass 1, Restitution 0.8, SlidingFriction
+     * 0.4, InertiaSolidity 1 unless set; its radius sqrt(+0x34) of its shape; no spin */
+    float r = collide_mover_radius(&o->cshape);
+    if (r < 0.05f)
+        r = o->cshape.radius > 0.05f ? o->cshape.radius : 1;
+    collide_mover_init(&o->cm, r, onum(o, "Gravity", 9.81f), onum(o, "Mass", 1), onum(o, "Restitution", 0.8f),
+                       onum(o, "SlidingFriction", 0.4f), onum(o, "InertiaSolidity", 1));
+    static const float none[3] = { 0, 0, 0 };
+    collide_mover_spin(&o->cm, none);
+    if (vel)
+        memcpy(o->cm.vel, vel, sizeof o->cm.vel);
+    collide_matrix_from16(o->cmat, o->world);
+    o->flying = 1;
+    (void)eat;                                       /* onThrow's bWasEaten: StreetObject.bsf does not look */
+    if (o->kind == SK_STREET)
+        streetobj_throw(s, i, monster);
 }
 
 void streetobj_place(StreetObjs *s, int i, const float world[16])

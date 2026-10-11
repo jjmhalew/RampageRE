@@ -92,6 +92,9 @@ typedef struct {
     float osc, osc_scale, osc_base;                  /* StreetObject: the custom oscillation */
     ArmyOsc wobble;                                  /* an AttackObjectInstance|'s: the AttackObject's (0x314EF0) */
     float elapsed, move_time, y_per_frame, latency, ydir, rpf[3];   /* RoofItem: the fall */
+    int flying;                                      /* thrown: on its SpherePhysicsMover */
+    CollideMover cm;                                 /* that mover (0x28DE70) */
+    float cmat[12];                                  /* its matrix while it flies (collide.h's 3 x 4) */
 } StreetObj;
 
 /* ---- what happened */
@@ -110,7 +113,10 @@ enum {
     SE_MONSTER_EFFECT,/* effect `name` attached to monster `monster`'s node `node` (createAndStartAttachedToNodeByName):
                        * level 0 that node ("fxNode_Belch"); level 1 the series node + "1", "2", ... up to "20", until
                        * a node is missing ("fxNode_Shoulder") */
-    SE_REMOVED        /* obj is gone (requestDelete): no longer drawn */
+    SE_REMOVED,       /* obj is gone (requestDelete): no longer drawn */
+    SE_IMPACT         /* obj, flying, met the frame's collision object whose tag is id (level: its kind) at pos:
+                       * its TakeImpact (0x287430), amount the mover's Mass (a building: Building::hit at radius
+                       * Mass / 1000, main.c impact_route) */
 };
 typedef struct {
     int type, id, obj, monster, level, node_id;
@@ -158,12 +164,25 @@ void streetobj_collide_add(StreetObjs *s, CollideWorld *w);
  * is knocked off as by a blow without a monster. Its index, -1 none */
 int streetobj_force_damage(StreetObjs *s, const char *name, const float pos[3]);
 
-/* the pick-up of a Pickupable one (the parked cars), for a host that grabs it: onPickup (DamageShape, PickupSound,
- * HitEffect, no longer PushOutMonsters), held (TakeDamage ignored), onThrow (it counts; no longer Pickupable),
- * OnHitGround (HitEffect where it lands, deleted). While held or flying the host moves it (streetobj_place) */
+/* the pick-up of a Pickupable one (the parked cars, CarParkedCoup / Sedan / Taxi and their Roof kin): onPickup
+ * (DamageShape, PickupSound, HitEffect, no longer PushOutMonsters), held (TakeDamage ignored), onThrow (it counts; no
+ * longer Pickupable), OnHitGround (HitEffect where it lands, deleted). RoofItem.bsf has none of the three */
 void streetobj_pickup(StreetObjs *s, int i);
 void streetobj_throw(StreetObjs *s, int i, int monster);
 void streetobj_hit_ground(StreetObjs *s, int i);
+/* doGrabObject's search (0x2D99C0): within radius of the hand, Pickupable (0x10000) and neither held nor going, in
+ * front of the monster's root (forward its +y axis), the nearest by its place; -1 none */
+int streetobj_nearest_pickup(const StreetObjs *s, const float hand[3], const float root[3], const float forward[3],
+                             float radius);
+/* the hold (0x2DA310): BeingHeld, neither Pickupable nor PushOutMonsters, then onPickup */
+void streetobj_grab(StreetObjs *s, int i);
+/* each frame it is held: the HeldObjectMover (0x310ED0 / 0x3109E0) at the hand's (LiftNodeName) world matrix */
+void streetobj_hold(StreetObjs *s, int i, const float hand_world[16], int mirrored);
+/* throwObject (0x2D9DC0): a SpherePhysicsMover with the throw's velocity (in the world: the clip's, turned by the
+ * monster's matrix), keeping the hand's turn with no spin; then onThrow(monster, eat). It flies in the frame's
+ * collision world (streetobj_collide_add): the street (OnHitGround) and the objects it meets (TakeImpact on both:
+ * SE_IMPACT for the other) */
+void streetobj_fly(StreetObjs *s, int i, int monster, int eat, const float vel[3]);
 void streetobj_place(StreetObjs *s, int i, const float world[16]);
 
 int streetobj_count(const StreetObjs *s);
