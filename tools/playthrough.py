@@ -29,6 +29,14 @@ STRONG = '986960,071767'                             # no monster can be hit, on
 # console lines worth a look (numbers folded when they are counted); "N not found" of a block's line only when N > 0
 NOISE = [re.compile(p) for p in (r'not found', r'(?i)\bassert', r'(?i)\berror', r'(?i)cannot ', r'(?i)\bfail',
                                  r'^no [A-Za-z]', r'(?i)nan\b', r'(?i)\binf\b', r'(?i)overflow', r'(?i)too many')]
+# a first guess at what a problem is, for the triage (the report says it is a guess)
+KIND_HINT = {
+    'crash': 'port bug', 'nan_position': 'port bug', 'never_respawns': 'port bug', 'state_never_ends': 'port bug',
+    'results_never_answer': 'port bug', 'shell_never_advances': 'port bug (or the autopilot)',
+    'objects_runaway': 'port bug', 'memory': 'port bug', 'memory_growth': 'port bug', 'inside_building': 'port bug?',
+    'under_ground': 'port bug?', 'outside_street': 'port bug?', 'monster_stuck': 'bot limit or port bug',
+    'block_never_ends': 'bot limit or port bug', 'block_lost_repeatedly': 'bot limit (it does not eat or dodge)',
+}
 QUIET = [re.compile(p) for p in (r'\b0 not found', r'^\[\d\] |^[A-Z][A-Za-z_0-9]* -> ', r'^wrote ', r'^camera at ')]
 
 
@@ -85,6 +93,8 @@ def parse_log(path):
                 out['summary'] = kv
             elif kind == 'CRASH':
                 out['crash'] = line
+            elif kind == 'CRASH_FRAME':
+                out.setdefault('frames', []).append(line)
     return out
 
 
@@ -141,7 +151,8 @@ def table(results):
         s = r['summary'] or {}
         end = 'HANG (wall clock)' if r['hung'] else ('CRASH' if r['exit'] not in (0, 3) else s.get('end', '-'))
         won = sum(1 for b in r['blocks'] if b.get('result', '').startswith('won'))
-        sim = float(s.get('t', 0) or 0) / 60
+        last_t = [m.group(1) for l in r.get('lines', []) for m in [re.search(r' t=([\d.]+)', l)] if m]
+        sim = float(s.get('t', 0) or (last_t[-1] if last_t else 0)) / 60
         rows.append(f"| {r['name']} | {end} | {won} / {len(r['blocks'])} | {sim:.0f} | {r['wall_s']:.0f} | "
                     f"{s.get('peak_mb', '-')} | {len(r['problems'])} | {r['exit']} |")
     return rows
@@ -178,7 +189,8 @@ def main():
                   f"{len(r['problems'])} problems, end {s.get('end', '-')}, {r['wall_s']:.0f} s", flush=True)
     order = {n: i for i, (n, _, _) in enumerate(todo)}
     results.sort(key=lambda r: order[r['name']])
-    md = ['# Playthrough', '', *table(results), '']
+    rows = table(results)
+    md = ['# Playthrough', '', *rows, '']
     bad = False
     for r in results:
         md.append(f"## {r['name']}")
@@ -190,6 +202,7 @@ def main():
             bad = True
         if r['exit'] not in (0, 3) and not r['hung']:
             md.append(f"**crash**, exit {r['exit']}: {r['crash'] or ''}")
+            md += ['    ' + l for l in r.get('frames', [])]
             bad = True
         if r.get('tail'):
             md.append('the console\'s last lines:')
@@ -198,7 +211,7 @@ def main():
             md.append(f"- {b.get('city')} {b.get('block')} ({b.get('type')}): {b.get('result')} in {b.get('dur')} s, "
                       f"score {b.get('score')}, lives {b.get('lives')}, hp {b.get('hp')}, boss {b.get('boss')}")
         for p in r['problems']:
-            md.append(f"- PROBLEM {p['line']}")
+            md.append(f"- PROBLEM ({KIND_HINT.get(p.get('kind'), '?')}, a guess) {p['line']}")
             bad = True
         for k, n in sorted(r['console'].items(), key=lambda x: -x[1])[:25]:
             md.append(f'- console x{n}: `{k}`')

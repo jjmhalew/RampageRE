@@ -182,7 +182,11 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS *e)
     if (g_ap && g_ap->log && e && e->ContextRecord) {   /* the stack, each frame by its symbol and line */
         HANDLE proc = GetCurrentProcess();
         SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
-        SymInitialize(proc, NULL, TRUE);
+        char dir[MAX_PATH] = "";                     /* the .pdb beside the exe, whatever the current folder */
+        DWORD dn = GetModuleFileNameA(NULL, dir, sizeof dir);
+        while (dn > 0 && dir[dn - 1] != '\\' && dir[dn - 1] != '/')
+            dir[--dn] = 0;
+        SymInitialize(proc, dir[0] ? dir : NULL, TRUE);
         CONTEXT c = *e->ContextRecord;
         STACKFRAME64 f;
         memset(&f, 0, sizeof f);
