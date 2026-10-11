@@ -250,6 +250,7 @@ int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMon
 /* PE_WEAPON from people.c: person `who`'s weapon WeaponName on (at its world matrix, at target_monster) or off (NULL) */
 void army_person_weapon(Army *a, int who, const char *weapon, const float person_world[16], int target_monster);
 void army_person_moved(Army *a, int who, const float person_world[16]);
+void army_person_forget(Army *a, int who);           /* the person is gone: its weapon with it */
 
 void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
 

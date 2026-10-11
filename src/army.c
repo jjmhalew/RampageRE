@@ -31,7 +31,7 @@ typedef struct {                                     /* an AIInstance record, 0x
     int alive, enabled;                              /* +1C, +20 */
 } Spawner;
 
-typedef struct { int on, monster; float world[16]; ArmyWeapon w; int has; } PersonGun;
+typedef struct { int who, on, monster; float world[16]; ArmyWeapon w; int has; } PersonGun;   /* who: person + 1, 0 free */
 typedef struct { float step, sum; int skip; } Chain; /* a building's +0x194, +0x198, +0x19C [R] */
 
 struct Army {
@@ -689,6 +689,10 @@ static void hit_monster(Army *a, int monster, const char *weapon, int owner, flo
         k[0] /= l;
         k[1] /= l;
     }
+    if (getenv("RAMPAGE_TRACE"))                     /* who hit it: a unit's template, or a person (the punks) */
+        printf("  %.2f: %s's %s hits monster %d: %.2f\n", a->now,
+               owner >= 0 && owner < a->n && a->u[owner].name ? a->u[owner].name : "person", weapon ? weapon : "?",
+               monster, damage);
     ArmyEvent *e = emit(a, AE_HIT, owner, weapon, NULL);
     e->monster = monster;
     e->amount = damage;
@@ -718,8 +722,9 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
     memcpy(s->pos, from, sizeof s->pos);
     memcpy(s->dir, dir0, sizeof s->dir);
     norm3(s->dir);
-    if (u && getenv("RAMPAGE_TRACE"))                /* a unit's (the people's bottles are many) */
-        printf("  %.2f: %s fires %s from %.1f %.1f %.1f along %.2f %.2f %.2f\n", a->now, u->name ? u->name : "?",
+    if (getenv("RAMPAGE_TRACE"))                     /* a unit's, or a person's (the punks' bottles) */
+        printf("  %.2f: %s fires %s from %.1f %.1f %.1f along %.2f %.2f %.2f\n", a->now,
+               u ? u->name ? u->name : "?" : "person",
                w->name ? w->name : "?", from[0], from[1], from[2], s->dir[0], s->dir[1], s->dir[2]);
     s->damage = w->damage * w->scale;
     s->duration = w->duration;
@@ -938,6 +943,8 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
         w->timer = fmaxf(w->refire, w->charge_time);
     } else {
         ArmyShot *s = new_shot(a);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  %.2f: %s fires %s (a beam)\n", a->now, u && u->name ? u->name : "person", w->name ? w->name : "?");
         w->beam_left = w->duration;                  /* [R] 0x295CDC */
         w->firing = 1;
         w->first = 1;
@@ -3533,8 +3540,7 @@ void army_clear(Army *a)
     a->n = 0;
     a->nshots = 0;
     a->nev = 0;
-    for (int i = 0; i < MAX_PERSONS; i++)
-        a->person[i].on = 0;
+    memset(a->person, 0, sizeof a->person);
     memset(a->chain, 0, sizeof a->chain);
     memset(a->flee, 0, sizeof a->flee);
     memset(a->instances, 0, sizeof a->instances);
@@ -3577,13 +3583,47 @@ int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMon
 
 /* ---- the people's weapons (PE_WEAPON: the street punk's bottle) */
 
+/* the person's weapon: its own (who + 1), else (make) a free one */
+static PersonGun *person_gun(Army *a, int person, int make)
+{
+    PersonGun *free = NULL;
+    for (int i = 0; i < MAX_PERSONS; i++) {
+        if (a->person[i].who == person + 1)
+            return &a->person[i];
+        if (!free && !a->person[i].who)
+            free = &a->person[i];
+    }
+    if (!make)
+        return NULL;
+    if (!free) {                                     /* all taken: one whose weapon is off */
+        for (int i = 0; i < MAX_PERSONS && !free; i++)
+            if (!a->person[i].on)
+                free = &a->person[i];
+        if (!free)
+            return NULL;
+    }
+    memset(free, 0, sizeof *free);
+    free->who = person + 1;
+    return free;
+}
+
+void army_person_forget(Army *a, int person)
+{
+    PersonGun *g = person >= 0 ? person_gun(a, person, 0) : NULL;
+    if (g)
+        memset(g, 0, sizeof *g);
+}
+
 void army_person_weapon(Army *a, int person, const char *weapon, const float person_world[16], int target_monster)
 {
     if (person < 0)
         return;
-    PersonGun *g = &a->person[person % MAX_PERSONS];
-    if (!weapon) {                                   /* enableWeapon(0) */
+    PersonGun *g = person_gun(a, person, weapon != NULL);
+    if (!g)
+        return;
+    if (!weapon) {                                   /* enableWeapon(0): it keeps counting down (0x30EC10) */
         g->on = 0;
+        g->w.on = 0;
         return;
     }
     if (!g->has || !same_text(g->w.name, weapon)) {
@@ -3623,22 +3663,25 @@ void army_person_weapon(Army *a, int person, const char *weapon, const float per
 
 void army_person_moved(Army *a, int person, const float person_world[16])
 {
-    if (person >= 0 && person_world)
-        memcpy(a->person[person % MAX_PERSONS].world, person_world, 16 * sizeof(float));
+    PersonGun *g = person >= 0 && person_world ? person_gun(a, person, 0) : NULL;
+    if (g)
+        memcpy(g->world, person_world, 16 * sizeof(float));
 }
 
+/* [R 0x30EC10] the actor's weapon is updated every frame, enabled or not (its vtable +0x6C with the enable byte
+ * +0x0): a disabled one counts down to its floor (ChargeTime + FiringOffset, weapon_tick) and does not fire */
 static void persons_update(Army *a, float dt)
 {
     for (int i = 0; i < MAX_PERSONS; i++) {
         PersonGun *g = &a->person[i];
-        if (!g->on || !g->has)
+        if (!g->who || !g->has)
             continue;
         int m = g->monster >= 0 && g->monster < a->nm ? g->monster : -1;
         float from[3] = { g->world[12], g->world[13], g->world[14] + 1.5f }, tp[3] = { 0, 0, 0 }, dir[3];
         if (m >= 0)
             monster_target(&a->m[m], tp);
         lob(from, tp, g->w.velocity, 9.81f * g->w.gravity, dir);   /* the throw's aim: see weapon_aim */
-        weapon_tick(a, NULL, &g->w, m >= 0 && dist3(from, tp) <= g->w.range, from, dir, NULL, m, dt);
+        weapon_tick(a, NULL, &g->w, g->on && m >= 0 && dist3(from, tp) <= g->w.range, from, dir, NULL, m, dt);
     }
 }
 

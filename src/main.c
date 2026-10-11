@@ -4423,16 +4423,23 @@ static void play_step(Viewer *v, float dt, float aspect)
                     tmpl = record_str(where, r[(uint32_t)rand() % n]);
                 if (tmpl)
                     army_drop(v->army, tmpl, ev[i].v, NULL, 0, NULL, 0);
-            } else if (ev[i].type == PE_WEAPON && ev[i].name) {
-                army_person_weapon(v->army, ev[i].who, ev[i].on ? ev[i].name : NULL, p->world, 0);
-                if (ev[i].on && v->narmed_people < 32)
+            } else if (ev[i].type == PE_WEAPON) {            /* enableWeapon(1) with its name, enableWeapon(0) without */
+                int on = ev[i].on && ev[i].name, k;
+                army_person_weapon(v->army, ev[i].who, on ? ev[i].name : NULL, p->world, 0);
+                for (k = 0; k < v->narmed_people && v->armed_people[k] != ev[i].who; k++)
+                    ;
+                if (on && k == v->narmed_people && v->narmed_people < 32)
                     v->armed_people[v->narmed_people++] = ev[i].who;
             }
         }
         for (int i = 0; v->army && i < v->narmed_people; i++) {
             const Person *p = people_get(v->scene.folk, v->armed_people[i]);
-            if (p)
+            if (p && p->phase != PP_GONE)
                 army_person_moved(v->army, v->armed_people[i], p->world);
+            else {                                   /* [R] a deleted actor's weapon goes with it */
+                army_person_forget(v->army, v->armed_people[i]);
+                v->armed_people[i--] = v->armed_people[--v->narmed_people];
+            }
         }
         for (int i = 0; i < ne; i++) {
             if (ev[i].type == PE_SOUND && ev[i].name) {

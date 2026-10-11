@@ -90,7 +90,13 @@ else 0.
   Velocity, Gravity). Rotation and elevation step at Rate × dt, each within ±Range in degrees (0x298E70 / 0x298F40).
   The weapon fires when the turret is on target, unless `RequiresRotation/ElevationClearToFire` is 0, and the target
   is within MaxFiringRange. `FireOnceCommited` latches the fire.
-- **Actors:** they fire while `enableWeapon(1)` is on and `setWeaponTarget` is set.
+- **Actors:** they fire while `enableWeapon(1)` is on and `setWeaponTarget` is set. The actor's weapon is updated
+  every frame, enabled or not (0x30EC10 ends in the weapon's vtable +0x6C with the enable byte +0x0), so a disabled
+  one keeps counting down to its floor and is ready again when re-enabled; it goes with its actor. The punks
+  (WalkingAroundPerson.bsf) enable theirs at the end of `Throw` and disable it 0.25 s later (`disableWeaponDelay`
+  on the pulse): StreetPunkBottle's countdown starts at 0 (ChargeTime + FiringOffset), so one bottle a throw, a throw
+  every `ReloadDelay` (5) at most [R]. Here army.c `army_person_weapon` / `persons_update` (a weapon per person,
+  kept until `army_person_forget`).
 
 The cluster (0x299640) [R]: RotationRate and ElevationRate are radians a second as read (the step 0x29BA50 is rate ×
 the frame's dt; the angles wrap at 0x298E70 / 0x298F40). The defaults: ElevationRate 0.5, ElevationRange ±40°,
@@ -487,5 +493,6 @@ Floating = 100
 3. **Monster attacks:** an armed attack sphere calls `army_hit`. The grab uses `army_nearest_pickup`, `army_grab`,
    `army_hold` each frame and `army_throw`.
 4. **People:** `PE_DROP` goes to `army_drop` with the block's `DroppableDef` template, and `PE_WEAPON` goes to
-   `army_person_weapon`, with `army_person_moved` while the person is on.
+   `army_person_weapon` (on with its name, off without: both), with `army_person_moved` while the person is on and
+   `army_person_forget` when it is gone.
 5. **Buildings:** building damage calls `army_score_building`.
