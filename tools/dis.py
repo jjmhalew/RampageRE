@@ -40,6 +40,8 @@ def main():
         x = word(a)
         ins = rabbitizer.Instruction(x, vram=a, category=rabbitizer.InstrCategory.R5900)
         text = ins.disassemble()
+        if x & 0xFFE0003F == 0x46000004:             # the EE's sqrt.s fd, ft (fs unused), which rabbitizer leaves "c1"
+            text = f'{"sqrt.s":11s} $f{(x >> 6) & 31}, $f{(x >> 16) & 31}'
         note = ''
         op = x >> 26
         if op == 0x0f:
