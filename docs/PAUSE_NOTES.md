@@ -259,5 +259,7 @@ The three lists (`choices`, ConfirmQuit's `cq_list`, the Options page's `rumble`
 - After Quit the menu goes on the next `hud_update` (in the game it stays up while the world shuts down; the viewer
   leaves the world at once).
 - `pauseGame`'s gate is the tick's (0x288340: App +0xA0 & 0x10 skips the world's update; the GUI and the drawing
-  run on) [R]; each system's own tests (0x2B6AF0, 0x2C1CE0) were not traced.
+  run on) [R]. 0x2B6AF0 (from 0x2B8F80) runs each monster's 0x2D6650 and then, only with the app paused (+0xA0 &
+  0x10) and the cheat flag 0x10000, the soak test's world half (SHELL_NOTES.md "The soak test") [R]; 0x2C1CE0's test
+  was not traced.
 - The music fade, the pausing of the sound events and the vibration belong to the viewer.

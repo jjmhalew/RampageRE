@@ -3113,6 +3113,8 @@ static void game_step(Viewer *v, float dt)
                         r.blocks_won[p] = game_blocks_won(v->game, p);
                         r.cities_won[p] = game_cities_won(v->game, p);
                     }
+                    int sb = game_start_block(v->game);   /* getMonsterName(-1): the roster's monster of that number */
+                    r.monster_none = sb >= 0 && sb < v->roster.n ? v->roster.name[sb] : NULL;
                     r.king_block = game_king(v->game, 0);
                     r.king_city = game_king(v->game, 1);
                     r.king_world = game_king(v->game, 2);

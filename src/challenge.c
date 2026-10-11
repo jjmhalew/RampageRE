@@ -109,12 +109,13 @@ int challenge_upgrade_props(Challenge *c, Group t)
     c->up.text = s ? s : "";
     n += s != NULL;
     Group col = group_sub(t, "Color|TextColor");
-    if (col.at) {                                    /* three unnamed numbers */
-        Record v[4];
-        uint32_t k = group_items(col, v, 4);
-        for (uint32_t i = 0; i < 3; i++)
-            c->up.colour[i] = i < k ? record_num(v[i]) / 255.0f : 0;
-        c->up.colour[3] = 1;
+    Record v[5];
+    uint32_t k = col.at ? group_items(col, v, 5) : 0;
+    if (k == 3 || k == 4) {                          /* [R 0x278C38 -> 0x27B4F0] three or four numbers, each
+                                                      * truncated to a byte, alpha 255 with three, x 1/255
+                                                      * (0x1C97F0) */
+        for (uint32_t i = 0; i < 4; i++)
+            c->up.colour[i] = (float)(i < k ? (int)record_num(v[i]) & 0xFF : 255) / 255.0f;
         n++;
     } else {
         for (int i = 0; i < 4; i++)

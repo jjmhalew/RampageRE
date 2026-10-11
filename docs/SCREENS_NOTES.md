@@ -161,8 +161,10 @@ walkout of the field, band, buttons and "Live", the same title scroll and "Live"
 the widest shown, the PS2 button colours and (except KingWorldResults) ConfirmQuit for Back. After the walkout: result
 1, 5 s more, a 0.5 s fade, `endResults`. "P" + (n + 1) is a key of Game.loc ("P1"); monster names are localized keys
 ("Boosy" is "Bubba"). The scrolling title runs between 62 and 503 in each (`gtTitleLeftX` / `RightX`) [R].
-`getMonsterName(-1)` (a city with no King: KingCity / KingWorld do not test for one) is not traced [G: "" in the
-port].
+`getMonsterName(-1)` (a city with no King: KingCity / KingWorld do not test for one) reads the status record's
++0x14 − 4 = +0x10, the start block, as a roster index without a test (0x2C4B18 → 0x2C36A0: gCommon +0x10, 12 bytes
+a monster, the name at +8): the tie names the roster's monster of the start block's number [R] (hud.c `kr_monster`,
+HudResults.monster_none).
 
 ### WorldResults (the campaign's end, state 11) [R WorldResults.scr]
 "TOTAL DESTRUCTION!" (Atrox60 × 1.25, from x 960) and "ALL CITIES DESTROYED!" (from −320) between two red bands

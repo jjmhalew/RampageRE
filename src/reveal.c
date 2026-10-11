@@ -133,7 +133,8 @@ int reveal_block(Reveal *r, int block, int nbuildings, RevealLoc *out, int max)
     for (int i = 0; i < r->nlocs; i++) {
         const RevealLoc *l = &r->loc[i];
         if (l->block != block || l->building >= nbuildings || l->building < 0)
-            continue;                                /* [G] building < 0: the game would index before its list */
+            continue;                                /* [G: building < 0: the game would index before its list;
+                                                      * never in the data, the 21 locations all name one] */
         if (made < max)
             out[made++] = *l;                        /* 0x318FD0(mgr, building, "Edible_Cryotube", floor, cell, ...) */
         r->placed++;
@@ -350,7 +351,8 @@ int rubble_load(Rubble *r, Group block_left, int had_previous, const RubbleHost 
     r->n = 0;                                        /* [R] 0x303D50 */
     if (!had_previous || !block_left.at)
         return 0;
-    /* [R] BackRowOffset (an int) [G: 10 when missing, as city.c's DefBlockProps default; the game reads address 0] */
+    /* [R] BackRowOffset (an int) [G: 10 when missing, as city.c's DefBlockProps default; the game reads address 0;
+     * never in the data: every one of the seven cities' 85 BlockDefs has one] */
     float back = group_num(block_left, "BackRowOffset", 10);
     Record rec[MAX_REC];
     Group where;

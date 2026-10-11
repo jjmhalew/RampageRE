@@ -242,6 +242,7 @@ int game_world_done(const Game *g);
 int game_par_score(const Game *g);                   /* gWorld.getParScore (WorldData ParScore) */
 uint32_t game_city_flags(const Game *g);             /* 1 destroyed, 2 par beaten, 8 (all monsters ...) [R 0x4D7C3C] */
 int game_block(const Game *g, const char **name);    /* the current block's index in the BlockList, its name */
+int game_start_block(const Game *g);                 /* GameStatus +0x10 (0x4D7BA0): getStartBlock */
 const char *game_block_name(const Game *g, int which);   /* gWorld.getBlockName(which): 0 the block played, 1 the
                                                           * current (they differ once the next one is activated) */
 int game_num_blocks(const Game *g);                  /* gWorld.getNumBlocks: BlockEnd - BlockStart + 1 */

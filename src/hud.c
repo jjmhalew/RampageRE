@@ -1535,7 +1535,7 @@ typedef struct {
     Intro intro[MAX_INTRO], walk[MAX_WALK];
     int nintro, nwalk;
     /* WorldResults, KingBlockResults, KingCityResults, KingWorldResults, TimedRunResults */
-    char monsters[4][32], next_city[64];
+    char monsters[4][32], monster_none[32], next_city[64];
     int ids[4];                                          /* KingBlockResults' aPlayerIds: the players by points */
     int do_rank, alt_walkout;                            /* bDoRank, bUseAltWalkout */
     Intro rank[MAX_WALK], alt[MAX_WALK];                 /* rankItems, altWalkoutItems */
@@ -3232,10 +3232,14 @@ static int kr_players(const Screen *s)
 {
     return s->r.num_players > 0 && s->r.num_players <= 4 ? s->r.num_players : 1;
 }
-/* localizeString(getGameStatus().getMonsterName(slot)) (a missing key: "" [R 0x28B470]) [G: slot -1 (KingCity /
- * KingWorld do not test for a King; a tie) gives "" here, getMonsterName's answer for it not traced] */
+/* localizeString(getGameStatus().getMonsterName(slot)) (a missing key: "" [R 0x28B470]). getMonsterName (0x2C4B18)
+ * reads the status's +0x14 + 4 slot as a roster index (0x2C36A0: gCommon +0x10, 12 bytes each, the name at +8)
+ * without a test, so slot -1 (KingCity / KingWorld ask for their King without testing for one: a tie) reads +0x10,
+ * the start block, and names the roster's monster of that number [R] */
 static const char *kr_monster(const Hud *h, const Screen *s, int slot)
 {
+    if (slot == -1)
+        return loc_app(&h->gui, s->monster_none);
     if (slot < 0 || slot > 3)
         return "";
     return loc_app(&h->gui, s->monsters[slot]);
@@ -4238,6 +4242,7 @@ void hud_results(Hud *h, int screen, const HudResults *r)
         snprintf(s->next_city, sizeof s->next_city, "%s", r->next_city ? r->next_city : "");
         for (int i = 0; i < 4; i++)
             snprintf(s->monsters[i], sizeof s->monsters[i], "%s", r->monsters[i] ? r->monsters[i] : "");
+        snprintf(s->monster_none, sizeof s->monster_none, "%s", r->monster_none ? r->monster_none : "");
     } else {
         s->r.play_type = h->cfg.play_type;
         s->r.num_players = 1;
@@ -4249,6 +4254,7 @@ void hud_results(Hud *h, int screen, const HudResults *r)
     s->r.next_city = s->next_city;
     for (int i = 0; i < 4; i++)
         s->r.monsters[i] = s->monsters[i];
+    s->r.monster_none = s->monster_none;
     h->result = HUD_RESULT_NONE;                         /* nResultState = 0 */
     char file[40];
     snprintf(file, sizeof file, "%s.ifc", names[screen >= 0 && screen < 8 ? screen : 7]);

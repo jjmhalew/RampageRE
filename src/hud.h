@@ -165,6 +165,8 @@ typedef struct {
     int show_victory;        /* gCommon.getShowVictory(): no "Change Monster" / "Quit" */
     /* the King screens (KingBlockResults, KingCityResults, KingWorldResults), per player slot 0 .. 3 */
     const char *monsters[4]; /* gCommon.getGameStatus().getMonsterName(i): a .loc key ("George", "Boosy") */
+    const char *monster_none;    /* getMonsterName(-1), asked for a King that is none (a tie): the status's +0x14 - 4,
+                                  * its start block (+0x10, game_start_block), taken as a roster index [R 0x2C4B18] */
     int king_block, king_city, king_world;   /* gCommon.getKingOfBlock / City / World (game_king(g, 0 / 1 / 2)): a
                                               * player slot, -1 none (a tie) */
     int blocks_won[4];       /* Player.getNumBlocksWon (game_blocks_won) */

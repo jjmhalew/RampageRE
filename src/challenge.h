@@ -41,7 +41,7 @@ typedef struct {
     float radius;                                    /* CollisionRadius (1) */
     const char *effect;                              /* Effect|AttachEffect "Powerup_Upgrade", on it while it waits */
     const char *text;                                /* TextID "MonsterUpgrade" ("Monster\nUpgrade"), the banner */
-    float colour[4];                                 /* Color|TextColor (200, 0, 0) / 255 [G: the scale], alpha 1 */
+    float colour[4];                                 /* Color|TextColor (200, 0, 0): bytes / 255, alpha 1 [R] */
 } ChallengeUpgradeProps;
 
 enum { CU_NONE = 0, CU_WAITING, CU_TAKEN };          /* the MonsterUpgrade object */
@@ -83,8 +83,8 @@ int challenge_load(Challenge *c, Group block_def, int play_type, int last_block,
 const char *challenge_identifier(const Challenge *c);   /* getChallengeIdentifier: Name, "" none (0x2B4970) */
 const char *challenge_icon(const Challenge *c);         /* getChallengeIcon: Icon, "" none (0x2B47C0) */
 float challenge_icon_scale(const Challenge *c, int pause);   /* getChallengeIconScale(pause): PauseScale (pause != 0
-                                                              * and the key there), else Scale [G: 1 without] */
-float challenge_icon_shift(const Challenge *c);         /* getChallengeIconShift: ShiftX [G: 0 without] */
+                                                              * and the key there), else Scale; 0 without [R] */
+float challenge_icon_shift(const Challenge *c);         /* getChallengeIconShift: ShiftX; 0 without [R] */
 int challenge_required(const Challenge *c);             /* getChallengeItemRequired (0x3464F0): the goals' Required
                                                          * summed, -1 with no goal */
 int challenge_collected(const Challenge *c);            /* getChallengeItemCollected (0x3465D0): their counts summed */
@@ -118,7 +118,7 @@ int challenge_was_met(const Challenge *c);              /* wasChallengeMet (0x34
 enum { CUE_NONE = 0, CUE_SPAWN, CUE_BANNER };
 int challenge_upgrade_tick(Challenge *c, float dt);
 /* a monster's blow (its attack sphere centre, radius: StreetObject.bsf TakeDamage from a Monster) on the waiting
- * object [G: the reach is the two radii]. Once the delay is over (gAIMgr.aquireUpgrade) the move is player 1's
+ * object (the reach is the two radii, CHALLENGE_NOTES.md [R 0x2E22B0]). Once the delay is over (gAIMgr.aquireUpgrade) the move is player 1's
  * monster's: *flags |= it, c->upgrade becomes 0, and it returns the move: hide the CHALLENGE MET banners
  * (hideChallengeCompletionUI), show hud_banner_text(c->up.text, c->up.colour, 1, "v_upgrade") and stop the effect.
  * 0: missed, or too early (the blow is taken all the same) */

@@ -627,7 +627,7 @@ first 512's black pass before the reset to −1: George's card stays dark on the
 | City | `setCityIdx`: `CityData.City<i>` and its City |
 | Start block | `setStartBlock`: GameStatus +0x210, 0 = the city's BlockStart |
 | Night | `setNight` |
-| The world's seeds | GameStatus +0x0 / +0x4: drawn at the start (0x308890), but the demo's own (`ShellGame.seed`); the port keeps the profile's for the other play types [G: game.c's to follow] |
+| The world's seeds | GameStatus +0x0 / +0x4: drawn at the start (0x308890) for every play type but the demo, which keeps its own (`ShellGame.seed`) [R]; main.c `shell_start_game` (GAME_NOTES.md: gShell +0x1C's start is not found) |
 
 A game that ends hands back, through `ShellStart`:
 - quit (0x4D7E4D);

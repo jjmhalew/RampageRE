@@ -163,6 +163,8 @@ becomes current:
 Then:
 
 - **Timed Run**: the clock's seconds (0x4D7E48) go up by TimeLimit (180 everywhere), so what is left carries over.
+  A city's start clears them (0x33DBE4 in 0x33DB90, from the world's start) [R]; a block's win (0x3256A0) is their
+  only other writer.
   The clock is armed.
 - **Attract**: 60 s, or TimeLimit if smaller. Armed, not shown.
 - **Others**: armed only with a TimeLimit of 1 or more. That is the boss blocks in the campaign, with 600 s. Without

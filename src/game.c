@@ -1128,10 +1128,10 @@ void game_start(Game *g)
     g->start_block = 0;                              /* a new city: the lives (0x33DB90 with no start block yet) */
     status_reset(g);
     g->start_block = keep;
-    if (g->cfg.play_type == GP_TIMED_RUN)          /* the run's time starts from nothing [G: 0x4D7E48 is written
-                                                      * only at a block's win (0x3256A0) and is 0 at the boot (.bss);
-                                                      * no traced code clears it as a run starts, so a second run would
-                                                      * begin with the first's time left] */
+    if (g->cfg.play_type == GP_TIMED_RUN)          /* the run's time starts from nothing [R 0x33DBE4: the city's
+                                                      * start (0x33DB90 on gCommon, from the world's 0x2B7D40) clears
+                                                      * +0x4B8 = 0x4D7E48; its one other writer is a block's win,
+                                                      * 0x3256A0] */
         g->clock_limit = 0;
     g->cur = (g->first > g->start_block ? g->first : g->start_block) - 1;   /* 0x2B74D0 */
     activate_next_block(g, 0);
@@ -1305,6 +1305,8 @@ int game_choose_monster(const Game *g) { return g ? g->select : 0; }
 int game_world_done(const Game *g) { return g ? g->world_done : 0; }
 int game_par_score(const Game *g) { return g ? g->par_score : 0; }
 uint32_t game_city_flags(const Game *g) { return g ? g->city_flags : 0; }
+
+int game_start_block(const Game *g) { return g ? g->start_block : 0; }
 
 int game_block(const Game *g, const char **name)
 {
