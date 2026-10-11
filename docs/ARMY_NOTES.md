@@ -105,6 +105,15 @@ else 0.
   the charge effect stopped). Only `SoldierGrenadierFromWindow` (0.5 .. 0.75 of its 1 s throw) and the `Biker`
   (0.4 .. 1) narrow it. Here `unit_weapons_tick` for Swat.bsf and Military_Window.bsf units; the biker's weapon is
   made from the book alone (parade.c passes the name) [G: its AnimPosMin not applied].
+- **The actor's aim** (0x30ED9C .. 0x30F0E8) [R]: from the node's world (else the actor's) at p, the target point t;
+  with gravity (the definition's +0x1C) t is lifted by 0x293050 over |t − p|, that difference's y zeroed first for
+  `FromWindow`. The way is t − p, then with `LimitAngle` > 0 0x30E930 keeps it within that angle of the node's aimed
+  axis (the row `Direction` picks): farther, the axis is turned by the limit towards the way, about their cross
+  product (0x105340 + 0x104BB0). From a window the frame's place is 1.1 lower in y (out from the front, towards the
+  street) and the way's y is 0: a window soldier fires along the front, so it reaches a monster on the facade or
+  just before it, and passes one out on the street. `FromWindow` 1: SoldierRifleman0 (LimitAngle 10),
+  SoldierGrenadierFromWindow, SWATWindow0 and the window police (PoliceUSWindow1, PoliceUKWindow: LimitAngle 45).
+  Here `weapon_aim` (`ArmyWeapon.from_window`, `limit_angle`).
 
 The cluster (0x299640) [R]: RotationRate and ElevationRate are radians a second as read (the step 0x29BA50 is rate ×
 the frame's dt; the angles wrap at 0x298E70 / 0x298F40). The defaults: ElevationRate 0.5, ElevationRange ±40°,

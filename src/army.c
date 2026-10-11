@@ -561,6 +561,8 @@ static int weapon_make(Army *a, ArmyWeapon *w, Group g)
     w->axis = 2;
     w->anim_min = group_num(g, "AnimPosMin", 0);    /* [R 0x30F1F0] the actor's weapon, of its own group alone */
     w->anim_max = group_num(g, "AnimPosMax", 1);
+    w->limit_angle = group_num(g, "LimitAngle", 0) * PI / 180;
+    w->from_window = group_num(g, "FromWindow", 0) != 0;
     w->vis_range = 1;
     w->reaction = -1;
     weapon_read(w, book);
@@ -1077,7 +1079,35 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
             dir[2] = 0;
             return 0;
         }
-        lob(from, tp, w->velocity, 9.81f * w->gravity, dir);
+        /* [R 0x30ED9C .. 0x30F010] the target lifted for the fall over the distance to it, level in y from a window
+         * (FromWindow, +0x24); then the way to it, within LimitAngle (+0x28) of the node's aimed axis (0x30E930:
+         * turned from that axis towards it by the limit, about their cross product, when farther); from a window the
+         * frame is 1.1 lower in y (out from the front) and the way has no y: it fires along the front */
+        float d[3] = { tp[0] - from[0], w->from_window ? 0 : tp[1] - from[1], tp[2] - from[2] }, t[3];
+        float l = len3(d), g = 9.81f * w->gravity;
+        memcpy(t, tp, sizeof t);
+        if (g > 0 && w->velocity > 0)
+            t[2] += 0.5f * g * (l / w->velocity) * (l / w->velocity);
+        for (int k = 0; k < 3; k++)
+            dir[k] = t[k] - from[k];
+        norm3(dir);
+        if (w->limit_angle > 0) {
+            const float *ax = F[w->aim_axis];
+            if (ax[0] * dir[0] + ax[1] * dir[1] + ax[2] * dir[2] < cosf(w->limit_angle)) {
+                float c[3] = { ax[1] * dir[2] - ax[2] * dir[1], ax[2] * dir[0] - ax[0] * dir[2],
+                               ax[0] * dir[1] - ax[1] * dir[0] };
+                norm3(c);                            /* the axis turned by the limit about c, towards the way */
+                float s[3] = { c[1] * ax[2] - c[2] * ax[1], c[2] * ax[0] - c[0] * ax[2], c[0] * ax[1] - c[1] * ax[0] };
+                float ca = cosf(w->limit_angle), sa = sinf(w->limit_angle);
+                for (int k = 0; k < 3; k++)
+                    dir[k] = ax[k] * ca + s[k] * sa;
+            }
+        }
+        if (w->from_window) {
+            from[1] -= 1.1f;
+            dir[1] = 0;
+            norm3(dir);
+        }
         army_frame_point(F, dir, w->aim_axis);       /* [R 0x30F010] */
         return 1;
     }

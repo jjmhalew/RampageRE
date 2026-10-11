@@ -89,6 +89,8 @@ typedef struct {                                     /* one weapon (a Weapon| gr
     int ammo_max, start_ammo, axis, axis_neg, damage_type, reaction;
     int aim_axis;                                    /* an actor's aimed axis (0x30F1F0 +0x20): Direction's letter - 'X', 0 */
     float anim_min, anim_max;                        /* an actor's AnimPosMin / Max (0x30F1F0 +0x18 / +0x1C; 0, 1) */
+    float limit_angle;                               /* an actor's LimitAngle (+0x28), radians; 0 none */
+    int from_window;                                 /* an actor's FromWindow (+0x24): it fires along the front */
     float firing_offset, refire, charge_time, gravity, velocity, range, duration, damage, impact_delay, vis_range,
           mobility, accel, init_vel, dps, radius, h_knock, v_knock;
     const char *fire_fx, *charge_fx, *impact_fx;
