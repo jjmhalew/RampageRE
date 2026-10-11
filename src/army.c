@@ -3810,12 +3810,97 @@ int army_nearest_pickup(const Army *a, const float hand[3], const float root[3],
 }
 
 /* [R] the hold (0x2DA310): BeingHeld, not Pickupable nor PushOutMonsters, the script's onPickup */
-void army_grab(Army *a, int unit, int monster)
+/* rotation (3 columns) <-> quaternion (x, y, z, w), the blend's: the columns made 1 long first */
+static void rot_quat(const float r[9], float q[4])
+{
+    float m[9];
+    for (int c = 0; c < 3; c++) {
+        float l = sqrtf(r[3 * c] * r[3 * c] + r[3 * c + 1] * r[3 * c + 1] + r[3 * c + 2] * r[3 * c + 2]);
+        for (int k = 0; k < 3; k++)
+            m[3 * c + k] = l > 1e-6f ? r[3 * c + k] / l : (c == k);
+    }
+    float t = m[0] + m[4] + m[8];
+    if (t > 0) {
+        float s = sqrtf(t + 1) * 2;
+        q[3] = s / 4; q[0] = (m[5] - m[7]) / s; q[1] = (m[6] - m[2]) / s; q[2] = (m[1] - m[3]) / s;
+    } else if (m[0] > m[4] && m[0] > m[8]) {
+        float s = sqrtf(1 + m[0] - m[4] - m[8]) * 2;
+        q[3] = (m[5] - m[7]) / s; q[0] = s / 4; q[1] = (m[3] + m[1]) / s; q[2] = (m[6] + m[2]) / s;
+    } else if (m[4] > m[8]) {
+        float s = sqrtf(1 + m[4] - m[0] - m[8]) * 2;
+        q[3] = (m[6] - m[2]) / s; q[0] = (m[3] + m[1]) / s; q[1] = s / 4; q[2] = (m[7] + m[5]) / s;
+    } else {
+        float s = sqrtf(1 + m[8] - m[0] - m[4]) * 2;
+        q[3] = (m[1] - m[3]) / s; q[0] = (m[6] + m[2]) / s; q[1] = (m[7] + m[5]) / s; q[2] = s / 4;
+    }
+}
+static void quat_rot(const float q[4], float m[9])
+{
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y + z * w);     m[2] = 2 * (x * z - y * w);
+    m[3] = 2 * (x * y - z * w);     m[4] = 1 - 2 * (x * x + z * z); m[5] = 2 * (y * z + x * w);
+    m[6] = 2 * (x * z + y * w);     m[7] = 2 * (y * z - x * w);     m[8] = 1 - 2 * (x * x + y * y);
+}
+static void quat_mul(const float a[4], const float b[4], float out[4])   /* R(a) R(b) */
+{
+    float x = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+    float y = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+    float z = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+    float w = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+    out[0] = x; out[1] = y; out[2] = z; out[3] = w;
+}
+void army_hold_blend_start(ArmyHoldBlend *b, const float rot[9], const float pos[3], float blend)
+{
+    memset(b, 0, sizeof *b);
+    b->blend = b->left = blend > 0.001f ? blend : 0;
+    rot_quat(rot, b->from_q);
+    memcpy(b->from_p, pos, sizeof b->from_p);
+}
+
+void army_hold_blend(ArmyHoldBlend *b, float rot[9], float pos[3], float dt)
+{
+    if (b->left <= 0)
+        return;
+    float tq[4], len[3], R[9];
+    rot_quat(rot, tq);
+    quat_rot(tq, R);                                 /* the hold's frame made 1 long; its own lengths kept */
+    for (int c = 0; c < 3; c++)
+        len[c] = sqrtf(rot[3 * c] * rot[3 * c] + rot[3 * c + 1] * rot[3 * c + 1] + rot[3 * c + 2] * rot[3 * c + 2]);
+    if (!b->set) {                                   /* 0x310ED0: where it was, in the hold's frame */
+        float c[4] = { -tq[0], -tq[1], -tq[2], tq[3] }, d[3];
+        quat_mul(c, b->from_q, b->off_q);
+        for (int k = 0; k < 3; k++)
+            d[k] = b->from_p[k] - pos[k];
+        for (int k = 0; k < 3; k++)                  /* R^T d */
+            b->off_p[k] = R[3 * k] * d[0] + R[3 * k + 1] * d[1] + R[3 * k + 2] * d[2];
+        b->set = 1;
+    }
+    b->left -= dt;                                   /* 0x310B50 */
+    float w = b->left > 0 ? 1 - b->left / b->blend : 1, bq[4], oq[4], M[9];
+    static const float none[4] = { 0, 0, 0, 1 };
+    quat_slerp(b->off_q, none, w, bq);           /* (anim.c's) */
+    quat_mul(tq, bq, oq);
+    quat_rot(oq, M);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  hold blend %.2f: %.2f from the hand\n", w,
+               (1 - w) * sqrtf(b->off_p[0] * b->off_p[0] + b->off_p[1] * b->off_p[1] + b->off_p[2] * b->off_p[2]));
+    for (int k = 0; k < 3; k++)
+        pos[k] += (1 - w) * (R[k] * b->off_p[0] + R[3 + k] * b->off_p[1] + R[6 + k] * b->off_p[2]);
+    for (int c = 0; c < 3; c++)
+        for (int k = 0; k < 3; k++)
+            rot[3 * c + k] = M[3 * c + k] * len[c];
+}
+
+void army_grab(Army *a, int unit, int monster, float blend)
 {
     (void)monster;
     if (unit < 0 || unit >= a->n || a->u[unit].phase != AU_ALIVE)
         return;
     ArmyUnit *u = &a->u[unit];
+    float rot[9];
+    for (int c = 0; c < 3; c++)
+        memcpy(rot + 3 * c, u->world + 4 * c, 3 * sizeof(float));
+    army_hold_blend_start(&u->hold, rot, u->world + 12, blend);
     u->oflags = (u->oflags | OF_HELD) & ~(uint32_t)(OF_PICKUP | OF_PUSH_OUT);
     u->phase = AU_HELD;
     u->mv.active = 0;
@@ -3832,9 +3917,9 @@ void army_grab(Army *a, int unit, int monster)
 
 /* [R] the HeldObjectMover (init 0x310ED0, held 0x3109E0), as people.c's: the unit's MajorAxis (default 2) along the
  * hand's z, the next one along its y, the last their cross product; at the hand plus HoldOffset (MirroredHoldOffset
- * while the monster plays mirrored) in the hand's frame. [G: its blend in from where the unit was (+0x84, 0x310B50:
- * 0.1 s from doGrabObject) is not ported; the unit is in the hand at once] */
-void army_hold(Army *a, int unit, const float hand[16], int mirrored)
+ * while the monster plays mirrored) in the hand's frame; blended in from where the unit was (army_hold_blend: 0.1 s
+ * from doGrabObject) */
+void army_hold(Army *a, int unit, const float hand[16], int mirrored, float dt)
 {
     if (unit < 0 || unit >= a->n || a->u[unit].phase != AU_HELD)
         return;
@@ -3855,12 +3940,16 @@ void army_hold(Army *a, int unit, const float hand[16], int mirrored)
     if (og.at && group_items(og, r, 3) == 3)
         for (int k = 0; k < 3; k++)
             off[k] = record_num(r[k]);
+    float pos[3];
+    for (int k = 0; k < 3; k++)
+        pos[k] = hand[12 + k] + off[0] * hand[k] + off[1] * hand[4 + k] + off[2] * hand[8 + k];
+    army_hold_blend(&u->hold, axis[0], pos, dt);
     for (int c = 0; c < 3; c++) {
         memcpy(u->world + 4 * c, axis[c], sizeof axis[c]);
         u->world[4 * c + 3] = 0;
     }
     for (int k = 0; k < 3; k++)
-        u->world[12 + k] = u->pos[k] = hand[12 + k] + off[0] * hand[k] + off[1] * hand[4 + k] + off[2] * hand[8 + k];
+        u->world[12 + k] = u->pos[k] = pos[k];
     u->world[15] = 1;
 }
 

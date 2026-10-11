@@ -2246,12 +2246,13 @@ int rail_nearest_pickup(const Rail *r, const float hand[3], const float root[3],
 
 /* [R] the hold (0x2DA310): BeingHeld, neither Pickupable nor PushOutMonsters, its mover replaced by the
  * HeldObjectMover (a train's run and a cable car's stages stop), then onPickup */
-void rail_grab(Rail *r, int obj, int monster)
+void rail_grab(Rail *r, int obj, int monster, float blend)
 {
     (void)monster;
     if (obj < 0 || obj >= r->n || r->o[obj].phase != RP_ALIVE)
         return;
     RailObj *o = &r->o[obj];
+    army_hold_blend_start(&o->hold, o->rot, o->pos, blend);   /* the HeldObjectMover's blend in (army.h) */
     o->oflags = (o->oflags | RF_HELD) & ~(uint32_t)(RF_PICKUP | RF_PUSH_OUT);
     o->phase = RP_HELD;
     o->mv = MV_HELD;
@@ -2263,8 +2264,9 @@ void rail_grab(Rail *r, int obj, int monster)
 }
 
 /* the HeldObjectMover (init 0x310ED0): [R] HoldOffset (MirroredHoldOffset while the monster is mirrored) taken along
- * the hand's axes, the object turned by the MajorAxis frame it builds (below) */
-void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored)
+ * the hand's axes, the object turned by the MajorAxis frame it builds (below), blended in from where it was
+ * (army_hold_blend, 0x310B50) */
+void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored, float dt)
 {
     if (obj < 0 || obj >= r->n || r->o[obj].phase != RP_HELD)
         return;
@@ -2291,6 +2293,7 @@ void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored)
     ax[i2 * 3 + 2] = ax[major * 3 + 0] * ax[i1 * 3 + 1] - ax[major * 3 + 1] * ax[i1 * 3 + 0];
     for (int k = 0; k < 3; k++)
         o->pos[k] = hand_world[12 + k] + hand_world[k] * off[0] + hand_world[4 + k] * off[1] + hand_world[8 + k] * off[2];
+    army_hold_blend(&o->hold, o->rot, o->pos, dt);
     update_world(o);
 }
 

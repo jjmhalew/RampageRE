@@ -1523,12 +1523,13 @@ int vehicle_nearest_pickup(const Vehicles *v, const float hand[3], const float r
 
 /* [R] the hold (0x2DA310): BeingHeld, neither Pickupable nor PushOutMonsters, its mover replaced (a LineMover's end
  * never comes: it stays counted in the traffic until it is thrown, eaten or explodes), then onPickup */
-void vehicle_grab(Vehicles *v, int obj, int monster)
+void vehicle_grab(Vehicles *v, int obj, int monster, float blend)
 {
     (void)monster;
     if (obj < 0 || obj >= v->n || v->o[obj].phase != VP_ALIVE)
         return;
     VehObj *o = &v->o[obj];
+    army_hold_blend_start(&o->hold, o->rot, o->pos, blend);   /* the HeldObjectMover's blend in (army.h) */
     o->oflags = (o->oflags | VF_HELD) & ~(uint32_t)(VF_PICKUP | VF_PUSH_OUT);
     o->phase = VP_HELD;
     o->line.on = o->sphere.on = o->sphere.tumble = 0;
@@ -1537,8 +1538,9 @@ void vehicle_grab(Vehicles *v, int obj, int monster)
 }
 
 /* the HeldObjectMover (init 0x310ED0): [R] HoldOffset (MirroredHoldOffset while the monster is mirrored, +0x7DA1)
- * taken along the hand's axes, the object turned in its MajorAxis frame (below) */
-void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored)
+ * taken along the hand's axes, the object turned in its MajorAxis frame (below), blended in from where it was
+ * (army_hold_blend, 0x310B50) */
+void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored, float dt)
 {
     if (obj < 0 || obj >= v->n || v->o[obj].phase != VP_HELD)
         return;
@@ -1565,6 +1567,7 @@ void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored
     ax[i2 * 3 + 2] = ax[major * 3 + 0] * ax[i1 * 3 + 1] - ax[major * 3 + 1] * ax[i1 * 3 + 0];
     for (int k = 0; k < 3; k++)
         o->pos[k] = hand_world[12 + k] + hand_world[k] * off[0] + hand_world[4 + k] * off[1] + hand_world[8 + k] * off[2];
+    army_hold_blend(&o->hold, o->rot, o->pos, dt);
     update_world(o);
 }
 

@@ -87,6 +87,7 @@ typedef struct {
     int moved;                                       /* it has left where it was placed (fallen, swaying, rocking,
                                                       * deleted): draw it at world, or not at all */
     float world[16];                                 /* where it is now */
+    ArmyHoldBlend hold;                              /* held: its blend into the hand */
     float rest[16];                                  /* where the city placed it */
     const char *shape;                               /* its model now: Shape|Shape, DamageShape once set */
     uint32_t oflags;                                 /* SF_* */
@@ -198,9 +199,9 @@ void streetobj_hit_ground(StreetObjs *s, int i);
 int streetobj_nearest_pickup(const StreetObjs *s, const float hand[3], const float root[3], const float forward[3],
                              float radius);
 /* the hold (0x2DA310): BeingHeld, neither Pickupable nor PushOutMonsters, then onPickup */
-void streetobj_grab(StreetObjs *s, int i);
+void streetobj_grab(StreetObjs *s, int i, float blend);
 /* each frame it is held: the HeldObjectMover (0x310ED0 / 0x3109E0) at the hand's (LiftNodeName) world matrix */
-void streetobj_hold(StreetObjs *s, int i, const float hand_world[16], int mirrored);
+void streetobj_hold(StreetObjs *s, int i, const float hand_world[16], int mirrored, float dt);
 /* throwObject (0x2D9DC0): a SpherePhysicsMover with the throw's velocity (in the world: the clip's, turned by the
  * monster's matrix), keeping the hand's turn with no spin; then onThrow(monster, eat). It flies in the frame's
  * collision world (streetobj_collide_add): the street (OnHitGround) and the objects it meets (TakeImpact on both:

@@ -302,5 +302,5 @@ React_Ground_Slip_Heavy, his heading turned round; the same in GB04_BakerSt.
 - The objects are in the frame's collision world (`streetobj_collide_add`: tag `COLLIDE_TAG(COLLIDE_OWN_STREET, i)`,
   flags 4 and their own): the PushOutMonsters ones (the gongs, the chimneys) push the monster out (collide_monster),
   a flying object's TakeImpact reaches them, and a thrown one flies in it (`streetobj_nearest_pickup`, `_grab`,
-  `_hold`, `_fly`, main.c's doGrabObject and throwObject). The hold's blend in (0x310B50, 0.1 s from the ground) is
-  left out, as vehicle.c's; the throw's +0x2560 angle is taken as 0.
+  `_hold`, `_fly`, main.c's doGrabObject and throwObject). The hold blends in from where it was over doGrabObject's
+  0.1 s (0x310B50, army.c's `army_hold_blend`, ARMY_NOTES "The hold") [R]; the throw's +0x2560 angle is taken as 0.

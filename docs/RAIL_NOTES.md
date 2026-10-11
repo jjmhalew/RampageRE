@@ -58,7 +58,8 @@ R(axis, rate × h)) [R]. The monsters are left out of what it meets: a monster's
 **The hold** [R] (0x2DA310, HeldObjectMover 0x310ED0, as vehicle.c): BeingHeld, neither Pickupable nor
 PushOutMonsters, `HoldOffset` (0, 1, 0) or `MirroredHoldOffset` (0, −0.5, 0) along the hand's axes. Its turn is fixed
 in the hand by `MajorAxis` (0x310ED0): that row is the hand's z, the next the hand's y, the third their cross; the
-trains and cable cars have MajorAxis 1, so x = −hand x, y = hand z, z = hand y [R]. The throw (0x2D9DC0) makes a
+trains and cable cars have MajorAxis 1, so x = −hand x, y = hand z, z = hand y [R], blended in from where it was over
+doGrabObject's 0.1 s (0x310B50, army.c's `army_hold_blend`) [R]. The throw (0x2D9DC0) makes a
 SphereMover with only init (spin axis z, rate 0) and the throw's velocity (Monsters.bsf's throwObject(vel, 0, eat): the 0 turns it by the monster's matrix, main's turn as for the other modules): it keeps the held turn [R].
 
 **Buildings** [R]: `Building.isDestroyed` is +0x14C = 0 (case 0x2AD780: BUILDING_GONE, only the rubble left);

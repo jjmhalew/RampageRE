@@ -145,7 +145,8 @@ a street object) is wrecked, and so is a vehicle that a flying object meets.
 
 **The hold** [R] (0x2DA310): BeingHeld, neither Pickupable nor PushOutMonsters. The HeldObjectMover (init 0x310ED0)
 replaces the LineMover, so the end never comes: a held car stays counted in its slot. `HoldOffset` (or
-`MirroredHoldOffset` while the monster is mirrored, +0x7DA1) is taken along the hand's axes.
+`MirroredHoldOffset` while the monster is mirrored, +0x7DA1) is taken along the hand's axes. It blends in from where
+the car was over doGrabObject's 0.1 s (0x310B50, army.c's `army_hold_blend`, ARMY_NOTES "The hold").
 
 ## Vehicle_FireTruck.bsf
 [R] Not spawned by any shipped block; ported from the script.

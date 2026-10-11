@@ -72,6 +72,7 @@ struct VehObj {
     float pos[3], facing;
     float rot[9];                                    /* its turn, column-major 3 x 3 */
     float world[16];                                 /* [rot | pos]; always kept up to date */
+    ArmyHoldBlend hold;                              /* held: its blend into the hand */
     const char *shape;                               /* the model to draw now: Shape|Shape, DamageShape once hit */
     int hidden;                                      /* not drawn (IsHidden: the HiddenVehicle's InvisShape) */
     uint32_t oflags;                                 /* VF_* */
@@ -172,9 +173,9 @@ void vehicle_impact(Vehicles *v, int obj);
 /* doGrabObject's search over the objects: Pickupable, not held, in front of root, nearest within radius of hand */
 int vehicle_nearest_pickup(const Vehicles *v, const float hand[3], const float root[3], const float forward[3],
                            float radius);
-void vehicle_grab(Vehicles *v, int obj, int monster);   /* the hold (0x2DA310) and onPickup */
+void vehicle_grab(Vehicles *v, int obj, int monster, float blend);   /* the hold (0x2DA310) and onPickup */
 /* each frame while held: the hand's world matrix; mirrored picks MirroredHoldOffset (HeldObjectMover 0x310ED0) */
-void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored);
+void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored, float dt);
 /* throwObject(eat, vel): onThrow; an Edible eaten counts (addStats 1) and is gone, an Edible not eaten is smashed
  * away, anything else flies with vel */
 void vehicle_throw(Vehicles *v, int obj, int monster, int eat, const float vel[3], float monster_heading);

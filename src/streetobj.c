@@ -1250,11 +1250,15 @@ int streetobj_nearest_pickup(const StreetObjs *s, const float hand[3], const flo
     return best;
 }
 
-void streetobj_grab(StreetObjs *s, int i)
+void streetobj_grab(StreetObjs *s, int i, float blend)
 {
     if (i < 0 || i >= s->n || !s->o[i].alive)
         return;
     StreetObj *o = &s->o[i];
+    float rot[9];                                    /* the HeldObjectMover's blend in (army.h), from where it is */
+    for (int c = 0; c < 3; c++)
+        memcpy(rot + 3 * c, o->world + 4 * c, 3 * sizeof(float));
+    army_hold_blend_start(&o->hold, rot, o->world + 12, blend);
     o->oflags = (o->oflags | SF_HELD) & ~(uint32_t)(SF_PICKUP | SF_PUSH_OUT);   /* [R] 0x2DA310 */
     o->flying = 0;
     o->oflags &= ~(uint32_t)SF_ATTACHED;             /* its mover is the hand's now */
@@ -1263,9 +1267,9 @@ void streetobj_grab(StreetObjs *s, int i)
 }
 
 /* [R] the HeldObjectMover (0x310ED0): the MajorAxis row (default 2) is the hand's z, the next its y, the third their
- * cross; at the hand's place plus HoldOffset (MirroredHoldOffset when mirrored) in the hand's frame. [G: its blend
- * in (0x310B50, 0.1 s from the ground) is left out, as vehicle.c's] */
-void streetobj_hold(StreetObjs *s, int i, const float hand[16], int mirrored)
+ * cross; at the hand's place plus HoldOffset (MirroredHoldOffset when mirrored) in the hand's frame; blended in from
+ * where it was (army_hold_blend, 0x310B50: 0.1 s from doGrabObject) */
+void streetobj_hold(StreetObjs *s, int i, const float hand[16], int mirrored, float dt)
 {
     if (i < 0 || i >= s->n || !s->o[i].alive || !(s->o[i].oflags & SF_HELD))
         return;
@@ -1288,13 +1292,17 @@ void streetobj_hold(StreetObjs *s, int i, const float hand[16], int mirrored)
     ax[i2 * 3 + 0] = ax[major * 3 + 1] * ax[i1 * 3 + 2] - ax[major * 3 + 2] * ax[i1 * 3 + 1];
     ax[i2 * 3 + 1] = ax[major * 3 + 2] * ax[i1 * 3 + 0] - ax[major * 3 + 0] * ax[i1 * 3 + 2];
     ax[i2 * 3 + 2] = ax[major * 3 + 0] * ax[i1 * 3 + 1] - ax[major * 3 + 1] * ax[i1 * 3 + 0];
+    float pos[3];
+    for (int k = 0; k < 3; k++)
+        pos[k] = hand[12 + k] + hand[k] * off[0] + hand[4 + k] * off[1] + hand[8 + k] * off[2];
+    army_hold_blend(&o->hold, ax, pos, dt);
     for (int c = 0; c < 3; c++) {
         for (int k = 0; k < 3; k++)
             o->world[c * 4 + k] = ax[c * 3 + k];
         o->world[c * 4 + 3] = 0;
     }
     for (int k = 0; k < 3; k++)
-        o->world[12 + k] = hand[12 + k] + hand[k] * off[0] + hand[4 + k] * off[1] + hand[8 + k] * off[2];
+        o->world[12 + k] = pos[k];
     o->world[15] = 1;
     o->moved = 1;
 }

@@ -1779,19 +1779,19 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             people_grab(v->scene.folk, who, 0.1f);
             mo->held = who;
         } else if (v->army && (who = army_nearest_pickup(v->army, hand, root, fwd, 15)) >= 0) {
-            army_grab(v->army, who, mo->slot);
+            army_grab(v->army, who, mo->slot, 0.1f);
             mo->held_unit = who;
         } else if (v->parade && mo->held_parade < 0 && (who = parade_nearest_pickup(v->parade, hand, root, fwd, 15)) >= 0) {
             parade_grab(v->parade, who, mo->slot, 0.1f);    /* on the sidewalk: before the street's vehicles */
             mo->held_parade = who;
         } else if (v->veh && mo->held_vehicle < 0 && (who = vehicle_nearest_pickup(v->veh, hand, root, fwd, 15)) >= 0) {
-            vehicle_grab(v->veh, who, mo->slot);
+            vehicle_grab(v->veh, who, mo->slot, 0.1f);
             mo->held_vehicle = who;
         } else if (v->rail && mo->held_rail < 0 && (who = rail_nearest_pickup(v->rail, hand, root, fwd, 15)) >= 0) {
-            rail_grab(v->rail, who, mo->slot);
+            rail_grab(v->rail, who, mo->slot, 0.1f);
             mo->held_rail = who;
         } else if (v->sobj && mo->held_sobj < 0 && (who = streetobj_nearest_pickup(v->sobj, hand, root, fwd, 15)) >= 0) {
-            streetobj_grab(v->sobj, who);            /* a parked car */
+            streetobj_grab(v->sobj, who, 0.1f);      /* a parked car */
             mo->held_sobj = who;
         }
         return;
@@ -1801,7 +1801,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         int who = v->veh && mo->held < 0 && mo->held_unit < 0 && mo->held_vehicle < 0 ?
                   vehicle_spawn(v->veh, "Boulder", at, 0, -1) : -1;
         if (who >= 0) {
-            vehicle_grab(v->veh, who, mo->slot);
+            vehicle_grab(v->veh, who, mo->slot, 0.1f);
             mo->held_vehicle = who;
         }
         return;
@@ -3503,9 +3503,9 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
         Mon *mo = &v->mon[k];
         Mat4 h;
         if (mo->held_vehicle >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            vehicle_hold(v->veh, mo->held_vehicle, h.m, mo->mirror);
+            vehicle_hold(v->veh, mo->held_vehicle, h.m, mo->mirror, dt);
         if (v->sobj && mo->held_sobj >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            streetobj_hold(v->sobj, mo->held_sobj, h.m, mo->mirror);   /* a parked car in its hand */
+            streetobj_hold(v->sobj, mo->held_sobj, h.m, mo->mirror, dt);   /* a parked car in its hand */
     }
 }
 
@@ -3637,7 +3637,7 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
         Mon *mo = &v->mon[k];
         Mat4 h;
         if (mo->held_rail >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            rail_hold(v->rail, mo->held_rail, h.m, mo->mirror);
+            rail_hold(v->rail, mo->held_rail, h.m, mo->mirror, dt);
     }
 }
 
@@ -4084,7 +4084,7 @@ static void army_step(Viewer *v, float dt)
         Mon *mo = &v->mon[k];
         Mat4 h;
         if (mo->held_unit >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            army_hold(v->army, mo->held_unit, h.m, mo->mirror);
+            army_hold(v->army, mo->held_unit, h.m, mo->mirror, dt);
     }
 }
 

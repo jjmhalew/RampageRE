@@ -78,6 +78,7 @@ struct RailObj {
     float facing[3];                                 /* getFacing / setFacing: turns about x, y and z; [2] the heading */
     float rot[9];                                    /* its turn, column-major 3 x 3 */
     float world[16];                                 /* [rot | pos]; always kept up to date */
+    ArmyHoldBlend hold;                              /* held: its blend into the hand */
     const char *shape;                               /* the model to draw now: Shape|Shape, DamageShape once hit */
     int hidden;                                      /* not drawn: the controllers (InvisShape) */
     uint32_t oflags;                                 /* RF_* (and the untraced bits the scripts set) */
@@ -175,9 +176,9 @@ int rail_hit(Rail *r, int monster, const float centre[3], float radius, float am
 void rail_impact(Rail *r, int obj);                  /* TakeImpact: something flying hit obj */
 /* doGrabObject's search over the objects: Pickupable, not held, in front of root, nearest within radius of hand */
 int rail_nearest_pickup(const Rail *r, const float hand[3], const float root[3], const float forward[3], float radius);
-void rail_grab(Rail *r, int obj, int monster);       /* the hold (0x2DA310) and onPickup */
+void rail_grab(Rail *r, int obj, int monster, float blend);   /* the hold (0x2DA310) and onPickup */
 /* each frame while held: the hand's world matrix; mirrored picks MirroredHoldOffset (HeldObjectMover 0x310ED0) */
-void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored);
+void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored, float dt);
 /* throwObject(eat, vel) (0x2D9DC0): the object flies with vel (in the world: Monsters.bsf's throwObject(vel, 0, eat)
  * turned by the monster's matrix, the caller's) on a SpherePhysicsMover, then onThrow(monster, eat) */
 void rail_throw(Rail *r, int obj, int monster, int eat, const float vel[3]);

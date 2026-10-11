@@ -572,8 +572,12 @@ Floating = 100
   (`army_set_view`). The x range is also what is seen for a host without `visible`.
 - **The hold** [R] (the HeldObjectMover, init 0x310ED0, held 0x3109E0, as people.c's): `MajorAxis` (default 2)
   along the hand's z, the next along its y, the last their cross product, at the hand plus `HoldOffset`
-  (`MirroredHoldOffset` while the monster plays mirrored) in the hand's frame (`army_hold`). Its blend in from
-  where the unit was (+0x84, 0x310B50, 0.1 s from doGrabObject) is not ported [G: three frames].
+  (`MirroredHoldOffset` while the monster plays mirrored) in the hand's frame (`army_hold`). It blends in from
+  where the unit was [R]: 0x310ED0 keeps that turn and place in the hold's frame (+0x68, +0x78), and while the blend
+  lasts (+0x84 the time left, +0x88 one over it) 0x310B50 turns it w = 1 - left / blend of the way to none and
+  scales the place by 1 - w; the blend is the grab's (0x2DA310's f12): 0.1 s from doGrabObject (0x2AB914), whatever
+  it picks up (a unit, a car, a train, a street object), 0.25 from grabBuildingOccupant. Here `army_hold_blend`,
+  which vehicle.c, rail.c and streetobj.c use too (people.c and parade.c have their own).
 - **Other:** the impact's visibility test (ImpactVisRange) and the ImpactEffect's orientation (the surface's
   normal) are not traced.
 - **Elsewhere:** the bosses are boss.c's ([BOSS_NOTES.md](BOSS_NOTES.md)); `Vehicle.bsf` (the `Humvee` and the other

@@ -82,6 +82,9 @@ enum {                                               /* by the template's Script
 };
 enum { AU_ALIVE, AU_HELD, AU_DYING, AU_GONE };
 
+/* a held object's blend into the hand (army_hold_blend below) */
+typedef struct { float blend, left, from_q[4], from_p[3], off_q[4], off_p[3]; int set; } ArmyHoldBlend;
+
 typedef struct {                                     /* one weapon (a Weapon| group, over its Weapons.bdp group) */
     const char *name;                                /* WeaponName */
     int type;                                        /* 0 RProjectileWeapon, 1 RBeamWeapon, 2 other (Shockwave: not fired) */
@@ -124,6 +127,7 @@ struct ArmyUnit {
     int state, flags;                                /* the script's own (Def.state / nState, Def.flags) */
     float pos[3], facing, tilt[2];                   /* tilt: turns about x and y (a wreck's tumble, a pitch) */
     float world[16];                                 /* column-major; always kept up to date */
+    ArmyHoldBlend hold;                              /* held: its blend into the hand */
     /* the look */
     const char *shape;                               /* the model now: Shape|Shape (DestShape once wrecked); actors: their look's */
     char anim[40];                                   /* actors: the ActorAnimShape| record they play */
@@ -283,9 +287,18 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
 /* doGrabObject's search (0x2D99C0) over the units: Pickupable, not held, in front of root (forward), nearest within
  * radius of hand; -1 none */
 int army_nearest_pickup(const Army *a, const float hand[3], const float root[3], const float forward[3], float radius);
-void army_grab(Army *a, int unit, int monster);      /* the hold (0x2DA310): onPickup */
+/* the HeldObjectMover's blend in [R 0x310ED0 / 0x310B50], for the modules without their own (people.c and parade.c
+ * have theirs): the grab keeps where the object was; the first hold takes that turn and place in the hold's frame
+ * (+0x68, +0x78); while the blend lasts (+0x84 the time left, +0x88 one over the blend) the turn goes w = 1 - left /
+ * blend of the way to none (0x104C60) and the place by 1 - w, on the hold's frame: linear in time, following the hand.
+ * doGrabObject's blend is 0.1 s (0x2AB914), for whatever it picks up */
+void army_hold_blend_start(ArmyHoldBlend *b, const float rot[9], const float pos[3], float blend);
+/* rot (3 columns), pos: the hold's frame in, where the object is out; nothing once the blend is over */
+void army_hold_blend(ArmyHoldBlend *b, float rot[9], float pos[3], float dt);
+
+void army_grab(Army *a, int unit, int monster, float blend);   /* the hold (0x2DA310): onPickup */
 /* each frame in the hand (the HeldObjectMover): the hand's world; mirrored: the monster's clip is (MirroredHoldOffset) */
-void army_hold(Army *a, int unit, const float hand_world[16], int mirrored);
+void army_hold(Army *a, int unit, const float hand_world[16], int mirrored, float dt);
 /* throwObject(eat, vel): onThrow; an actor eaten counts (addStats 1) and is gone, one not eaten is smashed; a
  * vehicle is thrown with vel */
 void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], float monster_heading);
