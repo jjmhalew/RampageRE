@@ -435,8 +435,9 @@ width unless set), and the building `BuildingHP` (6 × width × storeys unless s
 A monster damages a building through its clips' script calls, not its attack spheres: `Monsters.bsf`'s
 `hitBuildingFront(kind, x, y, z)` (George's street punches `(2, 0.5, 6, 8.5)`: 6 ahead and 8.5 up, the first
 storey) picks the face from `kind` (0, 1, 3, 4 by the mirror state; 2, 5 the front; 6, 7 by the way the monster
-faces) and calls the monster's `hitBuildingPt(point, side, 1, 2.0)`. That turns the point into the world with the
-monster's matrix (0x2B3A80), finds the building whose face the side looks at (0x2A3D20 on the world at 0x4D0900;
+faces) and calls the monster's `hitBuildingPt(point, side, 1, 2.0)` (twice in the rage, Monsters.bsf). That turns
+the point into the world with the monster's matrix (0x2B3A80) or, on a face (mode 5), adds it to the monster's place
+unturned (0x2B3AC4 .. 0x2B3B08: a side's punch, kind 2, lands on the front's corner column), finds the building whose face the side looks at (0x2A3D20 on the world at 0x4D0900;
 side 0 its left face, 1 its right, 2 its front, 5 its roof), moves the point onto that face and, if it is within 5
 units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.0:
 

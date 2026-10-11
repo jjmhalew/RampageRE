@@ -62,7 +62,8 @@ the time (`rand01`, the lagged Fibonacci 0x106950 on gWorld +0x82C) [R].
 **withTarget (0x2F07F0)** [R]:
 - After 60 s on one target: `collapseBuilding` (0x2BB8B0) on it, scored to the bot.
 - Mounted: a falling building, jump off. Otherwise the current cell (the mount's, or the last hit's point mapped by
-  0x2BB7B0, z at least 6.02, on the front); a cell there not yet destroyed (state < 3) is punched (action 0 with a
+  0x2BB7B0, z at least 6.02, on the front; the offset's x, kept negated while mirrored, is negated again by the mirror
+  state now, 0x2EEB10, so after a mirror the cell is the one on its other side); a cell there not yet destroyed (state < 3) is punched (action 0 with a
   fresh pick, so the punches repeat). Else a target cell: the nearest intact one along the storey left or right
   (distLeft 0x2EF450 / distRight 0x2EF2B0: width + 1 when none, or when another monster is on that rail), a storey
   up when it is more than a column away; equal distances of 2 or more: the first intact cell above; then the first
