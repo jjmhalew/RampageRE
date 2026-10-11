@@ -130,7 +130,9 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   first total − int(total × NonMilitaryRate) of them military (+0x40), the rest civilian (+0x3C). The building's
   `NumNonMilitaryOccupants` (then all n windows, that many civilians) and `NumMilitaryOccupants` override the
   counts, each capped at n. A slot's kind is a random one of the sort's list (0x318B40 makes it from the
-  `MilitaryInstance|` / `OccupantInstance|` records; the viewer weighs them by `Frequency`). A military occupant
+  `MilitaryInstance|` / `OccupantInstance|` records: each one's name, `Frequency` and `DropRate`, the sort's total
+  `Frequency` at +0x24): weighed by `Frequency` (0x319D50 .. 0x319DF4: a random 0 .. 1 times the total, the first
+  kind whose running sum reaches it) [R]. A military occupant
   is the army's window soldier (`army_spawn_window`, Military_Window.bsf).
 - **Placement** (`getWindowPosition` 0x2BE660, with the slot's `LRPos`): the actor stands at its window's bottom middle:
   - x: the grid's min x + 5 × column + the middle of the column's `Openable` (0x2CFF30; not the `Outline`);

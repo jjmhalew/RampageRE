@@ -1270,12 +1270,13 @@ void scene_people_spawn(Scene *s, float dt)
     if (!s->folk || (!s->noccupants && !s->nmilitary))
         return;
     if (!s->slots_made) {
-        /* the windows' slots (0x31A540 -> 0x3196F0 for every building): of a building's n windows (here: its front
-         * cells with an outline [G]), round(n x FillRate) in a shuffled order, the first total - int(total x
-         * NonMilitaryRate) of them soldiers, the rest civilians; the building's NumNonMilitaryOccupants (then all n,
-         * that many civilians) and NumMilitaryOccupants override the counts, each at most n. A slot's occupant: one of
-         * the kinds of its sort (the game: a random one of a list 0x318B40 makes from the instances; here by their
-         * Frequency [G]) */
+        /* the windows' slots (0x31A540 -> 0x3196F0 for every building): of a building's n windows (0x2BE750(building,
+         * list, 300, 1, 100, 6) -> 0x2D01F0, 0x319B78 .. 0x319B94 [R]: below), round(n x FillRate) in a shuffled order,
+         * the first total - int(total x NonMilitaryRate) of them soldiers, the rest civilians; the building's
+         * NumNonMilitaryOccupants (then all n, that many civilians) and NumMilitaryOccupants override the counts, each
+         * at most n. A slot's occupant [R 0x319D50 .. 0x319DF4]: of its sort's list (0x318B40: the instances' names,
+         * their Frequency, the sort's total of them), a random 0 .. 1 x that total, the first kind whose running sum
+         * of Frequency reaches it */
         s->slots_made = 1;
         float civ_total = 0, mil_total = 0;
         for (int k = 0; k < s->noccupants; k++)
@@ -2855,8 +2856,10 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         /* [R 0x305B28 .. 0x305BB8, 0x305D4C .. 0x305D94] the play block (0x302DC8: 0x3059D0's a2 = 1) makes no
          * Building of an instance whose LeftEdgeXPos is outside [-50, 50) (the blocks ahead, a2 = 0, make them all): it
          * is not in the block's list (0x4D095C), so not counted (getCurrentBuildingCount), not a bot's target, not hit;
-         * beyond the street's limits (x +-55) no monster reaches it. Here it is drawn as the scenery is [G: whether the
-         * game draws it at all is not traced] */
+         * beyond the street's limits (x +-55) no monster reaches it (every city has them, at -85 .. -75 and 65). Here
+         * it is drawn as the scenery is [G: read bit by bit, 0x305B28 .. 0x305BB8 with a2 = 1 counts (and 0x305D94
+         * makes) only the instances outside the range, the inside ones being skipped, so the play block's own
+         * Buildings would come from elsewhere; not followed] */
         Group bi = record_group(where, r[i]);
         float left = group_num(bi, "LeftEdgeXPos", 0);
         building(c, s, bi, row_offset, 0, left < -50.0f || !(left < 50.0f));
