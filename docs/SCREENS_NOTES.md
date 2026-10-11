@@ -13,8 +13,14 @@ code or the files, **[G]** a guess or a stand-in.
 - The text calls load the interface **`Rage`** on the screen (screen +0x238, vtable +0x144 / +0x40) and call the script
   function `Rage::setPointsBannerData` (or `...Data2`) in it. So a text banner *is* the RAMPAGE banner with other data;
   `Monsters::startRage` loads `Rage` with none (its defaults: "Rampage", red, scale 1, `v_rampage`). Nothing sets
-  its `fHoldTime`: a namespace float, 0.0 when made (TypePFloat 0x1CE830) or the last banner's if the interfaces
-  share the script's namespace [G: the PP interpreter's instancing not traced; the port holds it 0.35 s].
+  its `fHoldTime`, and each interface has a script program of its own (the `sc` tag 0x22C010 → setScript 0x238A90,
+  a new 0x7BC-byte program through gGuiMgr +0x4C, 0x231360), so it is 0.0 as made (TypePFloat 0x1CE830): the
+  RAMPAGE banner has no hold, its text shows only at half, fading, after the swirl [R].
+- **Which banner gets the data** [R]: the new `Rage` is appended to the screen's list (0x233500), and the function
+  lookup (gGuiMgr 0x231220: its own program first, then each screen's interfaces from the first) calls
+  `setPointsBannerData` in the first interface whose program has it: the oldest `Rage` still up. While another
+  banner shows, the data go to that one (its text, set up on its first frame, stays; its hold and name change) and
+  the new banner is a plain RAMPAGE one. (Ported: hud.c `rage_load_data`.)
 - `Rage.ifc`: the text `Rage` at 320 240, Atrox60, centred both ways, s 1.4, charspacing 1, maxwidth 500, with a
   hidden `line2` (ArialBlack24, s 1.2, 30 below), and a quad `Head` (HUD_GEORGE_HEAD, scale 4).
 - `setPointsBannerData`: message, colour, the text object's scale (0.5 for edibles and the reveal, 1.0 for challenges),

@@ -1984,12 +1984,24 @@ static Rage *rage_load(Hud *h)
     r->scale = 1.0f;
     snprintf(r->sound, sizeof r->sound, "v_rampage");
     col_set(r->col, 1, 0, 0, 1);
-    /* [G: nothing sets fHoldTime for the plain RAMPAGE banner (Rage.scr's 8192 does not, only setPointsBannerData and
-     * ...Data2): a namespace float, 0.0 when made (TypePFloat 0x1CE830), or the last banner's if the interfaces share
-     * the script's namespace; which (the PP interpreter's instancing) was not traced. 0.35, the text banners'] */
-    r->hold = 0.35f;
+    /* nothing sets fHoldTime for the plain RAMPAGE banner (Rage.scr's 8192 does not, only setPointsBannerData and
+     * ...Data2) [R]: each interface gets a script program of its own (the <sc> tag 0x22C010 -> setScript 0x238A90,
+     * which news one through gGuiMgr +0x4C, 0x231360), so its floats are as made, 0.0 (TypePFloat 0x1CE830): no
+     * hold, the text only at half, fading */
+    r->hold = 0.0f;
     h->rages[h->nrages++] = r;
     return r;
+}
+
+/* PointsBanner.createAndStartText / ...Text2 (0x2B1640 / 0x2B14E0) [R]: the screen loads one more Rage interface
+ * (appended to its list, 0x233500), then gGuiMgr's function lookup (0x231220) calls Rage::setPointsBannerData in the
+ * first interface on the screen whose program has it: the oldest Rage still up. So while another banner shows, the
+ * data go to that one (its text, set up on its first frame, stays; its hold and name change) and the new one keeps
+ * the RAMPAGE defaults */
+static Rage *rage_load_data(Hud *h)
+{
+    Rage *r = rage_load(h);
+    return r ? h->rages[0] : NULL;
 }
 
 /* Rage::setPointsBannerData / setPointsBannerData2, and this.setName("Removeable"): gWorld.hideChallengeCompletionUI
@@ -2093,7 +2105,7 @@ void hud_banner_text2(Hud *h, const char *name, const char *name2, const float r
 {
     if (!h || !name)
         return;
-    Rage *r = rage_load(h);
+    Rage *r = rage_load_data(h);
     if (!r)
         return;
     /* Edible.scr: the first "\n" (backslash, n) of the message becomes a line break */
@@ -2135,7 +2147,7 @@ void hud_banner_reveal(Hud *h, const char *monster)
         snprintf(text, sizeof text, "%s", fmt ? fmt : name);
     snprintf(msg, sizeof msg, "#%s", text);
     float col[4] = { 220.0f / 255.0f, 0, 0, 1 };
-    Rage *r = rage_load(h);
+    Rage *r = rage_load_data(h);
     if (r)
         rage_data(r, msg, NULL, col, 0.5f, 0.35f, "V_Monster_Reveal_Seq");
 }

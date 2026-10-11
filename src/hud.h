@@ -83,7 +83,7 @@ void hud_float(Hud *h, int amount, const float pos[3], int building, float scale
 
 /* ---- the text banners: PointsBanner.createAndStartText (0x2B1640) loads the interface Rage and hands it the text
  * (Rage::setPointsBannerData) [R]. Each is its own copy of Rage.ifc: 15 ghosts swirl in to the centre (0.75 s), the
- * text holds (hold s, shaking), fades out (0.5 s), then is gone. */
+ * text holds (hold s, shaking), fades out from half (0.5 s), then is gone. */
 /* createAndStartText(name, colour, scale, sound): name is a .loc key ("InstantRampage", "Challenge_Met"), or a text
  * when it begins with '#'; rgba 0 .. 1; scale the text object's (0.5 edibles, 1.0 challenges); sound played when it
  * starts, "" / NULL none, "Default" keeps "v_rampage". Edible.scr's "\n" in the name (two characters) is made a line
@@ -93,7 +93,8 @@ void hud_banner_text(Hud *h, const char *name, const float rgba[4], float scale,
 void hud_banner_text2(Hud *h, const char *name, const char *name2, const float rgba[4], float scale, float hold,
                       const char *sound);
 /* Monsters::startRage's screen.loadInterface("Rage"): the RAMPAGE banner as the layout has it ("Rampage", red,
- * scale 1, "v_rampage", hold 0.35 s) [R Monsters.scr, Rage.scr] */
+ * scale 1, "v_rampage", no hold: the swirl, then the text at half fading out) [R Monsters.scr, Rage.scr]. A text
+ * banner asked for while another is up gives its data to the oldest one and shows this one [R 0x231220] */
 void hud_banner_rage(Hud *h);
 /* Cryotube.scr: the monster reveal (edible.h EE_REVEAL): "#" + "%s Unlocked" of the monster's localised name, colour
  * 220 0 0, scale 0.5, sound "V_Monster_Reveal_Seq" [R]. monster: gCommon.getMonsterName(gWorld.startReveal(pos)),
