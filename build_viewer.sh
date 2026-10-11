@@ -3,7 +3,8 @@
 # way: one C compile. Needs a C compiler, SDL2 and OpenGL headers, e.g. on Debian / Ubuntu:
 #   sudo apt install build-essential libsdl2-dev libgl-dev
 # (Windows: build_viewer.bat; the SRC list is the same there, without plat_sdl.c and with pad.c for pad_sdl.c; the
-# Switch: build_switch.sh, the same list with src/gles/gles2.c: keep the three in step.) Run it from the repository root:
+# Switch: build_switch.sh, the same list with src/gles/gles2.c; Android: android/app/CMakeLists.txt, that list with
+# src/android.c and src/touch.c: keep the four in step.) Run it from the repository root:
 # ./rampage [RAMPAGE.VOL] [City] [block]; with no display: SDL_VIDEODRIVER=offscreen ./rampage ... --shot s.png
 # GLES=1 ./build_viewer.sh draws through OpenGL ES 3.0 / 2.0 instead (src/gles: the fixed function emulated on it, the path
 # a Switch or Android build takes), to test that path on a PC; it needs libgles-dev instead of libgl-dev.

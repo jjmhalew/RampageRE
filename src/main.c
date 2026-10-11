@@ -49,6 +49,9 @@
 #include "pad.h"
 #include "iso.h"
 #include "settings.h"
+#ifdef __ANDROID__
+#include "touch.h"                               /* the on-screen pad, player 1's pad slot */
+#endif
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -5341,6 +5344,9 @@ int main(int argc, char **argv)
                                                       * rampage.log */
     if (argc < 2)                                    /* from the Homebrew Menu: the front end, played on the pads */
         v.shell_mode = 1;
+#elif defined __ANDROID__
+    android_init();                                  /* logcat; the app folder the current one: the data, rampage.cfg,
+                                                      * the profile (RampageActivity starts the front end, --shell) */
 #endif
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {   /* no window, no sound, no message boxes */
@@ -5398,10 +5404,15 @@ int main(int argc, char **argv)
         }
     if (!pos[0]) {                                   /* no path given: look for the data (iso.h), never asking */
         if (!data_find(found, sizeof found)) {
+#ifdef __ANDROID__                                   /* the first start: the disc image through the file picker */
+            if (!android_data_setup(found, sizeof found))
+                return 1;
+#else
             snprintf(msg, sizeof msg, "Found no game data: no RAMPAGE.VOL, nor a disc image (.iso) with it, in %s.\n"
                      "Pass the path to RAMPAGE.VOL or to the game's disc image, or set RAMPAGE_VOL.", data_where());
             plat_message(msg, 1);
             return 1;
+#endif
         }
         pos[0] = found;
         printf("game data: %s\n", found);
@@ -5433,6 +5444,9 @@ int main(int argc, char **argv)
                                                       * the --do words alone drive it) */
         v.pads_live = 1;
         v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
+#ifdef __ANDROID__
+        v.pads_on |= touch_pad(v.pads, v.pads_on);
+#endif
     }
     v.fog = v.fog < 0 ? 0 : 1;                       /* the game's fog (LightingData FogStart / FogEnd), F toggles it */
     v.rnd = rnd_create();
@@ -5557,9 +5571,18 @@ int main(int argc, char **argv)
         if (v.pads_live) {                           /* this frame's controllers, the vibration on them */
             memcpy(v.pads_prev, v.pads, sizeof v.pads);
             v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
+#ifdef __ANDROID__
+            v.pads_on |= touch_pad(v.pads, v.pads_on);   /* the on-screen pad: slot 0's */
+#endif
             pad_set_strength(v.vibrate ? 1.0f : 0.0f);
         }
+#ifdef __ANDROID__
+        if (w.pressed[VK_ESCAPE])                    /* the back button: Backspace (back) in the menus, else P (Start:
+                                                      * the Pause menu); an app is left with Home, not quit */
+            w.pressed[v.shell || (v.hud && (hud_results_showing(v.hud) || hud_pause_showing(v.hud))) ? VK_BACK : 'P'] = 1;
+#else
         if (w.pressed[VK_ESCAPE]) w.quit = 1;
+#endif
         settings_keys(&gfx, &w);                     /* F5 .. F9 the graphics, F11 fullscreen */
         if (v.shell) {                               /* the front end has the screen and the pad */
             if (v.shell_go) {                        /* the loading screen was drawn: the game */

@@ -1,0 +1,4 @@
+// RampageRE for Android: the native viewer of src/ on SDL2 and OpenGL ES through src/gles (docs/NATIVE.md, "Android").
+plugins {
+    id 'com.android.application' version '8.13.0' apply false
+}

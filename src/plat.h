@@ -55,6 +55,14 @@ void plat_message(const char *text, int warn);
 #define SWITCH_HOME "sdmc:/switch/rampagere"     /* the Switch's folder: the data, rampage.cfg, the profile, the log */
 void plat_switch_home(void);                     /* SWITCH_HOME made and the current folder, stdout / stderr into its
                                                   * rampage.log */
+#elif defined __ANDROID__
+/* a message with up to three buttons (RampageActivity.dialog; plat_sdl.c): 1 = b1, 0 = b2, -1 = b3; blocks */
+int plat_dialog(const char *text, const char *b1, const char *b2, const char *b3);
+void android_init(void);                         /* src/android.c: stdout / stderr to logcat, the app folder as the
+                                                  * current directory (rampage.cfg, the profile, the data) */
+const char *android_home(void);                  /* that folder (getExternalFilesDir), "" if none */
+int android_data_setup(char *out, size_t cap);   /* the first start: the game's data through the file picker, copied
+                                                  * into the app folder; 1 = found (out, as data_find), 0 = cancelled */
 #endif
 /* the free room in KB on the file system that holds path's folder, -1 unknown */
 static inline long long plat_free_kb(const char *path)

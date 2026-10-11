@@ -1,11 +1,12 @@
 # Builds the native viewer on every push to main, every pull request and every tag v*: rampage.exe with
-# build_viewer.bat (Windows, Zig), rampage with build_viewer.sh (Linux, SDL2) and rampage.nro with build_switch.sh
-# (Switch homebrew, devkitPro). No game data is involved: the programs hold only the port's own code, the submodules
-# (PS2Recomp, which with recomp/ needs the disc) are not checked out and build.ps1 never runs. Each package is listed
-# file by file and checked for disc files before it is uploaded. A pushed tag v* also publishes a GitHub release with
-# RampageRE-windows-<tag>.zip and RampageRE-linux-x86_64-<tag>.tar.gz (the program, README.md, LICENSE,
-# docs/NATIVE.md, docs/TEXTURES.md) and RampageRE-switch-<tag>.zip (switch/rampagere/ with rampage.nro, README.md,
-# LICENSE: unpacked onto the SD card as it is).
+# build_viewer.bat (Windows, Zig), rampage with build_viewer.sh (Linux, SDL2), the APK with android/ (Gradle) and
+# rampage.nro with build_switch.sh (Switch homebrew, devkitPro). No game data is involved: the programs hold only the
+# port's own code, the submodules (PS2Recomp, which with recomp/ needs the disc) are not checked out and build.ps1 never
+# runs. Each package is listed file by file and checked for disc files before it is uploaded. A pushed tag v* also
+# publishes a GitHub release with RampageRE-windows-<tag>.zip and RampageRE-linux-x86_64-<tag>.tar.gz (the program,
+# README.md, LICENSE, docs/NATIVE.md, docs/TEXTURES.md), RampageRE-android-<tag>.zip (RampageRE-<tag>.apk, README.md,
+# LICENSE, docs/NATIVE.md) and RampageRE-switch-<tag>.zip (switch/rampagere/ with rampage.nro, README.md, LICENSE:
+# unpacked onto the SD card as it is).
 name: build
 
 on:
@@ -175,6 +176,79 @@ jobs:
           if [ -e smoke.png ]; then echo "::error::a picture was written"; exit 1; fi
           rm -f smoke.out smoke.err
 
+  # Android (android/, Gradle): arm64 phones and tablets, x86_64 for the emulator and Chromebooks. CMake fetches SDL 2.32.10
+  # (checked against its SHA-256); the runner's SDK installs NDK 27.2 when it lacks it. Signed with the release key of the
+  # repository secrets ANDROID_KEYSTORE_B64 (the keystore, base64), ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD (store and
+  # key) when they are set. Without them the APK carries the runner's debug key, which nobody keeps and which can differ
+  # from run to run: such an APK may not update the one before it (Android wants the same key), and uninstalling first
+  # also deletes the copied game files and the saves. The APK holds no game data: the app copies it from the user's disc.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Build
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rampage.jks"
+            export ORG_GRADLE_PROJECT_rampageKeystore="$RUNNER_TEMP/rampage.jks" ORG_GRADLE_PROJECT_rampageKeyAlias="$KEY_ALIAS" ORG_GRADLE_PROJECT_rampageKeyPassword="$KEY_PASSWORD"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::warning::no ANDROID_KEYSTORE_B64 secret: this release APK is signed with the runner's debug key and may not install over an earlier one"
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then export ORG_GRADLE_PROJECT_rampageVersion="$GITHUB_REF_NAME"; fi
+          JAVA_HOME="$JAVA_HOME_17_X64" ./gradlew assembleRelease --console=plain
+          rm -f "$RUNNER_TEMP/rampage.jks"
+
+      # 16 KB pages: every .so's LOAD segments and the APK's alignment
+      - name: Check the APK
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          ls -l "$apk"
+          bt="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$bt/zipalign" -c -P 16 4 "$apk" || { echo "::error::the APK is not aligned for 16 KB pages"; exit 1; }
+          "$bt/aapt2" dump badging "$apk" | head -3
+
+      - name: Package
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="$GITHUB_REF_NAME"; else ver="${GITHUB_SHA:0:7}"; fi
+          name="RampageRE-android-$ver"
+          # file by file, never a folder or a glob: nothing else can end up in the zip
+          mkdir -p "pkg/$name/docs"
+          cp android/app/build/outputs/apk/release/app-release.apk "pkg/$name/RampageRE-$ver.apk"
+          cp README.md LICENSE "pkg/$name/"
+          cp docs/NATIVE.md "pkg/$name/docs/"
+          (cd pkg && zip -qr "../$name.zip" "$name")
+          echo "PKG=$name.zip" >> "$GITHUB_ENV"
+
+      - name: Check the package (no game data)
+        run: |
+          unzip -Z1 "$PKG" | tee pkg.txt
+          root="${PKG%.zip}"
+          if grep -iE '\.(vol|elf|iso|bin|cue)$|(^|/)SLES_|(^|/)build/' pkg.txt; then
+            echo "::error::game data in the package"; exit 1
+          fi
+          unzip -p "$PKG" "$root/RampageRE-*.apk" > app.apk   # and inside the APK (its META-INF has com/android/build/)
+          if unzip -Z1 app.apk | grep -iE '\.(vol|elf|iso|bin|cue)$|(^|/)SLES_|(^|/)RAMPAGE\.'; then
+            echo "::error::game data in the APK"; exit 1
+          fi
+          ver="${root#RampageRE-android-}"
+          printf "$root/%s\n" "RampageRE-$ver.apk" README.md LICENSE docs/NATIVE.md | sort > want.txt
+          unzip -Z1 "$PKG" | grep -v '/$' | sort > have.txt
+          diff want.txt have.txt || { echo "::error::the package does not hold exactly the listed files"; exit 1; }
+          rm -f pkg.txt want.txt have.txt app.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RampageRE-android
+          path: ${{ env.PKG }}
+
   # Nintendo Switch homebrew (.nro) in devkitPro's own image, which holds devkitA64, libnx, switch-sdl2 and switch-mesa
   # (and sets DEVKITPRO). The same sources on OpenGL ES through src/gles, as linux-gles; nothing to run it on here.
   switch:
@@ -220,7 +294,7 @@ jobs:
   # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start.
   release:
     if: github.ref_type == 'tag'
-    needs: [windows, linux, switch]
+    needs: [windows, linux, android, switch]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -241,7 +315,7 @@ jobs:
         run: |
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           new=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed -e 's/[[:space:]]*$//')
-          start="Windows: unzip and start rampage.exe with the path to RAMPAGE.VOL from the root of your own European PS2 disc (SLES-53800), e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1. Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. Keys and options: docs/NATIVE.md. The game files are not included - see README.md."
+          start="Windows: unzip and start rampage.exe with the path to RAMPAGE.VOL from the root of your own European PS2 disc (SLES-53800), e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1. Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
           if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --title "RampageRE $GITHUB_REF_NAME" --notes-file notes.md

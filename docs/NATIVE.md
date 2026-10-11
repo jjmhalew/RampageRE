@@ -38,7 +38,8 @@ Without a path (or with a city name first: `rampage.exe NewYork 6`) it looks, in
 4. the user's data folder, `RAMPAGE.VOL` or an image in it: `%LOCALAPPDATA%\RampageRE` on Windows,
    `$XDG_DATA_HOME/RampageRE` (else `~/.local/share/RampageRE`) elsewhere
 
-On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below).
+On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below), on Android the app folder ("Android"; a
+first start without the data asks for the disc image there, the one place the viewer asks).
 
 It never asks and never searches drives: with nothing found it says where it looked and exits with 1 (a `--shot` run
 prints that to stderr, as every message). An image without `RAMPAGE.VOL` is refused ("not Rampage - Total
@@ -184,6 +185,52 @@ docked / handheld changes, several controllers and single Joy-Cons. The build it
 image's devkitA64 (GCC 15.2), libnx 4.12, switch-sdl2 2.28.5 and switch-mesa 20.1 build `rampage.nro` (7 MB), GCC
 warning only about shared code (collide.c, movie.c, shell.c, water.c), none in the Switch parts.
 
+### Android
+An app for phones, tablets and Chromebooks (Android 7.0 and up, arm64-v8a and x86_64), WoodyRE's `android/` renamed:
+`io.github.jjmhalew.rampagere`. It is the OpenGL ES build above on SDL 2.32.10: `android/app/CMakeLists.txt` fetches
+SDL's source (checked against its SHA-256) and builds `libmain.so` from the SRC list of `build_switch.sh` (keep them
+in step) with `src/android.c` and `src/touch.c`, `-fsigned-char`, linked with `GLESv2 GLESv3 log android`; `main`
+is compiled as `SDL_main`, which SDL's activity calls. 16 KB pages (Android 15) are aligned for.
+```bat
+:: Android Studio's JDK and SDK (with NDK 27.2.12479018, which Gradle installs when it is missing)
+set JAVA_HOME=C:\Program Files\Android\Android Studio\jbr
+set ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk
+android\gradlew.bat -p android assembleDebug       :: android\app\build\outputs\apk\debug\app-debug.apk
+adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+```
+(`./gradlew assembleDebug` in `android/` elsewhere; Gradle 8.13 comes through the wrapper, checked against its SHA-256.)
+CI builds the release APK (the `android` job) and a release has `RampageRE-android-<tag>.zip` with
+`RampageRE-<tag>.apk`. Signing: `-PrampageKeystore=... -PrampageKeyAlias=... -PrampageKeyPassword=...` (CI: the
+secrets `ANDROID_KEYSTORE_B64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); without them the APK carries a debug key,
+and Android installs an update only over an APK with the same key: uninstalling first deletes the app folder, the
+copied data and the save with it.
+
+| | |
+|---|---|
+| App folder | `Android/data/io.github.jjmhalew.rampagere/files` on the shared storage (`getExternalFilesDir`; a USB cable reaches it, no permission is asked), the current folder from the start: `rampage.cfg`, `rampage_profile.bin` (the save), `mods/textures/` and the game's data; `data_find` looks there first (`__ANDROID__` only) |
+| First start | without the data a dialog asks for **Disc image** or **Folder** and opens the system's file picker. A disc image (`.iso`) is not read in place as on a PC (a picked file's permission does not outlast the run): `RAMPAGE.VOL`, the ELF that `SYSTEM.CNF` boots (saved as `RAMPAGE.ELF`) and `SYSTEM.CNF` are copied out of it into the app folder once (1.35 GB; the free room is checked first, a progress dialog counts the MB, each file is written as `NAME.part` and renamed when its size is the image's, `RAMPAGE.VOL` last); the image can be deleted afterwards. A folder that holds `RAMPAGE.VOL` and `SLES_538.00` or `RAMPAGE.ELF` (and `SYSTEM.CNF`) has them copied the same way (`RampageActivity.java`). Or copy those files, or the image itself (then read in place), into the app folder by cable before the first start. Cancel quits |
+| Start | the front end (`--shell`); the Pause menu's Quit goes back to its main menu. The app is left with Home, not quit |
+| Screen | the whole screen in landscape (either way round); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` need ES 3.0 |
+| Messages | a dialog (`RampageActivity.dialog`, `plat_dialog`); stdout and stderr go to logcat: `adb logcat -s RampageRE` |
+
+**Controls.** The on-screen pad (`src/touch.c`, WoodyRE's with the PS2 pad's buttons): a floating stick on the left
+half of the screen (where the finger lands; move), on the right Cross (jump), Square (punch), Triangle (kick) and
+Circle (grab) as on the PS2 pad, R2 (roar) above them and Start (pause) in the top corner. They are player 1's pad
+(slot 0), so the menus take them as a controller's ("Input": Cross accepts, Circle goes back, Square / Triangle / R2
+the pages' buttons); a finger may slide between the face buttons. The pad hides when a real controller's buttons or
+sticks or a key are used and comes back at the next touch. Controllers (Bluetooth or USB) play through `pad_sdl.c` as
+on Linux, up to four. The back button (or gesture) is Backspace in the menus (back) and Start in play (the Pause
+menu). Not there: the right stick (turning the head), L1 / L2 / R1, Select, and letters for the profile popup's name
+entry, which types from a keyboard (an attached one works; there is no on-screen one yet).
+
+**Testing.** `adb shell am start -n io.github.jjmhalew.rampagere/.RampageActivity -e args "'Chicago 1 --monster George'" -e env "RAMPAGE_TRACE=1;RAMPAGE_TOUCHLOG=1"`
+passes a command line (instead of `--shell`) and environment variables. Tried on the SDK's emulator (Android 16,
+x86_64, SwiftShader's ES 3.0, headless): the first-start dialog, the picker, the free-room check, the copy out of an
+image, the front end and a game with the on-screen pad, the back button into the Pause menu. **Untested**: a real
+phone or tablet (arm64, a real GPU's ES driver, its speed with four players, cloth and the effects), ES 2.0-only
+devices, controllers on Android, rumble, sound output, the folder copy, a picker's cloud files (a file that cannot be
+read where it is: copy it onto the device), an app sent to the background while copying, Chromebooks.
+
 ## Input
 Keys as above, and today's controllers (port extra, WoodyRE's pad code: `src/pad.h`, `src/pad.c` on Windows,
 `src/pad_sdl.c` elsewhere):
@@ -316,6 +363,7 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms"); the Switch's folder, log and error dialog |
 | `build_switch.sh`, `res/switch_icon.jpg` | the Switch homebrew `rampage.nro` and its icon ("Nintendo Switch") |
+| `android/`, `src/android.c`, `src/touch.c`, `src/touch.h` | the Android app: Gradle project, `RampageActivity` (file picker, dialogs), SDL's Java glue; logcat, the app folder and the first start's copy out of the disc image; the on-screen pad ("Android") |
 | `src/gles/GL/gl.h`, `src/gles/gles2.c` | the fixed function on OpenGL ES 2.0 / 3.0 (`GLES=1`, WoodyRE's shim with lighting, fog and sphere maps; "OpenGL ES") |
 | `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |

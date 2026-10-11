@@ -20,7 +20,8 @@ uint8_t *data_elf(const char *path, uint32_t *size);
  * ./RAMPAGE.VOL, data/RAMPAGE.VOL, RAMPAGE.VOL beside the program, a disc image (*.iso with RAMPAGE.VOL in it)
  * beside the program, in the current folder, in data/, then the user's data folder (%LOCALAPPDATA%\RampageRE;
  * $XDG_DATA_HOME/RampageRE or ~/.local/share/RampageRE) with RAMPAGE.VOL or an image; on the Switch first
- * sdmc:/switch/rampagere (SWITCH_HOME, either). 1 = found (out); never asks */
+ * sdmc:/switch/rampagere (SWITCH_HOME, either), on Android the app folder (android_home(); a first start without
+ * the data asks there, android_data_setup). 1 = found (out); never asks */
 int data_find(char *out, size_t cap);
 const char *data_where(void);                            /* that list in words, for the message when none is there */
 /* the supported release, SLES-53800 version 1.00: 0 (with why in msg) when SYSTEM.CNF (in the image, or beside the

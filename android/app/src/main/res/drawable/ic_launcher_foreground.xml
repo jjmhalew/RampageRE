@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RampageRE's launcher icon (the adaptive icon's front, 108 x 108 with the 66 x 66 safe zone in the middle): a block R
+     with three claw marks across it -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M37,29 L57,29 A15,15 0 0,1 62.5,58 L73,79 L61,79 L51.5,59 L48,59 L48,79 L37,79 Z M48,39 L56,39 A5,5 0 0,1 56,49 L48,49 Z" />
+    <path
+        android:fillColor="#B71C1C"
+        android:pathData="M30,70 L76,36 L78,39 L32,73 Z M33,77 L79,43 L80.5,45.5 L34.5,79.5 Z M28,63 L74,29 L75.5,31.5 L29.5,65.5 Z" />
+</vector>

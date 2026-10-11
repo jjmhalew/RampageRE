@@ -21,3 +21,14 @@ mods/
 
 # The viewer's own graphics settings (docs/NATIVE.md "Graphics settings")
 rampage.cfg
+
+# The Android build's output (android/, docs/NATIVE.md "Android"), its SDK path and signing keys
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks

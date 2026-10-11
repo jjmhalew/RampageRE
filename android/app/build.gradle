@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+// the version: -PrampageVersion=v1.2.3 (CI passes the tag), else 0.0.0; versionCode 1.2.3 = 10203, so a newer release
+// installs over an older one (with the same signing key)
+def rampageVersion = (project.findProperty('rampageVersion') ?: '0.0.0').toString().replaceFirst(/^v/, '')
+def rampageMatch = rampageVersion =~ /^([0-9]+)\.([0-9]+)\.([0-9]+)/
+def rampageParts = rampageMatch.find() ? (1..3).collect { rampageMatch.group(it) as int } : [0, 0, 0]
+
+android {
+    namespace 'io.github.jjmhalew.rampagere'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'io.github.jjmhalew.rampagere'
+        minSdk 24
+        targetSdk 35
+        versionCode Math.max(1, rampageParts[0] * 10000 + rampageParts[1] * 100 + rampageParts[2])
+        versionName rampageVersion
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'        // phones and tablets; x86_64 for the emulator and Chromebooks
+        }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'   // 16 KB pages (Android 15 devices, Google Play)
+            }
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    externalNativeBuild {
+        cmake {
+            path 'CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            // a release signed with your own key: pass -PrampageKeystore=... -PrampageKeyAlias=... -PrampageKeyPassword=...;
+            // without one the release APK carries the debug key, which is fine for installing it yourself
+            signingConfig project.hasProperty('rampageKeystore') ? signingConfigs.create('rampage') {
+                storeFile file(project.rampageKeystore); storePassword project.rampageKeyPassword
+                keyAlias project.rampageKeyAlias; keyPassword project.rampageKeyPassword
+            } : signingConfigs.debug
+        }
+    }
+    lint {
+        abortOnError false
+    }
+}

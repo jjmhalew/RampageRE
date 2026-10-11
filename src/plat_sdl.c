@@ -5,11 +5,21 @@
  * A hidden window (--shot) is never shown and draws into a framebuffer object; headless, SDL_VIDEODRIVER=offscreen.
  * Built with GLES=1 the context is OpenGL ES 3.0 (else 2.0) and the renderer draws through src/gles's shim. The
  * Switch (build_switch.sh, __SWITCH__) is that ES build: the whole screen at 1280x720, messages in the system's error
- * dialog, its folder sdmc:/switch/rampagere the current one and stdout / stderr in rampage.log there. */
+ * dialog, its folder sdmc:/switch/rampagere the current one and stdout / stderr in rampage.log there. Android
+ * (android/, __ANDROID__) too: the whole screen in landscape, messages in RampageActivity's dialog, the back button as
+ * Esc, and touch.c's on-screen pad fed every event and drawn over every frame. */
 #ifndef _WIN32
 #include "plat.h"
 #undef fopen
 #include "render_gl.h"
+#ifdef __ANDROID__
+#include "touch.h"                               /* the on-screen pad: every event goes by it, it draws over the frame */
+#define TOUCH_EVENT(e, w) touch_event((e), (w)->width, (w)->height)
+#define TOUCH_DRAW(w) touch_draw((w)->width, (w)->height)
+#else
+#define TOUCH_EVENT(e, w) ((void)0)
+#define TOUCH_DRAW(w) ((void)0)
+#endif
 #include <SDL.h>
 #include <GL/gl.h>
 #include <dirent.h>
@@ -119,6 +129,38 @@ void plat_switch_home(void)
     if (t != AppletType_Application && t != AppletType_SystemApplication)   /* the Album: about 400 MB */
         printf("started as an applet, with less memory: hold R while starting a game for all of it\n");
 }
+#elif defined __ANDROID__
+#include <jni.h>
+/* RampageActivity.dialog: a scrolling message with up to three buttons that stay on the screen (SDL's message box does
+ * not scroll, and in landscape its buttons end up below a phone's screen). Blocks until one is pressed. */
+int plat_dialog(const char *text, const char *b1, const char *b2, const char *b3)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    int r = -1;
+    if (!env || !act) { fprintf(stderr, "%s\n", text); return -1; }
+    jclass c = (*env)->GetObjectClass(env, act);
+    jmethodID m = (*env)->GetStaticMethodID(env, c, "dialog",
+                                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I");
+    if (m) {
+        jstring s[4] = { (*env)->NewStringUTF(env, text), b1 ? (*env)->NewStringUTF(env, b1) : NULL,
+                         b2 ? (*env)->NewStringUTF(env, b2) : NULL, b3 ? (*env)->NewStringUTF(env, b3) : NULL };
+        r = (*env)->CallStaticIntMethod(env, c, m, s[0], s[1], s[2], s[3]);
+        for (int i = 0; i < 4; i++) if (s[i]) (*env)->DeleteLocalRef(env, s[i]);
+    }
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); r = -1; }
+    (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, act);
+    return r;
+}
+
+void plat_message(const char *text, int warn)    /* always in logcat too (stderr, android.c) */
+{
+    (void)warn;
+    fprintf(stderr, "%s\n", text);
+    if (!plat_quiet && !g_hidden)
+        plat_dialog(text, "OK", NULL, NULL);
+}
 #else
 void plat_message(const char *text, int warn)
 {
@@ -160,6 +202,7 @@ static int vk_of(const SDL_Keysym *k)
     case SDL_SCANCODE_KP_PLUS: return VK_ADD;        case SDL_SCANCODE_KP_0: return VK_NUMPAD0;
     case SDL_SCANCODE_KP_PERIOD: return VK_DECIMAL;  case SDL_SCANCODE_NONUSBACKSLASH: return VK_OEM_102;
     case SDL_SCANCODE_APPLICATION: return VK_APPS;
+    case SDL_SCANCODE_AC_BACK: return VK_ESCAPE;     /* Android's back button / gesture (main.c: back, the Pause menu) */
     case SDL_SCANCODE_LCTRL: return VK_LCONTROL;     case SDL_SCANCODE_RCTRL: return VK_RCONTROL;
     case SDL_SCANCODE_LSHIFT: return VK_LSHIFT;      case SDL_SCANCODE_RSHIFT: return VK_RSHIFT;
     case SDL_SCANCODE_LALT: return VK_LMENU;         case SDL_SCANCODE_RALT: return VK_RMENU;
@@ -179,6 +222,12 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
 {
     memset(w, 0, sizeof *w);
     g_hidden = hidden;
+#ifdef __ANDROID__                               /* the whole screen in landscape; the fingers are touch.c's pad */
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+#endif
     if (SDL_InitSubSystem(SDL_INIT_VIDEO)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return -1; }
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1); SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
@@ -196,6 +245,9 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
         width = 1280;
         height = 720;
     }
+#elif defined __ANDROID__
+    if (!hidden)
+        flags |= SDL_WINDOW_FULLSCREEN;
 #endif
     SDL_Window *sw = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
 #ifdef RAMPAGE_GLES
@@ -263,7 +315,7 @@ void win_poll(Window *w)
     }
     plain_keys(w);
     SDL_Event e;
-    while (SDL_PollEvent(&e)) switch (e.type) {
+    while (SDL_PollEvent(&e)) switch (TOUCH_EVENT(&e, w), e.type) {
     case SDL_QUIT: w->quit = 1; break;
     case SDL_WINDOWEVENT:
         if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -303,7 +355,7 @@ void win_poll(Window *w)
     }
 }
 
-void win_swap(Window *w) { SDL_GL_SwapWindow((SDL_Window *)w->hwnd); }
+void win_swap(Window *w) { TOUCH_DRAW(w); SDL_GL_SwapWindow((SDL_Window *)w->hwnd); }
 void win_title(Window *w, const char *title) { SDL_SetWindowTitle((SDL_Window *)w->hwnd, title); }
 
 /* port extra (WoodyRE's): fullscreen on the desktop's resolution, or a window centred and shrunk to fit */
@@ -312,7 +364,7 @@ void win_mode(Window *w, int width, int height, int full)
     SDL_Window *sw = (SDL_Window *)w->hwnd;
     if (w->hidden)                               /* --shot: never shown, its size is the framebuffer object's */
         return;
-#ifdef __SWITCH__
+#if defined __SWITCH__ || defined __ANDROID__
     (void)width; (void)height; (void)full; (void)sw;
     drawable(w);                                 /* always the whole screen */
     return;

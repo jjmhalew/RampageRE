@@ -302,6 +302,9 @@ int data_find(char *out, size_t cap)
 #ifdef __SWITCH__
     if (vol_in(SWITCH_HOME, out, cap) || iso_in(SWITCH_HOME, out, cap))   /* the SD card's sdmc:/switch/rampagere */
         return 1;
+#elif defined __ANDROID__
+    if (vol_in(android_home(), out, cap) || iso_in(android_home(), out, cap))   /* the app folder (android.c) */
+        return 1;
 #endif
     return vol_in("build" SEP "disc", out, cap) || vol_in(".", out, cap) || vol_in("data", out, cap) ||
            vol_in(exe, out, cap) || iso_in(exe, out, cap) || iso_in(".", out, cap) || iso_in("data", out, cap) ||
@@ -314,6 +317,9 @@ const char *data_where(void)
     return "build\\disc, the current folder, data\\, beside rampage.exe, %LOCALAPPDATA%\\RampageRE";
 #elif defined __SWITCH__
     return SWITCH_HOME " (the disc image, or RAMPAGE.VOL with RAMPAGE.ELF or SLES_538.00)";
+#elif defined __ANDROID__
+    return "the app folder, Android/data/io.github.jjmhalew.rampagere/files (the disc image, or RAMPAGE.VOL with "
+           "RAMPAGE.ELF or SLES_538.00)";
 #else
     return "build/disc, the current folder, data/, beside rampage, $XDG_DATA_HOME/RampageRE (~/.local/share/RampageRE)";
 #endif
