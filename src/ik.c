@@ -128,7 +128,11 @@ static void arc(const float a[3], const float b[3], float r[9])
         memcpy(r, id, sizeof id);
         return;
     }
-    float q[4] = { ax[0] * sqrtf((1 - c) / 2), ax[1] * sqrtf((1 - c) / 2), ax[2] * sqrtf((1 - c) / 2), sqrtf((1 + c) / 2) };
+    /* (1 - c) / 2 goes below 0 when b is not quite of unit length (solve3's target direction through a thigh that is
+     * not quite orthonormal): the EE FPU's sqrt.s takes the root of |x| (it makes no NaN), as fabsf here [the
+     * hardware's, not the ELF's] */
+    float hs = sqrtf(fabsf((1 - c) / 2)), hc = sqrtf(fabsf((1 + c) / 2));
+    float q[4] = { ax[0] * hs, ax[1] * hs, ax[2] * hs, hc };
     ik_rot_of(q, r);
 }
 
