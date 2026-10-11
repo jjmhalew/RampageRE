@@ -2789,8 +2789,16 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     float row_offset = group_num(block, "BackRowOffset", 10);
     static Record r[MAX_REC];
     uint32_t n = group_values(block, "BuildingInstance|", &where, r, MAX_REC);
-    for (uint32_t i = 0; i < n; i++)
-        building(c, s, record_group(where, r[i]), row_offset, 0, 0);
+    for (uint32_t i = 0; i < n; i++) {
+        /* [R 0x305B28 .. 0x305BB8, 0x305D4C .. 0x305D94] the play block (0x302DC8: 0x3059D0's a2 = 1) makes no
+         * Building of an instance whose LeftEdgeXPos is outside [-50, 50) (the blocks ahead, a2 = 0, make them all): it
+         * is not in the block's list (0x4D095C), so not counted (getCurrentBuildingCount), not a bot's target, not hit;
+         * beyond the street's limits (x +-55) no monster reaches it. Here it is drawn as the scenery is [G: whether the
+         * game draws it at all is not traced] */
+        Group bi = record_group(where, r[i]);
+        float left = group_num(bi, "LeftEdgeXPos", 0);
+        building(c, s, bi, row_offset, 0, left < -50.0f || !(left < 50.0f));
+    }
     static const char *const objects[] = { "ObjectInstance|", "AttackObjectInstance|", "XObjectInstance|" };
     s->placing_block = 1;
     for (int k = 0; k < 3; k++) {
