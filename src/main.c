@@ -49,6 +49,7 @@
 #include "pad.h"
 #include "iso.h"
 #include "settings.h"
+#include "wrand.h"
 #ifdef __ANDROID__
 #include "touch.h"                               /* the on-screen pad, player 1's pad slot */
 #endif
@@ -134,7 +135,8 @@ typedef struct Mon {
         atk[MOVES_PARTS];
     unsigned atk_seq;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
-    float ev16;                                      /* the kept type-16 event record's +0x10 (+0xBAA0), 0 none */
+    float ev16, ev16x;                               /* the kept type-16 event record's +0x10 and +0xC (+0xBAA0),
+                                                      * 0 none */
     const Water *water_in; int water_tested;         /* 0x2D5F00's answer this frame (+0xC700), asked (+0xC704) */
     int landed; float landed_z;                      /* it landed this frame from the air at landed_z: the box test
                                                       * (0x2E2C50, in its update) came before the landing (0x2E2770,
@@ -234,6 +236,7 @@ typedef struct Viewer {
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
     int lang;                                        /* --lang: the .loc column (hud.h: 0 English .. 8 Portuguese) */
     ShellGame last_game;                             /* the shell's last choices (back from a game) */
+    uint32_t world_rng;                              /* gShell +0x1C: the state the world's seeds are drawn from */
     ShellStart kept;                                 /* what gShell keeps while the game plays (shell_keep) */
     const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */
@@ -378,7 +381,7 @@ static void play_state(Mon *mo)
             printf("  root of %s: %.2f %.2f %.2f\n", st->clip, rt[0], rt[1], rt[2]);
     }
     mo->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed, on the ground */
-    mo->ev16 = 0;                                     /* (and no event record kept) */
+    mo->ev16 = mo->ev16x = 0;                         /* (and no event record kept) */
     mo->mode = MODE_GROUND;                           /* (its events set the mode it is in) */
     climb_clip_started(&mo->mount, st->name);
     mo->mirror = mo->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
@@ -1220,12 +1223,30 @@ static float players_mid_x(const Viewer *v)
 }
 
 /* the monster as the climbing code sees it: the camera's reach (-9) is measured from the players' middle, and is
- * not asked of an AI monster (0x2DDC40) */
+ * not asked of an AI monster (0x2DDC40); the other monsters in the world (their objects in the grid: the box of
+ * their collision spheres taken as their collision box [G]) */
+static float mon_radius(const Mon *mo);
+static float mon_half_height(const Mon *mo);
 static Climber climber(Mon *mo)
 {
     Climber c = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->graph.box[0],
                   mo->v->nmon > 1 && !mo->is_ai ? mo->v->mid_x : mo->mx, { mo->graph.probe[0], mo->graph.probe[1] },
-                  0 };
+                  0, mo->mount.mounted, { { { 0 } } }, 0 };
+    for (int k = 0; k < mo->v->nmon && c.nother < 4; k++) {
+        Mon *o = &mo->v->mon[k];
+        if (o == mo || !o->have_graph || !mon_in(o))
+            continue;
+        float r = mon_radius(o), hh = mon_half_height(o), *pt = c.other[c.nother].pt;
+        if (o->mount.mounted)
+            memcpy(pt, o->mount.at.pt, sizeof o->mount.at.pt);
+        else {
+            pt[0] = o->mx; pt[1] = o->my; pt[2] = o->mz;
+        }
+        float lo[3] = { o->mx - r, o->my - r, o->mz }, hi[3] = { o->mx + r, o->my + r, o->mz + 2 * hh };
+        memcpy(c.other[c.nother].lo, lo, sizeof lo);
+        memcpy(c.other[c.nother].hi, hi, sizeof hi);
+        c.other[c.nother++].mounted = o->mount.mounted;
+    }
     return c;
 }
 
@@ -1297,8 +1318,10 @@ static int answer(void *ctx, const char *call, const float *a)
  * set the velocity, addVelocity adds to it, in the world or turned with the monster) */
 /* Monsters.bsf's hitBuildingFront(kind, x, y, z): which face (by kind, the mirror state, or for kinds 6 and 7 the way
  * the monster faces), the point in the monster's frame, then hitBuildingPt(point, side, 1, 2.0): the point in the
- * world (0x2B3A80), the building whose face that side looks at within 5 units, the point on it (0x2D54F0), and its
- * hit (0x2BC150). Sides: 0 the building's left face (looking +x), 1 its right (-x), 2 its front (+y), 5 its roof. */
+ * world (0x2B3A80), the building at it (unless it is more than 1 behind that one's front) or else the nearest one that
+ * way, not above its top, the point put on its face and kept only within 5 (0x2D54F0 with 0x2A3D20: collide.c's
+ * collide_hit_point), and its hit (0x2BC150). Sides: 0 the building's left face (looking +x), 1 its right (-x), 2 its
+ * front (+y), 5 its roof. */
 static void hit_building_front(Mon *mo, const float *p)
 {
     Viewer *v = mo->v;
@@ -1315,25 +1338,9 @@ static void hit_building_front(Mon *mo, const float *p)
     float l[3] = { (mirror && side == 2) || side == 1 ? -p[1] : p[1], p[2], p[3] };
     float c = cosf(mo->heading / 57.2957795f), sn = sinf(mo->heading / 57.2957795f);
     float w[3] = { mo->mx + c * l[0] - sn * l[1], mo->my + sn * l[0] + c * l[1], mo->mz + l[2] };
-    SceneBuilding *best = NULL;
-    float bq[3], bd = 25;                            /* within 5 units of the face */
-    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
-        Building *b = &v->scene.buildings[i].b;
-        float q[3] = { w[0], w[1], w[2] };
-        int in_x = w[0] >= b->min[0] && w[0] <= b->max[0], in_y = w[1] >= b->min[1] && w[1] <= b->max[1];
-        if (side == 2 && in_x) q[1] = b->min[1];
-        else if (side == 0 && in_y) q[0] = b->min[0];
-        else if (side == 1 && in_y) q[0] = b->max[0];
-        else continue;
-        if (w[2] > b->max[2])
-            continue;
-        float d = (q[0] - w[0]) * (q[0] - w[0]) + (q[1] - w[1]) * (q[1] - w[1]);
-        if (d <= bd) {
-            bd = d;
-            best = &v->scene.buildings[i];
-            memcpy(bq, q, sizeof bq);
-        }
-    }
+    float bq[3];                                     /* 0x2D54F0's search (collide.c, 0x2A3D20) [R] */
+    int bi = collide_hit_point(&v->cw, w, side, bq);
+    SceneBuilding *best = bi >= 0 && (uint32_t)bi < v->scene.nbuildings ? &v->scene.buildings[bi] : NULL;
     if (best)                                        /* Building::hit's +0x190: its Scoring pays this monster */
         best->hitter = mo->slot;
     if (best && mo->is_ai) {                         /* the AI's onHit (hitBuildingPt -> 0x2EED40) */
@@ -1442,6 +1449,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     if (e->type == 16) {                             /* the record kept at +0xBAA0 till the next clip (0x2E7F70) */
         mo->ev16 = e->p[0];
+        mo->ev16x = e->p[1];
         return;
     }
     if (e->type == 6) {                              /* a sound at the monster ({6, at, ?, name}) */
@@ -1550,10 +1558,11 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::transferMount")) { climb_transfer(&mo->mount); return; }
-    else if (!strcmp(n, "Monsters::setScale")) {     /* (scale, time): setDynamicScale, from its size now */
+    else if (!strcmp(n, "Monsters::setScale")) {     /* (scale, time): setDynamicScale (0x2E8660 [R]), from its size
+                                                      * now; a time of 0.001 or less at once */
         mo->scale_from = mo->scale;
         mo->scale_to = e->p[0] > 0 ? e->p[0] : 1;
-        mo->scale_time = mo->scale_left = e->p[1] > 0 ? e->p[1] : 0;
+        mo->scale_time = mo->scale_left = e->p[1] > 0.001f ? e->p[1] : 0;
         if (mo->scale_left <= 0)
             mo->scale = mo->scale_to;
         return;
@@ -1755,7 +1764,6 @@ static void stick_world(Mon *mo, float lx, float ly, float w[3])
 /* the monster's collision box (0x2E2C50): MONSTER_DATA +0x198 across (3 each way) and +0x19C up (4.25 each way from
  * its middle: 8.5 tall), against the buildings' boxes */
 #define MONSTER_HALF_WIDTH 3.0f
-#define ROOF_BAND 1.5f                               /* a building box's top 1.5 is its roof's band (0x2D1A30) */
 
 /* the monster's radius and half height (MONSTER_DATA +0x198, +0x19C) x its dynamic scale (+0xA78 while +0xA74) */
 static float mon_radius(const Mon *mo)
@@ -1768,13 +1776,13 @@ static float mon_half_height(const Mon *mo)
     return (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * (mo->scale > 0 ? mo->scale : 1);
 }
 
-/* its body centre (0x2E4D30 with its matrix, 0x282B90: +0x8): the feet + MONSTER_DATA +0x1A0 along its x axis and
- * +0x1A4 plus the kept type-16 record's +0x10 along its y, x its scale; z the feet's. (The record's +0xC, added to
- * +0x1A0, is not kept here: 0 [G].) */
+/* its body centre (0x2E4D30 with its matrix, 0x282B90: +0x8) [R]: the feet + MONSTER_DATA +0x1A0 plus the kept
+ * type-16 record's +0xC along its x axis and +0x1A4 plus the record's +0x10 along its y, x its scale (+0xA78 while
+ * +0xA74); z the feet's */
 static void mon_body_centre(const Mon *mo, float out[3])
 {
     float s = mo->scale > 0 ? mo->scale : 1, h = mo->heading / 57.2957795f, c = cosf(h), sn = sinf(h);
-    float ax = mo->graph.probe[0] * s, ay = (mo->graph.probe[1] + mo->ev16) * s;
+    float ax = (mo->graph.probe[0] + mo->ev16x) * s, ay = (mo->graph.probe[1] + mo->ev16) * s;
     out[0] = mo->mx + c * ax - sn * ay;
     out[1] = mo->my + sn * ax + c * ay;
     out[2] = mo->mz;
@@ -1822,29 +1830,24 @@ static int mon_water(Mon *mo)
     return found;
 }
 
-/* its ground (0x2E8530): the roof of the building under it (0x2D6150: its box's top +0xD4, the building kept only
- * while its top, +0x1F0, is no more than 5 above the feet, 0x2D6200 [R]; here the highest such one over the feet [G:
- * the game looks under its body centre, 0x2A3D20 at 0x2E4D30's point, and takes the last such building; with the
- * walk-off stand-in below, the centre leaving a roof edge first made it fall too soon]), else the street; in a water
- * (0x2E859C, +0xA48 = 0x337E00) the water's floor under its body centre. *under: that building, -1 none */
+/* its ground (0x2E8530) [R]: the roof of the building under it (0x2D6150: none while its hit points, +0xA4C, are
+ * gone; else the last building whose footprint holds its body centre, 0x2A3D20 at 0x2E4D30's point, kept only while
+ * its top, +0x1F0, is no more than 5 above the feet, 0x2D6200; the ground its box's top +0xD4, a gone one's flat),
+ * else in a water (0x2E859C, +0xA48 = 0x337E00) the water's floor under its body centre, else the street.
+ * *under: that building, -1 none */
 static float ground_under(Mon *mo, int *under)
 {
     Viewer *v = mo->v;
-    float x = mo->mx, y = mo->my, z = mo->mz, c[3];
-    int wk = mon_water(mo);
+    float c[3];
     mon_body_centre(mo, c);
-    float g = wk >= 0 ? water_floor(v->scene.water[wk], c[0], c[1]) : 0;
     *under = -1;
-    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
-        const Building *b = &v->scene.buildings[i].b;
-        float top = b->max[2];
-        if (b->max[2] > b->min[2] + ROOF_BAND && x >= b->min[0] && x <= b->max[0] && y >= b->min[1] && y <= b->max[1] &&
-            top - z <= 5 && top > g) {
-            g = top;
-            *under = (int)i;
-        }
+    int b = mo->defeated || mo->hp <= 0 ? -1 : collide_building_at(&v->cw, c, 0, 0, NULL);
+    if (b >= 0 && (uint32_t)b < v->scene.nbuildings && v->cw.b[b].max[2] - mo->mz <= 5) {
+        *under = b;
+        return v->cw.b[b].max[2];
     }
-    return g;
+    int wk = mon_water(mo);
+    return wk >= 0 ? water_floor(v->scene.water[wk], c[0], c[1]) : 0;
 }
 static float ground_at(Mon *mo)
 {
@@ -2696,10 +2699,16 @@ static void game_step(Viewer *v, float dt)
                 } else                               /* the state's music (0x3247A8) */
                     music_for_state(e->a, v->have_scene ? v->scene.music : NULL);
                 break;
-            case GE_EXIT:                            /* the demo is over (0x324D18): back to the shell */
-                if (e->a == 2) {
-                    v->exit_game = 1;
+            case GE_EXIT:                            /* the world is left: the app's next package is the shell's
+                                                      * (+0xA8 = 0x4D53F0), whatever the way (0 the menus, 1 King of
+                                                      * the World's next city b, 2 the demo's end 0x324D18) [R] */
+                v->exit_game = 1;
+                if (e->a == 2)
                     v->attract_button = e->b == 1;
+                if (e->a == 1 && e->b >= 0) {        /* GameStatus' city is the next one, from its first block */
+                    v->last_game.city_index = e->b;
+                    v->last_game.city[0] = 0;
+                    v->last_game.start_block = 0;
                 }
                 break;
             case GE_RUBBLE_FX: {                     /* findPointInRubble(pos, 8): a point in the block left's
@@ -2833,11 +2842,10 @@ static void game_step(Viewer *v, float dt)
                 if (mo->streaker >= 0 && v->scene.folk)
                     people_remove(v->scene.folk, mo->streaker);
                 mo->streaker = -1;
-                if (e->a == 1) {
-                    edible_power_init(&mo->power);
-                    power_from_profile(mo);
-                    mo->energy = 0;
-                }
+                if (e->a == 1)                       /* the continue: setEnergy(0) (0x325288 -> 0x2E5730) [R];
+                                                      * a rage runs on till its clock and energy are out */
+                    edible_power_set_energy(&mo->power, 0, others_full(mo));
+                mo->energy = mo->power.energy;
                 break;
             default: break;
             }
@@ -2935,7 +2943,8 @@ static void rage_started(Mon *mo)
 }
 
 /* gCommon.addStats on the monster (0x2C51A0): HP and energy by the rules edible.c keeps (none at 0 HP; while raging
- * only a full Energy restarts it); a full one starts the rage: Monsters::startRage, slot 54 [G: its slot] */
+ * only a full Energy restarts it); a full one starts the rage: Monsters::startRage, slot 54 (its setReaction(54),
+ * Monsters.bsf [R]) */
 static void monster_stats(Mon *mo, float health, float energy)
 {
     if (edible_power_add_stats(&mo->power, &mo->hp, 200, health, energy, others_full(mo))) {
@@ -3251,7 +3260,8 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                     }
                 break;
             /* a knock-down is asked again every frame until its slot starts (the viewer takes pending_slot at the
-             * clip's next event): one is enough [G] */
+             * clip's next event): setReaction (0x2E1AD0) puts the slot's entry in +0x110 each time, the same one, so
+             * one is enough [R] */
             case RE_REACTION: if (mo->pending_slot < 0) { mo->pending_slot = e->level; mo->rail_knock = 1; } break;
             case RE_SET_VEL: if (mo->rail_knock < 2) memcpy(mo->vel, e->v, sizeof mo->vel); break;
             case RE_HP: if (mo->hp > 0 && mo->rail_knock < 2) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
@@ -3797,7 +3807,9 @@ static int bot_can_climb(void *ctx, int dv, int dh)
 static int bot_place(void *ctx, int bi, const float pt[3])
 {
     Mon *mo = ctx;
-    return climb_place_ok(&mo->v->scene, bi, pt, pt[0]);   /* (an AI: no camera reach) */
+    Climber c = climber(mo);
+    c.focus_x = pt[0];                               /* (an AI: no camera reach) */
+    return climb_place_ok(&mo->v->scene, bi, pt, &c);
 }
 static void bot_collapse(void *ctx, int bi)          /* collapseBuilding, scored to the bot (+0x190) */
 {
@@ -3933,7 +3945,7 @@ static void mon_step(Mon *mo, float dt)
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
         int ev = -1, was_mode = mo->mode;            /* the mode 0x2E2770 switches on (the landing sets 4) */
         mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
-        if (mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF) {   /* the air: velocity, then gravity */
+        if (mo->mode == MODE_AIRBORNE) {             /* the air (0x2DEBD8, mode 1 of 0x2DEBB0's switch) */
             float pos[3] = { mo->mx, mo->my, mo->mz };  /* 0x2DEBD8: drag, the move, gravity */
             monster_air_velocity(mo->vel, pos, dt, mo->no_gravity);
             mo->mx = pos[0]; mo->my = pos[1]; mo->mz = pos[2];
@@ -3943,26 +3955,23 @@ static void mon_step(Mon *mo, float dt)
              * jump clips carry it so; as for the water, 0x2D603C, and the box, 0x2E2E18): it lands once z + 3 is down
              * to the ground and is put 3 under it, the ground follow (0x2E0330) lifting it the rest while the
              * landing crouches. No velocity in the test; none on a building coming down (0x2D6150's +0x14C >= 4,
-             * 0x2E2A2C): it falls on through. Taking off (mode 2, no landing test in the game): as it was [G] */
-            int high = mo->mode == MODE_AIRBORNE && mo->mz > 3;
-            int down = mo->mode == MODE_AIRBORNE ?
-                       mo->mz + (high ? 3 : 0) <= g &&
-                           !(under >= 0 && v->scene.buildings[under].b.state >= BUILDING_CRACKING) :
-                       mo->mz <= g && mo->vel[2] <= 0;
-            if (down) {
-                mo->landed = mo->mode == MODE_AIRBORNE;
+             * 0x2E2A2C): it falls on through */
+            int high = mo->mz > 3;
+            if (mo->mz + (high ? 3 : 0) <= g &&
+                !(under >= 0 && v->scene.buildings[under].b.state >= BUILDING_CRACKING)) {
+                mo->landed = 1;
                 mo->landed_z = mo->mz;
                 mo->mz = high ? g - 3 : g;
                 int wk = mon_water(mo);
-                if (mo->mode == MODE_AIRBORNE && wk >= 0) {   /* into the water (0x2DCA94 -> 0x2E2BD0): pressed down
-                                                      * 1.25 x its radius across at its body centre, by its fall speed
+                if (wk >= 0) {                       /* into the water (0x2DCA94 -> 0x2E2BD0): pressed down 1.25 x
+                                                      * its radius across at its body centre, by its fall speed
                                                       * (+0xBD38) */
                     float s = fminf(fmaxf(-mo->vel[2] / 50, 0), 1), at[3];
                     mon_body_centre(mo, at);
                     water_disturb(v->scene.water[wk], at, 1.25f * mon_radius(mo), -(2 * s + 0.5f * (1 - s)));
                 }
-                if (mo->mode == MODE_AIRBORNE && v->fxw) {   /* every landing (0x2DC450 -> 0x2F48D0): the big
-                                                      * footfall under the spine, GroundImpactFx / WaterImpactFx */
+                if (v->fxw) {                        /* every landing (0x2DC450 -> 0x2F48D0): the big footfall
+                                                      * under the spine, GroundImpactFx / WaterImpactFx */
                     Mat4 sp;
                     float spine[3] = { mo->mx, mo->my, mo->mz };
                     FootFx fx;
@@ -3976,33 +3985,30 @@ static void mon_step(Mon *mo, float dt)
                             printf("  landing %s at %.1f %.1f %.1f%c", fx.name, fx.pos[0], fx.pos[1], fx.pos[2], 10);
                     }
                 }
-                if (mo->mode == MODE_AIRBORNE)
-                    mo->dropping = 0;                /* (0x2E1A14: in the camera again) */
-                if (mo->mode == MODE_AIRBORNE)       /* from the air (modes 1 / 2): the pad 400 ms [R 0x2DC9F4] */
-                    mon_rumble(mo, 400);
-                if (mo->mode == MODE_AIRBORNE) {      /* landed (0x2DC450): slot 56 in the current column */
-                    int to = moves_slot(&mo->graph, SLOT_LAND, mo->column);
-                    if (to >= 0) {
-                        moves_force(&mo->run, to);
-                        ev = 0;
-                    }
-                    mo->mode = MODE_PRONE;
-                    memset(mo->vel, 0, sizeof mo->vel);
-                } else {
-                    mo->vel[2] = 0;
+                mo->dropping = 0;                    /* (0x2E1A14: in the camera again) */
+                mon_rumble(mo, 400);                 /* from the air: the pad 400 ms [R 0x2DC9F4] */
+                int to = moves_slot(&mo->graph, SLOT_LAND, mo->column);   /* landed (0x2DC450): slot 56 in the
+                                                      * current column */
+                if (to >= 0) {
+                    moves_force(&mo->run, to);
+                    ev = 0;
                 }
+                mo->mode = MODE_PRONE;
+                memset(mo->vel, 0, sizeof mo->vel);
             }
         } else if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {
             memset(mo->vel, 0, sizeof mo->vel);        /* on a face: held there, no gravity, no ground */
-        } else {                                     /* 0x2DF6F0: a knock slides it, friction stops it */
+        } else {                                     /* 0x2DF6F0 (modes 0, 2 and 4 of the switch, 0x431290 [R]:
+                                                      * taking off it is on the ground till a velocity event sets
+                                                      * mode 1): a knock slides it, friction stops it */
             float pos[3] = { mo->mx, mo->my, mo->mz };
             monster_ground_velocity(mo->vel, pos, mo->friction, dt, st->flags, mo->pending_slot >= 0);
             mo->mx = pos[0]; mo->my = pos[1]; mo->mz = pos[2];
-            float g = ground_at(mo);
-            if (g < mo->mz - 0.5f)                    /* walked off a roof: it falls (a stand-in: the game eases it */
-                mo->mode = MODE_AIRBORNE;             /* down, 0x2E0330) and lands through the landing slot */
-            else
-                mo->mz = monster_ground_follow(mo->mz, g, mo->no_gravity);
+            /* its z after its ground (0x2E0330, modes 0, 2 and 4) [R]: off a roof's edge onto a lower one, or onto the
+             * street, it is eased down so in the state it is in; nothing in those modes makes it fall (+0xAD8 is
+             * written only by the clips' mode events, 0x2E7DE4, their velocity ones, 0x2DB130, the clip's start,
+             * 0x2E8028, and the landing, 0x2DC5DC). On a roof's free edge the box test holds it (0x2A49C0) */
+            mo->mz = monster_ground_follow(mo->mz, ground_at(mo), mo->no_gravity);
         }
         if ((was_mode == MODE_GROUND || was_mode == MODE_BUILDING) && (st->flags & 0x810D2)) {
             /* wading (0x2E2870, the case of modes 0 and 5 in 0x2E2770: 0x2E28A0 .. 0x2E2974): in a state that
@@ -4106,7 +4112,9 @@ static void mon_step(Mon *mo, float dt)
             if (getenv("RAMPAGE_TRACE"))
                 printf("  stick %.2f %.2f size %.2f\n", lx, ly, in->v[MV_L_SIZE]);
             /* the transition says whether the new clip blends in (over the new state's blend time) or cuts; a start
-             * the game forces (a slot) takes no transition, and its blend is not traced: it blends */
+             * the game forces (a slot: 0x2C0DC0 .. 0x2C0E78, +0x110) takes no transition and blends in when the new
+             * state's blend time is over 0.001, else cuts [R], which is what blending over its time does; it starts
+             * at 0, as a start list entry's flag 8 (keep the phase) is set in none of the 30 monsters' lists */
             int blend = ev == 0 ? BLEND_IN : mo->run.via >= 0 ? st->trans[mo->run.via].blend : st->end_blend;
             scene_monster_blend(&v->scene, mo->slot, blend == BLEND_IN ? to->blend : 0);
             foot_command(&mo->feet, st->flags);      /* 0x33CCA0: the foot object keeps the state left */
@@ -4193,9 +4201,11 @@ static void mon_step(Mon *mo, float dt)
         v->scene.mon[mo->slot].look_yaw = mo->mirror ? -mo->look_yaw : mo->look_yaw;   /* mirrored: not traced [G] */
         v->scene.mon[mo->slot].look_pitch = mo->look_pitch;
     }
-    if (mo->scale_left > 0) {                         /* the dynamic scale, linear over its time [G] */
+    if (mo->scale_left > 0) {                         /* the dynamic scale (0x2E1CF0 .. 0x2E1D74 [R]): the old one's
+                                                      * share sin(pi / 2 x the time left / its time), +0xA84 x +0xA88;
+                                                      * the new one once the time is out */
         mo->scale_left -= dt;
-        float f = mo->scale_left > 0 ? mo->scale_left / mo->scale_time : 0;
+        float f = mo->scale_left > 0 ? sinf(1.5707963f * mo->scale_left / mo->scale_time) : 0;
         mo->scale = mo->scale_to + (mo->scale_from - mo->scale_to) * f;
     }
     if (mo->scale != 1 && mon_in(mo))
@@ -5385,8 +5395,10 @@ static void setup_players(Viewer *v, int n, int bots, const int *monster)
 }
 
 /* gShell.startGame: the game the shell chose (GameStatus), the city opened at its block. The demo (play type 0) keeps
- * the seeds it drew for the world [R 0x308890: the shell draws new ones for the other play types; for those the port
- * keeps the profile's, a stand-in [G]] */
+ * the seeds it drew for the world; for the other play types the shell draws new ones (0x308890 [R]): each (s >> 8) &
+ * 0xFFFF of a step of 0x106BD0 on gShell +0x1C, drawn again while 0, into GameStatus +0x0 and +0x4 (the current
+ * record's), before the profile takes the status (0x33E290). The state's start is not found (gShell is in .bss and no
+ * traced code writes +0x1C; a Park-Miller state of 0 would stay 0): 1 here [G] */
 static void shell_start_game(Viewer *v)
 {
     const ShellGame *g = shell_game(v->shell);
@@ -5401,6 +5413,13 @@ static void shell_start_game(Viewer *v)
     if (v->attract) {                                /* GameStatus +0x0 / +0x4: the current record's */
         v->prof.current.seed[0] = g->seed[0];
         v->prof.current.seed[1] = g->seed[1];
+    } else {
+        if (!v->world_rng)
+            v->world_rng = 1;
+        for (int k = 0; k < 2; k++)
+            do
+                v->prof.current.seed[k] = wrand_pm_next(&v->world_rng) >> 8 & 0xFFFF;
+            while (!v->prof.current.seed[k]);
     }
     memset(&v->kept, 0, sizeof v->kept);
     shell_keep(v->shell, &v->kept);
@@ -6056,10 +6075,13 @@ int main(int argc, char **argv)
             v.exit_game = 0;
             if (v.shell_mode) {
                 ShellStart st = v.kept;              /* gShell's idle timer, attract state, demo byte */
-                st.from = SHELL_FROM_GAME;
-                st.quit = 1;
-                st.choose_monster = st.city_destroyed = st.show_victory = 0;
-                st.king_of_world = -1;
+                st.from = SHELL_FROM_GAME;           /* and the flags the world left in gCommon [R] (no game: the
+                                                      * main menu) */
+                st.quit = v.game ? game_quitting(v.game) : 1;
+                st.choose_monster = game_choose_monster(v.game);
+                st.city_destroyed = game_city_destroyed(v.game);
+                st.show_victory = game_world_done(v.game);
+                st.king_of_world = game_king(v.game, 2);
                 st.game = v.last_game;
                 if (v.attract)
                     attract_end(&v, &st);

@@ -454,14 +454,17 @@ swings round a corner onto a side unless a neighbour is flush with it, climbs do
 mantles onto the roof at the top (its hands gripping the wall: the game's arm IK holds a planted hand where it took
 hold while the clip climbs on), steps across onto the front of a building it touches, and braces itself across a
 10-unit alley to climb between two buildings and turn onto the other one ([FORMAT_MONSTER.md](FORMAT_MONSTER.md)
-"Climbing"; the checks the game also makes against attachments, cells flagged 0x1000 and other monsters are left
-out). `--do "at x y"` puts the monster there, facing the buildings; `--do "square+up 0.3"` presses a button with the stick
-held that way. Stand-ins for game code not read: a start through a slot (a landing) blends in (it takes no
-transition, so which way it comes in is not traced). The monster's collision box is the game's (MONSTER_DATA +0x198 / +0x19C: 3 each way across, 8.5 tall, 0x2E2C50):
-it cannot go into a building's box (the game's response, collide.c's `collide_monster`), it can land on a roof (6 + 3 × storeys up) and stand there, and walking off the edge it falls (a stand-in: it
-drops in the state it is in until the landing slot catches it). The building a hit goes to is the one whose face
-lies within 5 units along the side's direction (the game's search, 0x2A3D20, is not read). The street ends at
-x ±75 and y −30.
+"Climbing"; a place is refused, as the game's 0x2DDC40 does, by the building's adornments flagged 2 and by another
+monster climbing within 8.2 of it, which a bot answers with a street punch). `--do "at x y"` puts the monster there,
+facing the buildings; `--do "square+up 0.3"` presses a button with the stick held that way. A start through a slot
+(a landing, a hit) blends in over the new state's blend time, or cuts when it has none (0x2C0E24). The monster's
+collision box is the game's (MONSTER_DATA +0x198 / +0x19C: 3 each way across, 8.5 tall, 0x2E2C50): it cannot go
+into a building's box (the game's response, collide.c's `collide_monster`), it can land on a roof (6 + 3 × storeys
+up) and stand there, held on it by the roof clamp; its ground is the roof under its body centre (2.5 ahead of
+George's feet), and as the game does (0x2E0330) it is eased down onto a lower roof it walks across to, or up onto
+one at most 5 higher, in the state it is in; it never falls from the ground (FORMAT_MONSTER.md "Slots"). The
+building a hit goes to is the game's search (0x2D54F0 with 0x2A3D20: the building at the point, or the nearest one
+that way, the point within 5 of its face; collide.c `collide_hit_point`). The street ends at x ±75 and y −30.
 
 **The collision world** (collide.c, [COLLIDE_NOTES.md](COLLIDE_NOTES.md)): main.c's `world_build` fills the frame's
 `CollideWorld` (a Viewer field) once a frame, before anything moves: the block's buildings, the monster's collision

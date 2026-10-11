@@ -40,7 +40,7 @@
 enum {
     GS_NONE = 0,
     GS_STARTING = 1,        /* the world starts: SinglePlayer.bsf loaded (0x2B7D40), then 4 */
-    GS_2 = 2,               /* 0x2B8040 [G: not traced further] */
+    GS_2 = 2,               /* 0x2B8040: RWorldPackage vtable 0x44A820 +0x3C, the package's own life (0x2889A0) [R] */
     GS_LOADING = 3,         /* the city is loading (0x2B7F50); waits for the start */
     GS_BEGIN_LEVEL = 4,     /* Levels::BeginLevelNI (the city's first block) or ContinueLevelNI: the intro */
     GS_BEGIN_BLOCK = 5,     /* Levels::BeginBlockNI: the HUD shows, the army is let loose */
@@ -51,7 +51,7 @@ enum {
     GS_END_LEVEL = 10,      /* the city is destroyed: LevelResults / KingCityResults, EndLevelNI */
     GS_END_WORLD = 11,      /* the last city: WorldResults / KingWorldResults, EndWorldNI */
     GS_EXIT = 12,           /* back to the shell (restartShell, the Pause menu's quit) */
-    GS_13 = 13, GS_14 = 14, /* 0x2B7EA0, 0x2B7FF0: the world shutting down [G] */
+    GS_13 = 13, GS_14 = 14, /* 0x2B7EA0, 0x2B7FF0: its +0x38 and +0x40 (0x2886A0, 0x2888F0) [R]; never entered here */
     GS_SHUTDOWN = 15        /* 0x2B7CB0: WorldGuiDriver::endResults */
 };
 
@@ -137,7 +137,8 @@ enum {
     GE_RESULTS,        /* WorldGuiDriver::startResults(a): show results screen a (GR_SCREEN_*), answer with
                         * game_set_result; GR_SCREEN_GAME_OVER is the game over */
     GE_REVIVE,         /* monster slot comes back where it is (cancelRespawn, 0x2D36A0): full HP (MONSTER_DATA +0x138),
-                        * scale 1, its streaker deleted; a = 1: also energy 0 and the rage off (the continue, 0x2E5730 [G]) */
+                        * scale 1, its streaker deleted; a = 1: also energy 0 (the continue: setEnergy(0), 0x325288 ->
+                        * 0x2E5730 [R]; a rage is not stopped) */
     GE_TIME_UP,        /* the clock ran out (state 6): a = 1 game over, 0 the block simply ends */
     GE_EXIT            /* the world is left for the shell: a = 0 the menus, 1 the next city (King of the World: city
                         * b), 2 the attract mode's demo is over (b = 1: a pad's button ended it, gShell's idle timer
@@ -221,6 +222,12 @@ int game_blocks_to_win(const Game *g);               /* gCommon.getNumBlocksToWi
 int game_cities_to_win(const Game *g);               /* gCommon.getNumCitiesToWin: (cities - 1) / players + 1 */
 int game_king(const Game *g, int which);             /* 0 of the block, 1 of the city, 2 of the world; -1 none */
 int game_city_destroyed(const Game *g);              /* gCommon.isCityDestroyed */
+/* the other flags the world leaves gCommon for the shell (RShellPackage's start 0x308950, Shell::onInit 0x309500,
+ * ControlRoom.scr's first interface) [R]: isPlayerQuiting (0x4D7E4D), isChooseMonster (0x4D7E4E), the campaign won
+ * (0x4D7E4F: the Victory movies, shell state 6) */
+int game_quitting(const Game *g);
+int game_choose_monster(const Game *g);
+int game_world_done(const Game *g);
 int game_par_score(const Game *g);                   /* gWorld.getParScore (WorldData ParScore) */
 uint32_t game_city_flags(const Game *g);             /* 1 destroyed, 2 par beaten, 8 (all monsters ...) [R 0x4D7C3C] */
 int game_block(const Game *g, const char **name);    /* the current block's index in the BlockList, its name */

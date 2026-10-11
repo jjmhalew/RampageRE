@@ -38,7 +38,7 @@ stand-in.
 | 10 | | `startResults` 2 (LevelResults) or 5 (KingCityResults); `EndLevelNI` | the screen's result | see below |
 | 11 | | `startResults` 3 (WorldResults) or 6 (KingWorldResults); `EndWorldNI` | the screen's result | quit to the shell |
 | 12 | `restartShell` (Pause's quit) | leave for the shell | | |
-| 2, 13, 14, 15 | 0x2B8040, 0x2B7EA0, 0x2B7FF0, 0x2B7CB0 (15: `endResults`) | | | |
+| 2, 13, 14, 15 | 0x2B8040, 0x2B7EA0, 0x2B7FF0 (RWorldPackage's vtable 0x44A820 +0x3C, +0x38, +0x40: the package's own life, on the world's managers through 0x2889A0 / 0x2886A0 / 0x2888F0; the port has no packages), 0x2B7CB0 (15: `endResults`) | | | |
 
 **From 7** (0x324DE8): every player's block points and kills are cleared. Then: the city done (`+0x18`) in a Timed
 Run: leave; the city done: 10; not a King mode: 9; a King of the City: 10; a King of the block: 9; nobody (a tie):
@@ -49,8 +49,18 @@ index + 1) and leave.
 **From 8** (0x3250B0): quit or select: leave (Timed Run's select starts over at block 0, otherwise the checkpoint is
 restored). Continue: each player gets one life which `cancelRespawn` spends at once, the clock resets, the checkpoint
 is restored (three lives each, its start block), the points are cleared, the block index becomes max(BlockStart,
-start block) − 1 (Timed Run: BlockStart − 1) and activateNextBlock makes it current; every monster gets full HP;
-state 4.
+start block) − 1 (Timed Run: BlockStart − 1) and activateNextBlock makes it current; every monster gets full HP
+(min(its most, 100000), 0x2DA510) and `setEnergy(0)` (0x325288 → 0x2E5730; a rage is not stopped); state 4.
+
+**Leaving** [R]: every leave (0x324740 and the ends above) makes the app's next package the shell's (+0xA8 =
+0x4D53F0), so main.c goes back to the shell on any `GE_EXIT` (a = 0 the menus, 1 King of the World's next city, whose
+index b becomes GameStatus' with start block 0, 2 the demo's end). The shell reads what the world left in gCommon:
+`isPlayerQuiting` (0x4D7E4D: the main menu), `isChooseMonster` (0x4D7E4E: MonsterSelect), `isCityDestroyed`
+(0x4D7E4C: CitySelect, or in King of the World with no King of the World straight to the next city's loading screen),
+`getKingOfWorld` (0x4D7E58) and the campaign won (0x4D7E4F: Shell::onInit 0x309500 clears it and plays the Victory
+movies, shell state 6); ControlRoom.scr picks the first interface in that order. The Pause menu's Quit
+(`restartShell`, state 12) sets none of them: the main menu by default. game.c `game_quitting`,
+`game_choose_monster`, `game_city_destroyed`, `game_king`, `game_world_done`; main.c fills ShellStart from them.
 
 **Each frame** (0x324340), in this order:
 1. Enter the state if it changed.

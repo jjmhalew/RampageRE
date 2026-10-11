@@ -229,12 +229,18 @@ in this clip, whether it is coming down from the top.
   just there: the front within 1.5 × the box's half-width (4.5) ahead, a side within 1.1 × (5.5 when mounted), the
   roof's edge within 4.5 behind the front edge at the roof's height; the nearest such point (storey by the monster's
   height) wins if the face goes on 11.5 above the monster, else −7. The place is then checked (0x2DDC40, the box
-  ± 4.1, 4.1, 4.5): −5 another building in the way (a neighbour flush with the side), −8 the building falling, −6 a
-  cell flagged 0x1000, −2 an attachment or object in the way, −3 another monster, −9 out of the camera's reach.
-  The objects of −2 are those flagged 0x40000 or 0x40 (the query mask 0x40040): a template's `Flags` with
-  `IsObstacle` sets 0x40000 (0x335ED0), as the electric side signs (`DefElectricSideSignProps`) have, so climbing
-  into one is `hitElectricSign` (−2) and the clip `React_Side_L_Zap`, whose `faceAnim` plays `Expression_Zap`. The
-  building's own adornments count when their `AdornmentFlags` has bit 2 (not 0x10).
+  ± 4.1, 4.1, 4.5) [R], in this order: −5 another building in the way (a neighbour flush with the side), −8 the
+  building falling, −6 a front cell the box covers flagged 0x1000 (0x2DDF60 .. 0x2DE0C4: the cell's u16 +0xE, from
+  the storey's `FloorFlags` list, 0x2CC0C0; every city's lists hold only 0 or 1 and no script sets a cell's flags to
+  it, so this never happens), −2 one of that building's adornments with `AdornmentFlags` bit 2 and not knocked off
+  (0x10) that the box reaches (0x2DE120: the adornment's box, its two corners through its matrix), then the objects
+  of the grid query (mask 0x40040) the box meets: one flagged 0x40 is a monster (−3: on a face by its mount point,
+  +0xC634, otherwise by its place, and that one only while this monster is off a face too; within 8.2 across and 9
+  up or down of the point), any other (flag 0x40000) an obstacle when its shape meets the box (0x2801A0: −2), −9 out
+  of the camera's reach (not asked of an AI, +0x108). A template's `Flags` with `IsObstacle` sets 0x40000 (0x335ED0),
+  as the electric side signs (`DefElectricSideSignProps`) have, so climbing into one is `hitElectricSign` (−2) and
+  the clip `React_Side_L_Zap`, whose `faceAnim` plays `Expression_Zap`. climb.c `place_ok` (the other monsters' grid
+  objects taken as their collision boxes [G]).
 - **Getting on**: `prepareToMount` takes the point canMount chose, `mountBuilding` mounts it (and
   `transitionToMount(t)` slides the monster onto it over t seconds, root motion still moving the start).
 - **On the face** (each frame in mode 5, 0x2D5870, after the root motion): the monster faces the wall (+y at the
@@ -291,17 +297,28 @@ events set the mode it is in), the attacks and the event records (0x2E7F70).
 
 The landing test [R] (the mode-1 case of 0x2E2770, 0x2E29A4 .. 0x2E2A9C; 0x2E2770 runs in the world's pass,
 0x2B6D20, after the monsters' own updates with their movement and box test): z is the monster's place (+0x34) after
-this frame's move, the ground 0x2E8530's (the roof, +0xD4, of the building 0x2D6150 finds under the body centre while
-its top is no more than 5 above the feet; else in a water its floor; else the street). More than 3 up, the body is
+this frame's move, the ground 0x2E8530's (the roof, +0xD4, of the building 0x2D6150 finds under the body centre: the
+last whose footprint holds it, 0x2A3D20, kept while its top, +0x1F0, is no more than 5 above the feet, none at 0 HP;
+else in a water its floor; else the street). The body centre (0x2E4D30) is the feet + MONSTER_DATA +0x1A0 plus the
+kept type-16 record's +0xC along the monster's x and +0x1A4 plus the record's +0x10 along its y (George: 2.5 ahead),
+times the dynamic scale. More than 3 up, the body is
 taken as 3 higher (the jump clips hold George's feet 2.5 … 4.4 above his place): it lands when z + 3 ≤ the ground,
 and is put at the ground − 3; at 3 or below, when z ≤ the ground, put on it. There is no velocity in the test, and
 no landing while that building's state (+0x14C) is 4 or more (cracking, shaking, falling, 0x2E2A2C): it falls on
-through. The matrix goes back with the new z (vtable +0x24), then 0x2DC450. The ground follow of modes 0 and 4
-(0x2E0330: 0.3 × ground + 0.7 × z a frame) lifts the 3 back over the next frames while the landing clip crouches, so
-the feet stay about on the roof. On the street the 3 never shows (z + 3 ≤ 0 cannot hold above 3). Here main.c
-`mon_step` (`ground_under`, the building looked for over the feet [G]; the box test of the landing frame sees the
-monster still in the air, as the game's did, `Mon.landed`; taking off, mode 2, keeps the port's old test [G]: the
-game has none in that mode, 0x2E2B28).
+through. The matrix goes back with the new z (vtable +0x24), then 0x2DC450.
+
+The movement by mode [R] (0x2DEBB0's switch, table 0x431290): modes 0, 2 and 4 the ground's (0x2DF6F0: the friction,
+then the ground follow 0x2E0330: z = 0.3 × ground + 0.7 × z a frame, the ground within 0.001), 1 the air's
+(0x2DEBD8: drag, gravity), 3 0x2DF300, 5 on a face (0x2E03A8). Taking off (mode 2, `Jump_Start_1` from 0.102 to the
+velocity event) is thus on the ground, and the world's pass has no landing test for it (0x2E2B28). Nothing in modes
+0, 2 and 4 makes the monster fall: +0xAD8 is written only by the clips' mode events (0x2E7DE4), their velocity events
+(0x2DB130 sets 1), a clip's start (0 at 0x2E8028) and the landing (4 at 0x2DC5DC). So the follow lifts the landing's
+3 back over the next frames while the landing clip crouches (the feet stay about on the roof; on the street the 3
+never shows: z + 3 ≤ 0 cannot hold above 3), lifts the monster onto a roof no more than 5 above it where its body
+centre goes over one, and eases it down onto a lower roof, or onto the street, where its body centre leaves one (off a
+free edge the box test's roof clamp, 0x2A49C0, holds the body centre on the roof). Here main.c `mon_step`
+(`ground_under`; the box test of the landing frame sees the monster still in the air, as the game's did,
+`Mon.landed`).
 
 Landing (0x2DC450) sets mode 4 and fires slot 56, or 57 when the ground's normal points against the monster's up
 axis: for George `Jump_Finish` by default, `Jump_Butt_Slam_impact` in the butt slam's column, `Jump_Fall_Finish2`
@@ -332,4 +349,6 @@ time (the new state's node +0x14) is set, with 1 / it (+0x4E58, +0x4E5C). Each f
 by dt × the monster's speed, and every bone of the new clip's pose goes towards the kept one by the share left
 (time left / blend time, so from 1 to 0 linearly): the translation by a lerp, the rotation (turned to the kept one's
 side first) by 0x104590. A start the game forces through a slot takes no transition (0x2EBF50 clears the runner's
-+0x8); which way it comes in is not traced.
++0x8); the slot's start (0x2C0DC0 .. 0x2C0E78) fills the request itself: the start list entry's state node, at 0
+(the entry's flag 8 would keep the phase: no monster's lists have it), its blend time, and blend mode 1 when that time
+is over 0.001, else 0 (a cut) [R].

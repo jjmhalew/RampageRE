@@ -18,13 +18,18 @@ static int standing(const Building *b)               /* states 1 .. 3 */
     return b->state == BUILDING_STANDING || b->state == BUILDING_FLOOR_FALLING;
 }
 
-/* 0x2DDC40: can the monster be at pt on building bi? The box pt +- (4.1, 4.1, 4.5) must not reach into another
- * building (-5), the building must not be falling (-8), nor into an obstacle object (-2: an electric side sign; the
- * game also counts the building's adornments flagged 2), and a player's place must be in the camera's reach (-9:
- * 0x336230, at most 70 high and 30 along x from the middle of the players). The game also asks the cells' flag
- * 0x1000 (-6) and other monsters (-3): none here. */
-static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
+/* 0x2DDC40 [R]: can the monster be at pt on building bi? The box pt +- (4.1, 4.1, 4.5) must not reach into another
+ * building (-5), the building must not be falling (-8), the cells of its front the box covers must not have flag
+ * 0x1000 (-6: 0x2DDF60 .. 0x2DE0C4; FloorFlags, 0x2CC0C0, holds only 0 or 1 in every city and no script sets it, so
+ * it never does), nor may the box reach an adornment of that building flagged 2 and not knocked off (-2: 0x2DE120,
+ * the adornment's box through its matrix, its two corners), then the objects in the grid (flags 0x40040): another
+ * monster (-3: object flag 0x40; one on a face counts by its mount point, one off a face by its place and only while
+ * this one is off a face too; within 8.2 across and 9 up and down of pt) or an obstacle (-2: an electric side sign),
+ * and a player's place must be in the camera's reach (-9: 0x336230, at most 70 high and 30 along x from the middle of
+ * the players; not asked of an AI, +0x108) */
+static int place_ok(const Scene *s, int bi, const float pt[3], const Climber *c)
 {
+    float focus_x = c->focus_x;
     float lo[3] = { pt[0] - 4.1f, pt[1] - 4.1f, pt[2] - 4.5f }, hi[3] = { pt[0] + 4.1f, pt[1] + 4.1f, pt[2] + 4.5f };
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         const Building *o = &s->buildings[i].b;
@@ -39,6 +44,31 @@ static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
     const Building *b = building_of(s, bi);
     if (!b || b->state == BUILDING_FALLING || b->state == BUILDING_GONE)
         return -8;
+    const SceneBuilding *sb = &s->buildings[bi];
+    for (int i = 0; i < sb->nadorn; i++) {
+        const Adornment *a = &sb->adorn[i];
+        if (!(a->flags & 2) || a->gone || a->inst < 0 || (uint32_t)a->inst >= s->ninstances)
+            continue;
+        const float *m = s->instances[a->inst].base.m;
+        float A[3], B[3];
+        for (int k = 0; k < 3; k++) {
+            A[k] = m[k] * a->lo[0] + m[4 + k] * a->lo[1] + m[8 + k] * a->lo[2] + m[12 + k];
+            B[k] = m[k] * a->hi[0] + m[4 + k] * a->hi[1] + m[8 + k] * a->hi[2] + m[12 + k];
+        }
+        if (lo[0] <= B[0] && lo[1] <= B[1] && lo[2] <= B[2] && !(hi[0] < A[0]) && !(hi[1] < A[1]) && !(hi[2] < A[2]))
+            return -2;
+    }
+    for (int i = 0; i < c->nother; i++) {
+        const float *op = c->other[i].pt, *olo = c->other[i].lo, *ohi = c->other[i].hi;
+        int overlap = 1;                             /* (the grid's query: its object meets the box) */
+        for (int k = 0; k < 3; k++)
+            overlap &= lo[k] < ohi[k] && hi[k] > olo[k];
+        if (!overlap || (c->mounted && !c->other[i].mounted))
+            continue;
+        float dx = op[0] - pt[0], dy = op[1] - pt[1];
+        if (dx * dx + dy * dy < 67.24f && op[2] - 4.5f <= pt[2] + 4.5f && op[2] + 4.5f >= pt[2] - 4.5f)
+            return -3;
+    }
     for (uint32_t i = 0; s->obstacles && i < s->nobstacles; i++) {
         const float *o = s->obstacles[i];
         int overlap = 1;
@@ -52,9 +82,9 @@ static int place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
     return 1;
 }
 
-int climb_place_ok(const Scene *s, int bi, const float pt[3], float focus_x)
+int climb_place_ok(const Scene *s, int bi, const float pt[3], const Climber *c)
 {
-    return place_ok(s, bi, pt, focus_x);
+    return place_ok(s, bi, pt, c);
 }
 
 /* 0x2DD710: on a side in a spider state, the building of its row across the 10-unit alley that side looks onto */
@@ -132,7 +162,7 @@ int climb_can_mount(Mount *m, const Scene *s, const Climber *c, int side, float 
     MountSpot spot;
     if (!find_spot(m, s, c, side, zoff, &spot))
         return -7;
-    int r = place_ok(s, spot.building, spot.pt, c->focus_x);
+    int r = place_ok(s, spot.building, spot.pt, c);
     if (r == 1) {
         m->cand = spot;
         m->have_cand = 1;
@@ -169,7 +199,7 @@ int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, in
         pt[0] += RAIL * (float)dh;
         if (m->from_top)
             pt[2] -= REACH;
-        int r = place_ok(s, m->at.building, pt, c->focus_x);
+        int r = place_ok(s, m->at.building, pt, c);
         if (r != 1)
             return r;
         return to == (dh < 0 ? 0 : b->width) || m->at.rail == (dh < 0 ? b->width : 0) ? 4 : 3;
@@ -178,18 +208,18 @@ int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, in
         float roof = spider ? top_of(m, s, b) : b->max[2];
         if (pt[2] + 4 <= roof) {
             pt[2] += 0.75f;
-            int r = place_ok(s, m->at.building, pt, c->focus_x);
+            int r = place_ok(s, m->at.building, pt, c);
             return r == 1 || r == -9 ? 2 : r;
         }
         float top[3] = { pt[0], pt[1] + 2.5f, roof + 7.5f };
-        int r = place_ok(s, m->at.building, top, c->focus_x);
+        int r = place_ok(s, m->at.building, top, c);
         return r == 1 ? 5 : r;
     }
     if (dv < 0) {                                    /* down: on climbing, or its feet are at the bottom: -1 */
         if (pt[2] - 7.5f <= b->min[2])
             return -1;
         pt[2] -= 0.75f;
-        int r = place_ok(s, m->at.building, pt, c->focus_x);
+        int r = place_ok(s, m->at.building, pt, c);
         return r == 1 || r == -9 || r == -5 ? 2 : r;
     }
     return 0;
@@ -237,7 +267,7 @@ int climb_can_transfer(Mount *m, const Scene *s, const Climber *c, int right)
     MountSpot spot;
     if (!m->mounted || !transfer_spot(m, s, right, &spot))
         return -7;
-    int r = place_ok(s, spot.building, spot.pt, c->focus_x);
+    int r = place_ok(s, spot.building, spot.pt, c);
     if (r == 1) {
         m->xfer = spot;
         m->have_xfer = 1;
@@ -376,7 +406,7 @@ int climb_check(Mount *m, const Scene *s, const Climber *c, int mode)
     if (!m->mounted || !b)
         return -1;
     m->at.storey = clampi((int)((c->pos[2] + 3) / 3), 0, b->n - 1 > 0 ? b->n - 1 : 0);
-    int r = place_ok(s, m->at.building, m->at.pt, c->focus_x);
+    int r = place_ok(s, m->at.building, m->at.pt, c);
     if (!c->in_water && (r == 1 || r == -9))         /* climbing down into a water: let go [R 0x2E1660] */
         return -1;
     return r == -8 ? 73 : 31;                        /* knocked off: the falling building's slot, or the plain one */

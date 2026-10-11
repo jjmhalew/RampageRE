@@ -291,7 +291,9 @@ static void steer_to(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float *
 static int walk_update(DirAI *ai, DirGoal *g, const DirGraph *ag, MoveRunner *r, const float pos[3], MoveCall call,
                        void *ctx)
 {
-    if (g->nwp <= 0) {                               /* no way point: over [G] */
+    if (g->nwp <= 0) {                               /* no way point: over (a guard: walkTo always puts its point in,
+                                                      * 0x2F20E0, and the game reads the current one unchecked,
+                                                      * 0x2F1F4C [R]) */
         if (g->notify)
             ai->done++;
         return 0;

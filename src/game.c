@@ -1113,11 +1113,15 @@ void game_start(Game *g)
     g->start_block = 0;                              /* a new city: the lives (0x33DB90 with no start block yet) */
     status_reset(g);
     g->start_block = keep;
-    if (g->cfg.play_type == GP_TIMED_RUN)
-        g->clock_limit = 0;                          /* [G] the run's time starts from nothing */
+    if (g->cfg.play_type == GP_TIMED_RUN)          /* the run's time starts from nothing [G: 0x4D7E48 is written
+                                                      * only at a block's win (0x3256A0) and is 0 at the boot (.bss);
+                                                      * no traced code clears it as a run starts, so a second run would
+                                                      * begin with the first's time left] */
+        g->clock_limit = 0;
     g->cur = (g->first > g->start_block ? g->first : g->start_block) - 1;   /* 0x2B74D0 */
     activate_next_block(g, 0);
-    checkpoint_save(g);                              /* [G] the checkpoint starts here */
+    checkpoint_save(g);                              /* the checkpoint starts here: the shell's startGame takes it
+                                                      * (0x3088F0 -> 0x33E290, the campaign's) before the world [R] */
     for (int i = 0; i < GAME_PLAYERS; i++)
         clear_points(&g->p[i]);
     set_state(g, GS_STARTING);                       /* 0x2B7D40: 1, then 4 */
@@ -1219,7 +1223,9 @@ void game_start_respawn(Game *g, int slot, const GameRespawnIn *in, GameRespawn 
         float t = fabsf(dy) > 1e-6f ? (STREET_Y - in->cam_pos[1]) / dy : 0;
         out->pos[0] = in->cam_pos[0] + dx * t;
         out->pos[1] = in->cam_pos[1] + dy * t;
-        /* z: where the vertical through that point meets a plane of the camera (its +0x7C, the view's top [G]) */
+        /* z: where the vertical through that point meets the camera's plane at +0x7C of its object (gp-0x6CFC
+         * +0x660), put through its matrix (0x102F60), 0 when the plane is all but vertical (|normal . up| <= 0.001)
+         * [R]; which plane that is is not traced: here the view's top [G] */
         float h = sqrtf(in->cam_dir[0] * in->cam_dir[0] + in->cam_dir[1] * in->cam_dir[1]);
         float pitch = atan2f(in->cam_dir[2], h > 1e-6f ? h : 1e-6f);
         float d = sqrtf((out->pos[0] - in->cam_pos[0]) * (out->pos[0] - in->cam_pos[0]) +
@@ -1278,6 +1284,9 @@ int game_king(const Game *g, int which)
     return which == 0 ? g->king_block : which == 1 ? g->king_city : g->king_world;
 }
 int game_city_destroyed(const Game *g) { return g ? g->city_destroyed : 0; }
+int game_quitting(const Game *g) { return g ? g->quit : 0; }
+int game_choose_monster(const Game *g) { return g ? g->select : 0; }
+int game_world_done(const Game *g) { return g ? g->world_done : 0; }
 int game_par_score(const Game *g) { return g ? g->par_score : 0; }
 uint32_t game_city_flags(const Game *g) { return g ? g->city_flags : 0; }
 

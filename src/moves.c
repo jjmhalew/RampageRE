@@ -82,8 +82,10 @@ int moves_read(const Bundle *b, MoveGraph *g)
                 ev->p[j] = rdf(d + o + 0x28 + 4 * j);
         } else {
             ev->value = rd32(d + o + 8);             /* 7: {7, at, mode} */
-            if ((ev->type == 15 || ev->type == 16) && o + 0x14 <= size)
-                ev->p[0] = rdf(d + o + 0x10);        /* 15, 16: the record's f32 +0x10 */
+            if ((ev->type == 15 || ev->type == 16) && o + 0x14 <= size) {
+                ev->p[0] = rdf(d + o + 0x10);        /* 15, 16: the record's f32 +0x10, and +0xC */
+                ev->p[1] = rdf(d + o + 0xC);
+            }
         }
     }
     /* slots: 74 start list indices at +0x4, then +0xA94 / +0xA98 columns of 74 overrides (-1 keep); start lists

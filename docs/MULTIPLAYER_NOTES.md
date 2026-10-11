@@ -196,6 +196,11 @@ pays +0x190 as well. Everything else (army, people, vehicles) goes through addSt
 - **game.c**: BeginBlockNI's GE_AI says `b = 1` for destroyBuildings.
 - **moves.c**: an attack event keeps its record's flags, victims and level for the monsters' fight.
 - **people.c**: `people_hit` takes the monster; its events say which monster they are about.
+- **climb.c**: the place check (0x2DDC40) counts the other monsters (−3) [R]: one on a face by its mount point
+  (+0xC634), one off a face by its place and only while the asking monster is off a face too, within 8.2 across and
+  9 up or down of the place; so two monsters on a face at one height stay two rails (10) apart. Their objects in the grid are
+  taken as their collision boxes [G]. A bot answers −2 or −3 at its mount point with a street punch (director.c,
+  frontPoint 0x2EF8F0).
 
 Stand-ins and gaps:
 - Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here

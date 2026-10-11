@@ -35,11 +35,18 @@ typedef struct {                                     /* what the climbing code a
     float probe[2];                                  /* MONSTER_DATA +0x1A0, +0x1A4: where it looks for a face */
     int in_water;                                    /* its box is in a water (0x2D5F00; on a face only in a climb
                                                         down): climb_check lets go (0x2E1660) */
+    int mounted;                                     /* its own +0xC644 */
+    struct {                                         /* the other monsters (0x2DDC40's grid objects flagged 0x40) */
+        float pt[3];                                 /* on a face its mount point (+0xC634), else its place */
+        float lo[3], hi[3];                          /* its box (its object in the grid) */
+        int mounted;                                 /* +0xC644 */
+    } other[4];
+    int nother;
 } Climber;
 
 int climb_can_mount(Mount *m, const Scene *s, const Climber *c, int side, float zoff);   /* 1 = yes, else -2 .. -9 */
 /* the check of a place on building bi (0x2DDC40): 1 fine, else -2 .. -9 (the bots' mount points) */
-int climb_place_ok(const Scene *s, int bi, const float pt[3], float focus_x);
+int climb_place_ok(const Scene *s, int bi, const float pt[3], const Climber *c);
 /* spider: canSpiderClimb, the top is the lower of the two buildings either side of the alley */
 int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, int dh, int spider);
 int climb_can_transfer(Mount *m, const Scene *s, const Climber *c, int right);   /* 1 = yes, else -7, -2 .. -9 */
