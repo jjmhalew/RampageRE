@@ -19,7 +19,7 @@ SRC="src/main.c src/shot.c src/render_gl.c src/city.c src/vol.c src/bundle.c src
      src/cloth.c src/sound.c src/army.c src/hud.c src/vehicle.c src/water.c src/edible.c src/game.c src/boss.c
      src/look.c src/shadow.c src/director.c src/footstep.c src/challenge.c src/reveal.c src/rail.c src/parade.c
      src/streetobj.c src/profile.c src/collide.c src/shell.c src/movie.c src/wrand.c src/texpack.c src/iso.c
-     src/plat_sdl.c src/pad_sdl.c src/settings.c src/postfx.c src/gtao.c"
+     src/plat_sdl.c src/pad_sdl.c src/settings.c src/postfx.c src/gtao.c src/autoplay.c"
 GL="-lGL"
 if [ "$GLES" = 1 ]; then SRC="$SRC src/gles/gles2.c"; GL="-Isrc/gles -fsigned-char -lGLESv2"; fi   # (char is unsigned on ARM)
 echo "Building $OUT ..."

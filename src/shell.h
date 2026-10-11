@@ -208,6 +208,19 @@ int shell_state(const Shell *s);
 /* the interface that has the pad: "AttractMode", "MainMenu", "MonsterSelect", "MonsterSheet", "CitySelect",
  * "Options", "MemoryCard" (the profile popup), "Loading", "Victory" */
 const char *shell_focus(const Shell *s);
+/* where the menus stand, for the viewer's autopilot (--autoplay; no game meaning): MainMenu's box (0 the play modes,
+ * 1 the players, 2 the bots, 4 the retro games, 5 the cheat entry), its play mode (2 .. 5) and the two lists'
+ * selections; MonsterSelect's players ready (bit n: player n) of ms_players; CitySelect's city (the campaign's order)
+ * and whether it is locked; the popup's panel (0 none, 1 the list, 2 the name entry, 3 a message) and message;
+ * AttractMode.scr's state */
+typedef struct {
+    int mm_state, mm_play_mode, mm_players, mm_bots;
+    int ms_ready, ms_players;
+    int cs_index, cs_locked;
+    int mc_mode, mc_msg;
+    int attract_state;
+} ShellAutoView;
+void shell_auto_view(const Shell *s, ShellAutoView *out);
 
 typedef struct {
     float x[4], y[4];               /* the corners in the reference screen: the picture's top-left, top-right,

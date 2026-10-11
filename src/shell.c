@@ -5372,6 +5372,25 @@ const char *shell_focus(const Shell *s)
     return s->focus >= 0 && s->focus < IF_COUNT ? IFC_NAMES[s->focus] : "";
 }
 
+void shell_auto_view(const Shell *s, ShellAutoView *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!s)
+        return;
+    out->mm_state = s->mm.state;
+    out->mm_play_mode = s->mm.play_mode;
+    out->mm_players = s->mm.lb_players ? s->mm.lb_players->sel : 0;
+    out->mm_bots = s->mm.lb_bots ? s->mm.lb_bots->sel : 0;
+    for (int i = 0; i < 4; i++)
+        out->ms_ready |= s->ms.pl[i].ready ? 1 << i : 0;
+    out->ms_players = s->ms.num_players;
+    out->cs_index = s->cs.index;
+    out->cs_locked = s->cs.locked;
+    out->mc_mode = s->mc.mode == MC_LIST ? 1 : s->mc.mode == MC_KEYBOARD ? 2 : s->mc.mode == MC_MESSAGE ? 3 : 0;
+    out->mc_msg = s->mc.msg;
+    out->attract_state = s->am.state;
+}
+
 /* the interfaces back to front: the ControlRoom's six in its layout's order, the profile popup over them (its own
  * screen), the loading screen over everything, or the Victory screen alone */
 static void emit_all(const Shell *s, Emit *e)

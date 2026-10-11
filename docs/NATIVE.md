@@ -105,7 +105,45 @@ what each block holds (models, people, vehicles, anything not found) and, in pla
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
 world). The fog is on (F toggles it, `--nofog` starts without). Texture packs: PNGs in `mods/textures/` replace the
 game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes
-([TEXTURES.md](TEXTURES.md)).
+([TEXTURES.md](TEXTURES.md)). `--cheat` takes several codes, comma separated (`--cheat 986960,071767`).
+
+### Autoplay (the playthrough test)
+```bat
+rampage.exe build\disc\RAMPAGE.VOL --shell --autoplay --shot out\end.png --mute          :: the campaign, front end to credits
+rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --autoplay --ap-cities 1 --shot out\c.png --mute   :: one city
+python tools\playthrough.py out                  :: the whole suite, in parallel, out\report.md (--suite ci: one city, 2 blocks)
+```
+`--autoplay` (with `--shot`: offscreen, simulated time, 60 frames a second, about 30 times real time) plays the game
+with nobody at the pad, to find what breaks; it is a test of the port, nothing of the game's. Every monster is the
+computer's (`DRIVE_COMPUTER`: the bots' DestroyBuildings goal, director.c, for players and bots alike; the game still
+counts them as players and bots as given), the results screens answer themselves (`hud_results_auto`, Continue on
+Game Over), the SaveGame popup's messages are taken, and the shell is driven by an autopilot (main.c
+`autopilot_shell`, a press every 0.4 s at most, reading the menus through `shell_auto_view`): the boot's notice, the
+main menu to the `--play` mode and the `--players` / `--bots` asked for (the PS2's boxes: 1 or 2 players), every
+card readied, the city select to `--ap-city` or the campaign's next city (the last one open and not destroyed), the
+Victory's movies and the credits played their length. Started in a city instead of `--shell`, the shell takes over
+when the city is left, as after a game it chose. It stops at the main menu after a game (the campaign's credits, a
+quit), at `--ap-cities N` games left, `--ap-blocks N` blocks ended, `--ap-demos N` demos (with `--shell`: no
+presses in the menus, the attract mode comes after its 120 s) or `--ap-minutes M` simulated minutes (600).
+`--ap-seed S` gives the world's seeds and the bots' (several seeds, several runs).
+
+The watchdog (src/autoplay.c) writes to `--ap-log FILE` (else the shot's name + `.log`), a line each, key=value:
+`BLOCK` per block ended (city, block, play type, its time, won / timeup / gameover / left, the points, lives, HP,
+states, the boss, the buildings standing, the objects' most, the memory), `EVENT` (the shell's screens, a game's
+start and end, a city or the world done), `PROBLEM` (a block never ending: its buildings felled to go on, `(forced)`;
+the same block lost three times running: its next try felled 30 s in; a results screen or a game state that never
+moves on, a shell screen standing for 5 minutes (15 with a movie); a monster's place not a number, a monster not
+moving for 90 s, outside the street, more than 4 under its ground or inside a standing building for 2 s, down at 0
+HP for 90 s; the live people or an object list past its bound; more than 3 GB, or 500 MB more after ten blocks),
+`CRASH` (the exception or signal and the last second's state) and `SUMMARY`. Screenshots go to `--ap-shots DIR`: one
+per problem (80 at most) and every fifth block's end. The exit code is 3 when it saw problems.
+
+`tools/playthrough.py OUT` runs the suite (the campaign from the front end per seed and with the cheats 986960 +
+071767, each city alone per seed, King of the City through the menus and with four players, King of the World, the
+Timed Run through the menus and alone, two and four players in the campaign, six demos), each run's files in OUT
+only (its log, console, screenshots, profile), and writes OUT\report.md and report.json: a table per run (how it
+ended, blocks won / ended, simulated minutes, wall seconds, peak memory, problems), each block, each problem, and
+the console's lines that look wrong ("not found", errors, `no ...`), counted.
 
 ### Windows builds
 `build.bat` (after WoodyRE's) builds, with Zig, from the same SRC list:
@@ -437,6 +475,7 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 | `src/settings.c` | the graphics settings: `rampage.cfg`, `RAMPAGE_*`, the flags, F5 .. F9 and F11 ("Graphics settings") |
 | `src/postfx.c`, `src/smaa/smaa.h` | MSAA and SMAA (WoodyRE's; `smaa.h` is SMAA by Jimenez et al., MIT) |
 | `src/gtao.c` | the ambient occlusion, GTAO (WoodyRE's) |
+| `src/autoplay.c`, `tools/playthrough.py` | `--autoplay`'s watchdog and log, and the suite that runs it ("Autoplay") |
 | `src/main.c` | the viewer: arguments, camera, keys; the monsters in play (`Mon`), their pads and their world |
 | `src/director.c` | the game flow's choreography: the AI's goals (playMove, walkTo, the bots' DestroyBuildings) and the camera modes (docs/FLOW_NOTES.md, MULTIPLAYER_NOTES.md) |
 

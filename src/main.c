@@ -52,6 +52,7 @@
 #include "iso.h"
 #include "settings.h"
 #include "wrand.h"
+#include "autoplay.h"
 #ifdef __ANDROID__
 #include "touch.h"                               /* the on-screen pad, player 1's pad slot */
 #endif
@@ -257,6 +258,11 @@ typedef struct Viewer {
     PadState pads[PAD_SLOTS], pads_prev[PAD_SLOTS];
     float pad_rep[PAD_SLOTS][4];
     int vibrate;                                     /* gCommon.setEnableRumble's answer: the pad's +0xC84 [R 0x1A5020] */
+    /* --autoplay (autoplay.h; a test, not the game's): every monster the computer's, the menus answered, the watchdog;
+     * simulated time ap_t; the autopilot's next press, the mode, players, bots and city (-1 the campaign's next) it
+     * goes for, the demos it waits for (no presses in the menus) */
+    Autoplay *ap; double ap_t; float ap_wait;
+    int ap_type, ap_players, ap_bots, ap_city, ap_demos;
 } Viewer;
 
 /* gCommon.getPlayType() of the game played: the demo's 0, else --play's or the shell's (unset: the campaign) */
@@ -5514,8 +5520,8 @@ static void setup_players(Viewer *v, int n, int bots, const int *monster)
         mo->slot = k;
         mo->monster = k < v->nmon ? monster[k] : -1;
         mo->bot = k < v->nmon && k >= v->nmon - v->num_bots;
-        mo->drive = mo->bot ? DRIVE_COMPUTER : k == 0 ? DRIVE_KEYS1 : k == 1 ? DRIVE_KEYS2 :
-                    v->pads_on >> k & 1 ? DRIVE_PAD : DRIVE_COMPUTER;
+        mo->drive = mo->bot || v->ap ? DRIVE_COMPUTER : k == 0 ? DRIVE_KEYS1 : k == 1 ? DRIVE_KEYS2 :
+                    v->pads_on >> k & 1 ? DRIVE_PAD : DRIVE_COMPUTER;   /* (--autoplay: all the computer's) */
         mo->mx = -17.0f * (float)(v->nmon - 1) / 2 + 17.0f * (float)k;
         mo->my = -18;
         mo->heading = 180;
@@ -5572,6 +5578,10 @@ static void shell_start_game(Viewer *v)
     v->shell = NULL;
     v->exit_game = 0;
     open_city(v, city, (uint32_t)(v->last_game.start_block > 0 ? v->last_game.start_block : 0));   /* (g is gone) */
+    const ShellGame *lg = &v->last_game;
+    ap_event(v->ap, "what=game_start city=%s type=%d players=%d bots=%d start_block=%d night=%d monsters=%s,%s,%s,%s",
+             CITIES[city], lg->play_type, lg->num_players, lg->num_bots, lg->start_block, lg->night, lg->monster_name[0],
+             n > 1 ? lg->monster_name[1] : "-", n > 2 ? lg->monster_name[2] : "-", n > 3 ? lg->monster_name[3] : "-");
 }
 
 /* the demo is over, the shell's again (0x308950): with the button's end its idle timer is 120 (0x324CC8), so the main
@@ -5815,6 +5825,156 @@ static const char *shell_script(Viewer *v, const char *script)
     return *p ? p : NULL;
 }
 
+/* ---- --autoplay (autoplay.h): the port's own test, a whole playthrough with nobody at the pad */
+
+/* the shell's pad for the player, one press every 0.4 s at most: the boot's notice and the popup's messages taken
+ * (a new profile's name typed), the main menu to the mode, players and bots asked for, every monster card readied,
+ * the city select to the city asked for or the campaign's next one (the last one open that is not destroyed), the
+ * screens it has no business on left with Back; nothing while the loading screen or the Victory's movies play, and
+ * nothing in the menus while it waits for the demos (the attract mode comes after 120 s) */
+static void autopilot_shell(Viewer *v, float dt)
+{
+    if ((v->ap_wait -= dt) > 0)
+        return;
+    v->ap_wait = 0.4f;
+    ShellAutoView sv;
+    shell_auto_view(v->shell, &sv);
+    const char *f = shell_focus(v->shell);
+    int ev = 0, pad = 0;
+    if (!strcmp(f, "MemoryCard")) {
+        if (sv.mc_mode == 2) {                       /* the name entry: a name, DONE */
+            for (const char *c = "AUTOPLAY"; *c; c++)
+                shell_type(v->shell, *c);
+            shell_type(v->shell, '\r');
+            return;
+        }
+        ev = HUD_EV_ACCEPT;
+    } else if (!strcmp(f, "AttractMode"))
+        ev = v->ap_demos ? 0 : HUD_EV_ACCEPT;
+    else if (!strcmp(f, "MainMenu")) {
+        int want = v->ap_type ? v->ap_type : GP_CAMPAIGN, np = v->ap_players < 1 ? 1 : v->ap_players > 2 ? 2 :
+                   v->ap_players;                    /* (the PS2's boxes offer 1 or 2) */
+        if (v->ap_demos)
+            ev = 0;
+        else if (sv.mm_state == 0)
+            ev = sv.mm_play_mode != want ? HUD_EV_RIGHT : HUD_EV_ACCEPT;
+        else if (sv.mm_state == 1)
+            ev = sv.mm_players < np - 1 ? HUD_EV_DOWN : sv.mm_players > np - 1 ? HUD_EV_UP : HUD_EV_ACCEPT;
+        else if (sv.mm_state == 2)
+            ev = sv.mm_bots < v->ap_bots ? HUD_EV_DOWN : sv.mm_bots > v->ap_bots ? HUD_EV_UP : HUD_EV_ACCEPT;
+        else
+            ev = HUD_EV_BACK;
+    } else if (!strcmp(f, "MonsterSelect")) {
+        ev = HUD_EV_ACCEPT;
+        int humans = v->shell ? shell_game(v->shell)->num_players - shell_game(v->shell)->num_bots : 1;
+        for (int k = 0; k < sv.ms_players && k < 4; k++)
+            if (!(sv.ms_ready >> k & 1)) {
+                pad = k < humans ? k : 0;            /* (the bots' cards: player 1's pad) */
+                break;
+            }
+    } else if (!strcmp(f, "CitySelect")) {
+        int target = v->ap_city;
+        if (target < 0) {                            /* the campaign's next city */
+            for (int i = 0; i < 7; i++) {
+                int fl = profile_city_flags(&v->prof, i);
+                if ((fl & 0x80) && (target < 0 || !(fl & 1)))
+                    target = i;
+            }
+            if (target < 0)
+                target = 0;
+        }
+        ev = sv.cs_index < target ? HUD_EV_RIGHT : sv.cs_index > target ? HUD_EV_LEFT : sv.cs_locked ? HUD_EV_BACK :
+             HUD_EV_ACCEPT;
+    } else if (!strcmp(f, "MonsterSheet") || !strcmp(f, "Options"))
+        ev = HUD_EV_BACK;
+    if (ev)
+        shell_input_pad(v->shell, ev, 0, pad);
+}
+
+/* the frame for the watchdog, and what it asks: a block that never ends felled (and its boss beaten), a results
+ * screen answered, the shell's screen left with Back; the popup over the game's screens answered */
+static int autoplay_watch(Viewer *v)
+{
+    static ApFrame f;
+    memset(&f, 0, sizeof f);
+    f.t = v->ap_t;
+    f.in_game = v->shell == NULL;
+    if (v->shell) {
+        f.focus = shell_focus(v->shell);
+        f.shell_state = shell_state(v->shell);
+        f.movie = shell_movie_clock(v->shell) >= 0;
+    } else {
+        const char *bn = NULL;
+        f.state = game_state(v->game);
+        f.play_type = play_type(v);
+        f.city = CITIES[v->city_index];
+        f.block_index = game_block(v->game, &bn);
+        f.block = bn;
+        f.results = v->hud && hud_results_showing(v->hud);
+        f.clock = game_clock(v->game, NULL);
+        f.city_score = game_city_total(v->game);
+        f.nmon = v->nmon < AP_MONSTERS ? v->nmon : AP_MONSTERS;
+        for (int k = 0; k < f.nmon; k++) {
+            Mon *mo = &v->mon[k];
+            ApMonster *m = &f.mon[k];
+            m->pos[0] = mo->mx; m->pos[1] = mo->my; m->pos[2] = mo->mz;
+            m->hp = mo->hp;
+            m->lives = game_lives(v->game, k);
+            m->state = mo->have_graph ? mo->graph.states[mo->run.state].name : NULL;
+            m->mounted = mo->mount.mounted;
+            m->ground = mo->have_graph && mon_in(mo) ? ground_at(mo) : 0;
+            m->out = mo->human || mo->dropping || mo->defeated || !mon_in(mo) || mon_in(mo)->hidden;
+            f.points[k] = game_points(v->game, k, GPT_TOTAL);
+        }
+        if (v->boss_block && v->boss) {
+            const BossPart *bp = boss_part(v->boss, boss_main(v->boss));
+            f.boss = bp && bp->alive && !boss_defeated(v->boss) ? 1 : 2;
+            f.boss_hp = bp ? bp->hp_frac : 0;
+        }
+        f.nbuildings = (int)v->scene.nbuildings;
+        for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+            const Building *b = &v->scene.buildings[i].b;
+            int up = b->state == BUILDING_STANDING || b->state == BUILDING_FLOOR_FALLING;
+            f.standing += up;
+            if (i < AP_BUILDINGS) {
+                memcpy(f.b[i].min, b->min, sizeof f.b[i].min);
+                memcpy(f.b[i].max, b->max, sizeof f.b[i].max);
+                f.b[i].standing = up;
+            }
+        }
+        for (int i = 0; v->scene.folk && i < people_count(v->scene.folk); i++)   /* the live ones */
+            f.people += people_get(v->scene.folk, i)->phase != PP_GONE;
+        f.vehicles = v->veh ? vehicle_count(v->veh) : 0;
+        f.army = v->army ? army_count(v->army) : 0;
+        f.particles = v->fxw ? fx_particles(v->fxw) : 0;
+        f.street = v->sobj ? streetobj_count(v->sobj) : 0;
+        f.parade = v->parade ? parade_count(v->parade) : 0;
+        f.rail = v->rail ? rail_count(v->rail) : 0;
+        f.edibles = v->edibles ? edible_count(v->edibles) : 0;
+        if (v->popup && shell_popup_active(v->popup) && (v->ap_wait -= 1.0f / 60) <= 0) {
+            v->ap_wait = 0.5f;                       /* the SaveGame popup over the screens: its messages taken */
+            shell_input(v->popup, HUD_EV_ACCEPT, 0);
+        }
+    }
+    int r = ap_frame(v->ap, &f);
+    if ((r & AP_FORCE_BLOCK) && !v->shell) {
+        for (uint32_t i = 0; i < v->scene.nbuildings; i++)
+            if (v->scene.buildings[i].b.state == BUILDING_STANDING)
+                building_destroy(&v->scene.buildings[i].b);
+        const BossPart *bp = v->boss ? boss_part(v->boss, boss_main(v->boss)) : NULL;
+        if (bp && bp->alive)
+            boss_hit(v->boss, 0, bp->pos, 1, 1e6f, 0x7F000000u);
+    }
+    if ((r & AP_FORCE_RESULT) && v->game) {
+        if (v->hud)
+            hud_input(v->hud, HUD_EV_ACCEPT, 0);
+        game_set_result(v->game, game_state(v->game) == GS_GAME_OVER ? GR_CONTINUE : GR_DONE);
+    }
+    if ((r & AP_FORCE_SHELL) && v->shell)
+        shell_input(v->shell, HUD_EV_BACK, 0);
+    return r;
+}
+
 /* a player's pad from the keys. Player 1: W A S D / the left stick, the arrows the right stick, Space Cross (jump), J
  * Square (punch), K Triangle (kick), L Circle (grab), R R2 (roar). Player 2: the numeric keypad (Num Lock on): 8 4 2
  * 6 (or 5) the left stick, 0 Cross, 7 Square, 9 Triangle, 1 Circle, 3 R2, / and * the right stick left and right */
@@ -5927,6 +6087,11 @@ static int viewer_main(int argc, char **argv)
     double shot_time = 0;
     const char *script = NULL;
     char walk_script[48];
+    int autoplay = 0;                                /* --autoplay and its --ap-* (autoplay.h) */
+    const char *ap_log = NULL, *ap_shots = NULL, *ap_city = NULL;
+    ApLimits ap_lim;
+    memset(&ap_lim, 0, sizeof ap_lim);
+    uint32_t ap_seed = 0;
     Settings gfx, gfx_flags;                         /* the graphics settings (settings.h), the flags among them */
     settings_unset(&gfx_flags);
 #ifdef __SWITCH__
@@ -5983,6 +6148,17 @@ static int viewer_main(int argc, char **argv)
                 view[k] = (float)atof(argv[++i]);
             have_view = 1;
         }
+        else if (strcmp(argv[i], "--autoplay") == 0) autoplay = 1;   /* the playthrough test (docs/NATIVE.md) */
+        else if (strcmp(argv[i], "--ap-log") == 0 && i + 1 < argc) ap_log = argv[++i];
+        else if (strcmp(argv[i], "--ap-shots") == 0 && i + 1 < argc) ap_shots = argv[++i];
+        else if (strcmp(argv[i], "--ap-minutes") == 0 && i + 1 < argc) ap_lim.minutes = atof(argv[++i]);
+        else if (strcmp(argv[i], "--ap-blocks") == 0 && i + 1 < argc) ap_lim.blocks = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--ap-cities") == 0 && i + 1 < argc) ap_lim.cities = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--ap-demos") == 0 && i + 1 < argc) ap_lim.demos = v.ap_demos = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--ap-stuck") == 0 && i + 1 < argc) ap_lim.stuck = atof(argv[++i]);
+        else if (strcmp(argv[i], "--ap-block-time") == 0 && i + 1 < argc) ap_lim.block = atof(argv[++i]);
+        else if (strcmp(argv[i], "--ap-city") == 0 && i + 1 < argc) ap_city = argv[++i];
+        else if (strcmp(argv[i], "--ap-seed") == 0 && i + 1 < argc) ap_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (settings_arg(&gfx_flags, argc, argv, &i)) { }   /* --ao --smaa N --msaa N --aniso N --mips ... */
         else if (npos < 3) pos[npos++] = argv[i];
     }
@@ -6120,22 +6296,58 @@ static int viewer_main(int argc, char **argv)
         profile_init(&v.prof);
     }
     profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
-    if (cheat && !profile_cheat_code(&v.prof, cheat))
-        printf("no cheat %s\n", cheat);
+    for (const char *c = cheat; c && *c; c += c[6] == ',' ? 7 : 6) {   /* "986960,071767": several */
+        char code[7];
+        snprintf(code, sizeof code, "%s", c);
+        if (!profile_cheat_code(&v.prof, code))
+            printf("no cheat %s\n", code);
+        if (strlen(c) <= 6)
+            break;
+    }
     v.vibrate = profile_set_rumble(&v.prof, profile_rumble(&v.prof), 0);   /* the pads vibrate as the profile says [G] */
     v.sfx_vol = profile_sound_volume(&v.prof) / 0.75f;
     v.music_vol = v.music_now = profile_music_volume(&v.prof) / 0.75f;
     sound_settings(v.sfx_vol * 0.75f, v.music_now * 0.75f, 0);
     v.nmonsters = monster_names(&v.vol, v.monsters, 64);
     v.clip = clip;
+    if (autoplay) {                                  /* --autoplay: offscreen alone, in simulated time */
+        char lp[1024], what[1024] = "";
+        if (!shot) {
+            plat_message("--autoplay runs with --shot (no window).", 1);
+            return 1;
+        }
+        snprintf(lp, sizeof lp, "%s.log", shot);
+        for (int i = 1; i < argc; i++)
+            snprintf(what + strlen(what), sizeof what - strlen(what), "%s%s", i > 1 ? " " : "", argv[i]);
+        ap_lim.stop_at_menu = !ap_lim.demos;         /* back at the main menu after a game: over */
+        v.ap = ap_open(ap_log ? ap_log : lp, ap_shots, &ap_lim, what);
+        if (!v.ap) {
+            plat_message("--autoplay: cannot write its log.", 1);
+            return 1;
+        }
+        v.ap_type = v.play_type;
+        v.ap_players = players;
+        v.ap_bots = bots;
+        v.ap_city = ap_city ? campaign_index(ap_city) : v.play_type && v.play_type != GP_CAMPAIGN && !v.shell_mode ?
+                    campaign_index(CITIES[city]) : -1;
+        if (ap_seed) {                               /* the world's seeds, gShell's state they are drawn from, the bots' */
+            uint32_t s = ap_seed;
+            v.world_rng = v.bot_seed = ap_seed;
+            for (int k = 0; k < 2; k++)
+                do
+                    v.prof.current.seed[k] = wrand_pm_next(&s) >> 8 & 0xFFFF;
+                while (!v.prof.current.seed[k]);
+        }
+    }
     {                                                /* --players N (1 .. 4, --bots B of them the computer's) */
         static const char *const OTHERS[] = { "George", "Lizzie", "Ralph", "Boosy" };   /* the ones not named */
         int pick[MONSTERS];
         players = players < 1 ? 1 : players > MONSTERS ? MONSTERS : players;
         for (int k = 0; k < players; k++) {
             pick[k] = monster_index(&v, monster[k]);
-            for (int j = 0; (k || players > 1) && pick[k] < 0 && j < 4; j++) {   /* one of the classic three (and
-                                                      * Boosy) not taken yet; alone without --monster: none */
+            for (int j = 0; (k || players > 1 || autoplay) && pick[k] < 0 && j < 4; j++) {   /* one of the classic
+                                                      * three (and Boosy) not taken yet; alone without --monster: none
+                                                      * (--autoplay: George) */
                 int c = monster_index(&v, OTHERS[j]), taken = 0;
                 for (int q = 0; q < k; q++)
                     taken |= pick[q] == c;
@@ -6166,6 +6378,22 @@ static int viewer_main(int argc, char **argv)
     } else if (open_city(&v, city, block) != 0) {
         plat_message("The city's bundles are not in RAMPAGE.VOL.", 1);
         return 1;
+    } else if (v.ap) {                               /* --autoplay straight into a city: the shell takes over after it,
+                                                      * with this game as the one it chose */
+        ShellGame *g = &v.last_game;
+        g->play_type = play_type(&v);
+        g->num_players = v.nmon;
+        g->num_bots = v.num_bots;
+        for (int k = 0; k < v.nmon && k < 4; k++) {
+            int r = reveal_roster_find(&v.roster, v.monsters[v.mon[k].monster]);   /* MonsterData's index */
+            g->monster[k] = r >= 0 ? r : 0;
+            snprintf(g->monster_name[k], sizeof g->monster_name[k], "%s", v.monsters[v.mon[k].monster]);
+        }
+        g->city_index = campaign_index(CITIES[city]);
+        snprintf(g->city, sizeof g->city, "%s", CITIES[city]);
+        g->start_block = (int)block;
+        g->night = night;
+        v.kept.idle = SHELL_IDLE_SECONDS;            /* (no shell before it: not the attract mode after it) */
     }
     for (uint32_t i = 0; getenv("RAMPAGE_TRACE") && i < v.scene.nbuildings; i++) {
         const Building *b = &v.scene.buildings[i].b;
@@ -6188,6 +6416,12 @@ static int viewer_main(int argc, char **argv)
         double now = win_time();
         float dt = (float)(now - last);
         last = now;
+        int apf = 0;                                 /* --autoplay: the watchdog's asks this frame */
+        if (v.ap) {                                  /* simulated time, 60 frames a second */
+            dt = 1.0f / 60;
+            v.ap_t += dt;
+            now = start + v.ap_t;
+        }
         if (v.pads_live) {                           /* this frame's controllers, the vibration on them */
             memcpy(v.pads_prev, v.pads, sizeof v.pads);
             v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
@@ -6210,7 +6444,12 @@ static int viewer_main(int argc, char **argv)
                 shell_start_game(&v);
                 continue;
             }
-            if (!shot)
+            if (v.ap) {                              /* the autopilot's press, the shell's frame, the watchdog */
+                autopilot_shell(&v, dt);
+                shell_frame(&v, &w, dt);
+                if (!((apf = autoplay_watch(&v)) & (AP_SHOT | AP_STOP)))
+                    continue;                        /* nothing to draw */
+            } else if (!shot)
                 shell_frame(&v, &w, dt > 0.1f ? 0.1f : dt);
             static HudQuad sq[4096];
             v.shell_scene->hud = sq;
@@ -6220,8 +6459,13 @@ static int viewer_main(int argc, char **argv)
             sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
             rnd_frame(v.rnd, &w, &none, now - start, 0);
             if (shot) {
-                int ok = shot_png(shot, w.width, w.height) == 0;
-                printf(ok ? "wrote %s\n" : "cannot write %s\n", shot);
+                const char *to = apf & AP_STOP ? shot : v.ap ? ap_shot_path(v.ap) : shot;
+                int ok = shot_png(to, w.width, w.height) == 0;
+                printf(ok ? "wrote %s\n" : "cannot write %s\n", to);
+                if (v.ap && !(apf & AP_STOP)) {
+                    ap_shot_done(v.ap, ok);
+                    continue;
+                }
                 break;
             }
             win_swap(&w);
@@ -6280,8 +6524,9 @@ static int viewer_main(int argc, char **argv)
             attract_press(&v);
         if (v.exit_game) {                           /* back to the shell (--shell), or the viewer ends */
             v.exit_game = 0;
-            if (v.shell_mode) {
+            if (v.shell_mode || v.ap) {              /* (--autoplay: the shell goes on after a city) */
                 ShellStart st = v.kept;              /* gShell's idle timer, attract state, demo byte */
+                ap_game_left(v.ap, v.attract);
                 st.from = SHELL_FROM_GAME;           /* and the flags the world left in gCommon [R] (no game: the
                                                       * main menu) */
                 st.quit = v.game ? game_quitting(v.game) : 1;
@@ -6345,7 +6590,8 @@ static int viewer_main(int argc, char **argv)
         if (playing) {
             float aspect = w.width ? (float)w.height / w.width : 0.75f;
             if (shot && !settled) {                     /* a shot: the camera settles, then the script */
-                play_script(&v, "wait 2", aspect);
+                if (!v.ap)                           /* (--autoplay: its words first, then it plays on) */
+                    play_script(&v, "wait 2", aspect);
                 if (script)
                     script = play_script(&v, script, aspect);
             }
@@ -6359,8 +6605,8 @@ static int viewer_main(int argc, char **argv)
                     if (v.pads_live && k < PAD_SLOTS && (v.pads_on >> k & 1))
                         pad_to_pad(&v.pads[k], &v.pads_prev[k], &v.mon[k].pad);
                 }
-            play_step(&v, shot ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
-            pose_monsters(&v, shot ? shot_time : now - start);   /* the clips at the states' times (clip_at) */
+            play_step(&v, shot && !v.ap ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
+            pose_monsters(&v, shot && !v.ap ? shot_time : now - start);   /* the clips at the states' times (clip_at) */
             memcpy(cam.pos, v.view.pos, sizeof cam.pos);
             cam_shaken(v.view.pos, (const float (*)[3])v.view.rows, v.shakes, 8 + MONSTERS - 1, cam.rows);   /* after the
                                                       * smoothing */
@@ -6391,7 +6637,7 @@ static int viewer_main(int argc, char **argv)
             if (w.keys['E']) cam.pos[2] += step;
             if (w.keys['Q']) cam.pos[2] -= step;
         }
-        double t = shot ? shot_time : now - start;
+        double t = shot && !v.ap ? shot_time : now - start;
         sound_listener(cam.pos, (const float (*)[3])cam.rows);   /* the camera (its rows when it is the game's) */
         sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
         if (v.have_scene) {
@@ -6401,6 +6647,8 @@ static int viewer_main(int argc, char **argv)
             else
                 v.scene.nspheres = 0;
         }
+        if (v.ap && !v.shell && !((apf = autoplay_watch(&v)) & (AP_SHOT | AP_STOP)))
+            continue;                                /* --autoplay: nothing to draw */
         {                                            /* this frame's particles */
             static FxQuad quads[8192];
             v.scene.fx = quads;
@@ -6451,8 +6699,13 @@ static int viewer_main(int argc, char **argv)
                 printf("camera at %.2f %.2f %.2f, forward %.3f %.3f %.3f, up %.3f %.3f %.3f, tilt %.3f, state %d\n",
                        cam.pos[0], cam.pos[1], cam.pos[2], cam.rows[1][0], cam.rows[1][1], cam.rows[1][2],
                        cam.rows[2][0], cam.rows[2][1], cam.rows[2][2], v.cam.tilt, v.cam.state);
-            int ok = shot_png(shot, w.width, w.height) == 0;
-            printf(ok ? "wrote %s\n" : "cannot write %s\n", shot);
+            const char *to = apf & AP_STOP ? shot : v.ap ? ap_shot_path(v.ap) : shot;
+            int ok = shot_png(to, w.width, w.height) == 0;
+            printf(ok ? "wrote %s\n" : "cannot write %s\n", to);
+            if (v.ap && !(apf & AP_STOP)) {
+                ap_shot_done(v.ap, ok);
+                continue;
+            }
             break;
         }
         if (w.pressed[VK_F12]) {
@@ -6493,7 +6746,7 @@ static int viewer_main(int argc, char **argv)
     sound_end();
     sound_free();
     win_close(&w);
-    return 0;
+    return v.ap ? ap_close(v.ap, NULL) : 0;          /* --autoplay: 3 when it saw problems */
 }
 
 int main(int argc, char **argv)                      /* (Android: SDL_main, android/app/CMakeLists.txt) */

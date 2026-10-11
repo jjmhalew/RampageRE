@@ -22,7 +22,7 @@ add_library(main SHARED
     ${S}/cloth.c ${S}/sound.c ${S}/army.c ${S}/hud.c ${S}/vehicle.c ${S}/water.c ${S}/edible.c ${S}/game.c ${S}/boss.c
     ${S}/look.c ${S}/shadow.c ${S}/director.c ${S}/footstep.c ${S}/challenge.c ${S}/reveal.c ${S}/rail.c ${S}/parade.c
     ${S}/streetobj.c ${S}/profile.c ${S}/collide.c ${S}/shell.c ${S}/movie.c ${S}/wrand.c ${S}/texpack.c ${S}/iso.c
-    ${S}/plat_sdl.c ${S}/pad_sdl.c ${S}/settings.c ${S}/postfx.c ${S}/gtao.c
+    ${S}/plat_sdl.c ${S}/pad_sdl.c ${S}/settings.c ${S}/postfx.c ${S}/gtao.c ${S}/autoplay.c
     ${S}/gles/gles2.c ${S}/android.c ${S}/touch.c)
 target_include_directories(main PRIVATE ${S}/gles ${S})
 # char is unsigned on ARM; the viewer is written for x86, where it is signed (as GLES=1 build.sh)

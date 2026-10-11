@@ -21,7 +21,7 @@ SRC="src/main.c src/shot.c src/render_gl.c src/city.c src/vol.c src/bundle.c src
      src/cloth.c src/sound.c src/army.c src/hud.c src/vehicle.c src/water.c src/edible.c src/game.c src/boss.c
      src/look.c src/shadow.c src/director.c src/footstep.c src/challenge.c src/reveal.c src/rail.c src/parade.c
      src/streetobj.c src/profile.c src/collide.c src/shell.c src/movie.c src/wrand.c src/texpack.c src/iso.c
-     src/plat_sdl.c src/pad_sdl.c src/settings.c src/postfx.c src/gtao.c src/gles/gles2.c"
+     src/plat_sdl.c src/pad_sdl.c src/settings.c src/postfx.c src/gtao.c src/autoplay.c src/gles/gles2.c"
 ARCH="-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
 # src/gles first on the include path: its GL/gl.h puts the renderer's fixed-function OpenGL on OpenGL ES 3.0 / 2.0;
 # char is unsigned on ARM, the viewer (like the game's data) takes it as signed, as on x86
