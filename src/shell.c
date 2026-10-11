@@ -2029,6 +2029,7 @@ struct Shell {
     MemCard mc;
     Loading ld;
     Victory vi;
+    int popup;                                           /* shell_open_popup's: the game's SaveGame popup alone */
     ShellEvent ev[MAX_EVENTS];
     int nev;
     ShellQuad *quads;
@@ -5179,6 +5180,7 @@ Shell *shell_open_popup(const Vol *vol, const Bundle *common, const ShellProfile
     s->gui.lang = s->prof.language;
     s->cheats = s->prof.cheats;
     s->state = 3;                                        /* (the game's: no shell runs) */
+    s->popup = 1;
     s->boot_completed = 1;
     s->show_profile = !s->prof.profile_shown;
     s->cheat_param_block = s->cheat_param_video = -1;
@@ -5209,6 +5211,7 @@ void shell_card_result(Shell *s, int status)
 
 int shell_popup_active(const Shell *s) { return s && s->mc.mode != MC_OFF; }
 int shell_popup_shown(const Shell *s) { return s && (s->mc.mode != MC_OFF || s->mc.closing); }
+float shell_popup_fade(const Shell *s) { return s && s->mc.L ? get_fade(s->mc.L->root) : 0; }
 
 int shell_profile_shown(const Shell *s) { return s && !s->show_profile; }
 
@@ -5308,11 +5311,125 @@ int shell_type(Shell *s, int ch)
     return 0;
 }
 
+/* ---------------------------------------------------------------- the soak test (cheat 082864, flag 0x10000) [R]
+ * 0x308710 holds the idle timer at 120 and calls 0x307920 each frame while the flag is set: every sixth frame (the
+ * countdown gp-0x71BC from 5, .data) a press on the interface on top: the first active popup (GuiManager +0x3C4,
+ * 0x22F6F0 / 0x22F680), else the screen's focused interface (+0x238 -> +0x24), given through 0x22FE30 (the popup's
+ * input, else the screen's: GuiEvent(type, pad, button)); none while its fade (+0x5C) is below 1. The world's half is
+ * hud.c's hud_soak. With it, a 2-player campaign of the computer's (the world makes every player a bot, 0x2B7DC0)
+ * plays itself through the screens, each game the next pair of monsters. Its globals outlive the shell, as here */
+static int soak_wait = 5, soak_new = 1, soak_first_pass = 1, soak_pick[2];   /* gp-0x71BC, -0x71B8, -0x71B4 (.data);
+                                                                              * -0x6CB8, -0x6CB4 */
+
+/* 0x307C18 .. 0x307D30: the next pair of the roster (0x4D79A8 n monsters): first (0, n / 2), (1, n / 2 + 1) .. up to
+ * the end, then every pair with p1 above p0 in order, then every one with p1 below, round again */
+static void soak_next_pair(int n)
+{
+    int *p0 = &soak_pick[0], *p1 = &soak_pick[1];
+    if (soak_first_pass) {
+        if (*p1 == 0)
+            *p1 = n / 2;
+        else if (++*p0, ++*p1 >= n) {
+            soak_first_pass = 0;
+            *p1 = 1;
+            *p0 = 0;
+        }
+    } else if (*p1 >= *p0) {
+        if (++*p1 >= n) {
+            *p1 = ++*p0 + 1;
+            if (*p0 >= n - 1) {
+                *p1 = 0;
+                *p0 = 1;
+            }
+        }
+    } else if (++*p0 >= n) {
+        *p0 = ++*p1 + 1;
+        if (*p1 >= n - 1) {
+            *p0 = 0;
+            *p1 = 1;
+        }
+    }
+}
+
+static void soak_press(Shell *s, int ev, int pad)       /* 0x22FE30(gGui, 0, pad, ev, 0) */
+{
+    shell_input_pad(s, ev, 0, pad);                      /* (the popup's input while it is up) */
+}
+
+static void soak(Shell *s)
+{
+    s->idle = IDLE_SECONDS;                              /* [R 0x30873C] */
+    if (soak_wait-- != 0)
+        return;
+    soak_wait = 5;
+    const char *name;
+    Node *root;
+    if (s->mc.mode != MC_OFF) {
+        name = "MemoryCard";
+        root = s->mc.L ? s->mc.L->root : NULL;
+    } else {
+        /* [G: the loading and Victory screens taken as interfaces of other names: Accept, which the loading screen
+         * ignores and which ends a Victory movie] */
+        name = s->ld.on ? "Loading" : s->vi.on ? "Victory" : s->focus >= 0 && s->focus < IF_COUNT ? IFC_NAMES[s->focus] :
+               "";
+        root = s->ld.on ? (s->ld.L ? s->ld.L->root : NULL) : s->vi.on ? (s->vi.L ? s->vi.L->root : NULL) :
+               ifc_root(s, s->focus);
+    }
+    if (get_fade(root) < 1.0f)
+        return;
+    MainMenu *m = &s->mm;
+    if (!strcmp(name, "AttractMode"))
+        soak_press(s, EV_START, 0);
+    else if (!strcmp(name, "MemoryCard"))
+        soak_press(s, EV_BACK, 0);
+    else if (!strcmp(name, "MainMenu")) {               /* the campaign, 2 players, no bots; every monster */
+        set_cheats(s, s->cheats | 1);                    /* (0x4D7E68 |= 1, written straight) */
+        Node *np = find(root, "NumPlayers"), *nb = find(root, "NumBots"), *camp = find(root, "campaign");
+        if (get_fade(np) > 0) {
+            if (get_fade(np) >= 1.0f) {
+                int sel = m->lb_players ? m->lb_players->sel : 0;   /* np_selection +0x6C */
+                soak_press(s, sel <= 0 ? EV_DOWN : sel >= 2 ? EV_UP : EV_ACCEPT, 0);
+            }
+        } else if (get_fade(nb) > 0) {
+            if (get_fade(nb) >= 1.0f)
+                soak_press(s, (m->lb_bots ? m->lb_bots->sel : 0) > 0 ? EV_UP : EV_ACCEPT, 0);
+        } else                                           /* the campaign's icon red (its colour's G below its R,
+                                                          * +0x7C): not chosen yet */
+            soak_press(s, camp && camp->col[1] < camp->col[0] ? EV_RIGHT : EV_ACCEPT, 0);
+    } else if (!strcmp(name, "MonsterSelect")) {
+        MonsterSel *ms = &s->ms;
+        if (soak_new)
+            soak_next_pair(SHELL_MONSTERS);
+        soak_new = 0;
+        for (int p = 0; p < 2; p++) {
+            /* "2 Player"'s Player<p>: a card showing the body (head's picture <name>_Body: not ready yet), its name
+             * against the roster's of the pick, localized: Accept on it, else Right, from that pad [G: the port
+             * sees the cards only when two play; "2 Player" is shown for no other count] */
+            if (ms->num_players != 2 || ms->pl[p].ready)
+                continue;
+            Node *card = findf(find(root, "2 Player"), "Player%d", p), *nm = find(card, "name");
+            const char *key = monster_name(s, soak_pick[p]), *want = loc_find(&s->gui, key);
+            char buf[MAX_TEXT];
+            if (!want) {
+                snprintf(buf, sizeof buf, "0x %s x0", key);
+                want = buf;
+            }
+            soak_press(s, nm && !strcmp(nm->text, want) ? EV_ACCEPT : EV_RIGHT, p);
+        }
+    } else {                                             /* any other: Accept, and the next MonsterSelect takes the
+                                                          * next pair */
+        soak_new = 1;
+        soak_press(s, EV_ACCEPT, 0);
+    }
+}
+
 void shell_update(Shell *s, float dt)
 {
     if (!s)
         return;
     if (dt < 0) dt = 0;
+    if ((s->cheats & 0x10000u) && !s->popup)
+        soak(s);
     s->gui.time += dt;
     if (s->vi.on) {
         if (s->vi.movie_on)

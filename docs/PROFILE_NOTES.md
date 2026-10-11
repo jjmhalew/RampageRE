@@ -261,7 +261,7 @@ The version word 8 is not checked (0x3445E0 .. 0x3446B4 test the CRC and the dat
 | 271828 | 2 | every city open and its stars shown (CitySelect) |
 | 011235 | 8 | every upgrade move (Monsters.bsf, Eyegore, Furby, Leon) |
 | 986960 | 4 | no monster can be hit (0x2D6A50 answers 0; below) |
-| 082864 | 0x10000 | no vibration; the world takes the status's seeds; the Pause menu's Quit clears it |
+| 082864 | 0x10000 | the soak test (SHELL_NOTES.md): the screens pressed through, every player a bot; no vibration; the world takes the status's seeds; the Pause menu's Quit clears it |
 | 874098 | 0x10000, 0x20000 | 0x324930 skips a block |
 | 071767 | 0x40000000 | one-hit buildings (Building::hit 0x2BC1F0; below) |
 | 000020 | 0x20000000 | nothing: its user 0x1A61F0 is empty (below) |

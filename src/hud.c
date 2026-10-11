@@ -4324,6 +4324,38 @@ void hud_input_pad(Hud *h, int ev, int button, int pad)
 
 void hud_input(Hud *h, int ev, int button) { hud_input_pad(h, ev, button, 0); }
 
+/* the soak test's world half, 0x2B6350 [R]: from the world's update (running 0x2B6A30, paused 0x2B6AF0) each frame
+ * with the cheat flag 0x10000, every sixth frame (gp-0x7334 from 5, .data) a press on the interface on top (as the
+ * shell's half, shell.c soak), none while its fade (+0x5C) is below 1: the SaveGame popup ("MemoryCard") Back; the
+ * block's Results Start, but nothing while its "timebonus" line is not shown yet (Results.scr shows the points'
+ * lines one by one) and, with "select" shown, Button 1 instead (Save) when the world's block index (+0x878) + 1 is a
+ * multiple of 3; any other "*esult*" screen and GameOver Start. The Pause menu and the HUD take none */
+static int soak_wait = 5;
+int hud_soak(Hud *h, int popup, int block)
+{
+    if (soak_wait-- != 0)
+        return 0;
+    soak_wait = 5;
+    if (popup)
+        return popup > 0 ? HUD_EV_BACK : 0;
+    if (!h || h->pause || !h->scr || !h->scr->L || h->scr->L->root->fade < 1.0f)
+        return 0;
+    Screen *s = h->scr;
+    Node *root = s->L->root;
+    int ev = HUD_EV_START, button = 0;
+    if (s->kind == SCR_RESULTS) {
+        Node *tb = layout_find(root, "timebonus"), *sel = layout_find(root, "select");
+        if (tb && !tb->visible)
+            return 0;
+        if (tb && sel && sel->visible && (block + 1) % 3 == 0) {
+            ev = HUD_EV_BUTTON;
+            button = 1;
+        }
+    }
+    screen_input(h, s, ev, button);
+    return 0;
+}
+
 static void screen_update(Hud *h, float dt)
 {
     Screen *s = h->scr;

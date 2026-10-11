@@ -139,6 +139,7 @@ Shell *shell_open_popup(const Vol *vol, const Bundle *common, const ShellProfile
 int shell_popup_active(const Shell *s);
 /* the popup is still drawn: active, or closed and fading out with its SaveIcon playing out [R 0x341CD8] */
 int shell_popup_shown(const Shell *s);
+float shell_popup_fade(const Shell *s);   /* the popup's interface fade (+0x5C): 1 once it has faded in */
 /* the movie SHELL_EVT_MOVIE named is played: it lasts until shell_movie_end (or the pad skips it) */
 void shell_movie_hold(Shell *s);
 void shell_movie_end(Shell *s);              /* it is over (Video.status() 3): the shell goes on */

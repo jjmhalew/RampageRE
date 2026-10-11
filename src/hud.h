@@ -214,6 +214,10 @@ enum {
 };
 /* to the interface that has the pad: the Pause menu when it shows, else a results screen */
 void hud_input(Hud *h, int ev, int button);
+/* the soak test's world half (0x2B6350; cheat 082864, flag 0x10000): call each world frame, running or paused, with
+ * the flag set. popup: the SaveGame popup is up (1 shown in full, -1 still fading in, 0 not up); block: the world's
+ * block index (game_block). It presses on the results screens itself; the event to give the popup, 0 none */
+int hud_soak(Hud *h, int popup, int block);
 /* the same from pad `pad` (GuiEvent.getController(): 0 = player 1); hud_input is pad 0. The Pause menu's Options
  * page answers pad 0 only [R Pause.scr] */
 void hud_input_pad(Hud *h, int ev, int button, int pad);

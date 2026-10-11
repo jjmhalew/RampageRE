@@ -282,7 +282,6 @@ engine    0x2A32A0-0x2A5D10  RApp (name, args, start, quit) and the collision wo
 engine    0x2A5D10-0x2B3E40  script junctions (goals, cameras, movers, Monster, Building, gWorld): calls answered in main.c, army.c, director.c
 unused    0x2B3E40-0x2B4390  gWorld.getFogRange / getFogColour / calcSmashAngle's workers: no script calls them (build/scripts, bsfsrc)
 engine    0x2B4390-0x2B6350  RWorldScriptInterface's workers (block props, loadCityData, findBuilding*), the interface types: game.c, city.c, prb.c
-open      0x2B6350-0x2B6580  the soak test's world half (cheat 082864): fake GUI presses on MemoryCard / Results / GameOver every 5 frames
 engine    0x2B6580-0x2B6DA0  RWorld: block change and unload, preloadObjectType, loading monsters, the frame's pads to each monster: game.c, main.c
 unused    0x2B6DA0-0x2B72B0  RWorld::+0x20's debug modes 2/3/6/7 (a pick ray, "TestBall"): the frame's mode byte (+0x400) is only ever 0, 4 or 5 (pause)
 engine    0x2B72B0-0x2B8200  RWorld's update and reset, RWorldPackage (the city's bundles, volumes Game/Shell/Audio/Video): main.c, city.c, vol.c

@@ -64,7 +64,8 @@ Addresses are in `RAMPAGE.ELF`.
   - It is reset (0x308240) by input the GUI takes: the screen's (RGuiScreen 0x2C5AD0, from GuiManager::input
     0x22F7A0, for a pad the controller table allows: 0x2C5E60) or the popup's (0x2328B0). The script's
     `resetAttractTimer` (0x306B78) is called only by AttractMode.scr. 0x33D740 is not pad input: it is the cheat flag
-    0x10000 (cheat 082864), with which 0x307920 runs a soak test of fake GUI presses and the timer stays at 120.
+    0x10000 (cheat 082864), with which 0x307920 runs a soak test of fake GUI presses and the timer stays at 120 ("The
+  soak test").
 
 ## The attract mode, title and movies (AttractMode.scr) [R]
 
@@ -440,6 +441,44 @@ the pack's axis (`pad_axis`); the keys' menu presses are the port's own.
 
 The port reports the cheats as `SHELL_EVT_CHEATS`. What the flags do: [PROFILE_NOTES.md](PROFILE_NOTES.md) "The
 cheats".
+
+### The soak test (082864, flag 0x10000) [R]
+
+With the flag set the game plays itself through the screens, as a test that runs on and on. The shell's update
+(0x308710) holds the idle timer at 120 (no attract mode) and calls **0x307920** each frame; the world's update calls
+**0x2B6350** (running 0x2B6A30; paused 0x2B6AF0, with the app's pause flag +0xA0 & 0x10). Each counts down its own
+global from 5 (gp−0x71BC, gp−0x7334; .data) and acts every sixth frame on the interface on top: the first active
+popup (GuiManager +0x3C4, 0x22F6F0 / 0x22F680), else the screen's focused interface (+0x238 → +0x24), and only once
+that one's fade (+0x5C) is 1. A press is 0x22FE30(gGui, 0, pad, event, button): the popup's input (vtable +0x14),
+else the screen's (+0x5C, 0x232F60 → 0x2385F0: GuiEvent(event, pad, button)).
+
+The shell's half:
+- AttractMode: Start. MemoryCard (the popup): Back.
+- MainMenu: Common's cheat flags |= 1 (every monster, written straight to 0x4D7E68); then while NumPlayers shows
+  (fade above 0, acting at 1): np_selection's selection (+0x6C) 0 → Down, 2 or more → Up, 1 → Accept (2 players);
+  else while NumBots shows: nb_selection above 0 → Up, else Accept (no bots); else the `campaign` icon: its colour
+  (+0x7C) with G below R (red: not chosen) → Right, else Accept.
+- MonsterSelect: on its first frame after any other screen (gp−0x71B8, 1 in .data) the next pair of the roster
+  (Common +0x10, 0x4D79A8 = 30 records) into gp−0x6CB8 / −0x6CB4 (0x307C18 .. 0x307D30): first (0, 15), (1, 16) ..
+  (14, 29) (gp−0x71B4, 1 in .data, marks that pass), then every pair with player 1's above player 0's in order, then
+  every one with it below, and round again. Then for each of "2 Player"'s Player0 / Player1 whose `head` shows the
+  body (its texture's name has `_Body` / `_body`: not ready): its `name` text against the pick's localized name:
+  the same → Accept, else Right, from that player's pad.
+- Any other screen (CitySelect, the loading screen, the Victory movies ...): Accept, and the next MonsterSelect takes
+  the next pair.
+
+The world's half: MemoryCard (the SaveGame popup): Back; `Results`: nothing while its `timebonus` line is hidden
+(the points' lines show one by one), else with `select` shown and the world's block index (+0x878) + 1 a multiple
+of 3 Button 1 (Save), else Start; any other name with `esult` in it (strstr 0x32D818: LevelResults, WorldResults,
+the King modes', TimedRunResults) and GameOver: Start. The HUD and the Pause menu take nothing.
+
+With it the world's start makes every player a bot (0x2B7DC0, [GAME_NOTES.md](GAME_NOTES.md)) and reseeds the
+world's randoms at each block (0x2B65A4, 0x3244C4): a two-player campaign of the computer's, city after city, each
+game a new pair of monsters. The cheat is only entered in the main menu, so the boot's popup (whose notice takes
+Cross alone) is never under it. Ported: shell.c `soak` (from `shell_update`, the main shell only), hud.c `hud_soak`
+(main.c `soak_step`, every world frame) [G: the port sees MonsterSelect's cards only when two play; the loading and
+Victory screens are taken as interfaces of other names: Accept, which the loading screen ignores and which ends a
+Victory movie, as the port's pad does].
 
 ## The options (Options.scr) [R]
 

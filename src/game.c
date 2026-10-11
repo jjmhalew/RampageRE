@@ -841,10 +841,16 @@ static int enter(Game *g)
         g->fin = resolve(g, "IsBlockFinished", 0, g->fin_name, sizeof g->fin_name);
         g->fin_fallback = FN_IS_BLOCK_FINISHED;
         clock_start(g);
+        if (g->cfg.cheats & 0x10000u) {              /* [R 0x3244C4] the soak test's: the world's random states
+                                                      * from GameStatus' seeds again, as at the block's activation */
+            wrand_seed_pm(g->cfg.seed);
+            wrand_seed_lf(g->cfg.seed1);
+        }
         break;
     case GS_BLOCK_WON:                               /* 0x324500 */
         block_won(g);
         adv = g->ni == FN_NONE;
+        g->weapons_on = 0;                           /* 0x324510 */
         break;
     case GS_GAME_OVER:                               /* 0x324520: GameOverNI is in no script */
         start_results(g, GR_SCREEN_GAME_OVER);
@@ -856,7 +862,6 @@ static int enter(Game *g)
     case GS_END_BLOCK:                               /* 0x3245C0 */
         start_ni(g, "EndBlockNI", 1);
         adv = g->ni == FN_NONE;
-        g->weapons_on = 0;                           /* 0x324510 */
         break;
     case GS_END_LEVEL:                               /* 0x324600 */
         start_results(g, g->cfg.play_type == GP_KING_CITY || g->cfg.play_type == GP_KING_WORLD ?
@@ -1062,7 +1067,8 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
     if (g->cfg.num_players < 1 || g->cfg.num_players > GAME_PLAYERS)
         g->cfg.num_players = 1;
     if (g->cfg.num_bots < 0 || g->cfg.num_bots > g->cfg.num_players ||
-        (g->cfg.num_bots == g->cfg.num_players && g->cfg.play_type != GP_ATTRACT))   /* the demo: all of them */
+        (g->cfg.num_bots == g->cfg.num_players && g->cfg.play_type != GP_ATTRACT &&
+         !(g->cfg.cheats & 0x10000u)))               /* the demo, the soak test (0x2B7DC0): all of them */
         g->cfg.num_bots = 0;
     if (g->cfg.num_cities <= 0)
         g->cfg.num_cities = 7;

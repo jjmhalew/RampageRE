@@ -296,7 +296,10 @@ main.c carries them over (`GameConfig.cities_won`, kept at each `GE_EXIT`).
 - The bots' `destroyBuildings` AI is director.c's (MULTIPLAYER_NOTES.md).
 - Cheat 874098 (flags 0x10000 | 0x20000): 0x324930 wins a block at once while it is not the last [R]. 0x10000 alone
   also seeds gWorld +0x828 / +0x82C from GameStatus at each activateNextBlock (0x2B65B4: +0x828 = seed[0],
-  0x1069C0(+0x82C, seed[1]); the 0x33F720 after it is empty) [R]; as here (game.c `activate_next_block`).
+  0x1069C0(+0x82C, seed[1]); the 0x33F720 after it is empty) [R]; as here (game.c `activate_next_block`), and again
+  entering state 6 (0x3244C4) [R]. With it the world's start makes every player a bot (0x2B7DC0: Common 0x4D7E2C =
+  0x4D7E28; the world's end 0x2B7D18 puts 0 back) [R]: main.c `setup_players`, game.c's check of the bots. That is the
+  soak test of cheat 082864 (SHELL_NOTES.md "The soak test"): the world's half 0x2B6350 is hud.c `hud_soak`.
 - `NewYork::BossResultsNI` is ported from NewYork.scr: the monsters taunt on the Empire State's roof until the
   centre building falls (flag 1), or Levels' ResultsNI (flag 2). Any other non-Levels script goes to the host's
   `script` callback, falling back to Levels.bsf's version.

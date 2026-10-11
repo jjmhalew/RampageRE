@@ -4707,9 +4707,21 @@ static void mon_step(Mon *mo, float dt)
     feet_step(mo);
 }
 
+/* the soak test's world half (cheat 082864: hud.c hud_soak) in the world's update, running or paused */
+static void soak_step(Viewer *v)
+{
+    if (!(v->prof.cheats & PCH_10000) || !v->hud)
+        return;
+    int popup = v->popup && shell_popup_active(v->popup) ? (shell_popup_fade(v->popup) >= 1.0f ? 1 : -1) : 0;
+    int ev = hud_soak(v->hud, popup, game_block(v->game, NULL));
+    if (ev)
+        shell_input(v->popup, ev, 0);
+}
+
 /* one frame of play: the monsters (each from its pad: Mon.pad), then the world around them, the HUDs and the camera */
 static void play_step(Viewer *v, float dt, float aspect)
 {
+    soak_step(v);
     if (v->hud && hud_paused(v->hud)) {              /* GameOver's pauseGame(1): only the screen runs */
         hud_update(v->hud, dt);
         hud_frame(v, 1);
@@ -5924,7 +5936,11 @@ static int monster_index(const Viewer *v, const char *name)
 static void setup_players(Viewer *v, int n, int bots, const int *monster)
 {
     v->nmon = n < 1 ? 1 : n > MONSTERS ? MONSTERS : n;
-    int most = v->attract ? v->nmon : v->nmon - 1;   /* the demo's are all the computer's */
+    int soak = (v->prof.cheats & PCH_10000) != 0;    /* [R 0x2B7DC0] the world's start with the soak test's cheat:
+                                                      * bots = players (0x2B7D18: none again at the world's end) */
+    if (soak)
+        bots = v->nmon;
+    int most = v->attract || soak ? v->nmon : v->nmon - 1;   /* the demo's are all the computer's */
     v->num_bots = bots < 0 ? 0 : bots > most ? most : bots;
     for (int k = 0; k < MONSTERS; k++) {
         Mon *mo = &v->mon[k];

@@ -152,8 +152,9 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
 
 - `getEnableRumble` is 0x32. `clearCheatFlags` (0x30, 0x2C3390) clears bits of 0x4D7E68.
 - The setters raise the profile's "changed" byte 0x4D7AC8. The profile's load (0x33F120) applies them again.
-- Flag 65536 is the main menu's cheat code "082864" (`MainMenu::activateCheat`): the attract mode's soak test of
-  fake GUI presses (0x33D740, 0x307920; [SHELL_NOTES.md](SHELL_NOTES.md)) [R]. Quitting clears it.
+- Flag 65536 is the main menu's cheat code "082864" (`MainMenu::activateCheat`): the soak test of fake GUI presses
+  (0x33D740; the shell's 0x307920, the world's 0x2B6350; [SHELL_NOTES.md](SHELL_NOTES.md) "The soak test") [R].
+  Quitting clears it, which is the only way out of it.
 
 ## Two players [R]
 - Either pad opens the menu, and either pad's events move its list, pick Continue / Quit and answer ConfirmQuit.
