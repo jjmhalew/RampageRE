@@ -346,7 +346,8 @@ A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next on
 0x2FFA00 starts a clip in the monster's animation player: with blend mode 0, or 1 while nothing plays yet, it cuts;
 otherwise the two pose buffers swap (+0x29C0 / +0x29C4), so the pose the monster had stays as it was, and the blend
 time (the new state's node +0x14) is set, with 1 / it (+0x4E58, +0x4E5C). Each frame (0x2FFF10) the time left falls
-by dt × the monster's speed, and every bone of the new clip's pose goes towards the kept one by the share left
+by dt × the monster's speed; the root's motion is taken out of the new clip's pose first (0x301080, the root rewritten
+at 0x3003C8), so the kept pose has none either, and every bone of the new clip's pose goes towards the kept one by the share left
 (time left / blend time, so from 1 to 0 linearly): the translation by a lerp, the rotation (turned to the kept one's
 side first) by 0x104590. A start the game forces through a slot takes no transition (0x2EBF50 clears the runner's
 +0x8); the slot's start (0x2C0DC0 .. 0x2C0E78) fills the request itself: the start list entry's state node, at 0
