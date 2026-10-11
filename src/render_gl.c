@@ -214,7 +214,13 @@ double win_time(void)
 
 /* ---------------------------------------------------------------- renderer */
 
-typedef struct { const Bundle *b; GLuint *tex; uint32_t n; } BundleTex;   /* per name index: GL texture, ~0 = none */
+/* a texture region's own texture (region_texture): the tile of texture `name` that the region reg picks, 0 = the
+ * whole texture; the texture matrix's scale for it */
+typedef struct { uint32_t name; float reg[4]; GLuint id; float scale[2]; } RegionTex;
+typedef struct {
+    const Bundle *b; GLuint *tex; uint32_t n;            /* per name index: GL texture, ~0 = none */
+    RegionTex *reg; int nreg;
+} BundleTex;
 
 /* an animated texture (.ifl, a text entry: per line a frame's image and how many frames it shows, 3ds Max's 30 per
  * second): its frames' texture names */
@@ -317,7 +323,11 @@ static void drop_textures(Renderer *r)
         for (uint32_t i = 0; i < r->cache[k].n; i++)
             if (r->cache[k].tex[i] && r->cache[k].tex[i] != ~0u)
                 glDeleteTextures(1, &r->cache[k].tex[i]);
+        for (int i = 0; i < r->cache[k].nreg; i++)
+            if (r->cache[k].reg[i].id)
+                glDeleteTextures(1, &r->cache[k].reg[i].id);
         free(r->cache[k].tex);
+        free(r->cache[k].reg);
     }
     r->ncache = 0;
     r->nifl = 0;
@@ -373,21 +383,25 @@ uint32_t rnd_triangles(const Renderer *r) { return r->drawn; }
 
 /* a bundle's texture by name index, 0 none (a material's or a mesh's); texture_at with zero_ok: index 0 is a name too (an
  * effect's texture found by name: MemoryCard.bdp's Mem_arrow is name 0) */
+static BundleTex *bundle_tex(Renderer *r, const Bundle *b)
+{
+    for (int k = 0; k < r->ncache; k++)
+        if (r->cache[k].b == b)
+            return &r->cache[k];
+    if (r->ncache == 16)
+        return NULL;
+    BundleTex *bt = &r->cache[r->ncache++];
+    memset(bt, 0, sizeof *bt);
+    bt->b = b;
+    bt->n = b->nnames;
+    bt->tex = calloc(bt->n ? bt->n : 1, sizeof *bt->tex);
+    return bt;
+}
+
 static GLuint texture_at(Renderer *r, const Bundle *b, uint32_t name, int zero_ok)
 {
-    BundleTex *bt = NULL;
-    for (int k = 0; k < r->ncache && !bt; k++)
-        if (r->cache[k].b == b)
-            bt = &r->cache[k];
-    if (!bt) {
-        if (r->ncache == 16)
-            return 0;
-        bt = &r->cache[r->ncache++];
-        bt->b = b;
-        bt->n = b->nnames;
-        bt->tex = calloc(bt->n ? bt->n : 1, sizeof *bt->tex);
-    }
-    if ((!name && !zero_ok) || name >= bt->n)
+    BundleTex *bt = bundle_tex(r, b);
+    if (!bt || (!name && !zero_ok) || name >= bt->n)
         return 0;
     if (!bt->tex[name]) {
         uint8_t *rgba;
@@ -422,6 +436,111 @@ static GLuint texture_at(Renderer *r, const Bundle *b, uint32_t name, int zero_o
     return bt->tex[name] == ~0u ? 0 : bt->tex[name];
 }
 static GLuint texture(Renderer *r, const Bundle *b, uint32_t name) { return texture_at(r, b, name, 0); }
+
+/* ---- a material's texture region (MAT_REGION, docs/FORMAT_BDP.md "Material flags") [R]. 0x25F960 makes it the
+ * material's CLAMP_1 (+0x80): REGION_REPEAT on S and T (WMS = WMT = 3), MINU / MINV the tile's size - 1 and MAXU / MAXV
+ * its start; a pass on texture slot 0 sends it in place of the texture's own CLAMP_1 (0x265840 puts it at 0x4CBED0,
+ * 0x2598A0 over the texture's +0x90 in the packet; a pass on slot 1 sends none). The GS reads texel u at
+ * (u & MINU) | MAXU: the part's UVs, in units of the whole texture, wrap within the tile. Here the tile is cut into a
+ * texture of its own with GL_REPEAT and the texture matrix scales the UVs by the texture's size over the tile's: the
+ * same texels at the same UVs, the bilinear taps wrapped in the tile as the GS's are. */
+
+/* the tile in texels (x, y, w, h) of a tw x th texture, as 0x25FC08 .. 0x25FE50 builds the register: the size
+ * round(16 x width) (+ 0.5, cut as the EE's cvt.w.s) down to a power of two (0x25FED0 / 0x25FE80 halved, 0x10E0E0 its
+ * highest bit), times tw / 16; the start round(u0 x tw) + size / 2 cut to a multiple of the size; both 10 bits.
+ * 0 when that is the whole texture or no tile: a size 0 masks u with 0x3FF and starts at 0, the plain repeat of a
+ * texture up to 1024 wide [the start past the texture's end: never in the data, kept inside it] */
+static int region_rect(const float reg[4], int tw, int th, int rect[4])
+{
+    const int size[2] = { tw, th };
+    for (int k = 0; k < 2; k++) {
+        int s = (int)(16 * reg[2 + k] + 0.5f);
+        while (s & (s - 1))
+            s &= s - 1;
+        int len = size[k] * s / 16;
+        if (len <= 0 || len > 0x400 || len > size[k])
+            return 0;
+        int start = (((int)(reg[k] * size[k] + 0.5f) + len / 2) & ~(len - 1)) & 0x3FF;
+        if (start + len > size[k])
+            start = size[k] - len;
+        rect[k] = start;
+        rect[2 + k] = len;
+    }
+    return rect[2] < tw || rect[3] < th;
+}
+
+/* texture `name` cut to the region reg (region_rect), 0 = draw the whole texture; scale the texture matrix's. A
+ * texture pack's PNG replaces the whole texture, named after the whole one's hash as texture() names it, and the
+ * tile is cut from it at its own size */
+static GLuint region_texture(Renderer *r, const Bundle *b, uint32_t name, const float reg[4], float scale[2])
+{
+    BundleTex *bt = bundle_tex(r, b);
+    scale[0] = scale[1] = 1;
+    if (!bt || !name || name >= bt->n)
+        return 0;
+    RegionTex *rt = NULL;
+    for (int k = 0; k < bt->nreg && !rt; k++)
+        if (bt->reg[k].name == name && !memcmp(bt->reg[k].reg, reg, sizeof bt->reg[k].reg))
+            rt = &bt->reg[k];
+    if (!rt) {
+        RegionTex *grown = realloc(bt->reg, sizeof *grown * (size_t)(bt->nreg + 1));
+        if (!grown)
+            return 0;
+        bt->reg = grown;
+        rt = &bt->reg[bt->nreg++];
+        memset(rt, 0, sizeof *rt);
+        rt->name = name;
+        memcpy(rt->reg, reg, sizeof rt->reg);
+        rt->scale[0] = rt->scale[1] = 1;
+        uint8_t *rgba;
+        int w, h, rc[4];
+        if (tex_decode(b, bdp_entry_of(b, name, ET_TEXTURE), &rgba, &w, &h) != 0)
+            return 0;
+        if (region_rect(reg, w, h, rc)) {
+            uint64_t hash = tp_active() ? tp_hash('T', rgba, (uint32_t)w * (uint32_t)h * 4, w, h) : 0;
+            int pw = w, ph = h;
+            uint8_t *pack = hash ? tp_pixels(hash, TP_ASIS, &pw, &ph) : NULL;
+            const uint8_t *src = pack ? pack : rgba;
+            int x0 = rc[0] * pw / w, y0 = rc[1] * ph / h, cw = rc[2] * pw / w, ch = rc[3] * ph / h;
+            cw = cw < 1 ? 1 : cw;
+            ch = ch < 1 ? 1 : ch;
+            uint8_t *cut = malloc((size_t)cw * ch * 4);
+            if (cut) {
+                for (int y = 0; y < ch; y++)
+                    memcpy(cut + (size_t)y * cw * 4, src + ((size_t)(y0 + y) * pw + x0) * 4, (size_t)cw * 4);
+                GLuint id;
+                glGenTextures(1, &id);
+                glBindTexture(GL_TEXTURE_2D, id);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                if (pack)
+                    tp_upload(cut, cw, ch, TP_ASIS);
+                else {
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cw, ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, cut);
+                    if (g_mips && !r->in_hud)
+                        upload_mips(cut, cw, ch);
+                }
+                if (!r->in_hud)
+                    tex_aniso();
+                rt->id = id;
+                rt->scale[0] = (float)w / rc[2];
+                rt->scale[1] = (float)h / rc[3];
+                free(cut);
+            }
+            if (hash) {                              /* --dumptex: the whole texture, as texture() writes it */
+                tp_scope(b->scope);
+                tp_dump(hash, rgba, w, h);
+            }
+            free(pack);
+        }
+        free(rgba);
+    }
+    scale[0] = rt->scale[0];
+    scale[1] = rt->scale[1];
+    return rt->id;
+}
 
 /* the texture a material shows at time t: itself, or an .ifl's frame then */
 static uint32_t shown_texture(Renderer *r, const Bundle *b, uint32_t name, double t)
@@ -553,7 +672,10 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
 {
     const Scene *s = r->scene;
     const MeshPart *p = &sm->mesh.parts[i];
-    GLuint id = texture(r, sm->b, shown_texture(r, sm->b, material_texture(sm->b, p->material), t));
+    uint32_t tex = shown_texture(r, sm->b, material_texture(sm->b, p->material), t);
+    float reg[4], rs[2] = { 1, 1 };                      /* a texture region: its tile (region_texture) */
+    GLuint rid = p->uv && material_region(sm->b, p->material, reg) ? region_texture(r, sm->b, tex, reg, rs) : 0;
+    GLuint id = rid ? rid : texture(r, sm->b, tex);
     if (material_flags(sm->b, p->material) & MAT_TWO_SIDED) glDisable(GL_CULL_FACE);
     else glEnable(GL_CULL_FACE);
     if (id) {
@@ -563,10 +685,15 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glDisable(GL_TEXTURE_2D);
     }
     int scroll = s->cloud_material && sm->b == s->city && p->material == s->cloud_material;
-    if (scroll) {                                        /* the drifting cloud band (AnimatingSkyData) */
+    float drift[2] = { (float)fmod(s->cloud_rate[0] * t, 1.0), (float)fmod(s->cloud_rate[1] * t, 1.0) };
+    if (scroll || rid) {                                 /* the drifting cloud band (AnimatingSkyData); the tile's
+                                                          * scale, after the drift as the GS wraps the UVs it is sent */
         glMatrixMode(GL_TEXTURE);
         glLoadIdentity();
-        glTranslatef((float)fmod(s->cloud_rate[0] * t, 1.0), (float)fmod(s->cloud_rate[1] * t, 1.0), 0);
+        if (rid)
+            glScalef(rs[0], rs[1], 1);
+        if (scroll)
+            glTranslatef(drift[0], drift[1], 0);
         glMatrixMode(GL_MODELVIEW);
     }
     glVertexPointer(3, GL_FLOAT, 0, skin ? skin->pos + 3 * first : p->pos);
@@ -600,6 +727,13 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glDepthMask(GL_FALSE);
     }
     glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+    if (rid) {                                           /* the region is texture slot 0's alone (0x265840) */
+        glMatrixMode(GL_TEXTURE);
+        glLoadIdentity();
+        if (scroll)
+            glTranslatef(drift[0], drift[1], 0);
+        glMatrixMode(GL_MODELVIEW);
+    }
     if (p->blend || see_through) {
         glDisable(GL_BLEND);
         glAlphaFunc(GL_GREATER, 0.5f);

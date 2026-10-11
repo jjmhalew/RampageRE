@@ -161,3 +161,17 @@ uint32_t material_flags(const Bundle *b, uint32_t material)
     const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
     return e && e->size >= 6 ? rd16(e->data + 4) : 0;
 }
+
+/* 0x25F960 (its jump table 0x426940 by the kind at +0x2): kinds 0, 1 no texture, 2 one (the region at +0x3A), 3, 4,
+ * 5, 7 two (+0x3C), 6 three and 8 two (+0x3E); with flag 0x100 it copies the 16 bytes there and, when the material has
+ * a first texture, makes them its CLAMP_1 (material +0x80) */
+int material_region(const Bundle *b, uint32_t material, float region[4])
+{
+    static const uint8_t at[9] = { 0, 0, 0x3A, 0x3C, 0x3C, 0x3C, 0x3E, 0x3C, 0x3E };
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    if (!e || e->size < 6 || !(rd32(e->data + 4) & MAT_REGION) || e->data[2] > 8 || !at[e->data[2]] ||
+        e->size < at[e->data[2]] + 16u)
+        return 0;
+    memcpy(region, e->data + at[e->data[2]], 4 * sizeof(float));
+    return 1;
+}

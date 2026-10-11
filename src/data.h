@@ -59,8 +59,12 @@ void mesh_free(Mesh *m);
 uint32_t material_texture(const Bundle *b, uint32_t material);   /* texture name index of a part's material, 0 = none */
 /* a material's flags (+0x4): MAT_TWO_SIDED on flags, girders, trees, cloth, teeth (65 of the 1,893 materials), 2 on
  * the see-through ones (fog masks, skylines, tree cards); 0 for a part that names a texture directly */
-enum { MAT_TWO_SIDED = 1 };
+enum { MAT_TWO_SIDED = 1, MAT_REGION = 0x100 };
 uint32_t material_flags(const Bundle *b, uint32_t material);
+/* a material's texture region (MAT_REGION: 78 materials, all kind 2: the taxis, the Ryder truck, the backdrops'
+ * bricks, stucco and windows): the 16 bytes after its texture indices (by kind, 0x25F960), u0, v0, width, height in its
+ * first texture, a tile of an atlas; the part's UVs run in it (render_gl.c region_rect). 0 none */
+int material_region(const Bundle *b, uint32_t material, float region[4]);
 /* the material's diffuse colour (f32 rgba at +0x08): 218 materials have no texture and only this colour (the
  * saucer's orange blades, its green glass at alpha 0.38, flag poles, bumpers); every textured one is white. 0 when
  * the name is not a material (a texture named directly): white */

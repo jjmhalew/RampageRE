@@ -166,21 +166,26 @@ static uint8_t *read_file(const PathC *path, int *size)
     if (d && fread(d, 1, (size_t)n, f) != (size_t)n) { free(d); d = NULL; }
     fclose(f); *size = (int)n; return d;
 }
-int tp_replace(uint64_t hash, int alpha_mode)
+uint8_t *tp_pixels(uint64_t hash, int alpha_mode, int *pw, int *ph)
 {
     if (!T.scanned) scan();
-    const Entry *en = find(&T.pack, hash); if (!en) return 0;
+    const Entry *en = find(&T.pack, hash); if (!en) return NULL;
     const PathC *path = en->path;
-    int size, w, h, ch; uint8_t *file = read_file(path, &size); if (!file) return 0;
-    uint8_t *px = stbi_load_from_memory(file, size, &w, &h, &ch, 4); free(file);
+    int size, w, h, ch; uint8_t *file = read_file(path, &size); if (!file) return NULL;
+    uint8_t *px = stbi_load_from_memory(file, size, &w, &h, &ch, 4); free(file);   /* stbi's malloc: free() frees it */
     GLint max = 0; glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max);
-    if (!px || w > max || h > max) { printf("texture pack: cannot use " PF " (%s)\n", path, px ? "too big for this card" : stbi_failure_reason()); if (px) stbi_image_free(px); return 0; }
+    if (!px || w > max || h > max) { printf("texture pack: cannot use " PF " (%s)\n", path, px ? "too big for this card" : stbi_failure_reason()); if (px) stbi_image_free(px); return NULL; }
     size_t n = (size_t)w * h;
     for (size_t i = 0; i < n; i++) {
         uint8_t *p = px + i * 4;
         if (alpha_mode == TP_OPAQUE) p[3] = 255;
         else if (alpha_mode == TP_KEY) { if (p[3] < 128) p[0] = p[1] = p[2] = p[3] = 0; else p[3] = 255; }   /* transparent texels black (no fringe) */
     }
+    *pw = w; *ph = h; T.nreplaced++;
+    return px;
+}
+void tp_upload(uint8_t *px, int w, int h, int alpha_mode)
+{
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     int level = 0;
@@ -202,7 +207,12 @@ int tp_replace(uint64_t hash, int alpha_mode)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);                 /* GL's default, as the other uploads expect */
     glTexParameteri(GL_TEXTURE_2D, 0x813D /* GL_TEXTURE_MAX_LEVEL */, level);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    stbi_image_free(px); T.nreplaced++;
+}
+int tp_replace(uint64_t hash, int alpha_mode)
+{
+    int w, h; uint8_t *px = tp_pixels(hash, alpha_mode, &w, &h); if (!px) return 0;
+    tp_upload(px, w, h, alpha_mode);
+    stbi_image_free(px);
     return 1;
 }
 

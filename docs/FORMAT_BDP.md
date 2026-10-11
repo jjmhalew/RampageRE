@@ -319,10 +319,20 @@ Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees,
 (0x16F540 → 0x25F960, above): the 4 floats after the texture index, u0, v0, width, height in the texture, a tile of
 a 4 × 4 atlas (`Taxi_normal` (0.5, 0, 0.25, 0.25) of `RampageVehicles_01`, `Taxi_Damaged` (0.75, 0, …); the
 backdrops' `stucco`, `solid_wall_block`, `*_redbricksolid`, `*_windows` of their `*Base00` / `Window_sheet`), the
-parts' UVs in tile units: the taxi's run 0.035 … 0.239 by 0 … 0.249, the backdrops' −0.83 … 0.83 (they tile).
-Not ported: the viewer samples the atlas at the UVs as they are, so these parts show the atlas's first tile, or run
-across the atlas [G: whether the GS wraps within the tile (CLAMP REGION_REPEAT) or only offsets is not followed
-past 0x25F960; the tiling backdrops say a wrap].
+parts' UVs in units of the whole texture but within one tile's size: the taxi's run 0.035 … 0.239 by 0 … 0.249,
+the backdrops' −0.83 … 0.83 (they tile). The region sits at +0x3A (kind 2), +0x3C (3, 4, 5, 7) or +0x3E (6, 8),
+by 0x25F960's jump table 0x426940. **How the GS reads it** [R]: with a first texture (material +0x70), 0x25FC08 ..
+0x25FE50 makes it a CLAMP_1 register at material +0x80: WMS = WMT = 3 (REGION_REPEAT); the size in texels
+round(16 × width), down to a power of two (0x25FED0, 0x25FE80 halved; 0x10E0E0 the highest bit), × the texture's
+width (+0x20) / 16, MINU = size − 1; MAXU = round(u0 × width) + size / 2 cut to a multiple of the size; the same in V
+with height and the texture's +0x24; 10 bits each. The pass setup 0x265840 sends it for a pass on texture slot 0
+(to 0x4CBED0; slot 1 or none: 0), and 0x2598A0 writes it over the texture's own CLAMP_1 (+0x90) in the packet. The GS
+reads texel u at (u & MINU) | MAXU, so the UVs wrap within the tile, each bilinear tap too. All 78 are on 256 × 256
+atlases and snap to quarter tiles (64 × 64: `chicago_windowBrick`'s 0.2549 starts at 64). The viewer
+(src/render_gl.c `region_texture`, mesh.c `material_region`) cuts the tile into a texture of its own with GL_REPEAT
+and scales the UVs by the texture matrix (texture size / tile size): the same texels at the same UVs. Its mip levels
+are the tile's own [G: the GS's REGION_REPEAT on the smaller levels not followed; the viewer draws one level unless
+mips= is on].
 
 A mesh part's material name index does not always name a material: 3,768 of the 6,292 parts do, the other 2,524
 name a texture entry (type 9) directly (people, the city backdrops, many props).

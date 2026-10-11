@@ -2,7 +2,7 @@
 
 The original has no way to replace its textures; the port lets any texture it uploads be swapped for a PNG of any
 size, e.g. for HD packs. Code: `src/texpack.c` (WoodyRE's, with stb_image / stb_image_write in `src/stb/`), hooked
-into the one place that uploads the bundles' textures, `texture()` in render_gl.c. That covers the world, the
+into the places that upload the bundles' textures, `texture()` and `region_texture()` in render_gl.c. That covers the world, the
 buildings and their facade sheets, the damage layers, the sphere-map environment textures, water, shadows, particles,
 the monsters, the HUD and the front end's interfaces. The movie frames (`video_texture`) stay out.
 
@@ -45,6 +45,10 @@ The scope is the bundle's (`Bundle.scope`, set where it is loaded):
 ## 4. How a replacement is drawn
 - The game keeps every size and texture coordinate of the original; only the sampled image changes. The wrap mode
   stays the original's (repeat).
+- A material with a texture region (an atlas tile: the taxis, the backdrops' bricks and windows; FORMAT_BDP.md
+  "Material flags") draws a texture cut from its tile (render_gl.c `region_texture`). A pack still replaces the whole
+  atlas, under the whole atlas's hash (the dump writes the whole one too); the tile is cut from the replacement at
+  its own size (the same share of it), so the replacement must keep the atlas's layout.
 - All mip levels are made with a 2x2 box filter and sampled trilinearly (GL_LINEAR_MIPMAP_LINEAR); the originals stay
   one bilinear level.
 - Alpha is the PNG's as it is (`TP_ASIS`): the game drops texels below 0.5 and blends the see-through parts as with
