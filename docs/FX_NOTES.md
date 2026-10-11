@@ -13,7 +13,7 @@ What the game does with an effect file (`type = particle`, `composite`; `cameras
 | the coded text | 0x1ED400 (one line), 0x1ED060 |
 | graphs | factory 0x20D630; `GraphConstant` 0x447180, `GraphLinear` 0x447140 … `GraphQuintic`, `GraphLinearInterpolation` 0x447000, `GraphSineTable` 0x446F80 |
 | an emitter's frame | a member pointer at definition +0x180, picked by 0x21AD40 from 3 specialisations (0x20EFD0, 0x213F30, 0x216470); the default lives in BSS (0x450938) |
-| drawing | member pointer at +0x174 (0x2213F0, 4 specialisations): billboards 0x21D798 / 0x220768 → 0x2214D0 (VU1 packets), streaks 0x21C060 (0x1F6CA0 / 0x1F7500), shapes (XForm) 0x21B330 / 0x21DC20, streams 0x1F4B90 |
+| drawing | member pointer at +0x174 (0x2213F0, 4 specialisations): billboards 0x21D798 / 0x220768 → 0x2214D0 (VU1 packets), streaks 0x21C7E0 / 0x21F7B0 (0x1F6CA0 / 0x1F7500), shapes (XForm) 0x21B330 / 0x21DC20, streams 0x21C060 (0x1F4B90) |
 | emitter start | 0x1F7F90; shutdown 0x1F7CD0 |
 | `CompositeFx` | vtable 0x446830: `int.num_edfs`, `edf.name.N` (the parts by name, ".edf" optional), all started together |
 
@@ -149,7 +149,7 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 4. Gravity (0x2105E0): v.z += −196.2 × grav_multiplier, once per frame (no dt).
 5. Air (0x2118E0, 0x210450): v ×= max(0, 1 − dt × air × |v|), or with +LinearAirResistance max(0, 1 − dt × air).
 
-## Drawing (0x2214D0, 0x21C060)
+## Drawing (0x2214D0, 0x21C7E0)
 - t = age / lifetime. Size = size × size_mul(t), the quad's full width: its two axes are size × size_mul(t) times the
   current camera's right (+0x30) and up (+0x3C) (0x22233C … 0x2223D8), the corners (±0.5, ±0.5) (0x3B2480) [R]. The
   effect's matrix never reaches these axes, so a scaled effect's billboards keep their size (only their places

@@ -61,6 +61,7 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | Linux, Switch (homebrew) and Android builds, controllers and rumble, touch pad, texture packs, graphics settings, CI | ✅ (not yet tried on real hardware) [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) |
 | The attract mode's demo games (a random city, block and monsters, played by the computer) | ✅ [docs/SHELL_NOTES.md](docs/SHELL_NOTES.md) |
 | The arcade games (Midway Classics: Digital Eclipse's emulators on the disc) | after v1 [docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md) |
+| Coverage of the game's code: every function of the ELF ported, read, replaced by the port's own, unused by the data, or open (0.8 % of the code: the monsters' clip effects and roar, the tail motion, a few smaller items) | [docs/COVERAGE.md](docs/COVERAGE.md) |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
@@ -160,6 +161,7 @@ Never share or upload them.**
 | `tools/prb.py` | prints property books (design data) as readable trees |
 | `viewer/index.html` | three.js viewer for the exported glTF, plays animations (serve the repository root) |
 | `tools/refs.py` | finds the code that references an address (strings, tables) |
+| `tools/coverage.py` | the coverage map: every function's status from the addresses `src/` and `docs/` cite and the rules in `tools/coverage_groups.txt` (`--md docs/COVERAGE.md`, `--html` for a clickable map, `--range` to sort more) |
 | `tools/vudis.py` | disassembles VU micro code and decodes the runtime's VU1 traces |
 | `tools/iso9660.py` | extracts a PS2 disc image |
 | `patches/ps2recomp-runtime.diff` | runtime changes applied to the PS2Recomp submodule by `build.ps1` |

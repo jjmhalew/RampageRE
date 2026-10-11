@@ -2,7 +2,7 @@
  * coded lines; 0x1FA4D0, one emitter's keys; 0x1F97D0, what is derived at load), the graphs (factory 0x20D630), an
  * emitter's frame (ParticleSystemFx::advance 0x1F2900 calls the emitter update chosen per definition, 0x20EFD0 /
  * 0x213F30 / 0x216470, through the member pointer at definition +0x180) and how a particle is drawn (0x2214D0 builds
- * the VU1 packets of the billboards, 0x21C060 the streaks). [R] = read in that code, [G] = a guess where it matters.
+ * the VU1 packets of the billboards, 0x21C7E0 the streaks). [R] = read in that code, [G] = a guess where it matters.
  *
  * The game keeps an emitter's particles in the emitter's frame when +EmitterRelativeParticles and in the world otherwise
  * (only the relative ones go through the emitter's matrix at the draw [R 0x222400..0x222520]); here everything is
@@ -1710,7 +1710,7 @@ void fx_cut(FxWorld *w, int id, float t)
         f->rod = -1;
 }
 
-/* ---------------------------------------------------------------- drawing (0x2214D0, 0x21C060) */
+/* ---------------------------------------------------------------- drawing (0x2214D0, 0x21C7E0) */
 static float blend(int mode, float v, float e)              /* the emitter colour on the particle's [R 0x21C638..] */
 {
     switch (mode) {
