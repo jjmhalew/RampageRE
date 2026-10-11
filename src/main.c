@@ -1215,6 +1215,8 @@ static int open_city(Viewer *v, int index, uint32_t block)
     city_close(v->city);
     v->city = c;
     v->city_index = index;
+    if (v->roster.n)                                 /* its names are the old city's book's: read from this one's */
+        reveal_roster_load(&v->roster, city_book_group(c, "ShellData", "MonsterData"));
     v->nblocks = city_blocks(c, v->blocks, 64);
     v->block = block < v->nblocks ? block : 0;
     build(v);
