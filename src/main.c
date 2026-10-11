@@ -170,6 +170,7 @@ typedef struct Viewer {
     Boss *boss;                                      /* the block's boss and the ambient ones (boss.c) */
     /* the bosses' effects that follow (monster: the monster slot followed, -1 none) */
     struct { int id, fx, obj, monster; float off[3]; } bfx[64]; int nbfx;
+    struct { int obj, h; } bsnd[64]; int nbsnd;      /* and their sounds (add3DSfx: each follows its part) */
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
@@ -1011,6 +1012,9 @@ static void build(Viewer *v)
         for (int k = 0; k < v->nmon; k++)
             shadow_monster_init(&v->mon[k].smon);
     }
+    for (int k = 0; k < v->nbsnd; k++)               /* their parts go: so do the sounds on them (0x288050) */
+        sound_kill(v->bsnd[k].h);
+    v->nbsnd = 0;
     boss_free(v->boss);                              /* the block's boss, and the ambient ones of the blocks behind */
     v->boss = NULL;
     v->nbfx = 0;
@@ -2466,7 +2470,29 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
                         break;
                     }
                 break;
-            case BE_SOUND: if (e->level != 0 && e->name) sound_play(e->name, e->pos, 1); break;
+            case BE_SOUND: {                         /* [R] add3DSfx(name, 0) is 0x287860: one of the part's 16
+                                                      * slots, the sound at its place (+0x2C) as it moves; deleted, the
+                                                      * part takes its sounds with it (0x288050 -> 0x274710) */
+                const BossPart *p = e->obj >= 0 ? boss_part(v->boss, e->obj) : NULL;
+                if (e->level != 0 && e->name) {
+                    int on = 0;
+                    for (int k = 0; k < v->nbsnd; k++)
+                        on += v->bsnd[k].obj == e->obj;
+                    int h = on < 16 ? sound_add3d(e->name, p ? p->pos : e->pos, 0, 1, 1) : 0;
+                    if (h && p && v->nbsnd < 64) {
+                        v->bsnd[v->nbsnd].obj = e->obj;
+                        v->bsnd[v->nbsnd++].h = h;
+                    }
+                    if (getenv("RAMPAGE_TRACE"))
+                        printf("  boss sound %s on part %d%s\n", e->name, e->obj, h ? "" : " (refused)");
+                } else if (e->level == 0)
+                    for (int k = 0; k < v->nbsnd; k++)
+                        if (v->bsnd[k].obj == e->obj) {
+                            sound_kill(v->bsnd[k].h);
+                            v->bsnd[k--] = v->bsnd[--v->nbsnd];
+                        }
+                break;
+            }
             case BE_REACTION: if (mo->hp > 0) force_state(mo, e->name); break;
             case BE_VEL: memcpy(mo->vel, e->v, sizeof mo->vel); break;
             case BE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
@@ -2506,6 +2532,13 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
             if (getenv("RAMPAGE_TRACE") && e->type != BE_EFFECT && e->type != BE_EFFECT_STOP && e->type != BE_SOUND)
                 printf("  boss event %d (%s) part %d, %.2f\n", e->type, e->name ? e->name : "-", e->obj, e->amount);
         }
+    for (int k = 0; k < v->nbsnd; k++) {             /* the sounds that follow their part; ended, the slot is free */
+        const BossPart *p = boss_part(v->boss, v->bsnd[k].obj);
+        if (!sound_active(v->bsnd[k].h) || !p || !p->alive)
+            v->bsnd[k--] = v->bsnd[--v->nbsnd];
+        else
+            sound_move(v->bsnd[k].h, p->pos);
+    }
     for (int k = 0; k < v->nbfx; k++) {              /* the effects that follow their part or the monster */
         float at[3];
         if (v->bfx[k].obj >= 0) {
@@ -4474,7 +4507,8 @@ static void game_next_block(Viewer *v)
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
- * building b as an attack would; "p2" (p1 .. p4): the words after it play
+ * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "p2" (p1 .. p4): the words
+ * after it play
  * that player's monster (the others' keys idle meanwhile, the computer's monsters go on) */
 static void play_script(Viewer *v, const char *script, float aspect)
 {
@@ -4567,6 +4601,16 @@ static void play_script(Viewer *v, const char *script, float aspect)
                     else if (v->hud)
                         hud_input(v->hud, EV[i].ev, EV[i].button);
                 }
+            continue;
+        }
+        if (_stricmp(word, "bosshit") == 0) {        /* bosshit n: one blow of n (1 without) on the block's boss, by
+                                                      * this monster, as an armed attack sphere at its middle would */
+            const BossPart *bp = v->boss ? boss_part(v->boss, boss_main(v->boss)) : NULL;
+            static unsigned record = 0x40000000u;    /* a record of its own each time (one blow a record) */
+            if (bp && bp->alive)
+                boss_hit(v->boss, mo->slot, bp->pos, 1, seconds > 0 ? seconds : 1, record++);
+            else
+                printf("no boss to hit\n");
             continue;
         }
         if (_stricmp(word, "collapseall") == 0) {    /* every building of the block falls (the end of a block) */

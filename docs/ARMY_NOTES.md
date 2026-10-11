@@ -357,7 +357,9 @@ Floating = 100
   larger, one inside the other the outer, else the sphere round both), so the centre is the spheres' bounding
   sphere's and moves with the pose. As here (army.c `monster_centre`, from `ArmyMonster.spheres`). Both the projectile's wobble (definition flag 8) and its spread (record flag 8) come from flags no book
   sets.
-- **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject hit wobble (+0x18C), the
+- **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject's wobble (OscillationScale
+  +0x190, its phase +0x18C: 0.1 on the helicopters and the PirateShip; traced in BOSS_NOTES.md "The AttackObject's
+  oscillation" [R 0x314EF0], not done here), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).
 - **Elsewhere:** the bosses are boss.c's ([BOSS_NOTES.md](BOSS_NOTES.md)); `Vehicle.bsf` (the `Humvee` and the other
   street vehicles, `AK_OTHER` here) and Rocket / RocketBase are vehicle.c's ([VEHICLE_NOTES.md](VEHICLE_NOTES.md)).

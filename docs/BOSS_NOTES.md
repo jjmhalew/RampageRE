@@ -44,7 +44,12 @@ beaten (`BE_DEFEATED`). The NY blimp calls `NewYork::setBossBlockFinished` itsel
 - A non-zero value ends the block: the world state's update (0x324888) asks the BlockDef's IsBlockFinished in state
   6. So in New York, beating the blimp ends the block.
 - `ResultsNI = NewYork::BossResultsNI`: on 1 the monster stands on top of the Empire building at (0, 18, 61.5) for
-  the results; on 2 the usual results run.
+  the results; on 2 the usual results run. It is game.c's `ny_boss_results_ni` (NewYork.scr), as the other results
+  scenes are: SetupNI(0.25); the script camera cut to (4, −55, 78) looking at (−3, 10, 57); one player on (0, 18,
+  61.5) facing π, two on (±3, 15, 61.5) facing ∓¾π; the Hud and ChallengeStatus faded out; player 1 taunts
+  (`Ground_Taunt`), then each now and then a taunt, a grab or a punch down at the roof; at NITime 1.25 the camera
+  moves in to (−2.61, −13.75, 74.4) looking at (−3.08, 11.93, 66.46); while `bWatchForFall` they are held on the
+  roof, and once the centre building falls the TwoTilts camera comes back in 1.5 s. It never returns 0.
 
 **Every other city** [R]:
 - The data spells the key `xxIsBlockFinished`, which turns it off. The flag their `setBossBlockFinished` sets is
@@ -56,6 +61,14 @@ beaten (`BE_DEFEATED`). The NY blimp calls `NewYork::setBossBlockFinished` itsel
   cheat: 0x33D740 is `*(0x4D7E68) & 0x10000`, the cheat flags, which with 0x20000 (0x324930) skip a block [R].
 - So the boss is a fight inside the block, worth its `Points` (1500, category 2 "vehicle", through addStats type 2)
   and the challenge's Goal. The block still has to be flattened.
+
+**The Goal** [R]: the boss's addStats (0x2C51A0) awards its template's name once (0x346780), and `ChallengeBoss` has
+that template as its one Goal (`Required` 1), so beating the boss meets it. In the port the boss's `BE_STATS` goes
+through `army_add_stats`, whose `AE_SCORE` carries the template's name to `challenge_add_stats` (main.c
+`challenge_stats`, challenge.c); the HUD shows the boss bar instead of the count (hud.c `hud_boss_health`: the 5,000 at
+0 health), the Pause card its `boss_completed` tick once the count is met, and the Results the challenge line.
+Checked: NY10 with the blimp beaten traces `challenge: NYBlimp counted, 1/1`, then `challenge met: 1/1` as the block
+is won.
 - When the city's last block is finished, `gCommon.isCityDestroyed` (0x4D7E4F, set by 0x325AD0 in state 9 when the
   current block is the last) becomes 1, and a boss still around leaves for good.
 
@@ -110,6 +123,39 @@ t 0, and places the object at the first point at once [R].
 - `gWorld.getPlayValue / setPlayValue`: a table of ints. The generators write it and the blimp reads it.
 - `Monster.isClimbing`: +0xB9C0 ≠ 0.
 - `Monster.playReaction(name)`: the move state of that name (0x2D9890), started through 0x2D9710.
+
+**The AttackObject's oscillation** (vtable 0x44B470; its init 0x304FA0 → 0x315330, its update 0x314EF0) [R]:
+- **The keys** (0x315810 .. 0x3159F0): +0x190 = `OscillationScale`, the template's float, else (0 or less) the
+  instance book's; +0x18C = `OscillationOffset`, the template's, then the instance's over it, and below 0
+  gWorld.frand × 2π. Only float records count (the type byte is tested for 1). The constructor (0x315A90) zeroes
+  both and the last wobble (+0x180).
+- **Each frame**, after the world object's update (0x309AC0: the mover, the pulse, the script), while +0x190 > 0: the
+  phase grows by the world's step (gWorld +0x4); the wobble is (sin 2φ, cos 3φ, 0) × the scale; the object's turn
+  is taken apart into its facing (0x101220), gets the new wobble less the last one, and is made again (0x101330),
+  then its matrix (vtable +0x24). So a facing the script leaves alone rocks by ± the scale (in radians) about x and
+  y, and a mover's frame made afresh each frame only gets the frame's change.
+- **Which:** of the bosses only `BossSaucerAmbient` has one (0.075: ±4.3°, the tilt and its rotor's, which copies the
+  saucer's facing in its Process). The keys (0x3F5DB4, 0x3F5DB8) are read nowhere else, so the others that have them
+  rock only as AttackObjects: the army's helicopters (0.1, not in army.c) and the PirateShip (0.1); the palm trees'
+  0.02 and offset −1 (StreetObject.bsf objects) [G: not AttackObjects, so never read].
+- Ported (boss.c `obj_update`, the keys in `obj_new`): the facing carries it, a part whose turn is its mover's
+  (`oriented`) gets the change through `turn_facing` / `facing_turn`.
+
+**Sounds** [R]:
+- `add3DSfx(name, keep)` (the binding 0x278810) is 0x287860(object, name, keep != 0): one of the object's 16 sound
+  slots (2 bits each in +0x50: in use, keep), a slot whose sound has ended taken again (0x274CF0), none left: none.
+  It starts the 3D sound through 0x26D560 with the slot's id and the object's own place (+0x2C) as its position, so
+  the sound follows the object. A deleted object (0x290480 → 0x288050) kills the sounds of its slots without keep
+  (0x274710) and leaves those with keep where they are. The bosses' scripts all pass keep 0.
+- In the port each `BE_SOUND` is a `sound_add3d` moved with its part every frame (main.c `bsnd`), at most 16 a
+  part, and killed with it (`BE_SOUND` level 0, and a new block).
+- **MovementSound** (`Tank Treads` on BossTank, BossSaucer and NYBlimp, `Copter Loop` on BossHelicopter) is never
+  played for the bosses: the key (0x3F5D9C) is read only by the AttackMover's init (0x314B40, 0x314CE4) and the
+  HelicopterMover's (0x31EE20, 0x31F094, which starts it at once through 0x287860), and by the scripts
+  Vehicle_Attack.bsf and Vehicle_Helicopter.bsf. No boss has either mover (the SplineMover's init is empty,
+  0x33AC90, and the LineMover's 0x317650 does not read it), the Tank moves itself, and no Boss_*.bsf asks for the
+  key. What the bosses sound like is their scripts' own: `Cyclo_Hum_Loop` (the Saucer), `Cyclo_Wind_Loop` (the
+  whirlwind), `Leeper_Hum_Loop`, `Leeper_Servo`, `Leeper_Jump`, `Tim_Impact_Test` (the Jumper), the voices.
 
 **Object flags** (0x3F5F70) [R]:
 - 0x4000 `PushOutMonsters` (Tank, Jumper): a monster is pushed out of the part's box by the collision world
@@ -224,7 +270,11 @@ RenderScale 1.2. Its clips are `JumperBoss_Idle` / `_Launch` / `_Land` on the `J
   climbing a front below it.
 
 **The roof ornaments** [R]: landing within HitRadius of the palace's `HKPalaceTopAdorn1R` / `2` / `1L` breaks them
-(`forceDamage`).
+(`forceDamage`, `BE_FORCE_DAMAGE`). That is RoofItem.bsf's forceDamage, streetobj.c's `streetobj_force_damage`
+(STREETOBJ_NOTES.md): nFlags 2, 99 hits, TakeDamage(none, 1000, 0), so the ornament falls off its roof (the fall
+latency, then down 6 a second, turning) with no score. Checked in HK10: about 17 s in the Leeper lands on the palace
+and the top tower `HKPalaceTopAdorn2` (HitRadius 9) tips off and falls to the street; the side ornaments (HitRadius
+5) stay.
 
 **Leaving** [R]:
 - **When:** its LeaveDelay runs down twice a frame while it is not in the air, so 30 counts as 15 s.
@@ -352,8 +402,6 @@ falling back one loses its barriers too.
   - the parts' shapes (0x28FD70, `collide_shape_pick`: CollisionBox (the generators'), CollisionRadius or
     AutoCollisionBox (the blimp) with the model's box, else the sphere the model gives (its vtable +0x14, at
     0x290384): SimpleShape's 0x184CB0, the union of its parts' spheres (0x185AA0) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`.
-- **Movers:**
-  - the LineMover's pitch along a leg (the port turns the yaw only).
 - **Weapons:**
   - the turrets' rates (radians a second, as army.c);
   - `setWeaponAmmo` / `reloadWeapon` (the weapon's ammo, as army.c);
@@ -363,12 +411,10 @@ falling back one loses its barriers too.
   - `adjustZRot` (taken as adding to the turn);
   - getFacing().z read back in (−π, π];
   - the numGenerators global and the play values (taken as starting again per block);
-- **Not ported:**
-  - the movement sounds (`MovementSound`: `Tank Treads`, `Copter Loop`: native, not in the scripts);
-  - the bosses' `OscillationScale`;
-  - the challenge's Goal count;
-  - NewYork's `BossResultsNI` scene;
-  - RoofItem.bsf (what `BE_FORCE_DAMAGE` does to the palace ornaments).
+  - the facing the oscillation takes apart (0x101220) is `turn_facing`'s asin / atan2, read for the mover-turned
+    parts only: the others carry their facing as the script set it, plus the wobble.
+- **Sounds:** a `--shot` run moves no sound on (`sound_update(0)`), so there a part's 16 slots fill up and later
+  sounds are refused (the trace says so); in play an ended sound frees its slot, as 0x274CF0 does.
 
 ## Driving it from the viewer
 1. **Setup:**
@@ -382,10 +428,13 @@ falling back one loses its barriers too.
    - `boss_activate(1)` when gAIMgr is activated.
    - The army must not spawn the boss's AIInstance (`boss_is_boss_template`). city.c must not place the ambient
      bosses' or generators' AttackObjectInstance / ObjectInstance as still models.
+   - `--do "bosshit n"` (main.c) is one blow of n on the block's boss by the monster, as an armed attack sphere at
+     its middle with a record of its own: `wait 8, bosshit, wait 20, bosshit, wait 12, bosshit` beats the NY blimp.
 2. **Each frame:** `boss_collide_add` into the frame's collision world (between `collide_begin` and
    `collide_finish`, before anything moves), each touch of a kind-1 object (a trigger) that collide_monster reports
    to `boss_trigger_touch`; `boss_update(dt, monsters, buildings)`, then draw each alive part: `shape` at `world` ×
    `scale`; `animate`: its own RawAnim; the Jumper: `clip` at `anim_time`. Then apply the events (`BE_PUSH` no
-   longer comes: the pushes are collide_monster's).
+   longer comes: the pushes are collide_monster's; `BE_SOUND` level 1 starts a 3D sound that follows part `obj`,
+   level 0 kills that part's).
 3. **Monster attacks:** an armed attack sphere calls `boss_hit`.
 4. **The city's end:** `boss_set_city_destroyed(1)` once the city's last block is finished.

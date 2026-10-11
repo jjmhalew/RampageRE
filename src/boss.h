@@ -17,7 +17,8 @@
  *   - the natives they lean on: the SplineMover (update 0x33ACA0, its Kochanek-Bartels curve 0x13B780 / 0x13B2F0),
  *     the World's building finders (findBuildingNearMonster 0x318240 over the monsters' span 0x318390,
  *     findBuildingNearPosition 0x2B4D50, getRandomBuilding 0x2AEC40), gCommon.isCityDestroyed (0x4D7E4F),
- *     Monster.isClimbing (+0xB9C0) and playReaction (0x2D9890 + 0x2D9710).
+ *     Monster.isClimbing (+0xB9C0) and playReaction (0x2D9890 + 0x2D9710), the AttackObject's OscillationScale
+ *     wobble (init 0x315330, update 0x314EF0).
  *
  * Engine-agnostic, like army.h: nothing here draws, plays a sound or fires a shot itself. The caller gives each
  * frame what the bosses see of the monsters and the buildings, and gets back what to draw (the parts) and what
@@ -127,7 +128,8 @@ enum {
                          * `level` when >= 0 (Leeper_Steam on nodes 2, 5, 8); monster >= 0: it follows that monster
                          * (Hazard_Electricity_Explode); neither: it stays at pos */
     BE_EFFECT_STOP,     /* the effect with handle id stops */
-    BE_SOUND,           /* add3DSfx `name` at pos from part obj; level 0: stop every sound of part obj (it is gone) */
+    BE_SOUND,           /* add3DSfx `name` on part obj (0x287860: it follows the part); level 0: stop every sound of
+                         * part obj (it is gone, 0x288050) */
     BE_REACTION,        /* monster.playReaction(name): start its move state `name` (React_Airborne, React_Tornado,
                          * Jump_Air_Borne_Fall, React_Front_Zap, React_Side_L_Zap) */
     BE_VEL,             /* monster.setVel(v, 0): its velocity becomes v (it is thrown) */

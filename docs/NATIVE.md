@@ -441,7 +441,7 @@ trims: "Adornments"), ride their storeys down, fall off with their cells and are
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey
 and sinks, leaving its rubble (the camera shakes as each floor falls, and on the monsters' heavy blows: CAMERA.md
 "Shake") ("Collapse"; `--do "collapse"` destroys the building in front of the monster, `--do "hitcell b floor col"` hits one
-front cell).
+front cell; `--do "bosshit n"` deals the block's boss one blow of n, BOSS_NOTES.md).
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster
 pushed at a building's front mounts it, climbs with the stick (each stroke flipping the clip), hops along the front,
 swings round a corner onto a side unless a neighbour is flush with it, climbs down and steps off at the foot, or
