@@ -359,8 +359,10 @@ Floating = 100
   sets.
 - **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject hit wobble (+0x18C), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).
-- **Not ported:** bosses, `Vehicle.bsf` (the `Humvee` and other street vehicles, plain `AK_OTHER` here), the news
-  helicopters' cameras, Rocket / RocketBase. The `BradleyTroopCarrier` is a CombatTruck and is covered.
+- **Elsewhere:** the bosses are boss.c's ([BOSS_NOTES.md](BOSS_NOTES.md)); `Vehicle.bsf` (the `Humvee` and the other
+  street vehicles, `AK_OTHER` here) and Rocket / RocketBase are vehicle.c's ([VEHICLE_NOTES.md](VEHICLE_NOTES.md)).
+  The `BradleyTroopCarrier` is a CombatTruck and is covered.
+- **Not ported:** the news helicopters' cameras.
 
 ## Driving it from the viewer
 1. **Setup:** `army_new` with a host whose `find(book, name)` returns `book_group` of `<book>.bdp`. Use the same
