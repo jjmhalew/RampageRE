@@ -234,7 +234,7 @@ reports every award with its template name, so the viewer can count challenge go
   - the weapon node: the host's `node_world`, else 3 above the truck.
 - **WorldObject.rotate:** rot × Rz(e[2]) Rx(e[0]) Ry(e[1]), in its own frame (case 0xD, 0x278258) [R].
 - **The first fill** is done again after `vehicle_clear`. Whether a later block load resets it was not traced.
-- **Not ported:** the news helicopters' cameras (army), and what the 0x80000 / 0x8000000 object flags do in the engine.
+- **Not ported:** what the 0x80000 / 0x8000000 object flags do in the engine.
 
 ## Driving it from the viewer
 1. **Setup:**

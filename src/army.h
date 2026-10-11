@@ -95,10 +95,15 @@ typedef struct {                                     /* one weapon (a Weapon| gr
     /* the weapon (0x296760): +0xB4 the countdown, +0xEC ammo, +0xF5 firing (a beam), +0xF6 charging, +0x1B8 first */
     float timer, beam_left, scale;
     int ammo, on, firing, charging, first;
-    float yaw, pitch;                                /* a cluster's turn from the unit's front [G] */
+    float yaw, pitch;                                /* a cluster's turn from the unit's front (+0x54, +0x3C) */
     float rot_range, rot_rate, elev_range, elev_rate;   /* the WeaponCluster's, radians (rates a second) */
     float rot_min, rot_max, elev_min, elev_max;      /* the turn's and the pitch's ends (0x299640) */
     int clear_rot, clear_elev;                       /* RequiresRotation / ElevationClearToFire (flags 2, 1) */
+    int recenter;                                    /* ReCenterWhenNoTarget (flag 0x10): back to 0, 0 without one */
+    /* the nodes the cluster turns (Rotation / ElevationControlNode, +0x64 / +0x4C): the host draws the shape with
+     * rot_node's pose turned by yaw about its own z and elev_node's by pitch about its own x (WWeaponProcAnimator
+     * 0x298980), so the WeaponNode below them is the firing frame as it is */
+    const char *rot_node, *elev_node;
     int shot;                                        /* a beam's shot id, -1 none */
 } ArmyWeapon;
 

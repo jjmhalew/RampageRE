@@ -97,6 +97,27 @@ the frame's dt; the angles wrap at 0x298E70 / 0x298F40). The defaults: Elevation
 RotationRange ±360°; a negative or missing Range keeps the default, and `Elevation/RotationMin/MaxRange` (degrees)
 set each end on its own (the HT turret's −10 … 90). It is on target when the turn is within π/50 and the pitch
 within π/100, or when `RequiresRotation/ElevationClearToFire` is 0; a step that close lands on the target.
+`ReCenterWhenNoTarget` (flag 0x10, default off) makes the cluster step back towards 0, 0 at the same rates while it
+has no target (0x29ADE0: the wanted angles are 0); without it the turn stays where it was.
+
+**The turn is drawn** [R]: the cluster keeps the turn at +0x54 and the pitch at +0x3C, and the nodes named by
+`RotationControlNode` and `ElevationControlNode` at +0x64 and +0x4C (−1 when absent; looked up through the object's
+vtable +0x48, 0x299D90 / 0x299DF0). An embedded `WWeaponProcAnimator` (vtable 0x4499F0, at cluster +0x2C, set up
+by the cluster's constructor 0x29A200) is the shape's procedural animator while the weapon system runs: 0x299010
+hands it to the object (vtable +0x28) in its states 2, 3, 4 and 7 and takes it back otherwise. Its +0x8 (0x298B40)
+names the nodes it touches (a mask of the two), its +0xC (0x298980) poses one of them: the clip's local pose (the
+anim's vtable +0x14, made a matrix by 0x104BB0) with a turn put first (row vectors, 0x101A90), about the node's own
+z by +0x54 for the rotation node (0x1015B0: rows (c, s, 0), (−s, c, 0), (0, 0, 1)) or about its own x by +0x3C for
+the elevation node (0x101730: rows (1, 0, 0), (0, c, s), (0, −s, c)). So what hangs below the nodes turns with them,
+and the WeaponNode's world, the firing frame, carries the turn. Here city.c `army_sync` / `pose_instance`
+(`Instance.turn`), from `ArmyWeapon.rot_node` / `elev_node` and its `yaw` / `pitch`. The pirate ship's cannons stay
+unturned: it aims as an actor here, keeping no turn [G].
+
+The turn's targets (0x29ADE0): the turn is the angle of the aim's x, y less that of the object's +y row, wrapped
+to ±π [R]; the pitch comes from the aim's rise (the target's z less the weapon's, 0x29B7F8) with a correction for
+the object's own tilt (its x and y rows against the horizontal, 0x105C60, picked by whether the turn is within
+±π/2) [R], not followed to the end. Here the turn is from the unit's facing and the pitch the aim's elevation
+(`weapon_aim`), which agree while the units' frames are upright, as the helicopters' are here [G].
 
 The aim [R 0x293050]: actors (0x30EC10) and clusters aim straight at the target lifted by ½ × 9.81 × Gravity ×
 (L / V)² (L the straight distance, V the Velocity; no lift without gravity). A monster's target point (its vtable
@@ -159,9 +180,12 @@ otherwise.
   `Direction X`, like their effects' rods, so a soldier's beam runs straight at its target; the helicopters'
   Weapon_0 has +X along the unit's front. Here (`army_frame_point`, `army_beam_axis`): the beam's axis is the rod
   through the firing frame and its effect is placed in that frame (fx_spawn_frame, fx_place), for the army, the
-  bosses and the fire truck. A cluster's turn is applied to the node's frame about the unit's right and the world's
-  z (`army_frame_turn`) [G: the port's nodes are drawn without the turret's turn; how the cluster turns its node was
-  not read]. A boss weapon without a node gets a frame with the rod's main axis along its aim.
+  bosses and the fire truck. An army unit whose shape has its cluster's control nodes is drawn turned ("The turn is
+  drawn" above), so its firing frame is the WeaponNode as drawn, a frame behind (the shape is posed after the
+  update); for the others, and the bosses' and the fire truck's turrets (boss.c, vehicle.c draw no turn), the turn
+  is put on the node's frame about the unit's right and the world's z (`army_frame_turn`) [G]. A shot's way stays
+  the turn's [G]: on the helicopters the drawn Weapon_0's +X and it agree within about 2°. A boss weapon without a
+  node gets a frame with the rod's main axis along its aim.
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.
@@ -222,6 +246,21 @@ at 0.
 - **Wingman:** with `FriendChance` (from the AIInstance) a wingman is made and follows the leader's states
   (`stopFlight`).
 - **Death:** `HitPoints` hits make it fall on a SphereMover. At z ≤ 4 it explodes (`HitEffect0`, `ExplodeEffect`).
+- **The turn onto the target:** every helicopter's WeaponCluster names `Helicopter_Base_Rotate` (RotationRange 360,
+  1 rad/s) and `Helicopter_Base_Pitch` (ElevationRange 20, 0.5 rad/s), with `ReCenterWhenNoTarget`. In the shapes'
+  trees (Helicopter, NewsChopper) those nodes carry the whole body: Helicopter_base → Helicopter_base_pitch →
+  Helicopter_base_rotate → the body, its rotors and Weapon_0. So while the script's `setTarget(monster)` holds
+  (states 2 and 1) the helicopter turns its nose onto the monster and dips it by up to 20°, and from state 3
+  (`setTarget(nullTarget)`) it levels out again ("The turn is drawn" above).
+- **The news helicopters' cameras** [R]: `NewsHelicopter` and its city copies (`NewsHelicopterCG`, `LA`, `LV`, `NY`,
+  `SF`) carry the same cluster with one PulseCannon on Weapon_0 at `Ammo 0` (`RefireDelay 1000`). A weapon without
+  ammo never fires (0x2978D0, "The countdown" above; `IsHoming` is not set, so the script never gives it any), so
+  the cluster does nothing but turn the NewsChopper onto the monster it has spotted: that is the camera, the
+  chopper itself pointing at the monster, with its `VoiceSound` (`V_Traffic_Reporter`, `V_Traffic_Chic_Seq` …) when
+  it spots one. There is nothing more to it: the ELF has no news, broadcast or render-target strings (`RTTCamera` is
+  the play camera, CAMERA.md), no script but Vehicle_Helicopter.bsf names these templates, and neither Hud.bsf nor
+  the GUI books (CommonGUI, WorldGui) have a picture-in-picture or a news screen. Their 300 `Points` and the
+  addStats on their death are a helicopter's.
 - The spline is the SplineMover's (0x33ACA0, BOSS_NOTES.md: a Kochanek-Bartels curve whose place d grows by the
   velocity in the points' own d units, answering 2 every frame past its end) [R], ported as boss.c's (army.c
   `spline_step`); flag 2 turns the helicopter along the tangent (yaw only here; the game sets its whole frame).
@@ -364,7 +403,6 @@ Floating = 100
 - **Elsewhere:** the bosses are boss.c's ([BOSS_NOTES.md](BOSS_NOTES.md)); `Vehicle.bsf` (the `Humvee` and the other
   street vehicles, `AK_OTHER` here) and Rocket / RocketBase are vehicle.c's ([VEHICLE_NOTES.md](VEHICLE_NOTES.md)).
   The `BradleyTroopCarrier` is a CombatTruck and is covered.
-- **Not ported:** the news helicopters' cameras.
 
 ## Driving it from the viewer
 1. **Setup:** `army_new` with a host whose `find(book, name)` returns `book_group` of `<book>.bdp`. Use the same
@@ -372,6 +410,9 @@ Floating = 100
 2. **Each frame:** call `army_update(dt, monsters, buildings)`, where the monsters carry their collision spheres in
    the world. Then:
    - draw each live unit's `shape` at `world`; actors play `clip` at `anim_time` (one play is `anim_len`);
+   - turn each weapon's `rot_node` by its `yaw` about the node's own z and its `elev_node` by its `pitch` about the
+     node's own x, before the node's own pose (once per node; city.c `army_sync`), and give `node_world` the nodes
+     as drawn;
    - draw each live shot by its `effect` at `pos` along `dir` (a beam spans `length`);
    - apply the events: start and stop effects by name (attached ones follow `unit` / `shot`), play sounds, route
      `AE_HIT` through `army_reaction_slot` to the monster's slots and HP, `AE_REACTION` straight to the slot,

@@ -55,6 +55,9 @@ typedef struct {
     Clip face; int has_face; double face_t; uint8_t *face_mask;
     float (*face_held)[7]; float face_blend_left, face_blend_time;   /* the face bones' own cross-fade (AP +0x7298) */
     float (*held)[7]; float blend_left, blend_time;   /* the pose blended from while blend_left > 0 (0x2FFF10) */
+    /* an army unit's weapon clusters (WWeaponProcAnimator 0x298980): node turn[k].node's own pose is turned first,
+     * about its own z (axis 2, the RotationControlNode) or x (axis 0, the ElevationControlNode) by angle radians */
+    struct { int node, axis; float angle; } turn[8]; int nturn;
     int hidden;                                       /* not drawn (a building's interior until it is damaged) */
     int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
     int mirrored;                                     /* skinned mirror-wise: left and right swapped, x reflected */

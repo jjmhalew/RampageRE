@@ -531,6 +531,9 @@ static void unit_weapons(Army *a, ArmyUnit *u)
                     w->elev_rate = group_num(cl, "ElevationRate", 0.5f);
                     w->clear_rot = group_num(cl, "RequiresRotationClearToFire", 1) != 0;
                     w->clear_elev = group_num(cl, "RequiresElevationClearToFire", 1) != 0;
+                    w->recenter = group_num(cl, "ReCenterWhenNoTarget", 0) != 0;
+                    w->rot_node = group_str(cl, "RotationControlNode");
+                    w->elev_node = group_str(cl, "ElevationControlNode");
                 }
         }
         return;
@@ -962,14 +965,25 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
         w->pitch += clampf(want_pitch - w->pitch, -sp, sp);
         on = (!w->clear_rot || fabsf(want_yaw - w->yaw) <= PI / 50) &&
              (!w->clear_elev || fabsf(want_pitch - w->pitch) < PI / 100);
+    } else if (w->recenter) {
+        /* [R 0x29ADE0] ReCenterWhenNoTarget (flag 0x10) without a target: the same steps towards 0, 0 */
+        float sy = w->rot_rate * dt, sp = w->elev_rate * dt;
+        w->yaw += clampf(-w->yaw, -sy, sy);
+        w->pitch += clampf(-w->pitch, -sp, sp);
     }
     float h = u->facing + w->yaw;
     float f[3] = { -sinf(h) * cosf(w->pitch), cosf(h) * cosf(w->pitch), sinf(w->pitch) };
     memcpy(dir, f, sizeof f);
+    /* [R 0x2971A0, 0x298980] the firing frame is the WeaponNode's world as drawn, which carries the cluster's turn
+     * where the shape has its control nodes (a frame behind: the shape is posed after the update); elsewhere the turn
+     * is put on it here [G]. The shot's way stays the turn's (it agrees with the drawn frame's within about 2 deg) */
+    float cn[16];
+    const char *ctl = w->rot_node ? w->rot_node : w->elev_node;
+    int drawn = have_node && ctl && a->host.node_world(a->host.ctx, u, ctl, cn);
     if (have_node && !w->rot_rate && !w->elev_rate) {
         for (int k = 0; k < 3; k++)
             dir[k] = node[4 * w->axis + k] * (w->axis_neg ? -1.0f : 1.0f);
-    } else
+    } else if (!drawn)
         army_frame_turn(F, u->facing, w->yaw, w->pitch);
     return on;
 }

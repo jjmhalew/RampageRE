@@ -1015,6 +1015,23 @@ static void army_sync(Scene *s, double t)
         Instance *in = &s->instances[show];
         in->hidden = 0;
         memcpy(in->base.m, u->world, sizeof in->base.m);
+        /* the weapon clusters' turn on their control nodes (0x299010 hands the shape its WWeaponProcAnimator, the
+         * cluster +0x2C; 0x298980 turns +0x64 by +0x54 and +0x4C by +0x3C): a wreck's DestShape has no such nodes */
+        in->nturn = 0;
+        for (int w = 0; w < u->nw; w++)
+            for (int e = 0; e < 2; e++) {
+                const char *name = e ? u->w[w].elev_node : u->w[w].rot_node;
+                int had = 0;                         /* the weapons of one cluster share its nodes: turned once */
+                for (int t = 0; name && t < in->nturn; t++)
+                    had |= _stricmp(in->tree.nodes[in->turn[t].node].name, name) == 0;
+                for (uint32_t k = 0; name && !had && k < in->tree.n && in->nturn < 8; k++)
+                    if (_stricmp(in->tree.nodes[k].name, name) == 0) {
+                        in->turn[in->nturn].node = (int)k;
+                        in->turn[in->nturn].axis = e ? 0 : 2;
+                        in->turn[in->nturn++].angle = e ? u->w[w].pitch : u->w[w].yaw;
+                        break;
+                    }
+            }
         if (in->has_clip && u->anim_len > 0 && u->clip)
             in->offset = (float)(u->anim_time / u->anim_len * in->clip.duration - t);
     }
@@ -2236,6 +2253,17 @@ static void pose_instance(Scene *s, Instance *in, double t)
                 if (in->still_root >> k & 1)
                     tr[k] = in->root_hold[k];
         Mat4 local = mat_tq(tr, q);
+        for (int k = 0; k < in->nturn; k++)          /* [R 0x298980] local = R x pose (row vectors): R first */
+            if (in->turn[k].node == (int)i && in->turn[k].angle != 0) {
+                Mat4 r = mat_identity();
+                float c = cosf(in->turn[k].angle), sn = sinf(in->turn[k].angle);
+                if (in->turn[k].axis == 2) {         /* 0x1015B0: rows (c, s, 0), (-s, c, 0), (0, 0, 1) */
+                    r.m[0] = c; r.m[1] = sn; r.m[4] = -sn; r.m[5] = c;
+                } else {                             /* 0x101730: rows (1, 0, 0), (0, c, s), (0, -s, c) */
+                    r.m[5] = c; r.m[6] = sn; r.m[9] = -sn; r.m[10] = c;
+                }
+                local = mat_mul(local, r);
+            }
         if (nd->parent < 0 && in->root_turn != 0)
             local = mat_mul(mat_trs_z(0, 0, 0, -in->root_turn), local);
         int p = nd->parent;
