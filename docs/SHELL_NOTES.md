@@ -690,7 +690,7 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 ## Not ported, or guessed
 
 - **Not drawn:**
-  - the emulators (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md); the demo game too, above);
+  - the emulators, after v1 ([ARCADE_NOTES.md](ARCADE_NOTES.md); the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md); the demo game too, above);
   - the turn of hud.c's quads (the shell's turn, above);
   - the main menu's two searchlights: `auto="false"`, and no script starts them **[R]**;
   - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the

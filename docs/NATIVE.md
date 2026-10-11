@@ -511,7 +511,7 @@ city with its ring on it, lit for day or night; the main menu's fires, MonsterSe
 play, through the game's GUI camera, each in its place among the screen's pictures.
 
 ## Not there yet
-- the arcade emulators, skipped (SHELL_NOTES.md); the memory card's states a PC has no meaning for
+- the arcade emulators, after v1 ([ARCADE_NOTES.md](ARCADE_NOTES.md)); the memory card's states a PC has no meaning for
   (formatting, a card changed or taken out); the [G] marks in the notes.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people

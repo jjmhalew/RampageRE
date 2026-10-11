@@ -24,8 +24,9 @@ with their challenges, bosses, results screens and the credits, the other play m
 included), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch (homebrew)
 and Android, on keyboard, controllers (rumble included) or the touch screen, with texture packs and graphics
 settings (GTAO, SMAA / MSAA). It has been played on Windows; the Switch, phones and controllers are not yet tried on
-real hardware. Still missing: the two arcade games of Bonus Content (Midway Classics) and the smaller
-gaps that the notes in `docs/` list under "Not ported" (and mark [G] where the port guesses).
+real hardware. Still missing: the smaller gaps that the notes in `docs/` list under "Not ported" (and mark [G] where
+the port guesses). After v1: the two arcade games of Bonus Content (Midway Classics), separate emulator programs on
+the disc rather than part of the game ([docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md)).
 
 The recompiled game (`build.ps1`) is the reference the port is checked against. It runs the front end and the first
 campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly and without sound
@@ -59,7 +60,7 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | The game in the native port: front end and shell, profiles, game flow, challenges, people, army, traffic, bosses, edibles, effects, sound and music, movies, HUD and Pause | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 | Linux, Switch (homebrew) and Android builds, controllers and rumble, touch pad, texture packs, graphics settings, CI | ✅ (not yet tried on real hardware) [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) |
 | The attract mode's demo games (a random city, block and monsters, played by the computer) | ✅ [docs/SHELL_NOTES.md](docs/SHELL_NOTES.md) |
-| The arcade games | ❌ |
+| The arcade games (Midway Classics: Digital Eclipse's emulators on the disc) | after v1 [docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md) |
 
 **Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
 SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
