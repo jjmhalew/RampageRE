@@ -390,7 +390,11 @@ and no card (5, state 10).
 **Options (button 1):** `ControlRoom::fadeInInterface("Options")`.
 
 **Bonus Content (button 0):** the "Midway Classics" box, with Rampage and Rampage World Tour. Ballers is in the NTSC
-English version only. Cross starts `gShell.startEmulator(n)` after 0.25 s:
+English version only: `gApp.getPlatform() == 2 && gApp.getLanguage() == 1 && gApp.getRegion() == 0` [R]. The
+language is gApp +0x70 (0x28B268), the .loc column (1 English, 2 English 2, 3 Japanese, 4 French, 5 German, 6
+Italian, 7 Spanish, 8 Dutch, 9 Portuguese; the port's `--lang` + 1; `== 7`, Spanish, moves the main menu's buttons
+5 down and the Options' rumble list); the region 0x28B200 is SYSTEM.CNF's BOOT2: SLUS 0, SLES 1, else 2
+(0x10D290), 1 for this disc, so no Ballers box and cheat video 3 is the credits. Cross starts `gShell.startEmulator(n)` after 0.25 s:
 - It is 0x3063A0: `desi/m1` or `desi/jarvos` through `LoadExecPS2`, with `-game rampage` / `rwt`.
 - The port gives `SHELL_EVT_EMULATOR` and returns to the menu.
 

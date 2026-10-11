@@ -1858,6 +1858,10 @@ static void fader_update(Faders *fd, float dt)          /* UpdateObjectFader: 2 
                                                           * port takes 60 */
 #define IDLE_SECONDS SHELL_IDLE_SECONDS                  /* [R 0x308710: 120.0 (0x42F0) into the shell's +0x18] */
 
+/* gApp.getLanguage() [R 0x28B268: gApp +0x70, the .loc column 0x1D4CCC reads: 1 English, 2 English 2, 3 Japanese,
+ * 4 French, 5 German, 6 Italian, 7 Spanish, 8 Dutch, 9 Portuguese]: hud.h's language + 1 */
+#define get_language(s) ((s)->prof.language + 1)
+
 /* the GuiEvent ids [R the scripts] */
 enum { EV_RIGHT = 2, EV_LEFT = 4, EV_UP = 8, EV_DOWN = 16, EV_BACK = 32, EV_ACCEPT = 64, EV_START = 128,
        EV_BUTTON = 256, EV_GAIN = 512, EV_LOSE = 1024, EV_FRAME = 2048, EV_INIT = 8192 };
@@ -3543,7 +3547,7 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
         m->cheat = find(r, "CheatMenu");
         fix_buttons(m->retro, "nb_select", "nb_back", "", "");
         fix_buttons(m->cheat, "cb_select", "cb_back", "", "");
-        m->ntsc = s->platform == 2 && s->prof.language == 1 && s->region == 0;
+        m->ntsc = s->platform == 2 && get_language(s) == 1 && s->region == 0;   /* (English, SLUS: never here) */
         if (m->ntsc) m->retro = find(r, "RetroGamesNTSC");
         m->lb_players = find(r, "np_selection");
         m->lb_bots = find(r, "nb_selection");
@@ -3570,7 +3574,7 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
         Node *bs = find(r, "btn_select"), *bp = find(r, "btn_profile");
         float tw = text_w(&s->gui, bs);
         if (text_w(&s->gui, bp) > tw) tw = text_w(&s->gui, bp);
-        float shifty = s->prof.language == 7 ? 5.0f : 0.0f;
+        float shifty = get_language(s) == 7 ? 5.0f : 0.0f;     /* (Spanish) */
         set_pos(bs, 590.0f - tw, 0.0f + shifty, 0);
         set_pos(bp, 590.0f - tw, -20.0f + shifty, 0);
     } else if (ev == EV_GAIN && pad == 0) {
@@ -3755,7 +3759,7 @@ static void op_event(Shell *s, int ev, int pad, float dt)
         o->titles[0] = find(r, "sound_title");
         o->titles[1] = find(r, "music_title");
         o->titles[2] = find(r, "rumble_title");
-        if (s->prof.language == 7 && o->rumble) {
+        if (get_language(s) == 7 && o->rumble) {                /* (Spanish) */
             set_pos(o->rumble, 185, 180, 0);
             Node *on = find(o->rumble, "ON"), *off = find(o->rumble, "OFF");
             if (on) on->tscale = 0.6f;
@@ -5073,7 +5077,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     s->cheat_param_block = -1;
     s->cheat_param_video = -1;
     s->platform = 2;                                     /* gApp.getPlatform(): 2 [R 0x28B1A0, a constant] */
-    s->region = 0;
+    s->region = 1;                                       /* gApp.getRegion() [R 0x28B200: 0x10D290 makes SYSTEM.CNF's
+                                                          * BOOT2 SLUS 0, SLES 1 (this disc, SLES_538.00), else 2] */
     s->idle = IDLE_SECONDS;
     if (st) s->st = *st;
     s->gs = s->st.game;
