@@ -1871,7 +1871,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->props = t;
         sb->inst = inst;
         sb->seen_state = BUILDING_STANDING;
-        sb->fx_glass = group_str(t, "Glass_Small");
+        sb->fx_glass = group_str(t, "Glass_Large");   /* 0x34; Glass_Small (0x33) is never asked for */
         sb->fx_wall_small = group_str(t, "Wall_Small");
         sb->fx_wall_large = group_str(t, "Wall_Large");
         sb->fx_floor = group_str(t, "Floor_Large");
@@ -3243,9 +3243,24 @@ void scene_buildings_update(Scene *s, float dt)
         }
         sb->b.dirty = 0;
         facade_passes(s, sb);
-        /* the cells' effects as their state rises (0x2BB580: glass at the first crack, wall debris as it breaks, the
-         * heavy debris when destroyed; which of the props' Small / Large goes with which state is a stand-in) */
-        for (int ls = 0; ls < sb->b.n; ls++)
+        /* the cells' debris effects, as the building asked for them (building.c: 0x2BB950, 0x2BD7D0 through 0x3101C0):
+         * a first crack Glass_Large where the cell's column has an Outline, else Wall_Small; Wall_Small; Wall_Large;
+         * placed on the front at the cell's middle, in the face's frame (0x30F710: the front's the identity) [R] */
+        for (int k = 0; k < sb->b.ndebris; k++) {
+            int o = sb->b.debris[k].o, col = sb->b.debris[k].col, ls = 0, ci = building_cell_index(&sb->b, FACE_FRONT, col);
+            while (ls < sb->b.n && sb->b.live[ls] != o)
+                ls++;
+            if (ls == sb->b.n || ci < 0)
+                continue;
+            const char *name = sb->b.debris[k].kind == DEBRIS_WALL_LARGE ? sb->fx_wall_large :
+                               sb->b.debris[k].kind == DEBRIS_WALL_SMALL ? sb->fx_wall_small :
+                               sb->outline[sb->b.cell[o][ci].tile & 3][0] >= 0 ? sb->fx_glass : sb->fx_wall_small;
+            float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
+                            sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls + STOREY / 2 }, in[3] = { 0, 1, 0 };
+            scene_fx(s, name, at, in);
+        }
+        sb->b.ndebris = 0;
+        for (int ls = 0; ls < sb->b.n; ls++)   /* the cells' scoring as their state rises */
             for (int col = 0; col < sb->b.width; col++) {
                 int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];
                 if (ci < 0)
@@ -3260,10 +3275,6 @@ void scene_buildings_update(Scene *s, float dt)
                     army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_CELL, st, hitter_move(s, sb),
                                         sb->b.width, sb->b.n, NULL, 0, at);
                 }
-                const char *name = st == 1 ? sb->fx_glass : st == 2 ? sb->fx_wall_small : sb->fx_wall_large;
-                float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
-                                sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls + STOREY / 2 }, in[3] = { 0, 1, 0 };
-                scene_fx(s, name, at, in);
             }
         if (sb->b.collapse > 0 && sb->b.collapse != sb->seen_collapse) {   /* a floor comes down */
             int k = sb->b.collapse;

@@ -95,11 +95,13 @@ XF_RotatesAroundX/Y/Z 0x1000000/2000000/4000000. StretchEmissions, UsesStretchIn
 Particle (+0xD0, default 0x4001): TestZBuffer 0x1, WriteZBuffer 0x2, AdditiveAlpha 0x4, LoopingTextureAnimation
 0x8, CollidesWithGround 0x10, CollidesWithBuildings 0x20, CollidesWithObjects 0x40, UsesTinyParticles 0x80,
 NoRender 0x100, DontBillboard 0x200, CollidesWithWater 0x400, RandomStartTile 0x1000, RandomStartRotation and
-RandomizeInitialRotation 0x2000, UseDiscreteRotation 0x4000, CycleWithinStartArea 0x20000 (tiles cycle within
+RandomizeInitialRotation 0x2000, UseDiscreteRotation 0x4000 (no code reads it: the angle is always the octant
+sine series below), CycleWithinStartArea 0x20000 (tiles cycle within
 the start tile's step), LinearAirResistance 0x40000, StretchAlternateAlignment 0x80000,
 StretchCrosshatchRendering 0x100000, ParticlesDieWithEmitter 0x200000, StretchRealignDirection 0x1000000.
 Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and spin all 0), 0x8000, 0x400000 /
-0x800000 (the colour / alpha graphs are constants).
+0x800000 (the colour / alpha graphs are constants); UsesTinyParticles is cleared (0x1F9800: flags & ~0x80), so the
+31 emitters that set it draw as the others [R].
 
 ## An emitter (start 0x1F7F90, frame 0x20EFD0)
 - **Start**: cycle = lo + r (hi − lo); age = cycle × em_start_time(r) − dt; a random rotation with
@@ -160,11 +162,28 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 - Colour: rgb = vertex_color(t), alpha = vertex_color.a(t), combined with the emitter colour the particle got:
   Normal / None: as is; Lighten v + e; Darken e − v; Difference v − e; Multiply v × e; then clamped to 0 … 1. None
   with constant graphs gives the emitter colour (0x213420). Sent as 128 × colour (128 = 1.0: the texture as is).
-- Angle (modes RotatesOnly, Tiles; 0x2225E0): rotation(t) + spin × age + start angle.
+- Angle (modes RotatesOnly, Tiles; 0x2225E0): rotation(t) + spin × age + start angle, in octants (× 4/π; the start
+  byte × 1/32), its whole part & 7 and the rest into 0x105E30's series: the sine at +0x478, the cosine at +0x47C. The
+  quad's two axes A (right × size, or the DontBillboard axes) and B (up × size) become c A + s B and −s A + c B
+  (0x223344: rows (c, s, 0), (−s, c, 0), (0, 0, 1) times them, 0x101A90), a turn counter-clockwise on screen [R].
+- Corners and uv [R 0x221E50, 0x3B2480, 0x3B24D0]: the four corners (0.5, −0.5), (0.5, 0.5), (−0.5, −0.5), (−0.5, 0.5)
+  along A and B, their uv (4.12 fixed point) texture_center ± texture_radius / 2 so that u = 0.5 + x, v = 0.5 − y
+  (centre 0.5, radius 1 as no file sets them): v 0 at the top, the texture's first row.
 - Texture: the particle's texture; uv 0 … 1, or with Tiles / TilesNoRotation the tile start + ⌊tile_advance(t)⌋
   (with +CycleWithinStartArea modulo the step) of a u × v sheet, read row by row.
 - AdditiveAlpha: additive (dst + src × a), else alpha blended; TestZBuffer (default) tests depth, WriteZBuffer
-  (never set) writes it. NoRender: not drawn (the sound emitters). int.multiple_render: drawn that many times.
+  (never set) writes it. The GS state [R 0x221700..0x221790]: the shader 0x3B2660 (vertex format 0x412: STQ, RGBAQ,
+  XYZ2; VU1 program 0x3A75C8 .. 0x3A7D78 for both its plain and clipping slots), the registers 0x3B26C0 (additive:
+  ALPHA 0x48, Cs × As + Cd) or 0x3B2700 (ALPHA 0x44), both TEST 0x51001 (depth test GEQUAL; the alpha test fails every
+  pixel with AFAIL frame buffer only, so no depth is written whatever WriteZBuffer says), PRMODE 0x58 (Gouraud,
+  textured, blended, no fog); -TestZBuffer switches the depth test off (0x25A900).
+- The VU1 program (0x3A75C8, `tools/vudis.py`) [R]: the CPU builds every corner (0x2214D0); the program only takes them
+  through the matrix at VU1 0x89, divides by w, packs uv (ITOF12) and multiplies each vertex's alpha by the world's
+  fog factor: alpha × min(127.5, F × 0.5) / 128, F = a + b w the 0 … 255 fog value the world's programs (0x37A2A0)
+  send the GS, from the same VU1 constants (+0, +21). The GS draws the particles unfogged, so a fogged particle fades
+  out instead of taking the fog colour. No depth bias, no special depth: the corners' own depth. A triangle with a
+  corner outside the clip volume gets ADC (not drawn). `render_gl.c` draw_fx: the alpha times the linear fog's
+  factor at each corner's eye-plane depth, GL fog off. NoRender: not drawn (the sound emitters). int.multiple_render: drawn that many times.
   DontBillboard: the quad lies in the emitter's frame, normal = `int.forward_axis`. Stretch: a streak from the tail
   to the head, size wide.
 - Textures are the bundle's type-9 entries of those names (fx.bdp holds all of them).
@@ -197,6 +216,46 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 - `src/fx.c`: `fx_shape_*`, `fx_meshes` (a column-major model-to-world matrix per particle): the tumble × the start
   turn; a relative emitter's axis is taken into the world when the particle starts.
 
+## The collision rod and RelativeDistanceLimit (beams)
+An effect whose emitter 0 has AutoStart and +ProvidesCollisionRod (fx_rod) keeps at ParticleSystemFx +0x9C that
+emitter's instance, at +0xA0 the rod's head and at +0xA4 its tail, both 0 at its start (0x1F2750) [R]:
+- each frame after the emitters (0x1F2E60): head += rod speed × dt, at most the rod's length; tail = 0 while the rod
+  emitter is neither shut down nor past its cycle (a CycleLoops one never is until shut down), else tail += speed × dt;
+- the rod emitter stays alive while tail < head (0x1F2CE8); when it goes, +0x9C, the head and the tail are 0;
+- a beam's hit at t along it calls the effect's vtable +0x80 (0x1F2520, from 0x295938, before the stream's own cut
+  0x226DF0): head = t, and t below the tail drops the rod (the head then stays at t);
+- vtable +0xB8 (0x1F1CF0) answers the head: the limit of the +RelativeDistanceLimit emitters (`Autocannon_fire`,
+  `Machinegun_fire`, `Blimp_Laser_Charge`, `Blimp_Laser_Fire`, `Cyclone_Lightning`). At the end of the move
+  (0x211670, 0x2117D4) a particle goes when, for a relative streak, its tail is the limit or more from its emitter,
+  and its length is cut so that its head stops at the limit; for another streak, when age × speed (its head's run;
+  compared squared) reaches it; for the rest, when its distance does (the game takes |pos| in the emitter's frame;
+  no effect has a non-relative one). So a beam is drawn up to what it hit. `src/fx.c`: `Fx.rod`, `head`, `tail`,
+  `fx_cut`; main.c calls `fx_cut` when the army beam's stream was cut this frame (its head short of its growth), with
+  t = head − tail.
+
+## Moving effects
+Only the +EmitterRelativeParticles emitters' particles are drawn through the emitter's matrix (0x222400); the others
+are in the world [R]. `fx_move` moves those back by the effect's move, so they stay (smoke trails stay behind), and
+`fx_place` turns the relative ones (their place, velocity, streak direction, mesh turn) with the new frame. An
+effect also has a velocity of its own (+0x5C, set through vtable +0x90, 0x1F24E0) that the emitters pass to their
+non-Stationary, non-relative particles (0x20F064, 0x212310); none is given here [G: which callers set it was not
+traced].
+
+## Building debris
+The building's cells start their props' effects through the building's spawner (+0x8F4: 0x3101C0 → 0x310260 with the
+key's index into the table 0x3F5990; `Glass_Small` 0x33 is never asked for) [R]:
+- a cell hit (0x2BB950): its first crack (from state 0) `Glass_Large` (0x34) when its sheet column has an Outline (the
+  column's +0xEC, 0x2D0500; the window glass pass's test), else `Wall_Small` (0x35); below 5 HP `Wall_Small`; at 0
+  `Wall_Large` (0x36). A cell flagged 0x400 (FloorFlags, "hidden behind a front-row building") gets none at the first
+  crack and at 0 (not kept in building.c: Chicago's 447 FloorFlags lists are all 0). One hit can give two or three.
+- the destroyed front's crack (0x2BD7D0): a cell it raises to MinCollapseCrackLevel gets the first crack's effect when
+  a random number mod (gWorld +0x28 + 1) is 0 [G: that member (0x4D17C8, set through the world's vtable +0x14,
+  0x284AF0) taken as 0, so always];
+- a floor's collapse (0x2BAE70) none per cell: `Floor_Large` for the floor (0x2BD610, 0x2BD7D0);
+- a hit of kind 4 `Wall_Small` at the hit point (0x2BC88C, through 0x30FCB0; not ported).
+They are placed in the cell's face frame (0x30F710: the matrix of the face from 0x430F10, the front's the identity) at
+2.5 along and 1.5 up the cell. `src/building.c` queues them (`Building.debris`), `src/city.c` plays them.
+
 ## Sounds
 `enum.sound_loop_2d` (def +0xA4) and `enum.sound_2d` (+0xB0) keep the name after the `|` [R 0x1FE1D4]. When an
 emitter starts (0x1F7F90) each that is set and not "No Sound" is started with add3DSfx (0x26D560) at the effect's
@@ -218,12 +277,17 @@ ground (+DontBillboard, forward axis Z, size 10 × (1 + 10t)); `Carbinator_Run` 
 0.25–0.6 above it. Depth tested (+TestZBuffer, the default), the lower half of each billboard is behind the street
 and the flat glow z-fights with it, so the street's and the curb's straight edges cut them into steps. The textures
 are right (tex.c: `Suds_3` border alpha ≤ 30/255, `smoke_white` ≤ 26/255, `basic` is black at its corners and drawn
-additive); without the depth test the foam is round. How the PS2 avoids it (the VU1 billboard code, or how the
-street writes Z) was not read.
+additive); without the depth test the foam is round. The particles' VU1 program has no depth trick (the corners' own
+depth, GEQUAL: an equal depth passes) [R 0x3A75C8, 0x3B26C0]; whether the PS2's street writes the depth these quads
+are cut by is the city renderer's (not read). `render_gl.c` pulls the flat quads in front of the street with a
+polygon offset [G: for GEQUAL's equal-depth pass].
 
 ## Not done / not known
-- Streams modes (no effect uses them), RenderAsDatapoints, UsesTinyParticles (drawn as ordinary quads here),
-  `RelativeDistanceLimit`, the orbit graphs.
-- The VU1 microcode: the billboard's exact corner layout, uv orientation, UseDiscreteRotation, the depth it tests.
-- Which of the two update variants (0x21AD40's template match against 0x4CAE10) the XForm emitters get: only the
-  order of random draws could differ (meshes use neither the angle nor the spin).
+- Not ported because no effect uses them: the Streams modes, RenderAsDatapoints (emitter 0x4000), the orbit graphs
+  (fx.bdp's 287 effects and the menus' have none of them).
+- Which update an emitter gets (0x21AD40 matches a descriptor of its features against the 3 templates at 0x4CAE10,
+  the draw 0x2213F0 against the 4 at 0x4CAF80): both tables are filled at start-up by code that names them through no
+  address in the ELF. The update variants compute the same; they differ in the draws: 0x216470 picks the texture,
+  tile and angle (0x2193A0, 0x219410, 0x219530: two randoms for a RandomStartRotation emitter, XForm or not), 0x20EFD0
+  and 0x213F30 none of them (0x2122D0, 0x2119C0, 0x212240). The XForm emitters are taken as the latter [G].
+- The effect's own velocity (+0x5C) is not given ("Moving effects").

@@ -45,6 +45,15 @@ typedef struct {
 typedef struct { uint8_t level; float along, up; } BuildingVert;
 #define BUILDING_VCOLS (BUILDING_CELLS + 1)
 
+/* a cell's debris effect: the key of the building's props it names (the key table 0x3F5990, indices 0x34 .. 0x36) */
+enum {
+    DEBRIS_CRACK,         /* Glass_Large (0x34) when the cell's sheet column has an Outline (its +0xEC, 0x2D0500), else
+                           * Wall_Small (0x35): the host decides, it has the outlines */
+    DEBRIS_WALL_SMALL,    /* Wall_Small (0x35) */
+    DEBRIS_WALL_LARGE     /* Wall_Large (0x36) */
+};
+#define BUILDING_DEBRIS 64
+
 typedef struct {
     float min[3], max[3];                            /* in the world (the grid's +0x24 .. +0x38); max z drops as it falls */
     int width, depth, storeys;                       /* storeys: as built */
@@ -68,6 +77,9 @@ typedef struct {
     int no_autocollapse;                             /* disableAutoCollapse(1): its HP running out does not fell it */
     int dirty;                                       /* a cell or a storey changed: redraw */
     BuildingWindow window[BUILDING_WINDOWS]; int nwindows;   /* its open (and opening, closing) windows */
+    /* the debris effects its front cells asked for since the host last took them (0x3101C0 on the building's effect
+     * spawner +0x8F4, at the cell's face point 2.5 along and 1.5 up): the host plays them and sets ndebris to 0 */
+    struct { uint8_t o, col, kind; } debris[BUILDING_DEBRIS]; int ndebris;
 } Building;
 
 void building_init(Building *b, const float min[3], const float max[3], int width, int depth, int storeys);

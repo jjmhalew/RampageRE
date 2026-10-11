@@ -185,7 +185,8 @@ typedef struct Viewer {
     /* their effects that follow an object (obj >= 0: at its point off, or its model node) or monster mon's node */
     struct { int id, fx, obj, node_id, mon; const char *node; char mnode[32]; float off[3]; } sofx[64]; int nsofx;
     Army *army;
-    struct { int id, fx, unit, shot; float off[3]; } fxa[128]; int nfxa;   /* the army's effects that follow */
+    struct { int id, fx, unit, shot; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
+                                                      * (a beam's: its stream's head last frame, its rod) */
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     Bundle fx_bundle; int have_fx_bundle;            /* fx.bdp: the effects (fx.c) */
     FxLib *fxlib; FxWorld *fxw;
@@ -3581,6 +3582,11 @@ static void army_step(Viewer *v, float dt)
                         v->fxa[v->nfxa].fx = id;
                         v->fxa[v->nfxa].unit = e->shot >= 0 ? -1 : e->unit;
                         v->fxa[v->nfxa].shot = e->shot;
+                        FxRod rod;
+                        int has_rod = bs && fx_rod(v->fxlib, e->name, &rod);
+                        v->fxa[v->nfxa].head = 0;
+                        v->fxa[v->nfxa].speed = has_rod ? rod.speed : 0;
+                        v->fxa[v->nfxa].len = has_rod ? rod.length : 0;
                         const ArmyUnit *u = e->unit >= 0 ? army_unit(v->army, e->unit) : NULL;
                         for (int k = 0; k < 3; k++)
                             v->fxa[v->nfxa].off[k] = u && e->shot < 0 ? e->pos[k] - u->pos[k] : 0;
@@ -3643,6 +3649,12 @@ static void army_step(Viewer *v, float dt)
             }
             if (sh->beam) {                          /* [R 0x2975A4] placed in the firing frame each frame */
                 fx_place(v->fxw, v->fxa[k].fx, sh->pos, sh->R);
+                /* a hit this frame (the stream's head short of its growth) is the effect's hit too: t from the tail
+                 * (0x295938, before the stream's own cut 0x226DF0) */
+                float grown = fminf(v->fxa[k].head + v->fxa[k].speed * dt, v->fxa[k].len);
+                if (v->fxa[k].len > 0 && sh->head > 0 && sh->head < grown - 1e-3f)
+                    fx_cut(v->fxw, v->fxa[k].fx, sh->head - sh->tail);
+                v->fxa[k].head = sh->head;
                 continue;
             }
             memcpy(at, sh->pos, sizeof at);

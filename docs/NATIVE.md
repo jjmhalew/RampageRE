@@ -440,8 +440,8 @@ The facade's other passes are the game's too ("Facade geometry"): intact windows
 the sheet's clear panes, tinted `CubeTint`; hits dent the facade (its grid vertices move in the face, 0.1 … 0.45 by level) and fade in `CrackTexture` by the levels,
 around the windows of lightly damaged cells; a broken corner cell shows the inner wall behind it (the sheet's
 `InnerWallColumn`). The game's particle effects play (src/fx.c, [FX_NOTES.md](FX_NOTES.md): fx.bdp's 287 effects, their words from
-RAMPAGE.ELF): glass and wall debris as cells break (`Glass_*`, `Wall_*` of the building props; which goes with
-which state is a stand-in), the floors' collapse clouds with their camera shake, adornments' `DislodgedFx`, the
+RAMPAGE.ELF): glass and wall debris as cells break (`Glass_Large` or `Wall_Small` at a cell's first crack, by
+whether its column has a window outline, `Wall_Small` and `Wall_Large` as it breaks: FX_NOTES.md "Building debris"), the floors' collapse clouds with their camera shake, adornments' `DislodgedFx`, the
 people's effects. The buildings' adornments hang where the game puts them (fire escapes, AC units, awnings, roof
 trims: "Adornments"), ride their storeys down, fall off with their cells and are knocked off by attacks. A floor whose HP runs out falls: the storeys above
 come down onto it and crush the one below, and a building whose HP runs out cracks, shakes, drops storey by storey

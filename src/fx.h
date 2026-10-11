@@ -36,14 +36,20 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
 void fx_stop(FxWorld *w, int id);       /* shut down: emitters stop, live particles finish (a looping fire, ...) */
 void fx_kill(FxWorld *w, int id);       /* gone at once: its emitters and particles (a GuiEffect given another edf) */
 /* an effect in a whole frame: R its axes in the world (rows x, y, z, unit length), not made upright; fx_place moves it
- * and turns its emitters with it (an effect on the turning globe of the front end). The particles keep their places
- * relative to the origin, in world axes, as with fx_move */
+ * and turns its emitters with it (an effect on the turning globe of the front end, a beam in its weapon's frame): the
+ * relative emitters' particles turn and move with them, the others stay in the world, as with fx_move */
 int fx_spawn_frame(FxWorld *w, const char *effect_name, const float pos[3], const float R[3][3], float scale);
 void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3]);
 int fx_alive(const FxWorld *w, int id);
-/* an effect that follows something (an army unit's, a shot's look): its origin moves, and with it the particles it
- * keeps relative to it [G: the game's attached effects move their emitter; a shot's trail is not left behind] */
+/* an effect that follows something (an army unit's, a shot's look): its origin moves, and with it the particles of its
+ * +EmitterRelativeParticles emitters; the others are in the world and stay behind (a trail) [R 0x222400: only the
+ * relative ones are drawn through the emitter's matrix]. The game's effects also pass a velocity of their own (+0x5C,
+ * 0x20F064) to non-Stationary particles; none is given here [G: the callers' velocities are not traced] */
 void fx_move(FxWorld *w, int id, const float pos[3]);
+/* a beam's hit t along its collision rod (world units from the rod's start): the rod's head, the reach of its
+ * +RelativeDistanceLimit particles, is t now; it grows on from there by the rod's speed (ParticleSystemFx vtable
+ * +0x80, 0x1F2520, called by the beam weapon on a hit, 0x295938) */
+void fx_cut(FxWorld *w, int id, float t);
 void fx_clear(FxWorld *w);
 /* advances everything by dt seconds (run as fixed 1/60 s game frames); ground_z is the height of the ground plane for
  * particles that collide with the ground (+CollidesWithGround). The game's ground is what the world returns around

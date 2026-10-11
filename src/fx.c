@@ -4,8 +4,11 @@
  * 0x213F30 / 0x216470, through the member pointer at definition +0x180) and how a particle is drawn (0x2214D0 builds
  * the VU1 packets of the billboards, 0x21C060 the streaks). [R] = read in that code, [G] = a guess where it matters.
  *
- * The game keeps an emitter's particles in the emitter's frame when +EmitterRelativeParticles; a spawned effect never
- * moves here, so everything is simulated in world axes relative to the effect's origin, unscaled, and scaled on output.
+ * The game keeps an emitter's particles in the emitter's frame when +EmitterRelativeParticles and in the world otherwise
+ * (only the relative ones go through the emitter's matrix at the draw [R 0x222400..0x222520]); here everything is
+ * simulated in world axes relative to the effect's origin, unscaled, and scaled on output: when the effect moves
+ * (fx_move, fx_place) the others are moved back by as much, so they stay where they were, and the relative ones turn
+ * with the new frame.
  * The game advances effects once per frame with gravity added per frame [R 0x2105E0], so fx_update runs fixed 1/60 s
  * frames: the effects world's dt is 1 / the display rate (0x309210), 60 here (50 for a PAL game) [R]. */
 #include <math.h>
@@ -670,6 +673,7 @@ static void emdef_finish(EmDef *d)
         d->tile_step = 1;
     if (d->repeat < 0)
         d->repeat = 0;
+    d->pflags &= ~(uint32_t)PF_TINY;   /* [R 0x1F9800] UsesTinyParticles is cleared at load: drawn as the others */
 }
 
 /* ---------------------------------------------------------------- an effect file */
@@ -869,10 +873,17 @@ typedef struct {
     float origin[3], R[3][3];              /* where it emits from (relative, unscaled), its axes (rows) */
 } Emit;
 
+/* ParticleSystemFx +0x9C .. +0xA4 [R 0x1F2750, 0x1F2E60..0x1F2F08]: an effect with a collision rod (fx_rod) keeps its
+ * rod emitter (emitter 0's instance) and the rod's head and tail: the head grows by the rod's speed x dt up to its
+ * length, the tail stays 0 while that emitter is neither shut down nor past its cycle and grows by as much after; a
+ * hit cuts the head (fx_cut, its vtable +0x80, 0x1F2520). The head is the distance the RelativeDistanceLimit emitters'
+ * particles may go (vtable +0xB8, 0x1F1CF0: +0xA0) */
 typedef struct {
     int used, gen, nemit;      /* nemit: its live emitters */
     const Effect *e;
     float origin[3], R[3][3], scale;
+    int rod;                   /* the rod emitter (w->em), -1 none (+0x9C) */
+    float rod_speed, rod_len, head, tail;   /* the rod's (unscaled), +0xA0, +0xA4 */
 } Fx;
 
 struct FxWorld {
@@ -960,12 +971,8 @@ static float em_graph(const FxWorld *w, const Emit *e, int slot, float t) { retu
  * and +ProvidesCollisionRod; its direction em_vel(0) made 1 long (+0x40), its speed |em_vel(0)| (+0x50), its length
  * speed x p_lifetime.max(0), times destretch_percent_time when above 0 (+0x54, 0x1FB484), its radius |start_area(0)|
  * + max(p_size) x size_mul (+0x4C); the stream handle's cycle the emitter's longest range.cycle_length (0x2270A0) */
-int fx_rod(const FxLib *L, const char *name, FxRod *r)
+static int rod_of(const FxLib *L, const Effect *f, FxRod *r)
 {
-    int i = fx_find(L, name);
-    if (i < 0 || !r)
-        return 0;
-    const Effect *f = &L->fx[i];
     if (f->type != FX_PARTICLE || f->nem < 1)
         return 0;
     const EmDef *d = &f->em[0];
@@ -987,6 +994,12 @@ int fx_rod(const FxLib *L, const char *name, FxRod *r)
     r->cycle = d->cycle[0] > d->cycle[1] ? d->cycle[0] : d->cycle[1];
     r->loops = (d->eflags & EF_CYCLELOOPS) != 0;
     return 1;
+}
+
+int fx_rod(const FxLib *L, const char *name, FxRod *r)
+{
+    int i = fx_find(L, name);
+    return i >= 0 && r ? rod_of(L, &L->fx[i], r) : 0;
 }
 
 /* a new emitter of an effect (0x1F7F90): its cycle length from range.cycle_length, a start age from
@@ -1267,7 +1280,10 @@ static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
         int n = d->ntiles[0] * d->ntiles[1] / d->tile_step;
         p->tile0 = (uint16_t)((n > 0 ? rnd(w) % (uint32_t)n : 0) * (uint32_t)d->tile_step);
     }
-    /* 0x219530: a start angle and a spin; an XForm particle tumbles instead [G: its emitters take 0x212240] */
+    /* 0x219530 (the update 0x216470): a start angle and a spin; 0x212240 (0x20EFD0, 0x213F30) sets neither. Which
+     * update an emitter gets is 0x21AD40's template match against the table at 0x4CAE10, which start-up code fills
+     * through no address the ELF names [G: an XForm emitter as 0x212240; with 0x219530 the RandomStartRotation ones
+     * would draw two more random numbers, the angle and the spin, which a mesh does not use] */
     if ((d->pmode & 2) && (d->pflags & PF_RANDOMROT) && d->ptype != PT_XFORM) {
         p->ang0 = (float)((rnd(w) >> 8) & 0xFF) * (2 * FX_PI / 256);
         p->spin = graph_eval(w->lib, &d->g[G_SRD], rnd01(w));
@@ -1287,9 +1303,29 @@ static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
     *link = pi;
 }
 
+/* +RelativeDistanceLimit (0x211670, 0x2117D4, at the end of the move): the particle goes when it is limit (the effect's
+ * rod head, fx_cut) or more from its emitter [R]: a relative streak by its tail's distance, its length cut so that its
+ * head stops at the limit; another streak by how far its head has run (age x speed, compared squared); the rest by
+ * their distance (the game takes |pos| in the emitter's frame; no effect has a non-relative one). Returns 1: gone. */
+static int distance_limit(const EmDef *d, const Emit *e, Part *p, float limit)
+{
+    float r[3] = { p->pos[0] - e->origin[0], p->pos[1] - e->origin[1], p->pos[2] - e->origin[2] }, dist = len3(r);
+    if (d->ptype != PT_STRETCH)
+        return !(dist < limit);
+    if (!(d->eflags & EF_RELATIVE)) {
+        float v2 = p->vel[0] * p->vel[0] + p->vel[1] * p->vel[1] + p->vel[2] * p->vel[2];
+        return !(p->age * p->age * v2 < limit * limit);
+    }
+    if (!(dist < limit))
+        return 1;
+    if (dist + p->stretch > limit)
+        p->stretch = limit - dist;
+    return 0;
+}
+
 /* a particle's frame after the emitter's (0x20F9B8..0x20FD30): age, move (0x211110), the ground (0x2106B0), gravity
  * (0x2105E0), the air (0x210450). Returns 1 when it is gone. */
-static int part_step(FxWorld *w, Emit *e, Part *p, float dt, float ground)
+static int part_step(FxWorld *w, Emit *e, Part *p, float dt, float ground, float limit)
 {
     const EmDef *d = e->d;
     p->age += dt;
@@ -1320,6 +1356,8 @@ static int part_step(FxWorld *w, Emit *e, Part *p, float dt, float ground)
         for (int i = 0; i < 3; i++)
             p->pos[i] += delta[i];
     }
+    if ((d->eflags & EF_RELDISTLIMIT) && distance_limit(d, e, p, limit))
+        return 1;
     if (d->pflags & PF_GROUND) {                           /* the ground plane, its normal +Z */
         const float *c = COL_TABLE[d->gnd];
         float h = p->pos[2] - ground;
@@ -1408,9 +1446,10 @@ static int emit_step(FxWorld *w, int ei, float dt, float ground)
         }
     }
     int *link = &e->head;
+    float limit = w->fx[e->fx].head;
     while (*link >= 0) {
         int pi = *link;
-        if (part_step(w, e, &w->p[pi], dt, ground)) {
+        if (part_step(w, e, &w->p[pi], dt, ground, limit)) {
             *link = w->p[pi].next;
             part_free(w, pi);
         } else {
@@ -1431,9 +1470,19 @@ static void spawn_effect(FxWorld *w, int slot, int effect, int depth)
             if (ef->child[k] >= 0)
                 spawn_effect(w, slot, ef->child[k], depth + 1);
     } else if (ef->type == FX_PARTICLE) {
-        for (int i = 0; i < ef->nem; i++)
-            if (ef->em[i].eflags & EF_AUTOSTART)            /* -AutoStart ones wait for EmitEmitters */
-                emit_new(w, slot, ef, &ef->em[i], -1);
+        Fx *f = &w->fx[slot];
+        FxRod r;
+        for (int i = 0; i < ef->nem; i++) {
+            if (!(ef->em[i].eflags & EF_AUTOSTART))         /* -AutoStart ones wait for EmitEmitters */
+                continue;
+            int ei = emit_new(w, slot, ef, &ef->em[i], -1);
+            if (i == 0 && ei >= 0 && f->rod < 0 && rod_of(w->lib, ef, &r)) {   /* [R 0x1F2734..0x1F2758] */
+                f->rod = ei;
+                f->rod_speed = r.speed;
+                f->rod_len = r.length;
+                f->head = f->tail = 0;
+            }
+        }
     }
 }
 
@@ -1456,7 +1505,11 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     f->e = &w->lib->fx[effect];
     memcpy(f->origin, pos, sizeof f->origin);
     f->scale = scale > 0 ? scale : 1;
-    /* the effect's frame: Y along dir, Z the world's up made square to it [G: how the game's callers place them] */
+    f->rod = -1;
+    f->head = f->tail = 0;
+    /* the effect's frame: Y along dir, Z the world's up made square to it. The game's callers hand the effect a
+     * whole matrix of their own; a building cell's is its face's from 0x430F10 (0x30F710; the front's the identity:
+     * dir +Y here, the effects' -Y out of the facade) [R]; the others are the callers' (fx_spawn_frame for a frame) */
     float Y[3] = { 0, 1, 0 }, Z[3] = { 0, 0, 1 }, X[3];
     if (dir && len3(dir) > 1e-6f) {
         float l = len3(dir);
@@ -1509,8 +1562,19 @@ void fx_move(FxWorld *w, int id, const float pos[3])
     Fx *f = fx_of(w, id);
     if (!f)
         return;
-    memcpy(f->origin, pos, sizeof f->origin);
     int slot = (int)(f - w->fx);
+    float back[3];                                    /* the world's particles stay where they are */
+    for (int i = 0; i < 3; i++)
+        back[i] = (pos[i] - f->origin[i]) / f->scale;
+    for (int i = 0; i < MAX_EMITS; i++) {
+        const Emit *e = &w->em[i];
+        if (!e->used || e->fx != slot || (e->d->eflags & EF_RELATIVE))
+            continue;
+        for (int p = e->head; p >= 0; p = w->p[p].next)
+            for (int k = 0; k < 3; k++)
+                w->p[p].pos[k] -= back[k];
+    }
+    memcpy(f->origin, pos, sizeof f->origin);
     for (int i = 0; i < MAX_EMITS && w->sound; i++)       /* its sounds follow it (add3DSfx keeps the place's address) */
         for (int k = 0; k < 2; k++)
             if (w->em[i].used && w->em[i].fx == slot && w->em[i].sound[k])
@@ -1529,8 +1593,31 @@ void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3])
     int slot = (int)(f - w->fx);
     for (int i = 0; i < MAX_EMITS; i++) {              /* its emitters' axes, but for the world-axis and random ones */
         Emit *e = &w->em[i];
-        if (e->used && e->fx == slot && !(e->d->eflags & (EF_WORLDMATRIX | EF_RANDOMXF)))
-            memcpy(e->R, R, sizeof e->R);
+        if (!e->used || e->fx != slot || (e->d->eflags & (EF_WORLDMATRIX | EF_RANDOMXF)))
+            continue;
+        if (e->d->eflags & EF_RELATIVE) {             /* its particles are in its frame: they turn with it */
+            float T[3][3];                            /* T v = the new axes x (the old axes' components of v) */
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++)
+                    T[r][c] = R[0][r] * e->R[0][c] + R[1][r] * e->R[1][c] + R[2][r] * e->R[2][c];
+            for (int p = e->head; p >= 0; p = w->p[p].next) {
+                Part *q = &w->p[p];
+                float *v[4] = { q->pos, q->vel, q->sdir, q->xaxis }, t[3];
+                for (int k = 0; k < 4; k++) {
+                    float o[3] = { v[k][0] - (k ? 0 : e->origin[0]), v[k][1] - (k ? 0 : e->origin[1]),
+                                   v[k][2] - (k ? 0 : e->origin[2]) };
+                    for (int j = 0; j < 3; j++)
+                        t[j] = T[j][0] * o[0] + T[j][1] * o[1] + T[j][2] * o[2] + (k ? 0 : e->origin[j]);
+                    memcpy(v[k], t, sizeof t);
+                }
+                float X[3][3];
+                for (int r = 0; r < 3; r++)
+                    for (int c = 0; c < 3; c++)
+                        X[r][c] = T[r][0] * q->xr0[0][c] + T[r][1] * q->xr0[1][c] + T[r][2] * q->xr0[2][c];
+                memcpy(q->xr0, X, sizeof X);
+            }
+        }
+        memcpy(e->R, R, sizeof e->R);
     }
 }
 
@@ -1582,16 +1669,45 @@ void fx_update(FxWorld *w, float dt, float ground_z)
         for (int i = 0; i < MAX_EMITS; i++) {
             if (!w->em[i].used)
                 continue;
-            const Fx *f = &w->fx[w->em[i].fx];
+            Fx *f = &w->fx[w->em[i].fx];
             float ground = (ground_z - f->origin[2]) / f->scale;
             if (emit_step(w, i, FX_STEP, ground)) {
+                if (f->rod == i) {
+                    if (f->tail < f->head)               /* the rod's emitter stays while its tail is short of the
+                                                          * head [R 0x1F2CE8] */
+                        continue;
+                    f->rod = -1;                         /* [R 0x1F2E40] */
+                    f->head = f->tail = 0;
+                }
                 emit_sounds_stop(w, &w->em[i]);
                 w->em[i].used = 0;
-                if (--w->fx[w->em[i].fx].nemit <= 0)
-                    w->fx[w->em[i].fx].used = 0;     /* the effect is over when its last emitter is */
+                if (--f->nemit <= 0)
+                    f->used = 0;                         /* the effect is over when its last emitter is */
             }
         }
+        for (int k = 0; k < MAX_FX; k++) {               /* the rods, after the emitters [R 0x1F2E60..0x1F2F08] */
+            Fx *f = &w->fx[k];
+            if (!f->used || f->rod < 0)
+                continue;
+            const Emit *e = &w->em[f->rod];
+            f->head += f->rod_speed * FX_STEP;
+            if (f->head > f->rod_len)
+                f->head = f->rod_len;
+            f->tail = e->shut || e->age > e->cycle ? f->tail + f->rod_speed * FX_STEP : 0;
+        }
     }
+}
+
+/* the rod's vtable +0x80 (0x1F2520): a hit t along it (world units) is its head now; one short of the tail drops the
+ * rod (its head then stays) */
+void fx_cut(FxWorld *w, int id, float t)
+{
+    Fx *f = fx_of(w, id);
+    if (!f)
+        return;
+    f->head = t / f->scale;
+    if (f->head < f->tail)
+        f->rod = -1;
 }
 
 /* ---------------------------------------------------------------- drawing (0x2214D0, 0x21C060) */
@@ -1642,6 +1758,9 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
             float rot = 0;
             if (d->pmode & 2)                           /* RotatesOnly, Tiles [R 0x2225E0] */
                 rot = graph_eval(L, &d->g[G_ROT], (d->pnorm & 8) ? t : p->age) + p->spin * p->age + p->ang0;
+            /* [R 0x221E50, 0x3B2480, 0x3B24D0] the quad's corners (+-0.5 along the camera's right, +-0.5 up) take
+             * u = 0.5 + x, v = 0.5 - y of texture_center +- texture_radius / 2 (4.12 fixed point; 0.5 and 1, as no
+             * file sets them): v 0 at the top */
             q.uv[0] = q.uv[1] = 0;
             q.uv[2] = q.uv[3] = 1;
             if (d->pmode & 4) {                         /* Tiles, TilesNoRotation [R 0x223488] */
@@ -1670,7 +1789,8 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
                 /* [R 0x222C08] DontBillboard: not relative, the world's x and y (the draw's model matrix), forward_axis
                  * unused; relative, rows 0 and 1 of the emitter's frame x B (forward_axis 2: identity; 1: rows (1, 0,
                  * 0), (0, 0, 1), (0, -1, 0); 0: (0, 1, 0), (-1, 0, 0), (0, 0, 1)), the effect's scale with them; then
-                 * the spin (0x223344) [G: which of 0x478 / 0x47C is the sine] */
+                 * the spin (0x223344): rows (c, s, 0), (-s, c, 0), (0, 0, 1) times those axes (0x101A90), s the sine
+                 * at +0x478 and c the cosine at +0x47C (0x105E30's series) [R] */
                 float A[2][3] = { { 1, 0, 0 }, { 0, 1, 0 } }, sz = size;
                 if (d->eflags & EF_RELATIVE) {
                     const float (*M)[3] = (const float (*)[3])e->R;

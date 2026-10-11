@@ -230,9 +230,23 @@ static void destroyed(Building *b)
     b->dirty = 1;
 }
 
+/* a debris effect for front cell (o, col), for the host (Building.debris) */
+static void debris(Building *b, int o, int col, int kind)
+{
+    if (b->ndebris < BUILDING_DEBRIS) {
+        b->debris[b->ndebris].o = (uint8_t)o;
+        b->debris[b->ndebris].col = (uint8_t)col;
+        b->debris[b->ndebris].kind = (uint8_t)kind;
+        b->ndebris++;
+    }
+}
+
 /* 0x2BB950: amt HP off the front cell (live storey s, col); with spread, the hit carries to a neighbour as the cell
  * passes 7 HP (above or below, by where in the cell it was hit) and 3 HP (left or right, at random). 1 if it took
- * damage. */
+ * damage. The effects as the state rises [R 0x2BBB54..0x2BBE3C]: a first crack (from state 0) Glass_Large or
+ * Wall_Small by the column's Outline, then Wall_Small below 5 HP, Wall_Large at 0; none for a cell flagged 0x400 at the
+ * first crack and at 0 (FloorFlags' "hidden behind a front-row building"; not kept here: Chicago's 447 FloorFlags lists
+ * are all 0) */
 static int cell_damage(Building *b, int s, int col, int amt, int spread, float fv)
 {
     int i = building_cell_index(b, FACE_FRONT, col);
@@ -258,8 +272,10 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     b->floor_hp[o] -= d;
     c->hp = (uint8_t)now;
     int st = c->state;
-    if (st <= 0)
+    if (st <= 0) {
         set_state(b, o, col, 1);                     /* cracked: glass (0x34) or wall (0x35) debris */
+        debris(b, o, col, DEBRIS_CRACK);
+    }
     if (now >= 7)
         return 1;
     if (old >= 7 && spread) {
@@ -270,8 +286,10 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     }
     if (now >= 5)
         return 1;
-    if (st < 2)
+    if (st < 2) {
         set_state(b, o, col, 2);
+        debris(b, o, col, DEBRIS_WALL_SMALL);
+    }
     if (now >= 3)
         return 1;
     if (old >= 3 && spread) {                        /* a living neighbour to the left or right */
@@ -283,8 +301,10 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     }
     if (now > 0)
         return 1;
-    if (st < 3)
+    if (st < 3) {
         set_state(b, o, col, 3);                     /* destroyed: heavy debris (0x36) */
+        debris(b, o, col, DEBRIS_WALL_LARGE);
+    }
     return 1;
 }
 
@@ -452,7 +472,9 @@ static void collapse_step(Building *b, float dt)
     landed(b, k);
 }
 
-/* 0x2BD7D0: one step of the destroyed building's front cracking, bottom row first */
+/* 0x2BD7D0: one step of the destroyed building's front cracking, bottom row first. A cell it raises gets a debris
+ * effect (Glass_Large or Wall_Small by its Outline, as a first crack) when a random number mod (gWorld +0x28 + 1) is 0
+ * [R 0x2BDA94..0x2BDB08; G: that member (0x4D17C8, set by the world's vtable +0x14, 0x284AF0) taken as 0: always] */
 static int crack_step(Building *b)
 {
     int cols = b->width + 1;
@@ -466,8 +488,10 @@ static int crack_step(Building *b)
             if (j > 0)                               /* the cells either side of it, in the storey below the row */
                 for (int c = v - 1; c <= v; c++) {
                     int ci = building_cell_index(b, FACE_FRONT, c);
-                    if (ci >= 0 && b->cell[b->live[j - 1]][ci].state < b->min_crack)
+                    if (ci >= 0 && b->cell[b->live[j - 1]][ci].state < b->min_crack) {
+                        debris(b, b->live[j - 1], c, DEBRIS_CRACK);
                         set_state(b, b->live[j - 1], c, b->min_crack);
+                    }
                 }
             return 1;
         }

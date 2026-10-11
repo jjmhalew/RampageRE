@@ -701,7 +701,7 @@ static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
 
 /* the HUD's quads (hud.c): the GUI's 640 x 480 screen at the window's height, centred (its 4:3 kept), in order, no
  * depth, alpha blended */
-static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam);
+static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, float fog_start, float fog_end);
 
 static void hud_state(float aspect)
 {
@@ -771,7 +771,7 @@ static void draw_gui3d(Renderer *r, const SceneGui3D *l, float aspect, double t)
     }
     glDisable(GL_CULL_FACE);
     if (l->nfx)
-        draw_fx(r, l->fx, l->nfx, &cam);
+        draw_fx(r, l->fx, l->nfx, &cam, 0, 0);
     hud_state(aspect);
 }
 
@@ -880,17 +880,25 @@ static void draw_shadows(Renderer *r, int pass)
     glPopAttrib();
 }
 
-static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam)
+/* the particles (fx.c): the game's VU1 program for them (0x3A75C8 .. 0x3A7D78, shader 0x3B2660, vertex format 0x412)
+ * takes the corners the CPU made (0x2214D0), projects them, and multiplies each vertex's alpha by the world's fog
+ * factor: min(127.5, F / 2) / 128, F the 0 .. 255 the world's programs send the GS, which draws them unfogged (PRMODE
+ * 0x58: no FGE) [R]. So a fogged particle fades out rather than taking the fog colour: here the linear fog's factor at
+ * each corner's eye-plane depth times its alpha, GL fog off. The GS state (0x3B26C0 additive, 0x3B2700 blended): ALPHA
+ * 0x48 (Cs + Cd x As) or 0x44, TEST 0x51001 (depth test GEQUAL, the alpha test failing every pixel into the frame
+ * buffer only: no depth written), the depth test switched off for -TestZBuffer (0x25A900) [R] */
+static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, float fog_start, float fog_end)
 {
     float M[16];
     glGetFloatv(GL_MODELVIEW_MATRIX, M);
     float right[3] = { M[0], M[4], M[8] }, up[3] = { M[1], M[5], M[9] };
+    GLboolean fogged = glIsEnabled(GL_FOG);
+    glDisable(GL_FOG);
     glDisable(GL_LIGHTING);
     glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
     glAlphaFunc(GL_GREATER, 0.004f);
-    float fog_col[4], black[4] = { 0, 0, 0, 0 };
-    glGetFloatv(GL_FOG_COLOR, fog_col);
+    float fog_k = fog_end > fog_start ? 1 / (fog_end - fog_start) : 0;
     for (int i = 0; i < nfx; i++) {
         const FxQuad *q = &fx[i];
         GLuint id = q->b ? texture_at(r, q->b, q->tex, 1) : 0;
@@ -902,10 +910,6 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam)
         }
         if (q->ztest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         glBlendFunc(GL_SRC_ALPHA, q->additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
-        /* fog goes on before the blend: an additive quad fogs towards black, so its black adds nothing (fogged
-         * towards the fog colour, every texel would add that colour) */
-        glFogfv(GL_FOG_COLOR, q->additive ? black : fog_col);
-        glColor4fv(q->col);
         float c[4][3];                                     /* top-left, top-right, bottom-right, bottom-left */
         if (q->kind == FXQ_BILLBOARD) {
             float cs = cosf(q->rot), sn = sinf(q->rot), rr[3], uu[3];
@@ -946,15 +950,28 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam)
             glPolygonOffset(-1, -4);
         } else
             glDisable(GL_POLYGON_OFFSET_FILL);
+        float a[4];                                        /* the alpha x the fog factor at each corner */
+        for (int k = 0; k < 4; k++) {
+            float f = 1;
+            if (fog_k > 0) {
+                float d = -(M[2] * c[k][0] + M[6] * c[k][1] + M[10] * c[k][2] + M[14]);
+                f = (fog_end - d) * fog_k;
+                f = f < 0 ? 0 : f > 1 ? 1 : f;
+            }
+            a[k] = q->col[3] * f;
+        }
+        static const int UV[4][2] = { { 0, 1 }, { 2, 1 }, { 2, 3 }, { 0, 3 } };
         glBegin(GL_QUADS);
-        glTexCoord2f(q->uv[0], q->uv[1]); glVertex3fv(c[0]);
-        glTexCoord2f(q->uv[2], q->uv[1]); glVertex3fv(c[1]);
-        glTexCoord2f(q->uv[2], q->uv[3]); glVertex3fv(c[2]);
-        glTexCoord2f(q->uv[0], q->uv[3]); glVertex3fv(c[3]);
+        for (int k = 0; k < 4; k++) {
+            glColor4f(q->col[0], q->col[1], q->col[2], a[k]);
+            glTexCoord2f(q->uv[UV[k][0]], q->uv[UV[k][1]]);
+            glVertex3fv(c[k]);
+        }
         glEnd();
     }
     glDisable(GL_POLYGON_OFFSET_FILL);
-    glFogfv(GL_FOG_COLOR, fog_col);
+    if (fogged)
+        glEnable(GL_FOG);
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
@@ -1089,7 +1106,8 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_COLOR_ARRAY);
     glDisable(GL_CULL_FACE);
     if (s->nfx)                                            /* the effects' particles, over the world */
-        draw_fx(r, s->fx, s->nfx, cam);
+        draw_fx(r, s->fx, s->nfx, cam, fog && s->fog_end > s->fog_start ? s->fog_start : 0,
+                fog && s->fog_end > s->fog_start ? s->fog_end : 0);
     if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
