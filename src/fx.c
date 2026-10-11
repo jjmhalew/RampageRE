@@ -14,6 +14,7 @@
 #include <string.h>
 #include "plat.h"
 #include "fx.h"
+#include "iso.h"
 
 #define FX_PI 3.14159265f
 #define FX_STEP (1.0f / 60.0f)
@@ -722,33 +723,40 @@ static int parse_effect(FxLib *L, Effect *e, const uint8_t *data, uint32_t size)
     return 0;
 }
 
-static int load_words(FxLib *L, const char *elf_path)
+/* the file offset of address a by the ELF's program headers (RAMPAGE.ELF, split_elf.py's copy with its sections at
+ * 0x1000 on, or the disc's SLES_538.00, one segment at 0x80); 0 = not in the file */
+static uint32_t elf_offset(const uint8_t *elf, uint32_t size, uint32_t a)
 {
-    FILE *f = fopen(elf_path, "rb");
-    if (!f)
-        return -1;
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t *elf = size > 0 ? malloc((size_t)size) : NULL;
-    if (!elf || fread(elf, 1, (size_t)size, f) != (size_t)size) {
-        free(elf);
-        fclose(f);
-        return -1;
+    if (size < 52 || memcmp(elf, "\x7f" "ELF", 4) != 0)
+        return 0;
+    uint32_t ph = rd32(elf + 28), ent = rd16(elf + 42), n = rd16(elf + 44);
+    for (uint32_t i = 0; i < n && ent >= 32 && ph + (i + 1) * ent <= size; i++) {
+        const uint8_t *p = elf + ph + i * ent;
+        uint32_t off = rd32(p + 4), va = rd32(p + 8), filesz = rd32(p + 16);
+        if (rd32(p) == 1 && a >= va && a - va < filesz)  /* PT_LOAD */
+            return off + (a - va) < size ? off + (a - va) : 0;
     }
-    fclose(f);
+    return 0;
+}
+
+static int load_words(FxLib *L, const char *data_path)
+{
+    uint32_t size = 0;
+    uint8_t *elf = data_elf(data_path, &size);          /* beside the VOL, or in the disc image (iso.c) */
+    if (!elf)
+        return -1;
     int ok = 0;
-    const uint32_t table = 0x3B1C10 - 0x100000 + 0x1000;            /* file offset = address - 0x100000 + 0x1000 */
-    if (size > (long)table + 4 * 342 && memcmp(elf, "\x7f" "ELF", 4) == 0) {
+    const uint32_t table = elf_offset(elf, size, 0x3B1C10);
+    if (table && table + 4 * 342 <= size) {
         ok = 1;
         for (int i = 0; i < 342 && ok; i++) {
-            uint32_t a = rd32(elf + table + 4 * i);
-            if (a < 0x100000 || a - 0x100000 + 0x1000 >= (uint32_t)size) {
+            uint32_t at = elf_offset(elf, size, rd32(elf + table + 4 * i));
+            if (!at) {
                 ok = 0;
                 break;
             }
-            const char *s = (const char *)elf + (a - 0x100000 + 0x1000);
-            size_t n = 0, left = (size_t)size - (a - 0x100000 + 0x1000);
+            const char *s = (const char *)elf + at;
+            size_t n = 0, left = (size_t)(size - at);
             while (n < left && s[n])
                 n++;
             L->words[i] = malloc(n + 1);
@@ -799,12 +807,12 @@ int fx_find(const FxLib *L, const char *name)
     return -1;
 }
 
-FxLib *fx_open(const char *elf_path, const Bundle *const *bundles, int nbundles)
+FxLib *fx_open(const char *data_path, const Bundle *const *bundles, int nbundles)
 {
     FxLib *L = calloc(1, sizeof *L);
     if (!L)
         return NULL;
-    if (load_words(L, elf_path) != 0) {
+    if (load_words(L, data_path) != 0) {
         fx_close(L);
         return NULL;
     }

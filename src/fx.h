@@ -12,10 +12,11 @@
 #include "data.h"
 
 typedef struct FxLib FxLib;   /* the parsed effect definitions */
-/* reads the 342-word dictionary at 0x3B1C10 of RAMPAGE.ELF (elf_path), then every type-20 entry of the bundles (the
+/* reads the 342-word dictionary at 0x3B1C10 of the game's ELF (data_elf: RAMPAGE.ELF beside the VOL data_path, or
+ * SLES_538.00 in the disc image data_path), then every type-20 entry of the bundles (the
  * first of a name wins); texture names resolve to the first bundle that has a texture of that name. NULL when the ELF
  * cannot be read. The bundles must outlive the FxLib. */
-FxLib *fx_open(const char *elf_path, const Bundle *const *bundles, int nbundles);
+FxLib *fx_open(const char *data_path, const Bundle *const *bundles, int nbundles);
 void fx_close(FxLib *lib);
 int fx_count(const FxLib *lib);
 const char *fx_name(const FxLib *lib, int effect);

@@ -69,9 +69,12 @@ The native viewer ([docs/NATIVE.md](docs/NATIVE.md)) is built by GitHub Actions 
 `rampage.exe` for Windows (`build_viewer.bat`) and `rampage` for Linux (`build_viewer.sh`, needs SDL2). Each run of
 the [build workflow](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml) keeps them as artifacts, and
 each version tag publishes them on the [releases](https://github.com/jjmhalew/RampageRE/releases) page. They hold
-only the port's own code (the program, README.md, LICENSE and two docs), **no game data**: start them with the
-`RAMPAGE.VOL` from your own disc, e.g. `rampage.exe D:\RAMPAGE.VOL Chicago 1`. The recompiled game (`build.ps1`) is
-not built there, as it needs the disc.
+only the port's own code (the program, README.md, LICENSE and two docs), **no game data**: start them with your own
+disc image, read in place, e.g. `rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1`,
+or the `RAMPAGE.VOL` from it (`rampage.exe D:\RAMPAGE.VOL Chicago 1`). Without a path the viewer looks for either
+beside itself, in the current folder and in `%LOCALAPPDATA%\RampageRE` (`~/.local/share/RampageRE` on Linux; the
+whole list is in [docs/NATIVE.md](docs/NATIVE.md) "Game data"). The viewer does not need `build.ps1`. The recompiled
+game (`build.ps1`) is not built there, as it needs the disc.
 
 ## Repository layout
 | Path | |

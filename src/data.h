@@ -12,8 +12,11 @@ static inline float rdf(const uint8_t *p) { union { uint32_t u; float f; } v; v.
 
 /* ---- RAMPAGE.VOL ("PVOL" 0x1001: u32 count, u32 name block size, count x {u32 offset, u32 size, u32 index}, names) */
 typedef struct { const char *name; uint32_t offset, size; } VolFile;
-typedef struct { FILE *f; VolFile *files; uint32_t count; char *names; } Vol;
-int vol_open(Vol *v, const char *path);                 /* 0 = ok */
+typedef struct { FILE *f; VolFile *files; uint32_t count; char *names; int64_t base; } Vol;   /* base: its start in f */
+/* path: RAMPAGE.VOL, or a disc image read in place (iso.h). 0 = ok, else VOL_UNREADABLE or VOL_NOT_IN_IMAGE (an
+ * ISO 9660 image without RAMPAGE.VOL: another disc) */
+enum { VOL_UNREADABLE = -1, VOL_NOT_IN_IMAGE = -2 };
+int vol_open(Vol *v, const char *path);
 const VolFile *vol_find(const Vol *v, const char *name); /* case-insensitive */
 uint8_t *vol_read(const Vol *v, const char *name, uint32_t *size);   /* malloc'd copy of a file, NULL if absent */
 

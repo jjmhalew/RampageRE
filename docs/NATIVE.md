@@ -8,7 +8,9 @@ Python tools' readers and of `tools/city.py`.
 ## Building and running
 ```bat
 build_viewer.bat
-rampage.exe                                   :: build\disc\RAMPAGE.VOL, Chicago, block 1
+rampage.exe                                   :: the data it finds (below; build\disc\RAMPAGE.VOL first), Chicago, block 1
+rampage.exe NewYork 6 --night                 :: the same, another block
+rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1   :: straight from the disc image
 rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit (offscreen: no window)
@@ -17,8 +19,30 @@ rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 2 --monster George --mons
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 4 --bots 2 --play kingcity            :: two players, two bots
 ```
 `build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
-from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256. The disc
-must have been extracted by `build.ps1` first (or pass the path to your own `RAMPAGE.VOL`).
+from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256.
+
+### Game data
+The viewer needs only the disc: `RAMPAGE.VOL` and the game's ELF (`fx.c` reads the effects' word table from it). The
+first argument may be the disc image itself (`.iso`, ISO 9660 with 2048-byte sectors, as the PS2 DVD dumps are; the
+UDF bridge keeps the ISO 9660 tree): `RAMPAGE.VOL` and `SLES_538.00` are read in place from it, nothing is copied
+or unpacked (src/iso.c; `Vol.base` is where the VOL starts in the image). Beside a `RAMPAGE.VOL` the ELF is
+`RAMPAGE.ELF` (`build.ps1`'s split copy) or `SLES_538.00` (copied off the disc); either works. `build.ps1` is not
+needed for the viewer.
+
+Without a path (or with a city name first: `rampage.exe NewYork 6`) it looks, in this order, and takes the first:
+1. `RAMPAGE_VOL` (the environment variable: a `RAMPAGE.VOL` or an image, taken as it is)
+2. `build\disc\RAMPAGE.VOL` (what `build.ps1` extracts), `.\RAMPAGE.VOL`, `data\RAMPAGE.VOL`, `RAMPAGE.VOL` beside the
+   program
+3. a disc image (`*.iso` with `RAMPAGE.VOL` in it; by name, other images are passed over) beside the program, then in
+   the current folder, then in `data\`
+4. the user's data folder, `RAMPAGE.VOL` or an image in it: `%LOCALAPPDATA%\RampageRE` on Windows,
+   `$XDG_DATA_HOME/RampageRE` (else `~/.local/share/RampageRE`) elsewhere
+
+It never asks and never searches drives: with nothing found it says where it looked and exits with 1 (a `--shot` run
+prints that to stderr, as every message). An image without `RAMPAGE.VOL` is refused ("not Rampage - Total
+Destruction"). The supported release is the European SLES-53800 version 1.00: when `SYSTEM.CNF` (in the image, or
+beside the VOL) boots another ELF or another version, or the VOL's index is not that release's (352 files ending at
+byte 1,342,827,563), the viewer says so and goes on.
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
@@ -74,7 +98,7 @@ on every system, so main.c has one spelling of them.
 | Renderer | render_gl.c: OpenGL 1.1 fixed function, the same on both | |
 
 A `--shot` run opens no window, no sound and no message box anywhere: a message (a missing `RAMPAGE.VOL`) goes to
-stderr and the run exits with 1.
+stderr and the run exits with 1. A shot from the disc image is byte for byte the one from the extracted files.
 
 On Linux (Debian / Ubuntu; WSL2 too):
 ```sh
@@ -84,8 +108,8 @@ sudo apt install build-essential libsdl2-dev libgl-dev
 SDL_VIDEODRIVER=offscreen ./rampage build/disc/RAMPAGE.VOL Chicago 1 --mute --shot s.png   # no display needed
 ```
 `SDL_VIDEODRIVER=offscreen` is SDL's EGL pbuffer driver: it needs no X or Wayland server (CI, WSL without WSLg).
-The disc is extracted on Windows (`build.ps1`); copy `build/disc/RAMPAGE.VOL` and `RAMPAGE.ELF` over, or pass their
-path. A shot on Mesa's llvmpipe differs from the Windows one only in rounding (under 0.1 % of the pixels by more
+Pass the disc image (`./rampage ~/Rampage.iso Chicago 1`), or put it (or `RAMPAGE.VOL` with `SLES_538.00` or
+`RAMPAGE.ELF`) in `~/.local/share/RampageRE` ("Game data" above). A shot on Mesa's llvmpipe differs from the Windows one only in rounding (under 0.1 % of the pixels by more
 than 8 of 255).
 
 ## Input
@@ -154,7 +178,8 @@ monsters' pads directly, so every shot is the same with and without controllers 
 | File | |
 |---|---|
 | `src/data.h` | the formats: declarations and little-endian readers |
-| `src/vol.c` | `RAMPAGE.VOL` (`tools/pvol.py`) |
+| `src/vol.c` | `RAMPAGE.VOL` (`tools/pvol.py`), from the file or in place from the disc image |
+| `src/iso.c` | the disc image (ISO 9660, `tools/iso9660.py`): a file by its path, read in place; the game's ELF; where the data is (`data_find`) and whether it is the supported release ("Game data") |
 | `src/bundle.c` | Pipeworks bundles, segment 0 (`tools/bdp.py`) |
 | `src/tex.c` | textures to RGBA: PSMT8 unswizzle, CSM1 palettes, PSMCT32 / PSMCT16 (`tools/tex.py`) |
 | `src/mesh.c` | meshes, strips to triangles (`tools/mesh.py`) |

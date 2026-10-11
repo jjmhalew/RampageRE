@@ -912,7 +912,7 @@ Movie *movie_open(const Vol *v, const char *name)
     if (IDCT_C[0][0] == 0) idct_init();
     Movie *m = calloc(1, sizeof *m);
     m->f = v->f;
-    m->base = vf->offset;
+    m->base = v->base + vf->offset;                      /* (a disc image: from the VOL's start in it) */
     m->size = vf->size;
     m->ref_old = m->ref_new = m->disp = -1;
     for (int i = 0; i < 64 && !m->w; i++) {              /* the first sequence header: the size */

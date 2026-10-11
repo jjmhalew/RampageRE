@@ -13,8 +13,8 @@ SRC="src/main.c src/shot.c src/render_gl.c src/city.c src/vol.c src/bundle.c src
      src/tree.c src/anim.c src/camera.c src/moves.c src/building.c src/climb.c src/ik.c src/people.c src/fx.c
      src/cloth.c src/sound.c src/army.c src/hud.c src/vehicle.c src/water.c src/edible.c src/game.c src/boss.c
      src/look.c src/shadow.c src/director.c src/footstep.c src/challenge.c src/reveal.c src/rail.c src/parade.c
-     src/streetobj.c src/profile.c src/collide.c src/shell.c src/movie.c src/wrand.c src/texpack.c src/plat_sdl.c
-     src/pad_sdl.c"
+     src/streetobj.c src/profile.c src/collide.c src/shell.c src/movie.c src/wrand.c src/texpack.c src/iso.c
+     src/plat_sdl.c src/pad_sdl.c"
 echo "Building $OUT ..."
 # -Wno-format-truncation: gcc warns of every snprintf that may cut its text, which is what they are there for
 # shellcheck disable=SC2086

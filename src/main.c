@@ -2,7 +2,8 @@
  * with the game's layout, lights, traffic, people and a monster (city.c, anim.c, render_gl.c).
  *   rampage [RAMPAGE.VOL] [City] [block number] [--night] [--monster NAME] [--clip N] [--shot FILE.png] [--time T]
  *   [--dumptex] (texture packs, texpack.c: every texture drawn to mods/dump/; mods/textures/ replaces them)
- * default build\disc\RAMPAGE.VOL, Chicago, 1. --shot draws one frame (at T seconds) as a PNG and quits; with a
+ * RAMPAGE.VOL may be the game's disc image (.iso), read in place; without it data_find() looks (iso.h: build\disc
+ * first). Default Chicago, 1. --shot draws one frame (at T seconds) as a PNG and quits; with a
  * monster in play the camera settles for 2 s, then the monster plays --do "right 1, cross, wait 1.5, ..." (held
  * stick directions and pressed buttons, each for its seconds; --walk S = "right S").
  * Keys: W A S D move, Q E down and up, Shift faster, right mouse button look, wheel speed; Page Up / Page Down the
@@ -46,6 +47,7 @@
 #include "collide.h"
 #include "texpack.h"
 #include "pad.h"
+#include "iso.h"
 
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
@@ -212,7 +214,7 @@ typedef struct Viewer {
     int results_update;                              /* the Results' updateProfile is the campaign's */
     Shell *shell; Scene *shell_scene;                /* the front end while it shows (shell.c), its empty scene */
     struct GuiDraw *gd;                              /* its 3D objects: models, effects, this frame's layers */
-    char elf_path[512];                              /* RAMPAGE.ELF beside the VOL (fx.c's words) */
+    char data_path[512];                             /* RAMPAGE.VOL or the disc image (fx_open: the ELF beside / in it) */
     Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
     int lang;                                        /* --lang: the .loc column (hud.h: 0 English .. 8 Portuguese) */
@@ -4686,7 +4688,7 @@ static int gui_lib(Viewer *v, GuiDraw *g, const Bundle *b)
     GuiFxLib *l = &g->lib[g->nlib];
     const Bundle *bl[2] = { b, &v->fx_bundle };
     l->b = b;
-    l->lib = v->elf_path[0] ? fx_open(v->elf_path, bl, v->have_fx_bundle ? 2 : 1) : NULL;
+    l->lib = v->data_path[0] ? fx_open(v->data_path, bl, v->have_fx_bundle ? 2 : 1) : NULL;
     l->w = l->lib ? fx_world(l->lib) : NULL;
     return l->w ? g->nlib++ : (g->nlib++, -1);
 }
@@ -5320,7 +5322,7 @@ int main(int argc, char **argv)
     static Viewer v;
     if (getenv("RAMPAGE_TRACE"))                     /* a trace survives a crash */
         setvbuf(stdout, NULL, _IONBF, 0);
-    const char *shot = NULL, *monster[MONSTERS] = { NULL }, *pos[3] = { "build\\disc\\RAMPAGE.VOL", "Chicago", "1" };
+    const char *shot = NULL, *monster[MONSTERS] = { NULL }, *pos[3] = { NULL, "Chicago", "1" };
     int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0, players = 1, bots = 0;
     float view[5] = { 0 };
     v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
@@ -5375,13 +5377,36 @@ int main(int argc, char **argv)
         }
         else if (npos < 3) pos[npos++] = argv[i];
     }
-    if (vol_open(&v.vol, pos[0]) != 0) {
-        char msg[512];
-        snprintf(msg, sizeof msg, "Cannot read %s.\nRun build.ps1 first (it extracts the disc), or pass the path to "
-                 "RAMPAGE.VOL.", pos[0]);
+    char found[1024], msg[1024];
+    for (int i = 0; pos[0] && npos < 3 && i < NCITIES; i++)   /* "rampage Chicago 1": no path, a city */
+        if (_stricmp(pos[0], CITIES[i]) == 0 && !plat_exists(pos[0])) {
+            pos[2] = npos > 1 ? pos[1] : pos[2];
+            pos[1] = pos[0];
+            pos[0] = NULL;
+            break;
+        }
+    if (!pos[0]) {                                   /* no path given: look for the data (iso.h), never asking */
+        if (!data_find(found, sizeof found)) {
+            snprintf(msg, sizeof msg, "Found no game data: no RAMPAGE.VOL, nor a disc image (.iso) with it, in %s.\n"
+                     "Pass the path to RAMPAGE.VOL or to the game's disc image, or set RAMPAGE_VOL.", data_where());
+            plat_message(msg, 1);
+            return 1;
+        }
+        pos[0] = found;
+        printf("game data: %s\n", found);
+    }
+    int vol_err = vol_open(&v.vol, pos[0]);
+    if (vol_err != 0) {
+        if (vol_err == VOL_NOT_IN_IMAGE)
+            snprintf(msg, sizeof msg, "%s is a disc image without RAMPAGE.VOL: not Rampage - Total Destruction.", pos[0]);
+        else
+            snprintf(msg, sizeof msg, "Cannot read %s.\nPass the path to RAMPAGE.VOL or to the game's disc image (.iso), "
+                     "or run build.ps1 (it extracts the disc).", pos[0]);
         plat_message(msg, 1);
         return 1;
     }
+    if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
+        plat_message(msg, 1);
     int city = 0;
     for (int i = 0; i < NCITIES; i++)
         if (_stricmp(pos[1], CITIES[i]) == 0)
@@ -5412,15 +5437,10 @@ int main(int argc, char **argv)
         v.gui_world.scope = v.gui_common.scope = "GUI";   /* texture packs: the dump folders (texpack.c) */
         if (data && bdp_load(&v.fx_bundle, data, size) == 0) {
             v.fx_bundle.scope = "fx";
-            char elf[512];
-            snprintf(elf, sizeof elf, "%s", pos[0]);
-            char *slash = strrchr(elf, '\\'), *fwd = strrchr(elf, '/');
-            if (fwd > slash) slash = fwd;
-            snprintf(slash ? slash + 1 : elf, sizeof elf - (size_t)(slash ? slash + 1 - elf : 0), "RAMPAGE.ELF");
             const Bundle *bl[1] = { &v.fx_bundle };
-            snprintf(v.elf_path, sizeof v.elf_path, "%s", elf);
+            snprintf(v.data_path, sizeof v.data_path, "%s", pos[0]);
             v.have_fx_bundle = 1;
-            v.fxlib = fx_open(elf, bl, 1);
+            v.fxlib = fx_open(v.data_path, bl, 1);
             v.fxw = v.fxlib ? fx_world(v.fxlib) : NULL;
             if (v.fxw) {
                 fx_on_shake(v.fxw, fx_shake, &v);
