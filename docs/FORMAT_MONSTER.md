@@ -31,7 +31,7 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0xA6C / 0xA70 / 0xA74 | body parts | 6 at 0xF678, pointers at 0xF748 | `Arm L`, `Arm R`, `Body`, `Head`, `Leg L`, `Leg R`: {name, u32, u32, u16 count at +0xC, i16 bones from +0xE} (George's arms bones 28 … 37 and 38 … 47) |
 | 0xA58 / 0xA5C | start lists | 29 × 12 at 0xF760 | u32 ?, offset of a state, u32 flags (8: keep a time) |
 | 0xA94 / 0xA98 | slot columns | 6 × 0x128 at 0xF8BC | 74 slots each overriding the defaults (−1 = keep), see "Slots" |
-| 0xA78 / 0xA7C / 0xA80 | | 2 at 0xFFAC, pointers at 0x1022C | |
+| 0xA78 / 0xA7C / 0xA80 | effect slot nodes | 2 at 0xFFAC, pointers at 0x1022C | each {u32 count, offset} then 0x34 bytes a node: f32[12] matrix (rows, then the place), i16 bone, i16 the slot of the other side. +0x9C8 picks the set (0x2F3950; −1 none): 1 in all 30, its 11 nodes (Cal, Eyegore, Jill, Natalie, Venus 12); set 0 is one node. The clip events of type 12 put their effects on them ("Effect slots") |
 | 0xA84 / 0xA88 | attachment nodes | 15 × 0x38 at 0x10234 | f32[12] matrix, name (`fxNode_Belch`, `Helper L Hand`, `Tracking_Node`, ...), bone \| index << 16 |
 | 0xA8C / 0xA90 | effect names | 12 at 0x1057C | `Monster_Belch.edf`, `Debris_mega_punch.edf`, ... |
 | 0xA54 | the move graph | header 0x34 bytes at 0x105AC | +0x2C state count, +0x30 offset of the first state |
@@ -146,7 +146,7 @@ type, table 0x4312F0):
 | 7 | {mode} | the movement mode (+0xAD8 of the monster): 0 on the ground, 2 taking off, 1 in the air (`isAirborne`: 1 or 2), 4 down or landing, 5 on a building |
 | 8 | | the queued mirror state flips (+0xAA1, taken at the next clip's start); the climbs flip at each hand, so one clip climbs with both |
 | 9 | {f32} | a camera shake of that strength (0x2F5AC0 → 0x1E7ED0: the monster's own `camshake.edf`; CAMERA.md "Shake"); 3 or 4 on the heavy punches and the butt slam |
-| 12 | {u16 slot, u16 effect, u32 on} | an effect of MONSTER_DATA's list (+0xA90) starts (1) or stops (0) in that slot: `Monster_Belch.edf` on the burp, `Charged_Punch.edf` on the charge punch, `Collapse_Floor_concrete_comp.edf` on the butt slam |
+| 12 | {i16 slot, i16 effect, u16 on, u16 ground} | an effect of MONSTER_DATA's list (+0xA90) starts (1) or stops (0) in that slot, on the slot's node (0x2E7E90 → 0x2F5800, "Effect slots"): `Monster_Belch.edf` on the burp, `Charged_Punch.edf` on the charge punch, `Collapse_Floor_concrete_comp.edf` on the butt slam; ground (the effect kept on the ground, FollowEffect +0xF0, 0x2918D0) is 0 in all 862 |
 | 23 | {column} | the slot column (+0xBAB4), see "Slots" |
 | 15, 16 | {..., f32 +0x10} | the record is kept at +0xBA9C / +0xBAA0 till the next clip (on a building, −5.5; leaving it, −5 … −6.25): 16's +0x10 adds to MONSTER_DATA +0x1A4 in 0x2E4E40 (the bots' corner rule) and 0x2E4D30; 15 (+0xBA9C) is read by 0x2E4E90; 15 on George's front, side, spider and React_ clips, 16 on the Transition_Ground clips and Spider_Jump |
 | 1, 3, 4, 5, 10, 11, 13, 14, 17, 19, 20, 22 | | handled (a list of four at +0xBA8C, disarming shapes, a throw, +0xAA2, +0xAA8, +0xBD00, ...) but used by no monster |
@@ -155,6 +155,42 @@ Of the 38,002 events of all 30 monsters: 16,879 script calls, 7,612 sounds, 4,60
 type 15, 1,370 attacks, 862 effects, 310 flips, 90 shakes, 90 of type 16.
 
 `tools/monster.py` prints them under each state (`0.136 Monsters::addVelocity(1, 0, 0, 16); 0.136 mode 1`).
+
+### Effect slots
+The monster's effect record (monster +0x7DFC, FOOTSTEP_NOTES.md) begins with 32 slots of {FollowEffect, its serial}
+(+0x0 .. +0xFF); +0x100 holds the definitions of the list +0xA90 (loaded by 0x2F5D80). A type-12 event (0x2F5800) [R]:
+1. Whatever slot k holds, if it still lives (the FollowEffect's serial +0x4 is the slot's), shuts down: its effect's
+   vtable +0x30 (ParticleSystemFx 0x1F1C60 → 0x1F2410: each emitter's shutdown 0x1F7CD0; the live particles finish),
+   and the slot is emptied. Off events stop there.
+2. On: the node is 0x2DACA0(monster, k): node k of the set +0xA80[+0x9C8], or, while the monster plays mirrored
+   (+0x7DA1), the node its +0x32 names (George's slot 3 on bone 40, the right hand, takes node 4 on bone 30). Its
+   place is scaled by the dynamic scale (+0xA78) when +0xA74 is set. 0x292010 → 0x292050 → 0x291A20 makes a
+   FollowEffect on the monster with that bone and that matrix as its offset; it follows the bone each frame
+   (0x290F60 → 0x291440: the offset × the object's node, vtable +0x4C) and keeps the bone it started on. A missing
+   definition leaves the slot empty. The new FollowEffect gets +0x4C |= 0x80 (0x2F5A28) [G: no reader of that
+   world-object bit was found].
+Nothing else touches the slots: no clip start, death or respawn; the record's release (0x2F5AF0, from the Monster's
+destructor 0x2EACA0) frees the definitions, not the slots. A one-shot ends by itself; a looping one (`Charged_Punch`,
+`Roar_Weapon`) burns until its slot's next event, past its clip when that is cut short (`Front_Charge_Punch` turns it
+off at 0.592, but the switch to `Front_Double_Punch` at 1.7 s comes first: there `Debris_mega_punch` in the same slot
+ends it).
+
+The face clips' events come through the same handler (the face's event player, LOOK_NOTES.md): the belch and the
+spew are type-12 events of `Expression_Burp` and `Expression_Spew`.
+
+George's slots: 0, 1, 2 and 7 on `Bip01 Head` (0 the mouth, `fxNode_Belch`'s place: `Monster_Belch`, `Roar_Weapon`;
+1 `Fire_small`, 2 `Monster_Cough_smoke`, 7 `Hazard_Electricity_Explode`), 3 / 4 the right / left fist (2.66 along
+`Bip01 R Forearm` / `L Forearm`: `Charged_Punch`, `Debris_mega_punch`, `Debris_generic`, the butt slam's
+`Collapse_Floor_concrete_comp`), 5 / 9 the shoulders (`Bip01 Neck`, 0.93 to each side: the fall's
+`Collapse_Floor_concrete_comp`), 6 `Bip01` (`Monster_soar_butt`), 8 / 10 the right / left foot (2.55 along the calf:
+the mantle's `footfall_Big`). Of the 862 events of the 30 monsters 583 are on and 279 off (180 `Charged_Punch`, 90
+`Roar_Weapon`, 9 `Debris_megapunch_part2`); the rest are one-shots that no off follows.
+
+The port: moves.c reads the nodes (`MoveGraph.fxnode`, `moves_fx_node`) and the events (the effect's name, the slot,
+on); main.c `mon_fx_event` starts and stops them in `Mon.fx_slot` (fx.c `fx_spawn_frame`, `fx_stop`) and
+`mon_fx_follow` places them each frame (`fx_place`) on the bone as drawn (a mirrored monster's bone is the other
+side's node reflected, `scene_monster_node`). A new monster in the slot stops the old one's [G: the game's old
+Monster goes and its FollowEffects lose their object].
 
 The monster's event player (+0 the monster, +0x4 the node, +0x8 the time, +0xC the next event, +0x10 the count)
 starts with the clip (0x2F45D0, from the monster's command): at the clip's first event, the time where the clip

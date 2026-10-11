@@ -54,6 +54,9 @@ int moves_read(const Bundle *b, MoveGraph *g)
      * first << 16 | count of its own */
     uint32_t nitems = rd32(d + 0xA60), block = rd32(d + 0xA64), item_offsets = rd32(d + 0xA68);
     g->all_events = calloc(nitems ? nitems : 1, sizeof *g->all_events);
+    uint32_t nfx = rd32(d + 0xA8C), fxlist = rd32(d + 0xA90);   /* the effect names (0x2F5D80 loads them) */
+    if (fxlist + 4 * (uint64_t)nfx > size)
+        nfx = 0;
     for (uint32_t i = 0; i < nitems && item_offsets + 2 * i + 2 <= size; i++) {
         uint32_t o = block + (d[item_offsets + 2 * i] | d[item_offsets + 2 * i + 1] << 8);
         MoveEvent *ev = &g->all_events[i];
@@ -80,6 +83,12 @@ int moves_read(const Bundle *b, MoveGraph *g)
             ev->level = (int32_t)rd32(d + o + 0x24);
             for (int j = 1; j < 4; j++)
                 ev->p[j] = rdf(d + o + 0x28 + 4 * j);
+        } else if (ev->type == 12) {                 /* {12, at, i16 slot, i16 effect, u16 on, u16 ground} */
+            int fx = (int16_t)(d[o + 0xA] | d[o + 0xB] << 8);
+            ev->value = (uint32_t)(int16_t)(d[o + 8] | d[o + 9] << 8);
+            ev->p[0] = (d[o + 0xC] | d[o + 0xD] << 8) ? 1.0f : 0.0f;
+            ev->aflags = d[o + 0xE] | d[o + 0xF] << 8;
+            ev->name = fx >= 0 && (uint32_t)fx < nfx ? name_at(b, (int32_t)rd32(d + fxlist + 4 * fx)) : NULL;
         } else {
             ev->value = rd32(d + o + 8);             /* 7: {7, at, mode} */
             if ((ev->type == 15 || ev->type == 16) && o + 0x14 <= size) {
@@ -118,6 +127,23 @@ int moves_read(const Bundle *b, MoveGraph *g)
             g->attach[k].bone = (int)(rd32(a + 0x34) & 0xFFFF);
         }
     }
+    int32_t fxsel = (int32_t)rd32(d + 0x9C8);         /* 0x2F3950: +0xA80[+0x9C8], none when < 0 */
+    uint32_t nfxsets = rd32(d + 0xA78), fxsets = rd32(d + 0xA80);
+    if (fxsel >= 0 && (uint32_t)fxsel < nfxsets && fxsets + 4 * (uint64_t)nfxsets <= size) {
+        uint32_t rec = rd32(d + fxsets + 4 * fxsel);
+        uint32_t cnt = rec + 8 <= size ? rd32(d + rec) : 0, arr = rec + 8 <= size ? rd32(d + rec + 4) : 0;
+        if (cnt < 256 && arr + 0x34 * (uint64_t)cnt <= size) {
+            g->fxnode = calloc(cnt ? cnt : 1, sizeof *g->fxnode);
+            g->nfxnode = (int)cnt;
+            for (uint32_t k = 0; k < cnt; k++) {
+                const uint8_t *a = d + arr + 0x34 * k;
+                for (int j = 0; j < 12; j++)
+                    g->fxnode[k].m[j] = rdf(a + 4 * j);
+                g->fxnode[k].bone = (int16_t)(a[0x30] | a[0x31] << 8);
+                g->fxnode[k].mirror = (int16_t)(a[0x32] | a[0x33] << 8);
+            }
+        }
+    }
     uint32_t nnodes = rd32(d + 0xA4C), nodes = rd32(d + 0xA50);
     if (nodes + 0x84 * (uint64_t)nnodes <= size) {
         g->nodes = calloc(nnodes ? nnodes : 1, sizeof *g->nodes);
@@ -129,6 +155,11 @@ int moves_read(const Bundle *b, MoveGraph *g)
             m->blend = rdf(nd + 0x14);
             m->clip = name_at(b, (int32_t)rd32(nd + 0x78));
             m->name = name_at(b, (int32_t)rd32(nd + 0x7C));
+            uint32_t span = rd32(nd + 0x28);
+            if ((span >> 16) + (span & 0xFFFF) <= nitems) {
+                m->events = g->all_events + (span >> 16);
+                m->nevents = (int)(span & 0xFFFF);
+            }
         }
     }
     MoveTrans *t = g->all;
@@ -232,7 +263,19 @@ void moves_free(MoveGraph *g)
     free(g->shapes);
     free(g->nodes);
     free(g->attach);
+    free(g->fxnode);
     memset(g, 0, sizeof *g);
+}
+
+/* 0x2DACA0 [R]: the record +0xA80[+0x9C8]'s node k, or while the monster plays mirrored (+0x7DA1) the one its +0x32
+ * names (the game reads no count: the clips name only slots it has) */
+const struct MoveFxNode *moves_fx_node(const MoveGraph *g, int slot, int mirrored)
+{
+    if (slot < 0 || slot >= g->nfxnode)
+        return NULL;
+    if (mirrored)
+        slot = g->fxnode[slot].mirror;
+    return slot >= 0 && slot < g->nfxnode ? &g->fxnode[slot] : NULL;
 }
 
 const MoveNode *moves_node(const MoveGraph *g, const char *name)

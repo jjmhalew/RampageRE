@@ -40,6 +40,9 @@ typedef struct {                                     /* a timed event of the sta
     uint32_t aflags, victims; int level;             /* 0: its flags (+0x14: 2 victims in front, 4 behind), the
                                                         monsters it may hit (+0x18: bits 0 .. 3 the slots, 4 objects)
                                                         and its ReactionLevel (+0x24) (0x2E35D0) */
+    /* 12 (0x2F5800): an effect of the list +0xA90 on (p[0] 1) or off (0) in a slot: name the effect (index +0xA),
+     * value the slot (+0x8, also its node, moves_fx_node), aflags +0xE (set: the effect kept on the ground, 0x2918D0;
+     * no clip has it) */
 } MoveEvent;
 typedef struct {
     const char *name, *clip;                         /* the clip by name, as in the anims bundle (any case) */
@@ -75,11 +78,17 @@ typedef struct {
     const char *part_name[MOVES_PARTS]; int nparts;
     int part_nbones[MOVES_PARTS]; int16_t part_bone[MOVES_PARTS][MOVES_PART_BONES];
     /* every state node (+0xA4C / +0xA50), by name: setFacialAnim plays a node's clip on the face (George's
-     * Expression_Idle .. Expression_Zap play George_Head_*), its rate 1 / the clip's duration */
-    struct MoveNode { const char *name, *clip; float rate, blend; } *nodes; int nnodes;
+     * Expression_Idle .. Expression_Zap play George_Head_*), its rate 1 / the clip's duration; its clip events
+     * (+0x28, as a state's: the face's event player runs them, 0x2F4500 on monster +0x7DE8) */
+    struct MoveNode { const char *name, *clip; float rate, blend; const MoveEvent *events; int nevents; } *nodes;
+    int nnodes;
     /* the attachment nodes (+0xA84 / +0xA88, 0x38 bytes): a matrix (rows, then the place) on a bone: Helper R Hand
      * (what the monster holds things by), fxNode_*, Tracking_Node ... */
     struct MoveAttach { const char *name; int bone; float m[12]; } *attach; int nattach;
+    /* the effect slots' nodes (0x2DACA0: the record +0xA80[+0x9C8] (0x2F3950; item 1 of 2 in all 30), {u32 count,
+     * offset}, 0x34 bytes each): a matrix (rows, then the place) on a bone (+0x30), and the slot of the other side
+     * (+0x32), taken instead while the monster plays mirrored (George's 11: 0 the mouth, 3 / 4 the hands, ...) */
+    struct MoveFxNode { int bone, mirror; float m[12]; } *fxnode; int nfxnode;
     const char *props;                               /* +0xAA4: its property book ("George_prop": MiscData|IsFemale,
                                                         LiftNodeName ..., read by the setup 0x2E98C0) */
 } MoveGraph;
@@ -89,6 +98,8 @@ int moves_read(const Bundle *monster, MoveGraph *g);  /* the bundle's MONSTER_DA
 void moves_free(MoveGraph *g);
 int moves_find(const MoveGraph *g, const char *state);   /* -1 = none */
 const MoveNode *moves_node(const MoveGraph *g, const char *name);   /* NULL = none (any case) */
+/* 0x2DACA0: effect slot k's node (the other side's while mirrored), NULL = none */
+const struct MoveFxNode *moves_fx_node(const MoveGraph *g, int slot, int mirrored);
 
 typedef struct {
     float v[MV_COUNT];                               /* held values (booleans 0 / 1) */

@@ -241,6 +241,13 @@ effect also has a velocity of its own (+0x5C, set through vtable +0x90, 0x1F24E0
 non-Stationary, non-relative particles (0x20F064, 0x212310); none is given here [G: which callers set it was not
 traced].
 
+## Effects on a monster's bones
+The clip events of type 12 start and stop the effects of MONSTER_DATA's list in the monster's 32 effect slots, each a
+FollowEffect on a node of the monster's skeleton (0x2F5800, 0x292010 → 0x291A20; FORMAT_MONSTER.md "Effect slots")
+[R]. Stopping one is its effect's shutdown (vtable +0x30, 0x1F1C60 → 0x1F2410 → 0x1F7CD0 on every emitter): no more
+particles, the live ones finish (`fx_stop`). main.c starts them in the node's whole frame (`fx_spawn_frame`) and
+moves them with the bone each frame (`fx_place`).
+
 ## Building debris
 The building's cells start their props' effects through the building's spawner (+0x8F4: 0x3101C0 → 0x310260 with the
 key's index into the table 0x3F5990; `Glass_Small` 0x33 is never asked for) [R]:

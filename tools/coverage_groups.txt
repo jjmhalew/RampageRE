@@ -301,7 +301,7 @@ engine    0x2D6880-0x2E7988  Monster: the hit's mode cases (army.c army_reaction
 unused    0x2E7988-0x2E7CC0  clip events of types 1, 3, 4 (0x2E7840's cases): no monster's clips have them (FORMAT_MONSTER.md "Clip events")
 engine    0x2E7CC0-0x2E7E30  clip events 5/20/21 (script calls), 22/23, 6 (sound), 7, 9: main.c clip_event, sound.c
 unused    0x2E7E30-0x2E7E90  clip events of types 10, 11: no monster's clips have them
-open      0x2E7E90-0x2E7EA0  clip event 12 (an effect of MONSTER_DATA's list on or off in a slot): main.c clip_event has no case for it
+engine    0x2E7E90-0x2E7EA0  clip event 12 (an effect of MONSTER_DATA's list on or off in a slot): main.c clip_event -> mon_fx_event
 unused    0x2E7EA0-0x2E7EF8  clip events of types 13, 14: no monster's clips have them
 engine    0x2E7EF8-0x2E7F30  clip events 15, 16, 8: main.c clip_event, moves.c
 unused    0x2E7F30-0x2E7F50  clip events of types 17, 19: no monster's clips have them
@@ -310,7 +310,7 @@ engine    0x2E97D0-0x2E9860  Monster queueFacingZRequest: only MerryGoRound.bsf 
 engine    0x2E9860-0x2F4CC0  Monster ctor / dtor, ROMonster, the AI goals (director.c), MONSTER_DATA's load (moves.c), the event player (main.c)
 unused    0x2F4CC0-0x2F4F60  clip event 13's worker (0x2E7EA0): no monster's clips have type 13
 engine    0x2F4F60-0x2F5800  ROMonster's draw helpers, the event player's steps: city.c, main.c, footstep.c
-open      0x2F5800-0x2F5D80  clip event 12's effects: MONSTER_DATA +0xA90 effects (belch, charged punch, butt slam) started / stopped in slots
+engine    0x2F5800-0x2F5D80  clip event 12's effect slots (0x2F5800: FollowEffects on the nodes +0xA80[+0x9C8]), the shake, the record's release: main.c mon_fx_*, moves.c
 engine    0x2F5D80-0x2F97E0  MonsterFx, foot IK, the IK pair animators' pose plumbing: footstep.c, ik.c
 open      0x2F97E0-0x2FADC0  MonsterTailAnimator: the "Bip01 Tail" chain's own motion for the tailed monsters; the port poses tails from the clips only
 unused    0x2FADC0-0x2FB950  MonsterTorsoTwistAnimator: made for the node named by MONSTER_DATA +0xA24, which is name 0 in all 30 monsters

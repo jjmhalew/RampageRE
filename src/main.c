@@ -82,6 +82,7 @@ enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2, DRIVE_PAD = 3 };
 
 #define MONSTERS 4                                   /* the game's players and bots together (Common 0x4D7E28) */
 
+#define MON_FX_SLOTS 32
 /* a monster in play, one per player or bot: its slot is the scene's (Scene.mon), the army's, the game's player and
  * the HUD's (Hud<slot>.ifc). The game keeps all of this in the monster object (the MONSTER_DATA offsets below). */
 typedef struct Mon {
@@ -154,6 +155,10 @@ typedef struct Mon {
     float sph_prev[64][3]; int sph_prev_n;           /* its collision spheres' centres last frame (+0x430, valid +0x688) */
     int reveal, shown;                               /* the cryotube's monster (Viewer.extra): out of the world
                                                       * (+0x108 / +0x109) until the reveal shows it */
+    /* the clip events' effect slots (type 12; the record +0x7DFC's +0x0 .. +0xFF: 32 x {FollowEffect, its serial}):
+     * slot k's effect id and the node it follows (MoveGraph.fxnode), while bit k of fx_used is set */
+    int fx_slot[MON_FX_SLOTS], fx_node[MON_FX_SLOTS]; uint32_t fx_used;
+    float face_ev;                                   /* the face's event player's time (+0x7DE8 +0x8), a share */
 } Mon;
 
 typedef struct Viewer {
@@ -413,6 +418,19 @@ static void play_state(Mon *mo)
 
 /* setFacialAnim (0x2E9200, 0x2E9350): the state node of that name plays its clip on the face, from its start; a name
  * no node has does nothing */
+static void clip_event(Mon *mo, const MoveEvent *e);
+
+/* the face clip's events, those after `from` up to `to` (shares of the clip): the face's own event player (monster
+ * +0x7DE8) through the body's handler 0x2E7840 [R]: 0x2F45D0 at the face's start (setFacialAnim 0x2E9470, its
+ * replay 0x2E964C) fires those at 0, 0x2F4500 each frame (the update, 0x2DE600) those its time reaches.
+ * Expression_Burp's belch, Expression_Spew's fire and smoke (type 12), their sounds (6), Expression_Barf's doBarf */
+static void face_events(Mon *mo, const MoveNode *n, float from, float to)
+{
+    for (int i = 0; n && i < n->nevents; i++)
+        if (n->events[i].at > from && n->events[i].at <= to)
+            clip_event(mo, &n->events[i]);
+}
+
 static void face_start(Mon *mo)
 {
     Viewer *v = mo->v;
@@ -425,6 +443,8 @@ static void face_start(Mon *mo)
         return;
     mo->face = n;
     scene_monster_face_blend(&v->scene, mo->slot, n->blend);   /* 0x2FF910: from the face as it was, over the node's blend */
+    mo->face_ev = 0;
+    face_events(mo, n, -1, 0);
 }
 
 static void face_play(Mon *mo, const char *name, int head, int loop, int count)
@@ -449,6 +469,9 @@ static void face_step(Mon *mo, float dt)
         return;
     if (face_tick(&mo->faces, dt))
         face_play(mo, "Expression_Burp", 0, 0, 1);
+    float ev = mo->face_ev;                          /* 0x2F4500: the node's rate x dt x the speed (+0xA8C) */
+    mo->face_ev += mo->face->rate * dt * mo->power.speed;
+    face_events(mo, mo->face, ev, mo->face_ev);
     Instance *in = mon_in(mo);
     in->face_t += mo->face->rate * dt;
     if (in->face_t < 1)
@@ -457,6 +480,8 @@ static void face_step(Mon *mo, float dt)
     case FACE_RESTART:
         in->face_t = 0;
         scene_monster_face_blend(&v->scene, mo->slot, mo->face->blend);
+        mo->face_ev = 0;                             /* 0x2E964C */
+        face_events(mo, mo->face, -1, 0);
         break;
     case FACE_START: face_start(mo); break;
     default: face_default(mo); break;
@@ -469,9 +494,14 @@ static float mon_hp_max(const Mon *mo)
     return mo->have_graph && mo->graph.hp_max > 0 ? mo->graph.hp_max : 200;
 }
 
+static void mon_fx_event(Mon *mo, const MoveEvent *e);
+static void mon_fx_stop_all(Mon *mo);
+static void mon_fx_follow(Mon *mo);
+
 static void start_moves(Mon *mo)
 {
     Viewer *v = mo->v;
+    mon_fx_stop_all(mo);
     if (mo->have_graph) {
         moves_stop(&mo->run);
         moves_free(&mo->graph);
@@ -1544,6 +1574,10 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         union { uint32_t u; float f; } k = { e->value };
         float at[3] = { mo->mx, mo->my, mo->mz };
         shake_start(mon_shake(mo), &SHAKE_MONSTER, at, k.f, 1, &v->shake_seed);
+        return;
+    }
+    if (e->type == 12) {                             /* 0x2E7E90 -> 0x2F5800: an effect on or off in a slot */
+        mon_fx_event(mo, e);
         return;
     }
     if (e->type == 8) {                              /* 0x2E7F18: the next clip the other way round */
@@ -3896,6 +3930,8 @@ static void fx_step(Viewer *v, float dt)
                 printf("  effect %s at %.1f %.1f %.1f -> %d\n", f->name, f->pos[0], f->pos[1], f->pos[2], id);
         }
     v->scene.nfxreq = 0;
+    for (int k = 0; k < v->nmon; k++)                /* the monsters' slot effects on their nodes */
+        mon_fx_follow(&v->mon[k]);
     if (v->fxw)
         fx_update(v->fxw, dt, 0);
 }
@@ -3939,6 +3975,102 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
         }
     *out = mat_mul(in->base, m);
     return 0;
+}
+
+/* effect slot node `node`'s frame in the world (0x2F5800's start; then the FollowEffect's follow, 0x291440: the
+ * offset x the object's node, vtable +0x4C): the node's matrix on its bone as the game poses it (a mirrored
+ * monster's bone is the other side's node reflected, as scene_monster_node gives it), its place x the monster's
+ * scale (+0xA78 when +0xA74, 0x2F58A4; the port's base matrix is scaled); R its axes made 1 long; 0 = ok */
+static int mon_fx_frame(Mon *mo, int node, float pos[3], float R[3][3])
+{
+    const Instance *in = mon_in(mo);
+    if (!in || !mo->have_graph || node < 0 || node >= mo->graph.nfxnode)
+        return -1;
+    const struct MoveFxNode *n = &mo->graph.fxnode[node];
+    Mat4 w;
+    if (n->bone < 0 || (uint32_t)n->bone >= in->tree.n ||
+        scene_monster_node(&mo->v->scene, mo->slot, in->tree.nodes[n->bone].name, &w) != 0)
+        return -1;
+    Mat4 t = mat_identity();
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            t.m[4 * i + j] = n->m[3 * i + j];
+    for (int j = 0; j < 3; j++)
+        t.m[12 + j] = n->m[9 + j];
+    Mat4 m = mat_mul(w, t);
+    for (int a = 0; a < 3; a++) {
+        float l = sqrtf(m.m[4 * a] * m.m[4 * a] + m.m[4 * a + 1] * m.m[4 * a + 1] + m.m[4 * a + 2] * m.m[4 * a + 2]);
+        for (int c = 0; c < 3; c++)
+            R[a][c] = l > 1e-6f ? m.m[4 * a + c] / l : (float)(a == c);
+    }
+    pos[0] = m.m[12]; pos[1] = m.m[13]; pos[2] = m.m[14];
+    return 0;
+}
+
+/* clip event 12 (0x2E7E90 -> 0x2F5800, on the record +0x7DFC) [R]: effect `name` of MONSTER_DATA's list on in slot
+ * k, or off. Either way what the slot holds, if it still lives (the FollowEffect's serial +0x4 is the slot's), shuts
+ * down (its effect's vtable +0x30, 0x1F1C60 -> 0x1F2410: each emitter's 0x1F7CD0; the live particles finish) and the
+ * slot is emptied. On: the new effect starts there (0x292010 -> 0x292050 -> 0x291A20: a FollowEffect on the
+ * monster, the bone and offset of the slot's node, 0x2DACA0, the other side's while mirrored, kept for its life).
+ * Nothing else frees a slot (no clip start, death or respawn touches +0x0 .. +0xFF): a one-shot ends by itself, a
+ * looping one (Charged_Punch, Roar_Weapon) until its slot's next event, past its clip if that is cut short.
+ * Not ported: the started FollowEffect's +0x4C |= 0x80 (0x2F5A28) [G: no reader of that world-object bit found] */
+static void mon_fx_event(Mon *mo, const MoveEvent *e)
+{
+    Viewer *v = mo->v;
+    int k = (int)(int32_t)e->value;
+    if (k < 0 || k >= MON_FX_SLOTS || !v->fxw)
+        return;
+    if (mo->fx_used >> k & 1) {
+        int live = fx_alive(v->fxw, mo->fx_slot[k]);
+        if (live)
+            fx_stop(v->fxw, mo->fx_slot[k]);
+        mo->fx_used &= ~(1u << k);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  effect slot %d: %d %s\n", k, mo->fx_slot[k], live ? "shut down" : "already over");
+    }
+    if (e->p[0] == 0 || !e->name)
+        return;
+    const struct MoveFxNode *n = moves_fx_node(&mo->graph, k, mo->mirror);
+    int node = n ? (int)(n - mo->graph.fxnode) : -1, id = -1;
+    float pos[3], R[3][3];
+    if (mon_fx_frame(mo, node, pos, R) == 0 && (id = fx_spawn_frame(v->fxw, e->name, pos, R, 1)) >= 0) {
+        mo->fx_slot[k] = id;
+        mo->fx_node[k] = node;
+        mo->fx_used |= 1u << k;
+    }
+    if (getenv("RAMPAGE_TRACE")) {
+        int b = n && mon_in(mo) && n->bone >= 0 && (uint32_t)n->bone < mon_in(mo)->tree.n ? n->bone : -1;
+        printf("  effect %s in slot %d (node %d, %s) at %.1f %.1f %.1f -> %d\n", e->name, k, node,
+               b >= 0 ? mon_in(mo)->tree.nodes[b].name : "-", id >= 0 ? pos[0] : 0, id >= 0 ? pos[1] : 0,
+               id >= 0 ? pos[2] : 0, id);
+    }
+}
+
+/* each frame: the slots' effects follow their nodes (the FollowEffect's update, 0x290F60 -> 0x291440); a slot whose
+ * effect has ended is free again (its serial no longer matches, 0x2F5830) */
+static void mon_fx_follow(Mon *mo)
+{
+    Viewer *v = mo->v;
+    for (int k = 0; k < MON_FX_SLOTS && v->fxw; k++) {
+        if (!(mo->fx_used >> k & 1))
+            continue;
+        float pos[3], R[3][3];
+        if (!fx_alive(v->fxw, mo->fx_slot[k]))
+            mo->fx_used &= ~(1u << k);
+        else if (mon_fx_frame(mo, mo->fx_node[k], pos, R) == 0)
+            fx_place(v->fxw, mo->fx_slot[k], pos, (const float (*)[3])R);
+    }
+}
+
+/* a new monster in the slot: the old one's slot effects shut down [G: the game's old Monster goes, 0x2EACA0 ->
+ * 0x2F5AF0 releases the record's definitions but not the slots; its FollowEffects lose their object] */
+static void mon_fx_stop_all(Mon *mo)
+{
+    for (int k = 0; k < MON_FX_SLOTS; k++)
+        if ((mo->fx_used >> k & 1) && mo->v->fxw)
+            fx_stop(mo->v->fxw, mo->fx_slot[k]);
+    mo->fx_used = 0;
 }
 
 /* canGrabPerson's / doGrabPerson's window person (getBuildingOccupant 0x2B37C0), -1 none */

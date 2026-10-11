@@ -21,6 +21,13 @@ The faces are records of 0x24 bytes, 8 of them at monster +0xBAB8 (0x2EA0E0): +0
   down, has plays left (plays 0 and 1 both mean once); otherwise it is freed and the next one starts, or with none
   the script function `DefaultFacialAnim` runs (`setFacialAnim("Expression_Idle", 0, 1, 0)`).
 
+The face's event player (+0x7DE8, beside the body's at +0x7DD4) [R]: 0x2F45D0 at each start and replay fires the
+face node's events at its time 0, and each frame the update (0x2DE600) steps it (0x2F4500: the node's rate × dt × the
+monster's speed +0xA8C, firing the events it reaches) through the body's handler 0x2E7840. The face clips' events:
+sounds (every Expression_ node), `Expression_Burp`'s `Monster_Belch.edf` and `Expression_Spew`'s `Fire_small.edf` /
+`Monster_Cough_smoke.edf` (type 12, FORMAT_MONSTER.md "Effect slots"), `Expression_Barf`'s `Monsters::doBarf`. The
+port: main.c `face_events` (`Mon.face_ev` the player's time), the node's events from moves.c (`MoveNode.events`).
+
 So a queued face plays only after a face that does not loop. The default face loops, so behind it a queued face waits
 until something calls setFacialAnim with a face that ends. No script calls queueFacialAnim (Monsters.scr and every
 compiled .bsf call setFacialAnim only); it is an unused binding.

@@ -20,7 +20,8 @@ The reader is 0x2F5D80 (the part from 0x2F6168) [R]: the book's `MonsterFx` grou
 +0xAD0), each key's name (the key table 0x3F5BC4 .. 0x3F5BD8, read with 0x1B4490) loaded as an effect definition
 (0x198DC0, library 0x4861C0) and kept refcounted in the monster's effect record at **monster +0x7DFC**. A missing key
 leaves NULL there (0x2F65D8 zeroes them) and every starter below returns at once on NULL. The same function loads
-`camshake.edf` (+0x15C, its live effect +0x160) and the effect list of MONSTER_DATA +0xA8C / +0xA90.
+`camshake.edf` (+0x15C, its live effect +0x160) and the effect list of MONSTER_DATA +0xA8C / +0xA90 (+0x100 on;
+the clip events of type 12 play them in the slots at +0x0, FORMAT_MONSTER.md "Effect slots").
 
 The effects themselves carry the sounds (`enum.sound_2d`): `Rampage|Footfall` (footfall), `Rampage|Splash`
 (footfall_water), `Rampage|Ground Impact` (both big ones) and `Rampage|Geyser` (footfall_big_water). All are
