@@ -125,6 +125,7 @@ typedef struct Mon {
     FootProps feet_fx; FootState feet;              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
+    TailAnim tail;                                   /* the tail animator (look.c) */
     float friction;                                  /* +0xF4: the ground velocity's friction, set by the last knock */
     int msph0, nmsph;                                /* the monster's spheres in the frame's world (objects msph0 ..) */
     ShadowMonster smon;                              /* its blob shadows (shadow.c) */
@@ -407,6 +408,8 @@ static void play_state(Mon *mo)
     mo->ev16 = mo->ev16x = 0;                         /* (and no event record kept) */
     mo->mode = MODE_GROUND;                           /* (its events set the mode it is in) */
     climb_clip_started(&mo->mount, st->name);
+    tail_blend(&mo->tail, st->tail, st->blend);      /* 0x2E6884: to node +0x10 over the request's +0x4, which is
+                                                        always the node's blend (0x2ECC08), cut or not */
     mo->mirror = mo->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
     mo->input.mirrored = mo->mirror;
     if (mon_in(mo))
@@ -525,6 +528,7 @@ static void start_moves(Mon *mo)
             foot_ik_props(&mo->feet, g, &mon_in(mo)->tree);
         memset(&mo->feet_ik, 0, sizeof mo->feet_ik);
         mo->feet_ik.links = mo->feet.links;
+        memset(&mo->tail, 0, sizeof mo->tail);       /* found on the next posing (0x2FABC0) */
     }
     if (mo->have_ag)
         dir_graph_free(&mo->ag);
@@ -4512,6 +4516,8 @@ static void mon_step(Mon *mo, float dt)
         v->scene.mon[mo->slot].look_yaw = mo->mirror ? -mo->look_yaw : mo->look_yaw;
         v->scene.mon[mo->slot].look_pitch = mo->look_pitch;
     }
+    mo->tail.dt += dt;                               /* the tail's springs, at the next posing (0x2DEA78) */
+    v->scene.mon[mo->slot].tail = &mo->tail;
     if (mo->scale_left > 0) {                         /* the dynamic scale (0x2E1CF0 .. 0x2E1D74 [R]): the old one's
                                                       * share sin(pi / 2 x the time left / its time), +0xA84 x +0xA88;
                                                       * the new one once the time is out */

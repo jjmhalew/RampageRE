@@ -1,6 +1,7 @@
-/* look.c - the face queue, the head turn and the velocity's friction (look.h, docs/LOOK_NOTES.md).
+/* look.c - the face queue, the head turn, the velocity's friction and the tail (look.h, docs/LOOK_NOTES.md).
  * [R] read in the ELF, [G] guessed. */
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include "look.h"
 
@@ -353,4 +354,347 @@ float monster_knock_shot(float vel[3], const float knock[3])
         if (fabsf(knock[i]) > fabsf(vel[i]))
             vel[i] = knock[i];
     return MONSTER_FRICTION;
+}
+
+/* ---- 4. the tail ---------------------------------------------------------------------------------------------- */
+
+/* The game's rows of a node matrix: G[r][c] = m[4 r + c] (the port's columns are the game's rows, the axes), the
+ * place m[12 ..]; a x b of row matrices (0x101A90) is mat_mul(b, a). Quaternions are the game's, multiplied as its
+ * code does: tq_mul(a, b) is a then b, the quaternion of a x b. */
+
+static void tq_mul(const float a[4], const float b[4], float o[4])
+{
+    float r[4] = { a[3] * b[0] + b[3] * a[0] + a[1] * b[2] - a[2] * b[1],
+                   a[3] * b[1] + b[3] * a[1] + a[2] * b[0] - a[0] * b[2],
+                   a[3] * b[2] + b[3] * a[2] + a[0] * b[1] - a[1] * b[0],
+                   a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2] };
+    memcpy(o, r, sizeof r);
+}
+
+static void tq_conj(const float a[4], float o[4])
+{
+    o[0] = -a[0]; o[1] = -a[1]; o[2] = -a[2]; o[3] = a[3];
+}
+
+static void tq_norm(float q[4])                      /* 0x104240 */
+{
+    float l = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (l > 0)
+        for (int k = 0; k < 4; k++)
+            q[k] /= l;
+}
+
+/* [R] 0x1042F0 and its use (0x2FA2B8 .., 0x104D00 ..): from a towards b by t, under 0.001 a, over 0.999 counted as
+ * 1; within 0.5 of each other (|a - b|^2 < 0.25) a straight mix, else along the arc (b's part across a, at the angle
+ * between them, 0x105C60 / 0x105D50); normalised */
+static void tq_slerp(const float a[4], const float b[4], float t, float o[4])
+{
+    if (t < 0.001f) {
+        memcpy(o, a, sizeof(float) * 4);
+        return;
+    }
+    if (t > 0.999f)
+        t = 1;
+    float d2 = 0, ab = 0, p[4], r[4];
+    for (int k = 0; k < 4; k++) {
+        d2 += (a[k] - b[k]) * (a[k] - b[k]);
+        ab += a[k] * b[k];
+    }
+    if (d2 < 0.25f) {
+        for (int k = 0; k < 4; k++)
+            r[k] = a[k] + (b[k] - a[k]) * t;
+    } else {
+        float pb = 0;
+        for (int k = 0; k < 4; k++)
+            p[k] = b[k] - ab * a[k];
+        tq_norm(p);
+        for (int k = 0; k < 4; k++)
+            pb += p[k] * b[k];
+        float th = atan2f(pb, ab) * t, c = cosf(th), s = sinf(th);
+        for (int k = 0; k < 4; k++)
+            r[k] = a[k] * c + p[k] * s;
+    }
+    tq_norm(r);
+    memcpy(o, r, sizeof r);
+}
+
+/* [R] 0x104C60: q towards no turn by s (over 0.999 none at all, under 0.001 q), the identity taken on q's side */
+static void tq_unturn(float q[4], float s)
+{
+    if (s > 0.999f) {
+        q[0] = q[1] = q[2] = 0;
+        q[3] = 1;
+        return;
+    }
+    float id[4] = { 0, 0, 0, q[3] < 0 ? -1.0f : 1.0f };
+    tq_slerp(q, id, s, q);
+}
+
+#define G(r, c) g[4 * (r) + (c)]
+/* [R] 0x105090: the turn of the rows, w >= 0 */
+static void tq_of_rows(const Mat4 *m, float q[4])
+{
+    const float *g = m->m;
+    float tr = G(0, 0) + G(1, 1) + G(2, 2);
+    if (tr > 0) {
+        float s = sqrtf(tr + 1);
+        q[3] = 0.5f * s;
+        s = 0.5f / s;
+        q[0] = (G(2, 1) - G(1, 2)) * s;
+        q[1] = (G(0, 2) - G(2, 0)) * s;
+        q[2] = (G(1, 0) - G(0, 1)) * s;
+        return;
+    }
+    static const int next[3] = { 1, 2, 0 };          /* 0x40A080 */
+    int i = G(1, 1) > G(0, 0) ? 1 : 0;
+    if (G(2, 2) > G(i, i))
+        i = 2;
+    int j = next[i], k = next[j];
+    float s = sqrtf(G(i, i) - (G(j, j) + G(k, k)) + 1);
+    q[i] = 0.5f * s;
+    if (s != 0)
+        s = 0.5f / s;
+    q[3] = (G(k, j) - G(j, k)) * s;
+    q[j] = (G(j, i) + G(i, j)) * s;
+    q[k] = (G(k, i) + G(i, k)) * s;
+    if (q[3] < 0)
+        for (int c = 0; c < 4; c++)
+            q[c] = -q[c];
+}
+
+/* [R] 0x104BB0: the rows of the turn q (the place kept) */
+static void tq_rows(const float q[4], Mat4 *m)
+{
+    float x = q[0], y = q[1], z = q[2], w = q[3], *g = m->m;
+    G(0, 0) = 1 - 2 * (y * y + z * z); G(0, 1) = 2 * (x * y - w * z);     G(0, 2) = 2 * (x * z + w * y);
+    G(1, 0) = 2 * (x * y + w * z);     G(1, 1) = 1 - 2 * (x * x + z * z); G(1, 2) = 2 * (y * z - w * x);
+    G(2, 0) = 2 * (x * z - w * y);     G(2, 1) = 2 * (y * z + w * x);     G(2, 2) = 1 - 2 * (x * x + y * y);
+}
+#undef G
+
+/* [R] 0x1017F0: the rows made square: x normalised, y less its x part, z less its x and y parts, each normalised (one
+ * under 1e-3 long becomes (1, 0, 0)) */
+static void rows_square(Mat4 *m)
+{
+    float *r[3] = { m->m, m->m + 4, m->m + 8 };
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < i; j++) {
+            float d = r[i][0] * r[j][0] + r[i][1] * r[j][1] + r[i][2] * r[j][2];
+            for (int k = 0; k < 3; k++)
+                r[i][k] -= d * r[j][k];
+        }
+        float l2 = r[i][0] * r[i][0] + r[i][1] * r[i][1] + r[i][2] * r[i][2];
+        if (l2 < 1e-6f) {
+            r[i][0] = 1;
+            r[i][1] = r[i][2] = 0;
+        } else {
+            float l = 1 / sqrtf(l2);
+            for (int k = 0; k < 3; k++)
+                r[i][k] *= l;
+        }
+    }
+}
+
+static Mat4 rows_turned_over(const Mat4 *m)          /* the rows' 3 x 3 transposed, no place */
+{
+    Mat4 o = mat_identity();
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+            o.m[4 * r + c] = m->m[4 * c + r];
+    return o;
+}
+
+static const char *bare_name(const char *s)          /* the node's name as the game has it: no bundle "000" */
+{
+    if (!s)
+        return "";
+    while (*s == 0x13 || (*s >= '0' && *s <= '9'))
+        s++;
+    return s;
+}
+
+static int same_n(const char *s, const char *x, size_t n)   /* 0x32D1B0: strncasecmp over n, 1 = the same */
+{
+    for (size_t i = 0; i < n; i++) {
+        int a = s[i] >= 'A' && s[i] <= 'Z' ? s[i] + 32 : s[i], b = x[i] >= 'A' && x[i] <= 'Z' ? x[i] + 32 : x[i];
+        if (a != b)
+            return 0;
+        if (!a)
+            break;
+    }
+    return 1;
+}
+
+/* [R] 0x301AE0 (0x301F98: a node named "Bip01 Tail", any case, 0x32C9C8; at most two animators) and 0x2FABC0: from
+ * that node, while it has exactly one child (node +0x8) and the child is named "Bip01 Tail<k>" or "Bip01 Tail0<k>"
+ * (k = 1, 2 .., over that name's length, 0x32D1B0), the child is the next link. The links are taken to be the nodes
+ * after the base (+0x1C keeps the first's index for the mask, whose nodes the tree build 0x301610 hands to +0xC,
+ * 0x2F97E0: the plain build with the node before taken as the parent; the pose 0x2F9E90 rewrites base + k) [R]; they
+ * are in all 13 tailed skeletons (Amanda, Batty, Crock, Kingston, Philbert, Rhett: Tail1 .. Tail3; Dick, Jack, Leon,
+ * Lizzie, Ralph, Rojo, Wally: Tail1, Tail2). The turns start as none, the springs to start over. */
+void tail_find(TailAnim *t, const Tree *tree)
+{
+    t->ready = 1;                                    /* (the weight and its blend as they are: 0 from the start) */
+    t->base = -1;
+    t->n = 0;
+    t->reset = 1;                                    /* +0x464 */
+    t->acc = 0;
+    memset(t->q, 0, sizeof t->q);
+    memset(t->v, 0, sizeof t->v);
+    for (int k = 0; k <= TAIL_LINKS; k++)
+        t->q[k][3] = t->v[k][3] = 1;
+    if (!tree)
+        return;
+    for (uint32_t i = 0; i < tree->n && t->base < 0; i++)
+        if (same_n(bare_name(tree->nodes[i].name), "Bip01 Tail", 11))
+            t->base = (int)i;
+    for (int at = t->base; at >= 0 && t->n < TAIL_LINKS;) {
+        int child = -1, kids = 0;
+        for (uint32_t i = 0; i < tree->n; i++)
+            if (tree->nodes[i].parent == at) {
+                if (child < 0)
+                    child = (int)i;
+                kids++;
+            }
+        if (kids != 1)
+            break;
+        char a[32], b[32];
+        snprintf(a, sizeof a, "Bip01 Tail%d", t->n + 1);
+        snprintf(b, sizeof b, "Bip01 Tail0%d", t->n + 1);
+        const char *nm = bare_name(tree->nodes[child].name);
+        if ((!same_n(nm, a, strlen(a)) && !same_n(nm, b, strlen(b))) || child != t->base + t->n + 1)
+            break;
+        t->n++;
+        at = child;
+    }
+}
+
+/* [R] 0x2FAB00: with seconds over 0.001 the weight goes to target at (target - weight) / seconds a second, else
+ * nothing moves it (the blend's time, 1 / it and rate 0): a cut leaves the weight where it was; the target is kept */
+void tail_blend(TailAnim *t, float target, float seconds)
+{
+    if (seconds > 0.001f) {
+        t->left = seconds;
+        t->inv = 1 / seconds;
+        t->rate = t->inv * (target - t->weight);
+    } else
+        t->left = t->inv = t->rate = 0;
+    t->target = target;
+}
+
+/* [R] 0x2F9970, one step of the springs (MONSTER_DATA +0x9F4 .. +0xA00), link by link from the base, each against
+ * its parent as it is after this step: d = parent x link^-1 (the turn that would line it up) is taken 0.05 of the way
+ * (0x104C60 towards none by 1 - 0.05); the spin keeps 0.8 of itself (d x (spin taken 0.2 of the way)^-1 x spin: the
+ * new spin); the link turns by it (spin x link); one now more than 90 degrees from its parent (the relative turn's w
+ * under cos 45) is put back to 90 about the same axis. Both normalised. */
+static void tail_springs(TailAnim *t)
+{
+    for (int i = 1; i <= t->n; i++) {
+        float *a = t->q[i - 1], *b = t->q[i], c[4], d[4], vd[4], nq[4], v[4], w[4], e[4];
+        tq_conj(b, c);
+        tq_mul(a, c, d);
+        tq_unturn(d, 1 - TAIL_PULL);
+        memcpy(vd, t->v[i], sizeof vd);
+        tq_unturn(vd, 1 - TAIL_DAMP);
+        tq_conj(vd, c);
+        tq_mul(d, c, nq);
+        tq_mul(nq, t->v[i], v);
+        tq_mul(v, b, w);
+        tq_conj(a, c);
+        tq_mul(w, c, e);
+        if (e[3] < TAIL_COS) {
+            float l = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]), s = l > 0 ? TAIL_SIN / l : 0;
+            float lim[4] = { e[0] * s, e[1] * s, e[2] * s, TAIL_COS };
+            tq_mul(lim, a, w);
+        }
+        tq_norm(w);
+        tq_norm(v);
+        memcpy(b, w, sizeof w);
+        memcpy(t->v[i], v, sizeof v);
+    }
+}
+
+/* [R] 0x2F9E90: the links' model matrices. Each link's rest turn under the base (c = its bind turn x c, from none:
+ * the skeleton's +0x3C, 0x50 a node, +0x40) is put on its spring (h = c x q[k]) and made relative to the one before
+ * (k = h x h_before^-1, the first's against q[0]); the clip's own relative turn (the posed link x the posed parent's
+ * rows turned over, squared, 0x105090) goes towards it by the weight, k taken on its side first (0x1042F0); that x
+ * the parent as just rewritten is the link's turn, and its place the bind place (+0x34) in the parent's new frame.
+ * The base's rows are squared in place first (0x1017F0 at 0x2FA03C). */
+static void tail_links(TailAnim *t, Mat4 *node, const Tree *tree)
+{
+    Mat4 *mb = &node[t->base];
+    rows_square(mb);
+    Mat4 over = rows_turned_over(mb);
+    float c[4] = { 0, 0, 0, 1 }, hp[4], pq[4];
+    memcpy(hp, t->q[0], sizeof hp);
+    tq_of_rows(mb, pq);
+    for (int j = 1; j <= t->n; j++) {
+        int n = t->base + j;
+        const TreeNode *nd = &tree->nodes[n];
+        float h[4], k[4], lq[4], s[4], tq[4], hc[4];
+        tq_mul(nd->q, c, c);
+        tq_mul(c, t->q[j], h);
+        tq_conj(hp, hc);
+        tq_mul(h, hc, k);
+        Mat4 l = mat_mul(over, node[n]);             /* the posed link x the posed parent's rows turned over */
+        rows_square(&l);
+        tq_of_rows(&l, lq);
+        if (lq[0] * k[0] + lq[1] * k[1] + lq[2] * k[2] + lq[3] * k[3] < 0)
+            for (int i = 0; i < 4; i++)
+                k[i] = -k[i];
+        tq_slerp(lq, k, t->weight, s);
+        tq_mul(s, pq, tq);
+        tq_norm(tq);
+        over = rows_turned_over(&node[n]);           /* the next one's parent as the clip posed it */
+        const float *pm = node[n - 1].m, *bt = nd->t;
+        for (int r = 0; r < 3; r++)
+            node[n].m[12 + r] = bt[0] * pm[r] + bt[1] * pm[4 + r] + bt[2] * pm[8 + r] + pm[12 + r];
+        tq_rows(tq, &node[n]);
+        memcpy(pq, tq, sizeof pq);
+        memcpy(hp, h, sizeof hp);
+    }
+}
+
+/* [R] 0x2FAB70: while the weight's blend runs (0x2FA970) its time falls by dt and the weight moves by rate x dt, and
+ * the weight is not tested; when the time is out the weight is the target and it goes on as 0x2FA820. 0x2FA820: a
+ * weight of 0 or less only marks the springs to start over, and the clip's tail stays. Otherwise q[0] = the base's
+ * turn in the world (its model matrix x the monster's, squared: 0x101A90, 0x1017F0, 0x105090); starting over, every
+ * link takes it (the spins stay); the time adds up (+0x460) and the springs step at MONSTER_DATA +0xA04 (1 / 30 s)
+ * while more than a step is there (0x2F9970), then the links are posed (0x2F9E90). */
+void tail_pose(TailAnim *t, Mat4 *node, const Tree *tree, const Mat4 *world)
+{
+    float dt = t->dt;
+    t->dt = 0;
+    if (!t->ready)
+        tail_find(t, tree);
+    if (t->n <= 0 || !tree || (uint32_t)(t->base + t->n) >= tree->n)
+        return;
+    int blending = t->left > 0;
+    if (blending) {
+        t->left -= dt;
+        if (t->left <= 0) {
+            t->rate = t->left = 0;
+            t->weight = t->target;
+            blending = 0;
+        } else
+            t->weight += t->rate * dt;
+    }
+    if (!blending && t->weight <= 0) {
+        t->reset = 1;
+        return;
+    }
+    Mat4 w = mat_mul(*world, node[t->base]);
+    rows_square(&w);
+    tq_of_rows(&w, t->q[0]);
+    if (t->reset) {
+        for (int k = 1; k <= t->n; k++)
+            memcpy(t->q[k], t->q[0], sizeof t->q[0]);
+        t->reset = 0;
+    }
+    t->acc += dt;
+    while (t->acc > TAIL_STEP) {
+        tail_springs(t);
+        t->acc -= TAIL_STEP;
+    }
+    tail_links(t, node, tree);
 }

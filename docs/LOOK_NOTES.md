@@ -1,6 +1,6 @@
-# The face queue, the head turn and the velocity's friction
+# The face queue, the head turn, the velocity's friction and the tail
 
-Three small pieces of the monster traced from the ELF; `src/look.c` ports them. [R] read, [G] guessed.
+Four small pieces of the monster traced from the ELF; `src/look.c` ports them. [R] read, [G] guessed.
 
 ## The face queue
 The Monster script methods `setFacialAnim` (descriptor 0x42BAA0, id 0x7D, dispatcher case 0x2ABA88 → 0x2E9200) and
@@ -72,6 +72,65 @@ atan2(−x, y), elevation = π/2 − acos(z / |v|)). The pitch target is wrapped
 its target. The handle is only ever cleared (0x2FF790, from the constructor 0x2EB740) and no node of the 30 monsters
 has flag 0x20, so **tracking never runs in this build**: the head turns only with the right stick. The handle is also
 the "melee range" test (+0xF9: within MONSTER_DATA +0x184 × scale, 0x2DE650), equally idle.
+
+## The tail
+`MonsterTailAnimator` (vtable 0x44AFE0: +0x8 the update 0x2FAB70, +0xC the per-node build 0x2F97E0; 0x468 bytes,
+two of them in the animation player at +0x113C, counted at +0x1A0C). The player's setup 0x301AE0 makes one for a
+skeleton node named `Bip01 Tail` (any case, 0x32C9C8 at 0x301FA0; constructor 0x2FABC0). [R] throughout.
+
+**The chain** (0x2FABC0): from that node, while it has exactly one child (node +0x8) named `Bip01 Tail<k>` or
+`Bip01 Tail0<k>` (k = 1, 2 …, compared over that name's length, 0x32D1B0), the child is the next link (+0x1C the
+first's index, +0x20 the count; the links' bits in the mask +0x8 .. +0x14, which makes the tree build 0x301610 call
++0xC for them: 0x2F97E0 is the plain build, the parent taken as the node before). 13 skeletons have one: Amanda,
+Batty, Crock, Kingston, Philbert, Rhett (`Tail1` .. `Tail3`, nodes 56 .. 58) and Dick, Jack, Leon, Lizzie, Ralph, Rojo,
+Wally (`Tail1`, `Tail2`, nodes 58, 59), always right after the base (the pose writes base + k). Per link a turn in
+the world (+0x24, 32 quaternions, [0] the base's) and a spin (+0x234, 32), all none at the start, the springs marked
+to start over (+0x464 = 1), the weight 0 (+0x454).
+
+**The weight** (0x2FAB00, called by the monster's command 0x2E6580 at 0x2E6884 for each tail as a clip starts): it
+goes to the new state's node +0x10 over the request's +0x4, which is always the node's blend time (+0x14, 0x2ECC08),
+cut or blend: the rate (target − weight) / time at +0x458, the time left at +0x44C. A time of 0.001 or less sets no
+blend at all, so **a cut leaves the weight where it was** (the target is kept but never reached). Node +0x10 is 0 or
+1: 1 in `Ground_Walk` (all 30 monsters), in `Jump_Air_Borne_Profile` / `…ProfileR` (23 of them; of the tailed ones
+Amanda, Batty, Crock, Kingston, Philbert and Rhett, not Dick, Jack, Leon, Lizzie, Ralph, Rojo, Wally), Rojo's
+`Ground_Walk_2` .. `_4` and Marco's `React_Side_L_Eat_Person`; 0 everywhere else: the tail swings while walking
+(and in the profile jumps) and is the clip's otherwise.
+
+**Each frame** (vtable +0x8 from the monster update at 0x2DEA78, after the animation player's frame 0x2FFF10 has built
+the model pose, before the arms' and feet's IK at 0x2E1304 .., the monster's world matrix +0x8 as it was before the
+frame's move): while a blend runs (0x2FA970) its time falls by dt and the weight moves by rate × dt, untested; when
+it is out the weight is the target and the frame goes on as 0x2FA820, where a weight of 0 or less only marks the
+springs to start over (the clip's tail stays). Otherwise q[0] = the base's model matrix × the world matrix, squared
+(0x101A90, 0x1017F0, 0x105090); starting over, every link takes q[0] (the spins are kept). The time adds up (+0x460)
+and while more than MONSTER_DATA +0xA04 (1/30 s) is there the springs step (0x2F9970), then the links are posed
+(0x2F9E90).
+
+**A step** (0x2F9970; MONSTER_DATA +0x9F4 .. +0xA00, the same in all 30: 0.7071, 0.7071, 0.05, 0.2), link by link
+from the base, each against its parent as already stepped (a × b the game's product, rows: a then b):
+- d = parent × link⁻¹ (what would line it up), taken 0.05 of the way (0x104C60: towards none by 1 − 0.05);
+- the new spin = d × (spin taken 0.2 of the way)⁻¹ × spin: the spin keeps 0.8 of itself and gains d;
+- the link turns: spin × link; if it is now more than 90° from its parent (the relative turn's w under +0x9F8 =
+  cos 45°) it is set to 90° about the same axis ((+0x9F4 × axis, +0x9F8) × parent);
+- both normalised.
+So each link is a damped angular spring towards its parent's turn, in the world: as the monster turns or sways the
+tail lags behind and swings through, link after link.
+
+**The pose** (0x2F9E90): c starts as none, h_before as q[0], the parent's new turn as the base's model turn (its rows
+squared in place first, 0x2FA03C). Per link k (node base + k): c = its bind turn (the skeleton's +0x3C table, 0x50 a
+node, +0x40) × c, its rest turn below the base; h = c × q[k]; the spring's relative turn r = h × h_before⁻¹; the
+clip's own relative turn is the posed link × the posed parent's rows turned over, squared (0x105090); r is taken on
+its side (dot < 0: negated) and the clip's goes towards it by the weight (0x1042F0: a straight mix within |a − b|² <
+0.25, else along the arc; under 0.001 the clip's, over 0.999 all of r); that × the parent's new turn is the link's
+turn (0x104BB0), and its place the bind place (+0x34) in the parent's new frame (the clip's own place of the link is
+not used). With the weight 1 (walking) the tail is its bind shape, bent only by the springs.
+
+**Mirrored**: the springs run on the mirrored pose (the keys are mirrored before the build) with the skeleton's bind
+turns and places as they are; the tails' bind turns are about z alone and their places along x, which the reflection
+leaves as they are, so nothing changes. The port turns the drawn links (reflected) and reflects them back.
+
+**Port**: `look.c` `TailAnim`, `tail_find` (0x2FABC0), `tail_blend` (0x2FAB00, from main.c's `play_state`, with
+MoveState `tail` = node +0x10), `tail_pose` (0x2FAB70 .. 0x2F9E90), run by city.c's `monster_tail` after the pose and
+before the IK; main.c hands it the frame's dt. `RAMPAGE_NOTAIL=1` leaves the clip's tail.
 
 ## The velocity
 The monster update (vtable +0x10, 0x2DE530) switches on the movement mode (+0xAD8; jump table 0x431290): 0, 2 and 4

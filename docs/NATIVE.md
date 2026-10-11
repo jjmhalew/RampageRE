@@ -102,7 +102,8 @@ mode's movies and the next demo. `--do "wait 1, menu accept, wait 600, wait 8"` 
 and the attract mode's movies play their length). The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
-`RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
+`RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_NOTAIL=1`: the tails as the clips have them, without
+their springs; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
 world). The fog is on (F toggles it, `--nofog` starts without). Texture packs: PNGs in `mods/textures/` replace the
 game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes
 ([TEXTURES.md](TEXTURES.md)). `--cheat` takes several codes, comma separated (`--cheat 986960,071767`).
@@ -627,6 +628,6 @@ the street and roof objects (streetobj.c, [STREETOBJ_NOTES.md](STREETOBJ_NOTES.m
 their ADPCM sound decoded by hand, [MOVIE_NOTES.md](MOVIE_NOTES.md)), the buildings' light and
 neighbours' shadows (building.c, city.c, [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)), the water (water.c), the cloth and flags (cloth.c), the game flow and lives (game.c), its
 choreography and camera modes (director.c), the block challenges and their upgrades (challenge.c,
-[CHALLENGE_NOTES.md](CHALLENGE_NOTES.md)), the Pause menu (hud.c, [PAUSE_NOTES.md](PAUSE_NOTES.md)), the face queue, head turn and friction (look.c), shadows (shadow.c),
+[CHALLENGE_NOTES.md](CHALLENGE_NOTES.md)), the Pause menu (hud.c, [PAUSE_NOTES.md](PAUSE_NOTES.md)), the face queue, head turn, friction and the tails' springs (look.c), shadows (shadow.c),
 effects with their mesh debris and sounds (fx.c), the footfalls, the foot lock and drag with the legs' IK (footstep.c, ik.c,
 [FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md)) and sound (sound.c).

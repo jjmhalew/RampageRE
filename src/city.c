@@ -15,6 +15,7 @@
 #include "plat.h"
 #include "city.h"
 #include "ik.h"
+#include "look.h"
 #include "rail.h"
 
 #define CELL 5.0f
@@ -2667,6 +2668,33 @@ static void monster_ik(SceneMonster *s, Instance *in)
         ik_feet(in->node, &in->tree, in->mirrored, s->feet);
 }
 
+/* the tail's springs (look.c, MonsterTailAnimator), after the pose is built and before the IK as the monster update
+ * runs them (0x2DEA78, then 0x2E1304 ..). The game works on the mirrored pose (the keys mirrored by 0x2FFF10): here
+ * on the drawn links, each the other side's node reflected (the tail's are middle nodes, their own), and back */
+static void monster_tail(SceneMonster *s, Instance *in)
+{
+    struct TailAnim *t = s->tail;
+    if (!t || !in->tree.n || in->tree.n > 256 || getenv("RAMPAGE_NOTAIL"))
+        return;
+    if (!in->mirrored) {
+        tail_pose(t, in->node, &in->tree, &in->base);
+        return;
+    }
+    if (!t->ready)
+        tail_find(t, &in->tree);
+    static Mat4 drawn[256];
+    int from = t->n > 0 ? t->base : 0, to = t->n > 0 ? t->base + t->n : -1;
+    for (int j = from; j <= to && (uint32_t)j < in->tree.n; j++) {
+        int m = in->tree.nodes[j].mirror;
+        drawn[j] = reflect_node(in->node[m >= 0 && (uint32_t)m < in->tree.n ? m : j], reflect_axis(in, j));
+    }
+    tail_pose(t, drawn, &in->tree, &in->base);
+    for (int j = from; j <= to && (uint32_t)j < in->tree.n; j++) {
+        int m = in->tree.nodes[j].mirror;
+        in->node[m >= 0 && (uint32_t)m < in->tree.n ? m : j] = reflect_node(drawn[j], reflect_axis(in, j));
+    }
+}
+
 int scene_monster_slot(const Scene *s, int inst)
 {
     for (int k = 0; inst >= 0 && k < s->nmon; k++)
@@ -2732,8 +2760,10 @@ static void update(Scene *s, double t, int all)
         if (in->tree.n && (all || in->has_clip || in->dynamic)) {   /* a model made later is posed too */
             pose_instance(s, in, t);
             int mk = scene_monster_slot(s, (int)i);
-            if (mk >= 0)
+            if (mk >= 0) {
+                monster_tail(&s->mon[mk], in);
                 monster_ik(&s->mon[mk], in);
+            }
         }
     }
     for (uint32_t i = 0; i < s->nitems; i++) {

@@ -52,6 +52,9 @@ typedef struct {
      * turns towards the stick at `turn` × the angle per second (0x2E8190), its forward axis `fwd` (x, y); with
      * NODE_AIR_* the stick drives it at up to `speed` units / s; `blend` seconds to blend into the clip */
     float rate, turn, speed, blend, fwd[2]; uint32_t flags;   /* node +0x0, +0x4, +0x8, +0x14, +0x18, +0x2C */
+    float tail;                                      /* node +0x10: the tail's springs' weight (look.c tail_blend):
+                                                        1 in Ground_Walk (and the Jump_Air_Borne_Profile pair of
+                                                        some), 0 in every other state */
     MoveTrans *trans; int ntrans;
     MoveEvent *events; int nevents;                  /* in time order */
 } MoveState;

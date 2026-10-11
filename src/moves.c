@@ -175,6 +175,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
             s->turn = rdf(nd + 0x4);
             s->speed = rdf(nd + 0x8);
             s->blend = rdf(nd + 0x14);
+            s->tail = rdf(nd + 0x10);
             s->fwd[0] = rdf(nd + 0x18);
             s->fwd[1] = rdf(nd + 0x1C);
             s->flags = rd32(nd + 0x2C);

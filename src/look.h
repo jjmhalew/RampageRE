@@ -4,7 +4,8 @@
  *   2. the head turn (MonsterHeadAnimator, vtable 0x44B020): the right stick in a look state, and the target
  *      tracking the game has but never switches on;
  *   3. the velocity's friction and drag in the monster update (0x2DE530: modes 0 / 2 / 4 at 0x2DF6F0, mode 1 at
- *      0x2DEBD8) and the knocks that set it (0x2D6A50).
+ *      0x2DEBD8) and the knocks that set it (0x2D6A50);
+ *   4. the tail (MonsterTailAnimator, vtable 0x44AFE0): the "Bip01 Tail" links on springs while walking.
  * Positions are the game's: z up. Matrices as city.h's Mat4 (column vectors, column-major, m[12..14] the place). */
 #ifndef RAMPAGE_LOOK_H
 #define RAMPAGE_LOOK_H
@@ -108,5 +109,42 @@ float monster_knock_ground(float vel[3], const float dir[3], float dist, float t
 float monster_knock_air(float vel[3], const float dir[3], float dist, float time, float angle);
 /* a shot's knock (army, 0x2D9650): per axis the larger of the knock and the velocity; friction MONSTER_FRICTION */
 float monster_knock_shot(float vel[3], const float knock[3]);
+
+/* ---- 4. the tail ---------------------------------------------------------------------------------------------- */
+
+/* MonsterTailAnimator (vtable 0x44AFE0, 0x468 bytes, two in the animation player at +0x113C; made by its setup
+ * 0x301AE0 for the node named "Bip01 Tail", constructor 0x2FABC0): the links below it ("Bip01 Tail1", "Bip01 Tail2"
+ * .. or "Bip01 Tail01" ..) hang on springs in the world, and while its weight is up they replace the clip's tail. The
+ * settings are MONSTER_DATA's, the same in all 30 monsters. Quaternions are the game's (x, y, z, w; row vectors, as
+ * mat_tq takes them). */
+#define TAIL_LINKS 31                                /* the arrays hold 32 with the base's */
+#define TAIL_STEP (1 / 30.0f)                        /* +0xA04: the springs' fixed step */
+#define TAIL_PULL 0.05f                              /* +0x9FC: the share of the way to its parent's turn a link takes */
+#define TAIL_DAMP 0.2f                               /* +0xA00: the share of its spin a link loses, each step */
+#define TAIL_COS 0.7071068f                          /* +0x9F8, +0x9F4: cos and sin of 45 degrees: a link turns */
+#define TAIL_SIN 0.7071068f                          /* at most 90 degrees from its parent */
+typedef struct TailAnim {
+    int ready;                                       /* the chain was looked for (tail_find) */
+    int base, n;                                     /* +0x18 the "Bip01 Tail" node, +0x20 the links (n = 0: none);
+                                                        the links are the nodes base + 1 .. base + n (+0x1C) */
+    float q[TAIL_LINKS + 1][4];                      /* +0x24: each link's turn in the world, [0] the base's */
+    float v[TAIL_LINKS + 1][4];                      /* +0x234: each link's spin per step */
+    float weight;                                    /* +0x454: the share of the springs in the pose (0 .. 1) */
+    float left, inv, rate, target;                   /* +0x44C, +0x450, +0x458, +0x45C: the weight's blend */
+    float acc;                                       /* +0x460: time not yet stepped */
+    int reset;                                       /* +0x464: the links start again from the base's turn */
+    float dt;                                        /* play time since the last posing (the caller adds to it) */
+} TailAnim;
+/* 0x2FABC0: the chain below the node named "Bip01 Tail" (each with one child named "Bip01 Tail<k>" or
+ * "Bip01 Tail0<k>"); ready, the springs to start from the base. The weight and its blend are kept (zero the struct
+ * for a new monster: weight 0) */
+void tail_find(TailAnim *t, const Tree *tree);
+/* 0x2FAB00 (from the monster's command 0x2E6580, as a state starts): the weight goes to `target` (the new state's node
+ * +0x10) over `seconds` (its blend time, node +0x14); 0.001 or less leaves the weight where it is */
+void tail_blend(TailAnim *t, float target, float seconds);
+/* the update (vtable +0x8, 0x2FAB70, from the monster update at 0x2DEA78 after the pose is built): on a posed
+ * skeleton (model-space node matrices as drawn, the monster's world matrix `world`), the weight's blend, the springs
+ * stepped by t->dt (then 0) and, with the weight above 0, the links' model matrices rewritten */
+void tail_pose(TailAnim *t, Mat4 *node, const Tree *tree, const Mat4 *world);
 
 #endif

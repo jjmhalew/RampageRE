@@ -312,7 +312,7 @@ unused    0x2F4CC0-0x2F4F60  clip event 13's worker (0x2E7EA0): no monster's cli
 engine    0x2F4F60-0x2F5800  ROMonster's draw helpers, the event player's steps: city.c, main.c, footstep.c
 engine    0x2F5800-0x2F5D80  clip event 12's effect slots (0x2F5800: FollowEffects on the nodes +0xA80[+0x9C8]), the shake, the record's release: main.c mon_fx_*, moves.c
 engine    0x2F5D80-0x2F97E0  MonsterFx, foot IK, the IK pair animators' pose plumbing: footstep.c, ik.c
-open      0x2F97E0-0x2FADC0  MonsterTailAnimator: the "Bip01 Tail" chain's own motion for the tailed monsters; the port poses tails from the clips only
+engine    0x2F97E0-0x2FADC0  MonsterTailAnimator: the "Bip01 Tail" links' springs while walking: look.c tail_find / tail_blend / tail_pose, city.c monster_tail
 unused    0x2FADC0-0x2FB950  MonsterTorsoTwistAnimator: made for the node named by MONSTER_DATA +0xA24, which is name 0 in all 30 monsters
 engine    0x2FB950-0x30AE90  head animator (look.c), ROMonster (city.c), block manager (city.c), gShell junction (shell.c), ActorAnimShape (people.c)
 unused    0x30AE90-0x30C020  ActorAnimBitmap: made for an "ActorAnim|" group (0x30D280); the books have 546 ActorAnimShape| and no ActorAnim|

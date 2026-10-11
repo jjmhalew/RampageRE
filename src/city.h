@@ -132,6 +132,7 @@ typedef struct {                                      /* a building's cells and 
 } SceneBuilding;
 
 struct IkFeet;
+struct TailAnim;
 /* a monster in the scene: the game has up to four (the players and the bots), each with its own skeleton, clips,
  * head turn, arm IK and foot IK; Scene.mon[k] is monster slot k */
 #define SCENE_MONSTERS 4
@@ -152,6 +153,7 @@ typedef struct {
     Mat4 ik_anim[2];
     float ik_shoulder[2][3], ik_reach[2];             /* the upper arm's place (model space, as drawn), the arm's length */
     struct IkFeet *feet;                              /* its foot IK (ik.c ik_feet), NULL none */
+    struct TailAnim *tail;                            /* its tail's springs (look.c tail_pose), NULL none */
 } SceneMonster;
 
 typedef struct {
