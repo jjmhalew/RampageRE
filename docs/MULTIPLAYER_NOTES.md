@@ -8,7 +8,9 @@ Addresses are in RAMPAGE.ELF. **[R]** means read in the code or the files; **[G]
 
 - The players, bots included, are Common 0x4D7E28 (players) and 0x4D7E2C (bots); the last `bots` of the players are
   the computer's [R, SHELL_NOTES.md]. The shell's `NumPlayers` box offers 1 or 2 players on the PS2 (3 and 4 only on
-  other platforms), `NumBots` how many of them are the computer's.
+  other platforms), `NumBots` how many of them are the computer's. The attract mode's demo sets bots = players (1 or
+  2, 0x308628 .. 0x308638): every monster is the computer's (SHELL_NOTES.md "The demo game"; the port's
+  `setup_players` and game.c allow it there alone).
 - Each player has a monster slot 0 .. players − 1: its monster (GameStatus +0x14 + 4 i), its HUD (`Hud<i>.ifc`), its
   points and kills (`Player`, +0x318 + 0x60 i), its lives (+0x224 + 4 i) [R, GAME_NOTES.md].
 - **BeginLevelNI** puts monster i at x = −17 (n − 1) / 2 + 17 i, y = −5.2, facing π, playing `React_Intro`; it ends

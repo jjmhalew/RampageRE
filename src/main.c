@@ -231,8 +231,11 @@ typedef struct Viewer {
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
     int lang;                                        /* --lang: the .loc column (hud.h: 0 English .. 8 Portuguese) */
     ShellGame last_game;                             /* the shell's last choices (back from a game) */
+    ShellStart kept;                                 /* what gShell keeps while the game plays (shell_keep) */
     const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */
+    int attract;                                     /* the game is the attract mode's demo (play type 0, all bots) */
+    int attract_button;                              /* its end came from a button (GE_EXIT 2, b 1) */
     CollideWorld cw;                                 /* the frame's collision world (collide.c): built by world_build
                                                       * before anything moves, asked by the monsters and the modules */
     float mid_x;                                     /* the middle of the players' x this frame (0x336360) */
@@ -244,6 +247,9 @@ typedef struct Viewer {
     float pad_rep[PAD_SLOTS][4];
     int vibrate;                                     /* gCommon.setEnableRumble's answer: the pad's +0xC84 [R 0x1A5020] */
 } Viewer;
+
+/* gCommon.getPlayType() of the game played: the demo's 0, else --play's or the shell's (unset: the campaign) */
+static int play_type(const Viewer *v) { return v->attract ? GP_ATTRACT : v->play_type ? v->play_type : GP_CAMPAIGN; }
 
 /* the monster's instance in the scene, NULL none */
 static Instance *mon_in(const Mon *mo)
@@ -1066,14 +1072,14 @@ static void build(Viewer *v)
                 pm[k] = reveal_roster_find(&v->roster, v->monsters[v->mon[k].monster]);
             for (int i = 0; i < v->roster.n; i++)    /* the roster's flags are the profile's (ShellData's order) */
                 v->roster.flags[i] = profile_monster_flags(&v->prof, 0, i);
-            int rm = reveal_load(&v->reveal, world_data(v), (v->play_type ? v->play_type : GP_CAMPAIGN) == GP_CAMPAIGN,
+            int rm = reveal_load(&v->reveal, world_data(v), play_type(v) == GP_CAMPAIGN,
                                  v->nmon, pm, &v->roster);
             v->ntubes = 0;
             if (rm >= 0)                             /* with one player: the world's extra monster, hidden */
                 extra_add(v, reveal_extra_slot(&v->reveal, v->nmon), rm);
             if (getenv("RAMPAGE_TRACE"))
                 printf("reveal: %s%s\n", rm >= 0 ? v->roster.name[rm] : "-", v->extra >= 0 ? " (shown)" : "");
-            GameConfig gc = { v->play_type ? v->play_type : GP_CAMPAIGN, v->nmon, v->num_bots,
+            GameConfig gc = { play_type(v), v->nmon, v->num_bots,
                               campaign_index(CITIES[v->city_index]), 7,
                               city_block_index(v->city, v->blocks[v->block]), v->prof.current.seed[0],
                               v->prof.cheats, v->prof.current.seed[1] };
@@ -1095,7 +1101,7 @@ static void build(Viewer *v)
         huds_close(v);
         for (int k = 0; v->have_gui && v->have_scene && have_monster(v) && !v->no_hud && k < v->nmon; k++) {
             Mon *mo = &v->mon[k];                    /* each player's HUD (Hud<k>.ifc); player 1's has the screens */
-            int pt = v->play_type ? v->play_type : HUD_PLAY_CAMPAIGN;   /* the King modes: the blocks to win */
+            int pt = play_type(v);                   /* (GP_* and HUD_PLAY_* agree) the King modes: the blocks to win */
             HudConfig hc = { k, v->nmon, pt, v->game && (pt == GP_KING_CITY || pt == GP_KING_WORLD) ?
                              game_blocks_to_win(v->game) : 0, v->monsters[mo->monster] };
             mo->hud = hud_open(&v->gui_world, &v->gui_common, &hc);
@@ -2654,6 +2660,12 @@ static void game_step(Viewer *v, float dt)
                 if (e->a == GS_BEGIN_BLOCK && v->next_block >= 0) {
                     v->game_block = v->next_block;   /* built once this frame is over */
                     v->next_block = -1;
+                }
+                break;
+            case GE_EXIT:                            /* the demo is over (0x324D18): back to the shell */
+                if (e->a == 2) {
+                    v->exit_game = 1;
+                    v->attract_button = e->b == 1;
                 }
                 break;
             case GE_RUBBLE_FX: {                     /* findPointInRubble(pos, 8): a point in the block left's
@@ -4443,6 +4455,29 @@ static int pause_open(Viewer *v, int pad)
     return v->hud && hud_pause_open(v->hud, pad, &p);
 }
 
+/* a pad's button went down in the attract mode's demo (RControllerMgr 0x2C1BF4): the game leaves at its next update */
+static void attract_press(Viewer *v)
+{
+    if (v->attract && v->game)
+        game_attract_button(v->game);
+}
+
+/* this frame's buttons for the demo: any controller's d-pad or button (not the sticks: RControllerMgr's controls 4
+ * and on [R 0x2C1BE0]), or a key the viewer gives a button: Enter, Space, Backspace, P, J, K, L, R and the second
+ * player's keypad buttons [G: the keys' share] */
+static int attract_buttons(const Viewer *v, const Window *w)
+{
+    static const int KEYS[] = { VK_RETURN, VK_SPACE, VK_BACK, 'P', 'J', 'K', 'L', 'R', VK_NUMPAD0, VK_NUMPAD1,
+                                VK_NUMPAD3, VK_NUMPAD7, VK_NUMPAD9 };
+    for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
+        if (w->pressed[KEYS[k]])
+            return 1;
+    for (int k = 0; v->pads_live && k < PAD_SLOTS; k++)
+        if ((v->pads_on >> k & 1) && (v->pads[k].buttons & ~v->pads_prev[k].buttons))
+            return 1;
+    return 0;
+}
+
 /* each monster's clip at its state's time (clip_at), for a posing at time t (the scene's clock); how many have their
  * move graph */
 static int pose_monsters(Viewer *v, double t)
@@ -4538,8 +4573,10 @@ static void game_next_block(Viewer *v)
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
  * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "p2" (p1 .. p4): the words
  * after it play
- * that player's monster (the others' keys idle meanwhile, the computer's monsters go on) */
-static void play_script(Viewer *v, const char *script, float aspect)
+ * that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back to
+ * the shell the words stop: the ones left are returned (NULL none), for the shell */
+static void attract_press(Viewer *v);
+static const char *play_script(Viewer *v, const char *script, float aspect)
 {
     Mon *mo = &v->mon[0];                            /* the monster the words play */
     static const struct { const char *name; int button; float x, y; } WORDS[] = {
@@ -4552,6 +4589,8 @@ static void play_script(Viewer *v, const char *script, float aspect)
     const char *p = script;
     while (*p) {
         while (*p == ' ' || *p == ',') p++;
+        if (v->exit_game)                            /* the shell's turn: the rest is its */
+            return *p ? p : NULL;
         int n = 0;
         while (*p && *p != ' ' && *p != ',' && n < 31) word[n++] = *p++;
         word[n] = 0;
@@ -4608,7 +4647,8 @@ static void play_script(Viewer *v, const char *script, float aspect)
             challenge_stats(v, name, 0);
             continue;
         }
-        if (_stricmp(word, "pause") == 0) {          /* Start: the Pause menu */
+        if (_stricmp(word, "pause") == 0) {          /* Start: the Pause menu (the demo: its end) */
+            attract_press(v);
             pause_open(v, 0);
             continue;
         }
@@ -4692,7 +4732,9 @@ static void play_script(Viewer *v, const char *script, float aspect)
             if (WORDS[i].button >= 0) pressed[WORDS[i].button] = 1;
             int frames = (int)(seconds * 60 + 0.5f);
             if (frames < 1) frames = 1;
-            for (int k = 0; k < frames; k++) {
+            if (WORDS[i].button >= 0)                /* a button: the demo's end */
+                attract_press(v);
+            for (int k = 0; k < frames && !v->exit_game; k++) {
                 int right = WORDS[i].button == -2;  /* the right stick: held from here until rcenter */
                 if (right) {
                     mo->pad.rx = WORDS[i].x;
@@ -4722,6 +4764,7 @@ static void play_script(Viewer *v, const char *script, float aspect)
             }
         }
     }
+    return NULL;
 }
 
 /* ---- the front end (shell.c): --shell starts there, and a game's Quit goes back */
@@ -5237,7 +5280,11 @@ static int shell_answer(Viewer *v)
             case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
             case SHELL_EVT_START: start = 1; break;
             case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
-            default: break;                          /* the emulators, the demo game: skipped */
+            case SHELL_EVT_ATTRACT_GAME:             /* the demo (shell_game(), play type 0): its loading screen,
+                                                      * then SHELL_EVT_START as any game */
+                printf("attract mode demo %d: %s\n", e->arg, e->name);
+                break;
+            default: break;                          /* the emulators: skipped */
             }
         }
     movie_step(v);
@@ -5260,7 +5307,8 @@ static int monster_index(const Viewer *v, const char *name)
 static void setup_players(Viewer *v, int n, int bots, const int *monster)
 {
     v->nmon = n < 1 ? 1 : n > MONSTERS ? MONSTERS : n;
-    v->num_bots = bots < 0 ? 0 : bots >= v->nmon ? v->nmon - 1 : bots;
+    int most = v->attract ? v->nmon : v->nmon - 1;   /* the demo's are all the computer's */
+    v->num_bots = bots < 0 ? 0 : bots > most ? most : bots;
     for (int k = 0; k < MONSTERS; k++) {
         Mon *mo = &v->mon[k];
         mo->v = v;
@@ -5278,7 +5326,9 @@ static void setup_players(Viewer *v, int n, int bots, const int *monster)
     v->extra = -1;
 }
 
-/* gShell.startGame: the game the shell chose (GameStatus), the city opened at its block */
+/* gShell.startGame: the game the shell chose (GameStatus), the city opened at its block. The demo (play type 0) keeps
+ * the seeds it drew for the world [R 0x308890: the shell draws new ones for the other play types; for those the port
+ * keeps the profile's, a stand-in [G]] */
 static void shell_start_game(Viewer *v)
 {
     const ShellGame *g = shell_game(v->shell);
@@ -5286,8 +5336,16 @@ static void shell_start_game(Viewer *v)
     for (int i = 0; i < NCITIES; i++)
         if (!_stricmp(g->city, CITIES[i]))
             city = i;
-    v->play_type = g->play_type;
+    v->attract = g->play_type == GP_ATTRACT;
+    v->attract_button = 0;
+    v->play_type = v->attract ? 0 : g->play_type;
     v->night = g->night;
+    if (v->attract) {                                /* GameStatus +0x0 / +0x4: the current record's */
+        v->prof.current.seed[0] = g->seed[0];
+        v->prof.current.seed[1] = g->seed[1];
+    }
+    memset(&v->kept, 0, sizeof v->kept);
+    shell_keep(v->shell, &v->kept);
     int pick[MONSTERS], n = g->num_players < 1 ? 1 : g->num_players > MONSTERS ? MONSTERS : g->num_players;
     for (int k = 0; k < n; k++)                      /* the players' monsters, then the bots' (GameStatus +0x14) */
         pick[k] = monster_index(v, g->monster_name[k]);
@@ -5305,6 +5363,32 @@ static void shell_start_game(Viewer *v)
     v->shell = NULL;
     v->exit_game = 0;
     open_city(v, city, (uint32_t)(v->last_game.start_block > 0 ? v->last_game.start_block : 0));   /* (g is gone) */
+}
+
+/* the demo is over, the shell's again (0x308950): with the button's end its idle timer is 120 (0x324CC8), so the main
+ * menu; else still 0, the attract mode. +0x20 set: restoreProfile (0x308A00 -> 0x33D910), the current game is the
+ * profile's again (its city, night, start block, monsters, seeds; three lives); the play type stays 0 and the players
+ * and bots the demo's (0x4D7E44, 0x4D7E28 / 2C are not in the record) [R] */
+static void attract_end(Viewer *v, ShellStart *st)
+{
+    if (v->attract_button)
+        st->idle = SHELL_IDLE_SECONDS;
+    profile_restore(&v->prof);
+    const ProfileStatus *c = &v->prof.current;
+    ShellGame *g = &st->game;
+    g->night = c->night != 0;
+    g->city_index = c->city >= 0 && c->city < v->prof.ncities ? c->city : 0;
+    snprintf(g->city, sizeof g->city, "%s", v->prof.city_name[g->city_index] ? v->prof.city_name[g->city_index] : "");
+    g->start_block = c->start_block;
+    g->seed[0] = c->seed[0];
+    g->seed[1] = c->seed[1];
+    for (int i = 0; i < 4; i++) {
+        int m = c->monster[i] >= 0 && c->monster[i] < v->prof.nmonsters ? c->monster[i] : 0;
+        g->monster[i] = m;
+        snprintf(g->monster_name[i], sizeof g->monster_name[i], "%s",
+                 v->prof.monster_name[m] ? v->prof.monster_name[m] : "");
+    }
+    v->attract = v->attract_button = 0;
 }
 
 /* the "card"'s free room for the shell's room tests: --card-free-kb, else the drive the profile file is on, a look a
@@ -5814,7 +5898,7 @@ int main(int argc, char **argv)
     }
     float speed = 30;
     double last = win_time(), title_at = last, start = last;
-    int frames = 0;
+    int frames = 0, settled = 0;                     /* a shot's game: its words played */
     while (!w.quit) {
         win_poll(&w);
         double now = win_time();
@@ -5908,12 +5992,29 @@ int main(int argc, char **argv)
             for (int k = 0; k < PAD_SLOTS; k++)
                 if (pad_went_down(&v, k, PAD_START) && pause_open(&v, k))
                     break;
+        if (v.attract && attract_buttons(&v, &w))     /* the demo: a button ends it */
+            attract_press(&v);
         if (v.exit_game) {                           /* back to the shell (--shell), or the viewer ends */
             v.exit_game = 0;
             if (v.shell_mode) {
-                ShellStart st = { SHELL_FROM_GAME, 1, 0, 0, -1, 0, v.last_game };
+                ShellStart st = v.kept;              /* gShell's idle timer, attract state, demo byte */
+                st.from = SHELL_FROM_GAME;
+                st.quit = 1;
+                st.choose_monster = st.city_destroyed = st.show_victory = 0;
+                st.king_of_world = -1;
+                st.game = v.last_game;
+                if (v.attract)
+                    attract_end(&v, &st);
                 v.play = 0;
                 shell_enter(&v, &st);
+                if (shot && script) {                /* the words left play on in the shell */
+                    script = shell_script(&v, script);
+                    if (v.shell_go) {
+                        v.shell_go = 0;
+                        settled = 0;
+                        shell_start_game(&v);
+                    }
+                }
                 continue;
             }
             w.quit = 1;
@@ -5956,11 +6057,10 @@ int main(int argc, char **argv)
         int playing = v.play && have_monster(&v) && v.have_scene && mon_in(&v.mon[0]);
         if (playing) {
             float aspect = w.width ? (float)w.height / w.width : 0.75f;
-            static int settled;
             if (shot && !settled) {                     /* a shot: the camera settles, then the script */
                 play_script(&v, "wait 2", aspect);
                 if (script)
-                    play_script(&v, script, aspect);
+                    script = play_script(&v, script, aspect);
             }
             settled = 1;
             if (v.exit_game)                         /* the script quit the game: the shell's turn */

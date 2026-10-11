@@ -70,14 +70,17 @@ typedef struct {
 /* gCommon's play state and gCommon.getGameStatus() as the shell hands them to the game [R GameStatus bindings, lookup
  * 0x2C4C30: setMonsterIdx, setCityIdx, setStartBlock, setNight; the Common bindings setPlayType, setNumPlayersAndBots] */
 typedef struct {
-    int play_type;                  /* game.h GP_*: 2 campaign, 3 King of the City, 4 King of the World, 5 Timed Run */
-    int num_players, num_bots;      /* 1 .. 4; the last num_bots of the players are the computer's */
+    int play_type;                  /* game.h GP_*: 2 campaign, 3 King of the City, 4 King of the World, 5 Timed Run;
+                                     * 0 the attract mode's demo (gShell.startAttractGame) */
+    int num_players, num_bots;      /* 1 .. 4; the last num_bots of the players are the computer's (the demo: all) */
     int monster[4];                 /* MonsterData.Monster<n> per player */
     char monster_name[4][16];       /* its Name ("George") */
     int city_index;                 /* CityData.City<n> (the campaign's order, above) */
     char city[16];                  /* its City ("LasVegas") */
     int start_block;                /* GameStatus +0x210: 0 = the city's BlockStart, else that block */
     int night;                      /* GameStatus.getNight */
+    uint32_t seed[2];               /* GameStatus +0x0 / +0x4, the world's seeds: the shell draws new ones at each
+                                     * world's start, but not for the demo, whose own it keeps (0x308890) [R] */
 } ShellGame;
 
 /* how the shell starts [R Shell.scr, ControlRoom.scr's choice of the first interface, RShellPackage 0x308950] */
@@ -92,13 +95,22 @@ typedef struct {
                                      * King: straight to the loading screen of the next city */
     int show_victory;               /* the campaign was won: the Victory and Credits movies, then the main menu */
     ShellGame game;                 /* the game status kept from before (the shell starts with these choices) */
+    /* what gShell (0x4D51F0) keeps while a game plays, from shell_keep() at the start: the shell is closed here */
+    float idle;                     /* +0x18, the idle timer: 0 or less and the attract mode comes back (0x3089AC);
+                                     * the demo's end by a button sets it to SHELL_IDLE_SECONDS (0x324CC8) */
+    int attract_state;              /* +0x14, AttractMode.scr's state */
+    int attract_game;               /* +0x20: the game was the attract mode's demo (the viewer restores the profile,
+                                     * restoreProfile 0x33D910 at 0x308A00) */
 } ShellStart;
+#define SHELL_IDLE_SECONDS 120.0f   /* [R 0x308240: 120.0 into gShell +0x18] */
 
 typedef struct Shell Shell;
 /* vol: RAMPAGE.VOL, read for Shell.bdp, VShell.bdp, ShellData.bdp, CommonGUI.bdp, MemoryCard.bdp, Loading.bdp and
  * Loading_<City>.bdp; it must outlive the Shell. st NULL: the boot. NULL when the bundles are missing. */
 Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p);
 void shell_close(Shell *s);
+/* when a game starts: ShellStart's idle, attract_state and attract_game as gShell has them, for the return */
+void shell_keep(const Shell *s, ShellStart *st);
 /* the profile changed (after SHELL_EVT_PROFILE_LOAD / _CREATE, or a buddy's for player n): the shell takes a copy */
 void shell_set_profile(Shell *s, const ShellProfile *p);
 /* ShellProfile.profile_shown as the shell has it now (keep it for the next shell_open) */
@@ -166,7 +178,9 @@ enum {
     SHELL_EVT_MOVIE,                /* a .pss would play here (name: "midway", "pipeworks", "digital", "intro",
                                      * "Victory", "Credits", "victory", "credits", "ballers") */
     SHELL_EVT_EMULATOR,             /* gShell.startEmulator(arg): 0 Rampage, 1 Rampage World Tour (skipped) */
-    SHELL_EVT_ATTRACT_GAME,         /* gShell.startAttractGame(): the attract mode's demo game (skipped) */
+    SHELL_EVT_ATTRACT_GAME,         /* gShell.startAttractGame() (0x308460): the attract mode's demo game, chosen at
+                                     * random into shell_game() (play type 0, every player the computer's); the
+                                     * loading screen follows, then SHELL_EVT_START */
     SHELL_EVT_PROFILE_LOAD,         /* the popup reads saved profile arg (ShellProfile.profiles[arg], name): load it,
                                      * call shell_set_profile and answer shell_card_result */
     SHELL_EVT_PROFILE_CREATE,       /* the popup writes a new profile `name` (the name entry; an overwrite): create

@@ -13,7 +13,7 @@ Addresses are in `RAMPAGE.ELF`.
 | What | Where |
 |---|---|
 | Shell package | `RShellPackage` (vtable 0x44B170). Init 0x309500 creates the SaveGame popup. 0x308950 activates the package and loads `Shell.bsf`, then calls `Shell::onInit`. Update 0x308710 |
-| Shell object, `gShell` | 0x4D51F0: +0x0 state, +0x8 the script, +0xC the ShellData book, +0x10 play videos, +0x14 attract state, +0x18 the idle timer, +0x20 / +0x21 attract game / boot completed |
+| Shell object, `gShell` | 0x4D51F0: +0x0 state, +0x8 the script, +0xC the ShellData book, +0x10 play videos, +0x14 attract state, +0x18 the idle timer, +0x1C the world seeds' random state, +0x20 / +0x21 attract game / boot completed. The demo's number: gp-0x71C0 (0x44C9B0) |
 | `gShell` bindings | lookup 0x306BF0 (records 0x432CE0), dispatcher 0x3062B0, jump table 0x432F50 (index = id + 1) |
 | `gCommon` bindings | lookup 0x2C3840, table 0x430450. GameStatus 0x4D7990, its lookup 0x2C4C30 |
 | Profile popup (SaveGame) | 0x4D7E80. Interface 0x345D60. Load 0x345700. Save 0x345950. Boot check 0x345BC0. Close 0x345540. Update 0x341940 (panels), states 0x342F30 (table 0x4358F0). Errors 0x341DF0 (table 0x435640), their answers 0x342680. Event split 0x341880. Profile list 0x340B40 / 0x3410E0 / 0x341250. Name entry 0x340980 / 0x340320. Messages 0x3401E0 / 0x33FBB0 / 0x33FD10 |
@@ -27,13 +27,14 @@ Addresses are in `RAMPAGE.ELF`.
 | State | Meaning |
 |---|---|
 | 1 | The boot: the memory card check, then the attract mode's first run |
-| 2 | The attract mode after 120 s idle in the menus (0x308390) |
+| 2 | The attract mode after 120 s idle in the menus (0x308390), or back from a game with the idle timer out (a demo's) |
 | 3 | The menus |
-| 4 | `gShell.startGame()`: the update starts the world package (0x4D2050) and sets state 5 |
+| 4 | `gShell.startGame()`: the update starts the world package (0x4D2050) and sets state 5; for any play type but 0 it first draws the world's seeds (0x308890, below) |
 | 6 | The Victory movies |
 
 - **On activation:** state 0 becomes 1, state 7 becomes 3 (boot completed), and state 6 stays. Otherwise the state is
-  3 when the boot is completed, else 1.
+  2 when the idle timer is 0 or below (0x3089AC), else 3 when the boot is completed, else 1. Then, with +0x20 set (the
+  game was the attract mode's demo), +0x20 is cleared and `restoreProfile` (0x33D910) runs (0x308A00).
 - **`Shell::onInit`:**
   - In a King of the World game whose city is destroyed, with no King and no quit, it goes straight to `showLoading`:
     the next city.
@@ -54,6 +55,11 @@ Addresses are in `RAMPAGE.ELF`.
     attract state −1, and shows AttractMode. With the popup up it asks 0x341790 first: an interruptible popup (the
     boot's list, before a profile is chosen) is closed with result 3 and the attract mode starts; any other popup
     waits at 0.
+  - 0x308390 stores no time: the timer stays at 0 in the attract mode, and in states 2 and 4 it only runs down to 0
+    (0x308390 returns at once in state 2 and is not called in 4). The shell's update does not run while a world plays,
+    so a demo game starts with it at 0, unless the pad was touched in the last 120 s, and the shell comes back to the
+    attract mode after it (above). The port counts the loading screen's half second the same way, without the attract
+    mode's start [G].
   - It is reset (0x308240) by input the GUI takes: the screen's (RGuiScreen 0x2C5AD0, from GuiManager::input
     0x22F7A0, for a pad the controller table allows: 0x2C5E60) or the popup's (0x2328B0). The script's
     `resetAttractTimer` (0x306B78) is called only by AttractMode.scr. 0x33D740 is not pad input: it is the cheat flag
@@ -70,8 +76,10 @@ Addresses are in `RAMPAGE.ELF`.
   the main menu (`exitAttractMode`: state 3, the "Oingo" music).
 - PlayRandomGame:
   - In the boot it sets "boot completed" and goes to the main menu.
-  - In state 2 it calls `gShell.startAttractGame` (0x308460: a random demo game).
-- PostRandomGame starts over.
+  - In state 2 it calls `gShell.startAttractGame` (0x308460: a random demo game, below). The attract state stays 7.
+- PostRandomGame (in state 2) sets the attract state to 0 and goes on: ShortDelay, the movies, the next demo. It is
+  reached when the shell comes back from the demo in state 2: AttractMode's init takes state 7 and its focus
+  (`gotoNextState`) moves on to 8.
 
 **The title screen:** there is no separate title screen. In state 2, "Press START button" blinks at 587 418 over the
 movies (`setFlags(1024)`). The main menu with the `TITLE_BASE` logo is the title.
@@ -84,7 +92,86 @@ movies (`setFlags(1024)`). The main menu with the `TITLE_BASE` logo is the title
   lasts at least 5 s of black under "Press START", or Start could only arrive during ShortDelay, which ignores it.
   That is the port's: in the game `Video.status()` (GuiQuad id 0x4A, 0x253270 -> 0x243130) answers 3 when the quad
   has no player (+0xEC 0, as a failed `setVideo` 0x243370 leaves it), so the next frame goes on [R].
-- The demo game becomes `SHELL_EVT_ATTRACT_GAME` and is not played.
+- The demo game is played (below).
+
+## The demo game (gShell.startAttractGame, 0x308460) [R unless marked]
+
+**The draw.** The demo has a Park-Miller state of its own (0x106BD0 on a local; the world's is not touched):
+1. gShell +0x20 = 1.
+2. The demo's number (gp-0x71C0, the word 0x44C9B0, 3 in the file) goes on by one; 65 becomes 0. So the 65 demos come
+   in turn, the first one after the power-on is number 4.
+3. The seed: 0x106C80 seeds it from the clock, but it is overwritten at once by number × 7 + 1; one draw, and the
+   seed becomes that draw's (s >> 8) & 0xFFFF (0x4B27 for 0).
+4. Then each value one draw, in this order, into GameStatus (0x4D7B90; PROFILE_NOTES.md "A status record"):
+
+| Field | Value |
+|---|---|
+| +0xB4 changed | 1 (no draw) |
+| +0x8 night | bit 0 of (s >> 8) & 0xFFFF |
+| +0xC city | s / 2³¹ × the cities' count (0x4D799C, 7), cut to an int, at most the count |
+| +0x10 start block | s / 2³¹ × 6, cut: 0 .. 5, a BlockList index as CitySelect's `setStartBlock` (the world starts at max(BlockStart, it)) |
+| +0x0, +0x4 the world's seeds | (s >> 8) & 0xFFFF each |
+| 0x4D7E44 play type | 0 (no draw) |
+| 0x4D7E28 players, 0x4D7E2C bots | 1 + bit 0 of (s >> 8) & 0xFFFF, both: every player is the computer's |
+| +0x14 + 4 i the monster, each player | s / 2³¹ × the roster's count (0x4D79A8, 30), at most the count |
+| +0x24 + 4 i | 3: the lives (`getNumLives`), not a controller type |
+
+Any of the 30 monsters can come, whatever the profile has unlocked, and nothing keeps two players apart (demo 30:
+Natalie twice). The scaling multiplies (float) s by 2⁻³¹, then by the count (0x308518 .. 0x308574).
+
+5. `ControlRoom::startGame` (iCallScriptS): the focused interface goes, the loading screen of the city, then
+   `gShell.startGame()` (state 4). There 0x308890 draws new world seeds from gShell +0x1C only when the play type is
+   not 0: the demo keeps its own, so each demo plays from the same seeds each time it comes.
+
+**The first demos**, and the cycle's 0 and 1 (the draw worked through for each number; the port's shots agree for
+4, 5 and 6):
+
+| Number | City | Start block | Time | Players |
+|---|---|---|---|---|
+| 4 | London | 5 | day | Harry |
+| 5 | Hong Kong | 2 | day | Gilman |
+| 6 | London | 0 | day | Jack, Venus |
+| 7 | Chicago | 5 | day | Icky |
+| 8 | San Francisco | 2 | night | Lizzie |
+| 9 | Chicago | 1 | night | Natalie, Philbert |
+| 0 | Los Angeles | 0 | night | Lizzie |
+| 1 | Las Vegas | 4 | night | Rock |
+
+**In the world:**
+- `WorldGuiDriver::process` 8192 loads `Clock` and, with `getPlayType() == 0`, `AttractMode` (WorldGui.bdp's
+  AttractMode.ifc, script GAttractMode.bsf: "Press START button", `AttractMode_PressStart`, right-aligned at 587 418,
+  yellow, blinking with `setFlags(1024)`; its `Video` lookup finds nothing). Start opens no Pause (event 128 needs a
+  play type but 0). The pads do not vibrate (0x2B7FA4).
+- The clock: 60 s, or the block's TimeLimit when smaller, armed and not shown (GAME_NOTES.md). BeginBlockNI gives
+  every bot its AI.
+
+**The end:**
+- The minute up or the block finished: the end of state 6 in the demo leaves at once (0x324D08: the app's next package
+  is the shell, 0x4D53F0).
+- A button: RControllerMgr's input (vtable 0x44A9F0 +0x8, 0x2C1B80) sets gWorld +0x1B (0x4D6A9B) for any event of a
+  control from 4 on (the names at 0x3F67C0: 4 the d-pad's up .. 21 the left thumb; 0 .. 3, below them, are taken to be
+  the sticks [G]) of any pad. The world's update (0x324C80), in the demo and in states 4 .. 11, then stores state 6
+  without entering it, sets gShell's idle timer to 120 (0x308240) and ends the state: the same leave. The world's
+  reset (0x325C50) clears the flag.
+- Back in the shell (activation, above): after the time up the timer is still 0: state 2, AttractMode, PostRandomGame,
+  the movies and the next demo. After a button it is 120: state 3, the main menu. Either way restoreProfile: the
+  current game is the profile's record again (its city, night, start block, monsters, seeds; three lives each). The
+  play type (0, which MainMenu shows as the campaign: `max(2, getPlayType())`) and the players and bots stay the demo's.
+
+**The port:**
+- shell.c `start_attract_game`: the draw (wrand.c's `wrand_pm_next`, the same float steps) into `ShellGame` (its
+  `seed[2]` new), `SHELL_EVT_ATTRACT_GAME` with the number, then the loading screen and `SHELL_EVT_START`. gShell's
+  timer, attract state and +0x20 live on while the shell is closed through `ShellStart` (`shell_keep` at the start,
+  `idle`, `attract_state`, `attract_game` at the return); `shell_open` sets state 2 or 3 from the timer.
+- main.c: `shell_start_game` plays it with play type 0 (game.c `GP_ATTRACT`, hud.c `HUD_PLAY_ATTRACT`: the HUD's
+  AttractMode.ifc, no Pause), every player a bot (`setup_players`, game.c's `num_bots` may then be all), three lives,
+  the seeds into the profile's current record; a pad button (`attract_buttons`) or a `--do` button word calls
+  `game_attract_button`; game.c's `GE_EXIT` 2 (b 1 for the button) goes back, `attract_end`: the timer, profile.c's
+  `profile_restore` and the `ShellGame` taken from the restored record.
+- [G]: the keys that count as buttons (Enter, Space, Backspace, P, J, K, L, R, the keypad's); the GUI's own resets of
+  the timer by pad 0's events while the demo plays (RGuiScreen 0x2C5AD0, e.g. a stick pushed past the menus'
+  threshold) are not modelled, only the button's; a draw at the count itself (the game keeps it, past the list) is
+  taken as count − 1.
 
 ## The profile popup (SaveGame, MemoryCard.ifc) [R unless marked]
 
@@ -469,12 +556,13 @@ first 512's black pass before the reset to −1: George's card stays dark on the
 
 | Field | Comes from |
 |---|---|
-| Play type | `gCommon.setPlayType`, the main menu's mode: 2 campaign, 3 King of the City, 4 King of the World, 5 Timed Run (game.h `GP_*`) |
+| Play type | `gCommon.setPlayType`, the main menu's mode: 2 campaign, 3 King of the City, 4 King of the World, 5 Timed Run (game.h `GP_*`); 0 the demo |
 | Players and bots | `setNumPlayersAndBots`: Common 0x4D7E28 / 0x4D7E2C |
 | Monsters | `GameStatus.setMonsterIdx(i, m)`: `MonsterData.Monster<m>` and its Name |
 | City | `setCityIdx`: `CityData.City<i>` and its City |
 | Start block | `setStartBlock`: GameStatus +0x210, 0 = the city's BlockStart |
 | Night | `setNight` |
+| The world's seeds | GameStatus +0x0 / +0x4: drawn at the start (0x308890), but the demo's own (`ShellGame.seed`); the port keeps the profile's for the other play types [G] |
 
 A game that ends hands back, through `ShellStart`:
 - quit (0x4D7E4D);
@@ -602,7 +690,7 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
 ## Not ported, or guessed
 
 - **Not drawn:**
-  - the emulators and the demo game (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md));
+  - the emulators (the movies are played: [MOVIE_NOTES.md](MOVIE_NOTES.md); the demo game too, above);
   - the turn of hud.c's quads (the shell's turn, above);
   - the main menu's two searchlights: `auto="false"`, and no script starts them **[R]**;
   - the GUI effects' sounds: none to play. No emitter of the menus' effects (the fires, the lava lamp, the rings, the
@@ -629,7 +717,7 @@ after the children; **F 0x4 is never tested**. The GUI's begin (0x231900) clears
   0x22B530) nor GuiQuad's draw (0x2439E0) tests that colour.
 - **Focus** [R]: setFocus (0x238970) sends the old one 1024 (not when it is the new one), stores the slot, then sends
   the new one 512 even when it had it; as `cr_focus`. The idle timer's inputs are read (`shell_input_pad`).
-- **Attract mode:** its 5 s stand-in per movie in state 2 (above), and `startAttractGame`'s demo.
+- **Attract mode:** its 5 s stand-in per movie in state 2 (above); the demo's [G]s ("The demo game").
 - **Sizers** [R 0x248B80, PAUSE_NOTES.md]: the button rows (the main menu's, Options', MonsterSelect's,
   MonsterSheet's, CitySelect's, the popup's) are laid out every `shell_update` (`layouts_lay`). English comes out
   at the layouts' places for the main menu, Options, MonsterSheet and CitySelect; MonsterSelect's row and the popup's

@@ -81,8 +81,14 @@ memory card's CHECKING / SAVING / LOADING and its errors for the profile file (o
 corrupt one, a full drive), and the SaveIcon while an autosave writes, in the menus and over the Results; the Pause menu's Quit
 goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
 square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
-`menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), and the words left once a game
-starts play in it. The console prints
+`menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), the words left once a game
+starts play in it, and those left once it goes back play on in the shell. After 120 s untouched in the menus the
+attract mode runs its movies and then a demo game: a random city, block, day or night and one or two monsters, all
+the computer's, for a minute (the 65 demos come in turn, 4 first; "Press START button" blinks); any key or
+controller button that is a pad button (Enter, Space, Backspace, P, J, K, L, R, the keypad's, the d-pad and the
+buttons; `pause` or a button word in `--do`) ends it for the main menu, the minute's end goes back to the attract
+mode's movies and the next demo. `--do "wait 1, menu accept, wait 600, wait 8"` shoots the first one (the boot's
+and the attract mode's movies play their length). The console prints
 what each block holds (models, people, vehicles, anything not found) and, in play, every state the monster enters
 (`RAMPAGE_TRACE=1`: every frame's state, time, place and heading; `RAMPAGE_HANDS=1`: the hands' grips each frame;
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
@@ -505,7 +511,7 @@ city with its ring on it, lit for day or night; the main menu's fires, MonsterSe
 play, through the game's GUI camera, each in its place among the screen's pictures.
 
 ## Not there yet
-- the arcade emulators and the demo game, skipped (SHELL_NOTES.md); the memory card's states a PC has no meaning for
+- the arcade emulators, skipped (SHELL_NOTES.md); the memory card's states a PC has no meaning for
   (formatting, a card changed or taken out); the [G] marks in the notes.
 
 Ported as modules and driven by the viewer: the HUD with its banners, boss bar and results screens (hud.c), people

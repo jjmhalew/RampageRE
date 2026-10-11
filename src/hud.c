@@ -1412,7 +1412,7 @@ struct Hud {
     char monster[32];
     int save_active;                                     /* gCommon.isSaveGameActive() (hud_set_save_active) */
     Gui gui;
-    Layout *hud, *clock;
+    Layout *hud, *clock, *attract;
     /* Hud.scr's objects and state */
     Node *health, *rage, *score, *heads, *blocks, *num_text, *block_text, *block;
     float hp, hp_max, energy, energy_max;
@@ -1543,6 +1543,14 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
     h->last_seconds = -1;
     if (h->clock_group)
         h->clock_group->visible = 0;
+    /* WorldGuiDriver::process 8192: screen.loadInterface("AttractMode") in the demo (getPlayType() 0), after the Clock
+     * [R]; GAttractMode.scr's 8192 hides "Video" (it has none) and sets PressStart's flag 1024 (the GUI's pulse) */
+    if (cfg->player == 0 && gt == HUD_PLAY_ATTRACT &&
+        (h->attract = layout_load(&h->gui, worldgui, "AttractMode.ifc")) != NULL) {
+        Node *video = layout_find(h->attract->root, "Video"), *press = layout_find(h->attract->root, "PressStart");
+        if (video) video->visible = 0;
+        if (press) press->F |= 0x400;
+    }
     /* <City>::onInit: gCommon.setChallengeHud(screen.loadInterface("ChallengeStatus")) [R LasVegas.scr]; one for the
      * screen: player 0's */
     h->ch.required = -1;
@@ -1573,6 +1581,7 @@ void hud_close(Hud *h)
         return;
     free(h->hud);
     free(h->clock);
+    free(h->attract);
     free(h->cs.L);
     ctext_free(h->ct);
     for (int i = 0; i < h->nrages; i++)
@@ -4211,6 +4220,7 @@ int hud_quads(const Hud *h, HudQuad *out, int max)
     int n = banners_emit(h, out, max);
     n += emit_layout(out + n, max - n, &h->gui, h->hud);
     n += emit_layout(out + n, max - n, &h->gui, h->clock);
+    n += emit_layout(out + n, max - n, &h->gui, h->attract);
     n += emit_layout(out + n, max - n, &h->gui, h->cs.L);
     if (h->ct)
         n += emit_layout(out + n, max - n, &h->gui, h->ct->L);

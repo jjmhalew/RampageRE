@@ -79,6 +79,8 @@ struct Game {
     int boss_finished;                               /* the city script's bIsBossBlockFinished */
     int centre_down, ny_watch, ny_moved;             /* NewYork::BossResultsNI: the centre building, the watch */
     int left;                                        /* GE_EXIT given: the world is being left, nothing runs */
+    int button, button_end;                          /* gWorld +0x1B (0x4D6A9B): a pad button (game_attract_button);
+                                                      * the demo ended by it */
     GameEvent ev[MAX_EVENTS]; int nev;
 };
 
@@ -877,7 +879,7 @@ static void transition(Game *g)
     switch (g->state) {
     case GS_PLAY:                                    /* 0x324D08 */
         if (pt == GP_ATTRACT)
-            leave(g, 2, -1);
+            leave(g, 2, g->button_end);
         else
             set_state(g, g->game_over ? GS_GAME_OVER : GS_BLOCK_WON);
         break;
@@ -1024,6 +1026,13 @@ static void step(Game *g)
         if (adv)
             g->results_screen = -1;                  /* the stand-in's clock stops */
     }
+    /* [R 0x324C80] the demo and a pad's button (RControllerMgr 0x2C1BF4): in states 4 .. 11 the state becomes 6 (not
+     * entered), gShell's idle timer is set to 120 (0x308240, GE_EXIT's b) and the state ends: the shell's again */
+    if (g->button && g->cfg.play_type == GP_ATTRACT && g->state >= GS_BEGIN_LEVEL && g->state <= GS_END_WORLD) {
+        g->state = g->entered = GS_PLAY;
+        g->button_end = 1;
+        adv = 1;
+    }
     if (adv)
         transition(g);
 }
@@ -1045,7 +1054,8 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
     }
     if (g->cfg.num_players < 1 || g->cfg.num_players > GAME_PLAYERS)
         g->cfg.num_players = 1;
-    if (g->cfg.num_bots < 0 || g->cfg.num_bots >= g->cfg.num_players)
+    if (g->cfg.num_bots < 0 || g->cfg.num_bots > g->cfg.num_players ||
+        (g->cfg.num_bots == g->cfg.num_players && g->cfg.play_type != GP_ATTRACT))   /* the demo: all of them */
         g->cfg.num_bots = 0;
     if (g->cfg.num_cities <= 0)
         g->cfg.num_cities = 7;
@@ -1053,8 +1063,11 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
     g->start_block = g->cfg.start_block;
     g->king_block = g->king_city = g->king_world = g->first_place = g->second_place = -1;
     g->results_screen = -1;
-    for (int i = 0; i < GAME_PLAYERS; i++)
+    for (int i = 0; i < GAME_PLAYERS; i++) {
         g->hp[i] = 1e9f;
+        if (g->cfg.play_type == GP_ATTRACT && i < g->cfg.num_players)
+            g->lives[i] = 3;                         /* the shell's demo set them (0x3086C8); 0x33DB90 leaves them */
+    }
     return g;
 }
 
@@ -1151,6 +1164,7 @@ void game_move_done(Game *g, int slot)
 void game_set_result(Game *g, int result) { if (g) g->result = result; }
 void game_auto_results(Game *g, float seconds) { if (g) g->auto_results = seconds; }
 void game_restart_shell(Game *g) { if (g) set_state(g, GS_EXIT); }
+void game_attract_button(Game *g) { if (g) g->button = 1; }
 void game_add_points(Game *g, int slot, int cat, int amount) { if (g) add_points(g, slot, cat, amount); }
 
 uint32_t *game_rng(Game *g) { return g ? wrand_pm_state() : NULL; }

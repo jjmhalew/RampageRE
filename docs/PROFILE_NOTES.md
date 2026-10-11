@@ -39,7 +39,7 @@ Its +0x25C (0x4D80DC) is `hasLoadedProfile`, the name of the last profile saved 
 ### A status record (0xB8 bytes) [R 0x33D820, 0x33F730, the GameStatus bindings 0x2C48D0]
 | Offset | What | Binding |
 |---|---|---|
-| +0x00, +0x04 | the world's random seeds; the shell draws them at each world's start (0x308890), and the world uses them with cheat 0x10000 (0x2B6580) | |
+| +0x00, +0x04 | the world's random seeds; the shell draws them at each world's start (0x308890; not for play type 0: the attract mode's demo draws its own, 0x308460, SHELL_NOTES.md), and the world uses them with cheat 0x10000 (0x2B6580) | |
 | +0x08 | byte: night | getNight / setNight |
 | +0x0C | the city | getCityIdx / setCityIdx / getCityName |
 | +0x10 | the start block: activateNextBlock stores the current BlockList index (0x2B6600) | getStartBlock / setStartBlock |

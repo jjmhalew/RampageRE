@@ -24,6 +24,7 @@
 #include <string.h>
 #include "plat.h"
 #include "shell.h"
+#include "wrand.h"
 
 #define SH_PI 3.14159265f
 #define MAX_TEXT 640
@@ -1651,7 +1652,7 @@ static void fader_update(Faders *fd, float dt)          /* UpdateObjectFader: 2 
 
 /* ---------------------------------------------------------------- the shell's state */
 #define TICK (1.0f / 60.0f)                              /* a script frame [G: 60 a second] */
-#define IDLE_SECONDS 120.0f                              /* [R 0x308710: 120.0 (0x42F0) into the shell's +0x18] */
+#define IDLE_SECONDS SHELL_IDLE_SECONDS                  /* [R 0x308710: 120.0 (0x42F0) into the shell's +0x18] */
 
 /* the GuiEvent ids [R the scripts] */
 enum { EV_RIGHT = 2, EV_LEFT = 4, EV_UP = 8, EV_DOWN = 16, EV_BACK = 32, EV_ACCEPT = 64, EV_START = 128,
@@ -1796,6 +1797,7 @@ struct Shell {
     ShellStart st;
     /* gShell (0x4D51F0) */
     int state, attract_state, boot_completed, show_profile;
+    int attract_game;                                    /* +0x20: startAttractGame's */
     float idle, movie_time;
     float movie_clock;                                   /* seconds since the playing movie started */
     /* gCommon */
@@ -2760,6 +2762,59 @@ static void victory_next(Shell *s)
     }
 }
 
+/* ---------------------------------------------------------------- gShell.startAttractGame (0x308460) [R] */
+/* gp-0x71C0 (0x44C9B0 in .sdata, 3 in the file): the demo's number, 1 .. 64 then 0 again, so 65 demos in turn; it
+ * lives as long as the program, here as long as the viewer */
+static int attract_count = 3;
+
+/* a draw below n (0x308518 .. 0x308574): the state's next value / 2^31 times n, cut to an int; the game keeps it at
+ * n at most [R], n itself is no city or monster: there the port takes n - 1 [G: a float rounded up to 1] */
+static int attract_draw(uint32_t *seed, int n)
+{
+    int v = (int)((float)wrand_pm_next(seed) * (1.0f / 2147483648.0f) * (float)n);
+    if (n < v)
+        v = n;
+    return v < n ? v : n > 0 ? n - 1 : 0;
+}
+
+/* the demo: GameStatus (0x4D7B90) filled at random from a seed of its own, the players and bots, then
+ * ControlRoom::startGame. In this order [R]: +0x20 of gShell = 1; the count on (65 becomes 0); the seed count x 7 + 1
+ * (0x106C80's from the clock is overwritten at once), drawn once and replaced by that draw's (s >> 8) & 0xFFFF (0x4B27
+ * for 0); then each draw a step of 0x106BD0: +0xB4 (changed) = 1, +0x8 night = bit 0 of (s >> 8) & 0xFFFF, +0xC
+ * the city below the cities' count (0x4D799C), +0x10 the start block 6 s / 2^31 (0 .. 5), +0x0 and +0x4 the world's
+ * seeds (s >> 8) & 0xFFFF; the play type (0x4D7E44) 0; players = bots (0x4D7E28 / 0x4D7E2C) 1 + bit 0 of the next;
+ * each player a monster below the roster's count (0x4D79A8) at +0x14 + 4 i and 3 lives at +0x24 + 4 i (game.c's
+ * GP_ATTRACT start). Nothing keeps two players off the same monster (count 30: Natalie twice) */
+static void start_attract_game(Shell *s)
+{
+    ShellGame *g = &s->gs;
+    s->attract_game = 1;
+    if (++attract_count >= 65)
+        attract_count = 0;
+    uint32_t seed = (uint32_t)attract_count * 7 + 1;
+    uint32_t r = wrand_pm_next(&seed) >> 8 & 0xFFFF;
+    seed = r ? r : 0x4B27;
+    int ncities = 0, nmonsters = 0;                      /* (the loader's counts: the groups there, 0x33EED0 / 0x33EDD8) */
+    while (ncities < SHELL_CITIES && city_name(s, ncities)[0])
+        ncities++;
+    while (nmonsters < SHELL_MONSTERS && monster_name(s, nmonsters)[0])
+        nmonsters++;
+    g->night = (wrand_pm_next(&seed) >> 8 & 0xFFFF & 1) != 0;
+    g->city_index = attract_draw(&seed, ncities);
+    snprintf(g->city, sizeof g->city, "%s", city_name(s, g->city_index));
+    g->start_block = (int)(6.0f * ((float)wrand_pm_next(&seed) * (1.0f / 2147483648.0f)));
+    g->seed[0] = wrand_pm_next(&seed) >> 8 & 0xFFFF;
+    g->seed[1] = wrand_pm_next(&seed) >> 8 & 0xFFFF;
+    g->play_type = 0;
+    g->num_players = g->num_bots = (int)(wrand_pm_next(&seed) >> 8 & 0xFFFF & 1) + 1;
+    for (int i = 0; i < g->num_players; i++) {
+        g->monster[i] = attract_draw(&seed, nmonsters);
+        snprintf(g->monster_name[i], sizeof g->monster_name[i], "%s", monster_name(s, g->monster[i]));
+    }
+    event(s, SHELL_EVT_ATTRACT_GAME, g->city, attract_count, 0);
+    cr_start_game(s);                                    /* gGuiMgr.iCallScriptS("ControlRoom::startGame") */
+}
+
 /* ---------------------------------------------------------------- AttractMode.scr [R] */
 static int am_send(Shell *s, int ev);
 static void am_next(Shell *s);
@@ -2909,12 +2964,9 @@ static int am_state(Shell *s, int st, int ev)
             if (s->state == 1) {
                 s->boot_completed = 1;
                 am_exit(s);
-            } else {
-                /* gShell.startAttractGame() (0x308460: a random city and monsters, play type 0): not played
-                 * here; the attract mode goes on as after one [G] */
-                event(s, SHELL_EVT_ATTRACT_GAME, NULL, 0, 0);
-                am_next(s);
-            }
+            } else                                       /* gShell.startAttractGame(): the state stays (7), and
+                                                          * the shell's return goes on from it to PostRandomGame */
+                start_attract_game(s);
         }
         break;
     case AS_POST_RANDOM:
@@ -4694,11 +4746,18 @@ static void cr_open(Shell *s)
  * in states 6 and 7, in the campaign while the monster is to be chosen or the city is destroyed and not quit, and in
  * state 1 unless the memory card popup is up; a cheat movie set (setCheatFlagsI(16, n): 0x4D7E6C >= 0) runs it out at
  * once (0x3087D8). With the popup up it is not reset: at 0 an interruptible popup (the boot's list, before a profile
- * is chosen) is closed and the attract mode starts (0x341790, 0x345540(popup, 3)), any other waits at 0 */
+ * is chosen) is closed and the attract mode starts (0x341790, 0x345540(popup, 3)), any other waits at 0. The start
+ * of the attract mode leaves it at 0 (0x308390 stores no time), and in states 2 and 4 it runs on down to 0, where
+ * 0x308390 does nothing (state 2) or is not called (4): so a demo game starts with it at 0 unless the pad was
+ * touched in the last 120 s, and the shell comes back to the attract mode after it (0x3089AC) [R] */
 static void idle_update(Shell *s, float dt)
 {
-    if (!s->cr_on || s->ld.on || s->vi.on || s->state == 2 || s->state == 4)
+    if (!s->cr_on || s->vi.on)
         return;
+    if (s->state == 2 || s->state == 4 || s->ld.on) {   /* (the loading screen's half second counts alone [G]) */
+        s->idle = s->idle - dt > 0 ? s->idle - dt : 0;
+        return;
+    }
     int popup = s->mc.mode != MC_OFF;
     if (s->state == 6 || s->state == 7 || (s->state == 1 && !popup) || s->focus == IF_OPTIONS ||
         (s->gs.play_type == 2 && (s->choose_monster || (s->city_destroyed && !s->quitting)))) {
@@ -4717,7 +4776,7 @@ static void idle_update(Shell *s, float dt)
             return;
         mc_close(s, 3);                                  /* result 3: show-profile stays */
     }
-    s->idle = IDLE_SECONDS;
+    s->idle = 0;
     s->city_destroyed = s->quitting = s->choose_monster = 0;
     s->state = 2;
     s->attract_state = -1;
@@ -4796,9 +4855,13 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     s->attract_state = -1;
     mc_load(s);
     if (s->st.from == SHELL_FROM_GAME) {
-        /* RShellPackage 0x308950: back from the world, the boot is done */
-        s->state = 3;
+        /* RShellPackage 0x308950: back from the world, the boot is done; the menus, or the attract mode again when the
+         * idle timer is out (0x3089AC: the demo's time up, the timer still at 0) [R]. The demo's restoreProfile
+         * (0x308A00) is the viewer's: its profile */
         s->boot_completed = 1;
+        s->idle = s->st.idle;
+        s->state = s->idle <= 0 ? 2 : 3;
+        s->attract_state = s->st.attract_state;
         s->quitting = s->st.quit;
         s->choose_monster = s->st.choose_monster;
         s->city_destroyed = s->st.city_destroyed;
@@ -4847,6 +4910,15 @@ void shell_close(Shell *s)
     if (s->have_loading) bdp_free(&s->b_loading);
     free(s->quads);
     free(s);
+}
+
+void shell_keep(const Shell *s, ShellStart *st)
+{
+    if (!s || !st)
+        return;
+    st->idle = s->idle;
+    st->attract_state = s->attract_state;
+    st->attract_game = s->attract_game;
 }
 
 Shell *shell_open_popup(const Vol *vol, const Bundle *common, const ShellProfile *p)

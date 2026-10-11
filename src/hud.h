@@ -30,7 +30,7 @@
 
 /* gCommon.getPlayType() as the scripts test it [R Hud.scr, ChallengeStatus.scr, KingCityResults.scr] (game.h GP_*) */
 enum {
-    HUD_PLAY_ATTRACT = 0,
+    HUD_PLAY_ATTRACT = 0,    /* the demo: player 1's screen loads AttractMode.ifc, "Press START button" blinking */
     HUD_PLAY_CAMPAIGN = 2,   /* the lives counter "xN" by the head */
     HUD_PLAY_KING_CITY = 3,  /* King of the City / World: the blocks icon "xN" instead of the head */
     HUD_PLAY_KING_WORLD = 4,

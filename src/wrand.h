@@ -11,6 +11,7 @@
 uint32_t *wrand_pm_state(void);                      /* +0x828 itself (findPointInRubble draws on it) */
 void wrand_seed_pm(uint32_t seed);
 uint32_t wrand_pm(void);                             /* 0x106BD0: the next state */
+uint32_t wrand_pm_next(uint32_t *s);                 /* 0x106BD0 on a state of its own (the shell's demo, 0x308460) */
 float wrand_frand(void);                             /* gWorld.frand(): [0, 1) */
 int wrand_rand(void);                                /* gWorld.rand(): 0 .. 65535 */
 void wrand_seed_lf(uint32_t seed);                   /* 0x1069C0 */

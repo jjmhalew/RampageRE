@@ -62,7 +62,11 @@ state 4.
    at 0 HP**.
 5. In states 7, 8, 10, 11: `WorldGuiDriver::getResultState`: 1 or 2 end the state, 3 sets select, 4 sets quit (both
    end it too).
-6. If the state ended: its handler.
+6. The attract mode's demo (play type 0), in states 4 .. 11, with gWorld +0x1B set (0x4D6A9B: a pad's button,
+   RControllerMgr's input 0x2C1B80): state 6 is stored without being entered, gShell's idle timer is set to 120
+   (0x308240) and the state ends (0x324C80); so the demo leaves for the shell, which then shows the main menu
+   (SHELL_NOTES.md "The demo game"). game.c `game_attract_button`, `GE_EXIT` 2 with b = 1.
+7. If the state ended: its handler. The end of state 6 in the demo leaves at once (0x324D08), whatever ended it.
 
 **NI functions** are looked up by 0x324180: the block's string property of that name (the block just won for
 ResultsNI, GameOverNI and EndBlockNI, since the next block is already current), else WorldData's, else the name

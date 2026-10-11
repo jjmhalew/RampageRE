@@ -93,7 +93,8 @@ typedef struct {
 
 typedef struct {
     int play_type;                                   /* GP_* (default campaign) */
-    int num_players, num_bots;                       /* 1 .. 4 (default 1); the last num_bots of them are AI */
+    int num_players, num_bots;                       /* 1 .. 4 (default 1); the last num_bots of them are AI (the
+                                                      * demo, GP_ATTRACT: all of them, three lives each) */
     int city_index;                                  /* ShellData CityData.City<n>: 0 LasVegas .. 6 NewYork */
     int num_cities;                                  /* 7 (CityData City0 .. City6) */
     int start_block;                                 /* GameStatus +0x210 (0: the city's BlockStart) */
@@ -139,7 +140,8 @@ enum {
                         * scale 1, its streaker deleted; a = 1: also energy 0 and the rage off (the continue, 0x2E5730 [G]) */
     GE_TIME_UP,        /* the clock ran out (state 6): a = 1 game over, 0 the block simply ends */
     GE_EXIT            /* the world is left for the shell: a = 0 the menus, 1 the next city (King of the World: city
-                        * b), 2 the attract mode's end */
+                        * b), 2 the attract mode's demo is over (b = 1: a pad's button ended it, gShell's idle timer
+                        * is 120 again, 0x324CC8; 0: its minute is up or the block finished) */
 };
 typedef struct { int type, slot, a, b; const char *name; float pos[3], v[3], f; } GameEvent;
 
@@ -162,6 +164,10 @@ void game_set_result(Game *g, int result);           /* WorldGuiDriver::setResul
  * screen gets GR_CONTINUE); 0 = never (default) */
 void game_auto_results(Game *g, float seconds);
 void game_restart_shell(Game *g);                    /* gWorld.restartShell (the Pause menu's quit): GS_EXIT */
+/* a pad's button went down (RControllerMgr's input 0x2C1B80: any control from 4 on, the d-pad and every button, not
+ * the sticks, on any pad, sets gWorld +0x1B): in the attract mode's demo the world is left at the next update
+ * (0x324C80), GE_EXIT a = 2, b = 1 */
+void game_attract_button(Game *g);
 /* Player.addPoints(cat, amount) (0x33F530): forward the army's AE_SCORE (monster, level = cat, amount) here */
 void game_add_points(Game *g, int slot, int cat, int amount);
 /* <City>::setBossBlockFinished, the boss AIInstance's CompletionCallback; centre_down: New York's centre building

@@ -6,14 +6,16 @@ static uint32_t pm = 0x2545F491u;
 uint32_t *wrand_pm_state(void) { return &pm; }
 void wrand_seed_pm(uint32_t seed) { pm = seed; }
 
-uint32_t wrand_pm(void)
+uint32_t wrand_pm_next(uint32_t *s)
 {
-    uint64_t x = (uint64_t)pm * 16807u;
+    uint64_t x = (uint64_t)*s * 16807u;
     x = (x & 0x7FFFFFFFu) + (x >> 31);
     x = (x & 0x7FFFFFFFu) + (x >> 31);
-    pm = x == 0x7FFFFFFFu ? 0 : (uint32_t)x;
-    return pm;
+    *s = x == 0x7FFFFFFFu ? 0 : (uint32_t)x;
+    return *s;
 }
+
+uint32_t wrand_pm(void) { return wrand_pm_next(&pm); }
 
 float wrand_frand(void) { return (float)wrand_pm() * (1.0f / 2147483648.0f); }
 int wrand_rand(void) { return (int)(wrand_pm() >> 8 & 0xFFFF); }
