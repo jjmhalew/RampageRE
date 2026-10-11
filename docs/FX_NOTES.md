@@ -278,9 +278,11 @@ ground (+DontBillboard, forward axis Z, size 10 × (1 + 10t)); `Carbinator_Run` 
 and the flat glow z-fights with it, so the street's and the curb's straight edges cut them into steps. The textures
 are right (tex.c: `Suds_3` border alpha ≤ 30/255, `smoke_white` ≤ 26/255, `basic` is black at its corners and drawn
 additive); without the depth test the foam is round. The particles' VU1 program has no depth trick (the corners' own
-depth, GEQUAL: an equal depth passes) [R 0x3A75C8, 0x3B26C0]; whether the PS2's street writes the depth these quads
-are cut by is the city renderer's (not read). `render_gl.c` pulls the flat quads in front of the street with a
-polygon offset [G: for GEQUAL's equal-depth pass].
+depth, GEQUAL: an equal depth passes) [R 0x3A75C8, 0x3B26C0]. The street writes that depth [R]: the block grounds'
+parts are kind 2 materials (162 of 167 with flags 0xC: shader 1, one pass, GS state 1, TEST 0x50002, Z test and
+write; the rest shader 2 and 0xC, Z written too; FORMAT_BDP.md "How a material is built"), so the billboards' lower
+halves are behind it on the PS2 as well. `render_gl.c` pulls the flat quads in front of the street with a polygon
+offset [G: for GEQUAL's equal-depth pass; how two coplanar draws round on the GS is the hardware's].
 
 ## Not done / not known
 - Not ported because no effect uses them: the Streams modes, RenderAsDatapoints (emitter 0x4000), the orbit graphs

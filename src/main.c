@@ -169,7 +169,7 @@ typedef struct Viewer {
     struct { int fx, obj; float off[3]; } pfx[32]; int npfx;   /* the parade's effects that follow their object */
     Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
     Rail *rail;                                      /* the trains, cable cars and freighters (rail.c) */
-    struct { int id, fx, obj; float off[3]; } rfx[64]; int nrfx;   /* their effects (following them) */
+    struct { int id, fx, obj; float off[3]; } rfx[64]; int nrfx;   /* their effects (following them; off in its frame) */
     struct { int id, h, obj; } rsnd[64]; int nrsnd;                /* and sounds */
     Edibles *edibles;                                /* the power-ups and hazards behind the windows (edible.c) */
     Game *game;                                      /* the world's states, the lives, the clock (game.c) */
@@ -3274,14 +3274,21 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             const RailObj *o = e->obj >= 0 ? rail_obj(v->rail, e->obj) : NULL;
             switch (e->type) {
             case RE_EFFECT:
-                if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                if (v->fxw) {                        /* one on an object: in its whole frame, the offset in it */
+                    float R[3][3], d[3] = { 0, 0, 0 };
+                    for (int a = 0; a < 3 && o; a++)
+                        for (int k = 0; k < 3; k++)
+                            R[a][k] = o->rot[3 * a + k];
+                    int id = o ? fx_spawn_frame(v->fxw, e->name, e->pos, (const float (*)[3])R, 1)
+                               : fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
                     if (id >= 0 && v->nrfx < 64) {
                         v->rfx[v->nrfx].id = e->id;
                         v->rfx[v->nrfx].fx = id;
                         v->rfx[v->nrfx].obj = o ? e->obj : -1;
-                        for (int k = 0; k < 3; k++)
-                            v->rfx[v->nrfx].off[k] = o ? e->pos[k] - o->pos[k] : 0;
+                        for (int k = 0; k < 3 && o; k++)
+                            d[k] = e->pos[k] - o->pos[k];
+                        for (int a = 0; a < 3; a++)
+                            v->rfx[v->nrfx].off[a] = o ? d[0] * R[a][0] + d[1] * R[a][1] + d[2] * R[a][2] : 0;
                         v->nrfx++;
                     }
                 }
@@ -3347,8 +3354,13 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             v->rfx[k].obj = -1;
             continue;
         }
-        float at[3] = { o->pos[0] + v->rfx[k].off[0], o->pos[1] + v->rfx[k].off[1], o->pos[2] + v->rfx[k].off[2] };
-        fx_move(v->fxw, v->rfx[k].fx, at);
+        float R[3][3], at[3];                        /* [R 0x291ED0, 0x277100] the object's matrix x the offset */
+        for (int a = 0; a < 3; a++)
+            for (int c = 0; c < 3; c++)
+                R[a][c] = o->rot[3 * a + c];
+        for (int c = 0; c < 3; c++)
+            at[c] = o->pos[c] + v->rfx[k].off[0] * R[0][c] + v->rfx[k].off[1] * R[1][c] + v->rfx[k].off[2] * R[2][c];
+        fx_place(v->fxw, v->rfx[k].fx, at, (const float (*)[3])R);
     }
     for (int k = 0; k < v->nrsnd; k++) {             /* the sounds that follow theirs */
         const RailObj *o = rail_obj(v->rail, v->rsnd[k].obj);

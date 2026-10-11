@@ -1026,12 +1026,48 @@ static void vehicle_sync(Scene *s)
     }
 }
 
-/* each frame: every rail object at its matrix (looks keyed from 6 << 20) */
+/* a rail object's flags: [R] every object's setup (0x28FD70 -> 0x29C490) makes a cloth for each of its template's
+ * first four ClothBit| groups (ClothRef|Name, the ClothOffset matrix at +0x10 of its 0x54-byte record, identity
+ * without one, the wind at +0x44 ..), drawn at the object x ClothOffset: the freighter's flagpole_red on its stern.
+ * Made when the object is first drawn (place_flags at the identity: each instance's base is its offset), then
+ * carried with it; keyed by the object's uid (a slot is reused by the next freighter) */
+static void rail_flags(Scene *s, const RailObj *o, int show)
+{
+    int k = 0;
+    while (k < s->nrail_flag && s->rail_flag[k].uid != o->uid)
+        k++;
+    if (k == s->nrail_flag) {
+        Group where;
+        Record r1[1];
+        if (!show || !o->tmpl.at || s->nrail_flag >= 16 || !group_values(o->tmpl, "ClothBit|", &where, r1, 1))
+            return;
+        s->rail_flag[k].uid = o->uid;
+        s->rail_flag[k].first = (int)s->ninstances;
+        place_flags(s->owner, s, o->tmpl, mat_identity());
+        s->rail_flag[k].last = (int)s->ninstances;
+        for (int i = s->rail_flag[k].first; i < s->rail_flag[k].last && i - s->rail_flag[k].first < 4; i++)
+            s->rail_flag[k].rel[i - s->rail_flag[k].first] = s->instances[i].base;
+        s->nrail_flag++;
+    }
+    s->rail_flag[k].seen = 1;
+    Mat4 w;
+    memcpy(w.m, o->world, sizeof w.m);
+    for (int i = s->rail_flag[k].first; i < s->rail_flag[k].last; i++) {
+        Instance *c = &s->instances[i];
+        int r = i - s->rail_flag[k].first;
+        c->dynamic = 1;
+        c->hidden = !show || r >= 4;
+        if (!c->hidden)
+            c->base = mat_mul(w, s->rail_flag[k].rel[r]);
+    }
+}
+
+/* each frame: every rail object at its matrix (looks keyed from 6 << 20), its flags with it */
 static void rail_sync(Scene *s)
 {
-    if (!s->rail || !s->owner)
-        return;
-    for (int i = 0, n = rail_count(s->rail); i < n; i++) {
+    for (int k = 0; k < s->nrail_flag; k++)
+        s->rail_flag[k].seen = 0;
+    for (int i = 0, n = s->rail && s->owner ? rail_count(s->rail) : 0; i < n; i++) {
         const RailObj *o = rail_obj(s->rail, i);
         int who = (6 << 20) + i;
         int show = o->phase != RP_GONE && !o->hidden && o->shape ? vehicle_look(s->owner, s, who, o->shape) : -1;
@@ -1044,7 +1080,13 @@ static void rail_sync(Scene *s)
             if (o->tmpl.at && !s->instances[show].shadow.at)
                 s->instances[show].shadow = group_sub(o->tmpl, "ShadowData");
         }
+        if (o->phase != RP_GONE)
+            rail_flags(s, o, show >= 0);
     }
+    for (int k = 0; k < s->nrail_flag; k++)          /* an object gone (or the block's rail with it): its flags too */
+        if (!s->rail_flag[k].seen)
+            for (int i = s->rail_flag[k].first; i < s->rail_flag[k].last; i++)
+                s->instances[i].hidden = 1;
 }
 
 /* each frame: every army unit at its place, its clip at anim_time / anim_len of the clip (looks keyed from 1 << 20) */

@@ -102,6 +102,11 @@ slow-down path made, 2048 the lead car, 4096 it has touched the street, 16384 th
 
 **Construct** [R]: pulses every 0.15 s; object flags 0x2000000 | PushOutMonsters | 0x10000000, and Pickupable unless
 KnockDownMonster (the speeding train is not); HitPoints; 2 s to die once crashed; 128 when KnockDownMonster.
+0x10000000 [R 0x2BC1D0]: Building::hit (0x2BC150, from the building's TakeImpact 0x2BC0F0 with the object as the
+attacker) returns at once for an attacker so flagged, so a car thrown or falling onto a building never damages it
+(rail.c sends no `RE_IMPACT` for it). 0x2000000 (the NY train, MerryGoRound too; CombatTruck clears it) [G: no code
+tests it with an immediate: no `lui 0x200` mask and no shift by 25 of +0x4C anywhere; a mask read from data was not
+followed].
 
 **spawnTrainChain(n)** [R]: the next car 14 behind (x + 14 when it runs to −x), facing the same way, in the same state,
 with the same flags but neither 2048 nor 128; it makes its own next car. Making a chain clears its side's "stats
@@ -245,14 +250,14 @@ time, MaxOccurances (5) in all. The freighter has the AIInstance as its instance
 [R] Construct: `Direction` (−1) faces it left or right; a LineMover from x 150 × Direction to the other side at 30,
 starting at a random share; at its end it starts again from that side. No block places `Train1`.
 
-## Not traced (stand-ins in rail.c)
+## The engine's side (as rail.c has it)
 - **Random numbers and time:** `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]; the scripts at the world's fixed
   step, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
-- **The contacts:** the game's are the monster's (0x2E22B0): its spheres against the object's shape (0x280470); an
-  unarmed one gives TakeDamage(monster, 2.0, Collision (1)) every frame to an object without OnlyHitWithEffNodes, an
-  armed one the attack's damage, type 0 (Concussive), the sphere search ending at the first blow [R]. Here a monster's
-  box that meets the object (collide.c `collide_obj_box`, 0x2801A0) stands for the touch, and rail_hit runs per armed
-  sphere. The knock-downs repeat every frame while the monster's move still says
+- **The contacts** [R]: the monster's (0x2E22B0): its spheres against the object's shape (0x280470, collide.c
+  `collide_obj_sphere`); an unarmed one gives TakeDamage(monster, 2.0, Collision (1)) every frame to an object without
+  OnlyHitWithEffNodes, an armed one the attack's damage, type 0 (Concussive), the sphere search ending at the first
+  blow. As here: rail_update tests the monster's spheres (ArmyMonster.spheres; its box only for a monster without
+  any), rail_hit each armed sphere against the shape. The knock-downs repeat every frame while the monster's move still says
   `Ground`: the viewer starts a reaction at its next clip event, not at once. A PushOutMonsters object's push is the
   game's (collide_monster, 0x2E2C50: out of the object's box along its least overlap; a train pushes a monster on
   its track ahead of it).
@@ -260,12 +265,20 @@ starting at a random share; at its end it starts again from that side. No block 
   `CollisionRadius`, else `AutoCollisionBox` (every car here) with the model's box from the host, then the
   instance's; else the sphere the model keeps (0x184CB0: centre +0x38, radius +0x44, made at load as the union of
   its parts' spheres from the file, 0x185AA0) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere` (the freighter's hull
-  keeps (0, −0.53, 1.69) r 8.03, where its box's would be (0, −0.44, 2.68) r 8.75). A blow is tested on the shape's box.
-- **Attached effects:** at the object's place + the offset in its frame, their +Y along the object's; they follow
-  its place (the game re-turns the offset with the object each frame; here it is turned once). Its 3D sounds end when
-  it goes.
+  keeps (0, −0.53, 1.69) r 8.03, where its box's would be (0, −0.44, 2.68) r 8.75). A blow is tested on the shape (0x280470).
+- **Attached effects** [R 0x27A990, 0x291440, 0x291ED0]: in the object's matrix x the offset, its whole frame: main
+  spawns them in the object's frame (fx_spawn_frame) and places them there every frame (fx_place). Its 3D sounds end
+  when it goes [R: a deleted object (0x290480 -> 0x288050) kills its sound slots added without keep, and these
+  scripts all pass add3DSfx(..., 0)].
+- **getNearestMonster** [R 0x2B26F0, the binding 0x42 of 0x2A8FA0]: the nearest of the players' monsters (gWorld
+  +0x40, the count 0x4D7E28) by squared 3D distance, starting at 1000: none farther than about 31.6, so the lead
+  car's isNearMonster (60) is in fact 31.6, and a tanker's blast throws no monster beyond it.
 - **The freighter's sway:** setFacing(x, y, z) is Rz(z) × Rx(x) × Ry(y) (0x277E78 → 0x101330(m, z, x, y)) [R].
-- Not ported: the freighter's `ClothBit` flag (cloth.c's), the object flags 0x2000000 and 0x10000000, MajorAxis.
+- **The freighter's flag** [R]: every object's setup (0x28FD70 -> 0x29C490) makes a cloth for each of its template's
+  first four `ClothBit|` groups (`ClothRef|Name`, the `ClothOffset` matrix at +0x10 of the 0x54-byte record, identity
+  without one, the wind keys at +0x44 ..). ScumFreighter has one: `flagpole_red` at (0, −5, 4.5) in its frame, turned
+  up. city.c `rail_flags` makes it when the freighter is first drawn and carries it at the freighter x ClothOffset,
+  in its wind; it goes with the freighter.
 
 ## Driving it from the viewer
 1. **Setup** (each block): `rail_new` with a host whose `find` is the army's (city_book_group) and `shape_box` the

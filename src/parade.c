@@ -98,10 +98,12 @@ static void effect_on(Parade *p, ParadeObj *o, const char *name)
 
 static const ArmyMonster *monster(const Parade *p, int i) { return i >= 0 && i < p->nm ? &p->m[i] : NULL; }
 
-static int nearest_monster(const Parade *p, const float pos[3])   /* getNearestMonster; -1 none */
+/* getNearestMonster (0x2B26F0) [R]: the nearest of the players' monsters by squared 3D distance, starting at 1000:
+ * none farther than sqrt(1000), about 31.6; -1 none */
+static int nearest_monster(const Parade *p, const float pos[3])
 {
     int best = -1;
-    float bd = 1e30f;
+    float bd = 1000;
     for (int i = 0; i < p->nm; i++) {
         float dx = p->m[i].pos[0] - pos[0], dy = p->m[i].pos[1] - pos[1], dz = p->m[i].pos[2] - pos[2];
         float d = dx * dx + dy * dy + dz * dz;

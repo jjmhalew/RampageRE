@@ -224,6 +224,9 @@ typedef struct {
      * until the unit whose instance group is inst is drawn; then the cloths ride on the unit (rel: their places
      * relative to the model) and go with it (seen: it has been drawn) */
     struct { Group inst; int first, last, seen; Mat4 rel[4]; } army_obj[4]; int narmy_obj;
+    /* the rail objects' flags (their template's ClothBit|: the freighter's flagpole_red), made when the object is
+     * first drawn: instances first .. last - 1 riding on the rail object of that uid at rel (its ClothOffset) */
+    struct { uint32_t uid; int first, last, seen; Mat4 rel[4]; } rail_flag[16]; int nrail_flag;
     int left;                                        /* the game has moved on (scene_block_left): the block is behind */
     int placing_block;                                /* placing the block's own objects (not those behind) */
     int placing_attack;                               /* ... its AttackObjectInstance| list */

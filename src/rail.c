@@ -237,9 +237,10 @@ static int effect_at(Rail *r, const char *name, const float pos[3])
     RailEvent *e = emit(r, RE_EFFECT, -1, name, pos);
     return e->id = r->next_fx++;
 }
-/* FollowEffect.createAndStartAttached(object, name) / ...WithOffset(object, name, offset): [G] at the object's
- * place + offset (in its frame [R 0x27A990, 0x291440]), following it; turn_off is
- * setTurnOffWhenObjectDies(1): it stops when the object goes */
+/* FollowEffect.createAndStartAttached(object, name) / ...WithOffset(object, name, offset): [R 0x27A990, 0x291440,
+ * 0x291ED0 / 0x277100 (vehicle.c's reading)] in the object's matrix x the offset, its whole frame (the event's object:
+ * main spawns it in the object's frame and places it there every frame); turn_off is setTurnOffWhenObjectDies(1): it
+ * stops when the object goes */
 static int effect_on(Rail *r, RailObj *o, const char *name, const float off[3], int turn_off)
 {
     if (!name)
@@ -249,7 +250,7 @@ static int effect_on(Rail *r, RailObj *o, const char *name, const float off[3], 
         for (int k = 0; k < 3; k++)
             at[k] += off[0] * o->rot[k] + off[1] * o->rot[3 + k] + off[2] * o->rot[6 + k];
     RailEvent *e = emit(r, RE_EFFECT, idx(r, o), name, at);
-    copy3(e->dir, o->rot + 3);                       /* [G] it takes the object's turn: its +Y along the object's */
+    copy3(e->dir, o->rot + 3);                       /* its +Y (for a host without the frame) */
     e->id = r->next_fx++;
     if (turn_off && o->nfx_off < 6)
         o->fx_off[o->nfx_off++] = e->id;
@@ -329,13 +330,16 @@ static void monster_knock(Rail *r, RailObj *o, int m, const float vel[3], float 
     e->amount = -damage;
 }
 
-/* getNearestMonster: [G] the nearest by 3D distance; -1 with none */
+/* getNearestMonster (0x2B26F0, the script object's binding 0x42 in 0x2A8FA0) [R]: the nearest of the players' monsters
+ * (gWorld +0x40, the count at 0x4D7E28) by squared 3D distance from the object's place, starting at 1000: none
+ * farther than sqrt(1000), about 31.6; -1 with none */
 static int nearest_monster(const Rail *r, const float p[3])
 {
     int best = -1;
-    float bd = 1e30f;
+    float bd = 1000;
     for (int i = 0; i < r->nm; i++) {
-        float d = dist3(p, r->m[i].pos);
+        float e[3] = { r->m[i].pos[0] - p[0], r->m[i].pos[1] - p[1], r->m[i].pos[2] - p[2] };
+        float d = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
         if (d < bd) {
             bd = d;
             best = i;
@@ -405,7 +409,8 @@ static RailObj *obj_new(Rail *r, const char *name, Group tmpl, int kind)
     return o;
 }
 
-/* requestDelete: its 3D sounds end with it [G] and its turn-off effects stop [R] */
+/* requestDelete: its 3D sounds end with it [R: a deleted object (0x290480 -> 0x288050) kills its sound slots added
+ * without keep (0x274710), and these scripts all pass add3DSfx(..., 0)] and its turn-off effects stop [R] */
 static void obj_delete(Rail *r, RailObj *o)
 {
     if (o->phase == RP_GONE)
@@ -423,9 +428,9 @@ static void obj_delete(Rail *r, RailObj *o)
     emit(r, RE_REMOVED, idx(r, o), o->name, o->pos);
 }
 
-/* setPulseDelay: [G] the interval changes, the clock since the last pulse runs on (pulse_timer counts up). A cable
- * car sets 0.375 at every touch of the street, which would hold its dying off for as long as it slides if the call
- * restarted the clock (vehicle.c's reading) */
+/* setPulseDelay (0x2AA2A0) [R, streetobj.c's reading]: only the interval changes, the clock since the last pulse
+ * runs on (pulse_timer counts up). A cable car sets 0.375 at every touch of the street, which would hold its dying
+ * off for as long as it slides if the call restarted the clock */
 static void set_pulse(RailObj *o, float delay) { o->pulse_delay = delay; }
 
 /* ---------------------------------------------------------------- the movers */
@@ -451,8 +456,9 @@ static void line_init(RailObj *o, const float a[3], const float b[3], float spee
 }
 
 /* the LineMover's frame (0x315E10) [R]: the share grows by dt x speed / length; past 1 it stops at the end and calls
- * back 2 [G: once]; while it simply moves, a monster nearer than MonsterResponseDist (3D) calls back 4. Returns the
- * callback, 0 none */
+ * back 2, every frame after in the game: here once, as every handler of it deletes its object, gives it a new line or
+ * moves to a state that takes no more of it at the first [R, as vehicle.c]; while it simply moves, a monster nearer
+ * than MonsterResponseDist (3D) calls back 4. Returns the callback, 0 none */
 static int line_step(Rail *r, RailObj *o, float dt)
 {
     float d[3] = { o->line.b[0] - o->line.a[0], o->line.b[1] - o->line.a[1], o->line.b[2] - o->line.a[2] };
@@ -482,7 +488,8 @@ static int line_step(Rail *r, RailObj *o, float dt)
  * path (addPoint(p, d), addPointWithVel(p, d, k) [R 0x33B010: k the point's tension, the tangent x (1 - k)]), the place along it grows by
  * velocity x dt; past the last point it stays there and answers 2 every frame; flag 2 turns the object along the
  * tangent. The curve (0x13B780, tangents 0x13B2F0) is Hermite with Kochanek-Bartels tangents, T = B = C = 0 */
-static void sp_clear(RailObj *o)                     /* createSplineMover + clearPath [G: the place starts at 0] */
+static void sp_clear(RailObj *o)                     /* createSplineMover + clearPath [R 0x33B0B0: the points freed,
+                                                      * the place along it (+0x48) 0] */
 {
     memset(&o->sp, 0, sizeof o->sp);
     o->mv = MV_SPLINE;
@@ -623,6 +630,10 @@ static void flight_contact(void *user, int other, const float p[3], const float 
             rail_take_impact(r, &r->o[j]);
         return;
     }
+    /* [R 0x2BC1D0] Building::hit (0x2BC150, through its TakeImpact 0x2BC0F0 with the object as the attacker) does
+     * nothing for an attacker with object flag 0x10000000: an elevated train's car never damages a building */
+    if (COLLIDE_TAG_OWNER(w->tag) == COLLIDE_OWN_BUILDING && (o->oflags & RF_NO_BUILDING_HIT))
+        return;
     RailEvent *e = emit(r, RE_IMPACT, idx(r, o), o->name, p);
     e->id = w->tag;
     e->level = w->kind;
@@ -677,7 +688,7 @@ static void et_construct(Rail *r, RailObj *o)
     o->horn = 0;
     o->id = r->et_vehicles++;
     set_pulse(o, 0.15f);
-    o->oflags |= 0x2000000 | RF_PUSH_OUT | 0x10000000;
+    o->oflags |= 0x2000000 | RF_PUSH_OUT | RF_NO_BUILDING_HIT;
     if (pnum(o, "KnockDownMonster", 0) == 0)
         o->oflags |= RF_PICKUP;
     o->hp = (int)tnum(o, "HitPoints", 5);
@@ -768,7 +779,8 @@ static int et_damage(Rail *r, RailObj *o, int dmg, int chain)   /* eventDamage [
     return 0;
 }
 
-static int et_near_monster(Rail *r, RailObj *o)      /* isNearMonster [R]: the nearest monster within 60 */
+static int et_near_monster(Rail *r, RailObj *o)      /* isNearMonster [R]: the nearest monster within 60 (one there
+                                                      * is within 31.6 already: getNearestMonster's own limit) */
 {
     int m = nearest_monster(r, o->pos);
     return m >= 0 && dist3(o->pos, r->m[m].pos) < 60;
@@ -776,7 +788,7 @@ static int et_near_monster(Rail *r, RailObj *o)      /* isNearMonster [R]: the n
 static void et_horn(Rail *r, RailObj *o) { sfx_add(r, o, pstr(o, "HornSound")); }
 
 /* playSparks [R]: once (16384), the template's SparksEffect (Train_Sparks) on it, 0.6 up and, running to +x, 2 ahead
- * [G: the offset taken in the world], turned off when it goes */
+ * (createAndStartAttachedWithOffset: the offset in the car's frame), turned off when it goes */
 static void et_sparks(Rail *r, RailObj *o)
 {
     if (o->flags & 16384)
@@ -911,7 +923,8 @@ static void et_crash(Rail *r, RailObj *o)
         o->state = 5;
 }
 
-/* Process [R], [G: every frame]: running, braking or stopped, a car whose track gives way under it crashes */
+/* Process [R], every frame (the ScriptObject frame 0x309B94): running, braking or stopped, a car whose track gives way
+ * under it crashes */
 static void et_process(Rail *r, RailObj *o)
 {
     if ((o->state == 1 || o->state == 2 || o->state == 3) && !et_track_good(r, o))
@@ -1924,7 +1937,8 @@ static void rail_remove_ai(Rail *r, RailObj *o)
 
 /* [R] the update 0x3333F0 (army.c's): a record with nothing alive and spawns left counts down; at 0 it spawns its
  * template (an AttackObject whose instance book is the AIInstance group) and restarts at RespawnDelay + OffsetDelay x
- * rand. At most one of each alive; MaxOccurances in all. [G] It is made at the origin: the script places it */
+ * rand. At most one of each alive; MaxOccurances in all. No place is passed: the script places it [R, army.c's
+ * reading] */
 static void spawner_update(Rail *r, float dt)
 {
     if (!r->active)
@@ -2019,7 +2033,7 @@ static const float *book_box(Group g, float b[6])
 
 /* an object's shape (0x28FD70, collide_shape_pick): the template's CollisionBox (the New York engine's, a box 6 .. 8
  * ahead of it), CollisionRadius or AutoCollisionBox (every car here) with the model's box, then the instance's; else
- * the model's bounding sphere [G: taken as its box's, the host's; the freighter] */
+ * the sphere the model keeps (below; the freighter) */
 static void obj_shape_read(const Rail *r, const RailObj *o, CollideShape *s)
 {
     float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, rad = 1;
@@ -2061,28 +2075,34 @@ static void obj_collide(const Rail *r, RailObj *o, CollideObj *c)
     c->building = -1;
 }
 
-/* the box a blow is tested on [G]: the shape's box (a sphere's bounding cube) in the object's frame */
-static void obj_box(const Rail *r, RailObj *o, float mn[3], float mx[3])
+/* each frame [R 0x2E22B0, as boss.c]: the monster's object test puts each of its unarmed spheres against the
+ * object's shape (0x280470, collide_obj_sphere) and gives an object without OnlyHitWithEffNodes TakeDamage(monster,
+ * 2.0 (0x2E2680), Collision (1)) every frame one meets it (how a speeding train knocks a monster off the track); a
+ * monster without spheres: its box (0x2E2C50's) against the shape (0x2801A0). A PushOutMonsters object's push is the
+ * collision world's (collide_monster), not this */
+static int touches(const CollideObj *co, const ArmyMonster *mm)
 {
-    CollideShape s;
-    obj_shape(r, o, &s);
-    for (int k = 0; k < 3; k++) {
-        mn[k] = s.centre[k] - s.half[k];
-        mx[k] = s.centre[k] + s.half[k];
+    float nrm[3], pt[3], push[3];
+    for (int s = 0; s < mm->nspheres; s++)
+        if (collide_obj_sphere(co, mm->spheres[s], mm->spheres[s][3], nrm, pt, push))
+            return 1;
+    if (mm->nspheres > 0)
+        return 0;
+    float bmn[3], bmx[3], c[3], e[3];
+    if (mm->box_max[0] > mm->box_min[0]) {
+        copy3(bmn, mm->box_min);
+        copy3(bmx, mm->box_max);
+    } else {
+        set3(bmn, mm->pos[0] - 3, mm->pos[1] - 3, mm->pos[2]);
+        set3(bmx, mm->pos[0] + 3, mm->pos[1] + 3, mm->pos[2] + 8.5f);
     }
-}
-static void to_local(const RailObj *o, const float p[3], float l[3])   /* rot^T (p - pos) */
-{
-    float d[3] = { p[0] - o->pos[0], p[1] - o->pos[1], p[2] - o->pos[2] };
-    for (int k = 0; k < 3; k++)
-        l[k] = o->rot[k * 3] * d[0] + o->rot[k * 3 + 1] * d[1] + o->rot[k * 3 + 2] * d[2];
+    for (int k = 0; k < 3; k++) {
+        c[k] = (bmn[k] + bmx[k]) / 2;
+        e[k] = (bmx[k] - bmn[k]) / 2;
+    }
+    return collide_obj_box(co, c, e, nrm, pt, push);
 }
 
-/* each frame [G: where the game's touch comes from is not traced; as boss.c]: an object without OnlyHitWithEffNodes
- * that a monster's box (0x2E2C50's: its feet +- half width across, +- half height about its middle) meets
- * (collide_obj_box, the world's shape test 0x2801A0) takes TakeDamage(monster, 0, Collision (1)) every frame (how a
- * speeding train knocks a monster off the track). A PushOutMonsters object's push is the collision world's
- * (collide_monster), not this */
 static void contacts(Rail *r)
 {
     for (int i = 0; i < r->n; i++) {
@@ -2092,23 +2112,9 @@ static void contacts(Rail *r)
             continue;
         CollideObj co;
         obj_collide(r, o, &co);
-        for (int m = 0; m < r->nm && o->phase == RP_ALIVE; m++) {
-            const ArmyMonster *mm = &r->m[m];
-            float bmn[3], bmx[3], c[3], e[3], nrm[3], pt[3], push[3];
-            if (mm->box_max[0] > mm->box_min[0]) {
-                copy3(bmn, mm->box_min);
-                copy3(bmx, mm->box_max);
-            } else {
-                set3(bmn, mm->pos[0] - 3, mm->pos[1] - 3, mm->pos[2]);
-                set3(bmx, mm->pos[0] + 3, mm->pos[1] + 3, mm->pos[2] + 8.5f);
-            }
-            for (int k = 0; k < 3; k++) {
-                c[k] = (bmn[k] + bmx[k]) / 2;
-                e[k] = (bmx[k] - bmn[k]) / 2;
-            }
-            if (collide_obj_box(&co, c, e, nrm, pt, push))
+        for (int m = 0; m < r->nm && o->phase == RP_ALIVE; m++)
+            if (touches(&co, &r->m[m]))
                 take_damage(r, o, m, 1);
-        }
     }
 }
 
@@ -2182,14 +2188,10 @@ int rail_hit(Rail *r, int monster, const float centre[3], float radius, float am
         RailObj *o = &r->o[i];
         if (o->phase != RP_ALIVE || o->hidden || is_controller(o->kind) || o->kind == RK_LOOPTRAIN)
             continue;
-        float mn[3], mx[3], l[3], q = 0;
-        obj_box(r, o, mn, mx);
-        to_local(o, centre, l);
-        for (int k = 0; k < 3; k++) {
-            float c = l[k] < mn[k] ? mn[k] : l[k] > mx[k] ? mx[k] : l[k];
-            q += (l[k] - c) * (l[k] - c);
-        }
-        if (q > radius * radius)
+        CollideObj co;                               /* [R 0x2E22B0 -> 0x280470] the sphere against its shape */
+        float nrm[3], pt[3], push[3];
+        obj_collide(r, o, &co);
+        if (!collide_obj_sphere(&co, centre, radius, nrm, pt, push))
             continue;
         take_damage(r, o, monster, 0);
         hits++;
@@ -2262,7 +2264,7 @@ void rail_grab(Rail *r, int obj, int monster)
 }
 
 /* the HeldObjectMover (init 0x310ED0): [R] HoldOffset (MirroredHoldOffset while the monster is mirrored) taken along
- * the hand's axes; [G] the object turned as the hand is (the MajorAxis frame it builds is not ported) */
+ * the hand's axes, the object turned by the MajorAxis frame it builds (below) */
 void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored)
 {
     if (obj < 0 || obj >= r->n || r->o[obj].phase != RP_HELD)
@@ -2293,8 +2295,8 @@ void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored)
     update_world(o);
 }
 
-/* throwObject (0x2D9DC0): [R] the object gets its mover with the throw's velocity, then onThrow(monster, eat); [G]
- * the SphereMover, keeping the hand's turn (vehicle.c's) */
+/* throwObject (0x2D9DC0): [R] the object gets a SpherePhysicsMover with the throw's velocity, then onThrow(monster,
+ * eat); it keeps the hand's turn as it flies, with no spin [R, vehicle.c's reading] */
 void rail_throw(Rail *r, int obj, int monster, int eat, const float vel[3])
 {
     (void)eat;                                       /* neither script looks at bWasEaten */

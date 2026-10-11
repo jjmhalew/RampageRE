@@ -945,7 +945,12 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, f
                 c[3][k] = q->pos[k] - a[k] - wd[k];
             }
         }
-        if (q->kind == FXQ_FLAT) {                         /* lying on the street: pulled in front of it [G] */
+        /* lying on the street: pulled in front of it. The street writes depth [R: every block ground part is a kind 2
+         * material, 162 of 167 flags 0xC: shader 1 (0x16F030's table 0x3B1680), one pass, GS state 1, TEST 0x50002 (Z
+         * test GEQUAL, Z written); the rest shader 2 / 0xC, Z written too], so a quad in its plane is cut by it on the
+         * PS2 as here, where its depth rounds behind; the offset stands for GEQUAL's equal depth passing [G: how two
+         * coplanar draws round on the GS is the hardware's] */
+        if (q->kind == FXQ_FLAT) {
             glEnable(GL_POLYGON_OFFSET_FILL);
             glPolygonOffset(-1, -4);
         } else

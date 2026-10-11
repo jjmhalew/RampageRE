@@ -15,9 +15,10 @@
  *     gAIMgr.removeAIObject 0x332A50);
  *   - Train.bsf (Train1: no block places it), for completeness;
  *   - the natives they use: LineMover (0x3173D0 / 0x315E10, as vehicle.c), SplineMover (vtable 0x44B800, update
- *     0x33ACA0, curve 0x13B780, as boss.c), SphereMover [G, as vehicle.c], the HeldObjectMover (0x310ED0, as vehicle.c),
+ *     0x33ACA0, curve 0x13B780, as boss.c), SphereMover (0x28E440, as vehicle.c), the HeldObjectMover (0x310ED0, as
+ *     vehicle.c),
  *     Building.isDestroyed (+0x14C = 0, case 0x2AD780) and isFalling (grid +0x1CC != 0x7FFFFFFF, 0x2CE230),
- *     gWorld.findBuildingByPosition (0x2AEAA0 -> 0x2A3D20) [G: the building whose footprint holds the point].
+ *     gWorld.findBuildingByPosition (0x2AEAA0 -> 0x2A3D20: the last building whose footprint holds the point).
  *
  * Engine-agnostic, in army.h's and vehicle.h's conventions: z up, the street at z = 0, the camera at -y; matrices
  * column-major 4 x 4; facings in radians about z, 0 faces +y, pi / 2 faces -x, -pi / 2 faces +x. The caller gives each
@@ -62,9 +63,12 @@ enum {
 };
 enum { RP_ALIVE, RP_HELD, RP_GONE };
 
-/* object flags (+0x4C, the table at 0x3F5F20) [R] as vehicle.h's; 0x2000000 and 0x10000000 (ElevatedTrain,
- * NewYorkTrain) are not in that table, their engine side not traced */
-enum { RF_PUSH_OUT = 0x4000, RF_EFF_NODES = 0x8000, RF_PICKUP = 0x10000, RF_HELD = 0x20000 };
+/* object flags (+0x4C, the table at 0x3F5F20) [R] as vehicle.h's. Two more the scripts set by number: 0x10000000
+ * (ElevatedTrain) [R 0x2BC1D0]: Building::hit (0x2BC150) does nothing for an attacker so flagged, so the cars never
+ * damage a building; 0x2000000 (ElevatedTrain, NewYorkTrain, MerryGoRound; CombatTruck clears it) [G: no code tests
+ * it with an immediate (no lui 0x200 mask, no shift by 25 of +0x4C); a mask read from data was not followed] */
+enum { RF_PUSH_OUT = 0x4000, RF_EFF_NODES = 0x8000, RF_PICKUP = 0x10000, RF_HELD = 0x20000,
+       RF_NO_BUILDING_HIT = 0x10000000 };
 
 struct RailObj {
     const char *name;                                /* template name */
@@ -119,7 +123,8 @@ enum {
     RE_SET_VEL,       /* monster.setVel(v, 0): the monster is thrown with velocity v */
     RE_HP,            /* monster.addHitPoints(amount): HP + amount within 0 .. its most, nothing at 0 HP */
     RE_PUSH,          /* the monster is pushed: pos the place it is asked to go (queuePushRequest(pos)), v = pos - its
-                       * place (out of a PushOutMonsters box [G], or a freighter's pushMonster [R]) */
+                       * place (a freighter's pushMonster [R]; a PushOutMonsters box pushes through the collision
+                       * world, collide_monster) */
     RE_STATS,         /* gCommon.addStats(obj, monster, level): name the template, amount its Points, v[0] its Health,
                        * v[1] its Energy; id 1 when an Army was bound and has applied it (its AE_SCORE / AE_STATS_*
                        * events follow from army_events), 0 when the caller must apply it (and count `name` for the
@@ -162,10 +167,10 @@ const RailObj *rail_obj(const Rail *r, int i);
 int rail_events(Rail *r, RailEvent *out, int max);   /* takes the events since the last call */
 
 /* ---- the monster's side */
-/* an armed attack sphere reaching objects: their TakeDamage(monster, amount, 0, direction) [G: a monster's blow is
- * DamageType 0, Concussive]; how many it reached. (A touch, TakeDamage of type 1 Collision every frame, comes from
- * rail_update's own contact test of the monsters' boxes with the objects' shapes [G]; the PushOutMonsters push is the
- * collision world's, collide_monster.) */
+/* an armed attack sphere reaching objects (against their shapes, 0x280470): their TakeDamage(monster, amount, 0)
+ * [R 0x2E22B0: an armed sphere's blow is DamageType 0, Concussive]; how many it reached. (A touch, TakeDamage(2.0, type
+ * 1 Collision) every frame, comes from rail_update's own test of the monsters' unarmed spheres with the objects'
+ * shapes [R 0x2E22B0]; the PushOutMonsters push is the collision world's, collide_monster.) */
 int rail_hit(Rail *r, int monster, const float centre[3], float radius, float amount);
 void rail_impact(Rail *r, int obj);                  /* TakeImpact: something flying hit obj */
 /* doGrabObject's search over the objects: Pickupable, not held, in front of root, nearest within radius of hand */
@@ -173,7 +178,7 @@ int rail_nearest_pickup(const Rail *r, const float hand[3], const float root[3],
 void rail_grab(Rail *r, int obj, int monster);       /* the hold (0x2DA310) and onPickup */
 /* each frame while held: the hand's world matrix; mirrored picks MirroredHoldOffset (HeldObjectMover 0x310ED0) */
 void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored);
-/* throwObject(eat, vel): the object flies with vel [G: a SphereMover, as vehicle.c], then onThrow(monster, eat) */
+/* throwObject(eat, vel) (0x2D9DC0): the object flies with vel on a SpherePhysicsMover, then onThrow(monster, eat) */
 void rail_throw(Rail *r, int obj, int monster, int eat, const float vel[3]);
 
 #endif

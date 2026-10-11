@@ -280,6 +280,13 @@ descriptor). A record is u32 passes, then 0x24 bytes per pass: texture slot, GS 
 0x30: ALPHA_1, TEST_1, PRMODE), ..., the colour mode (0x265840: 0 a constant 255 = the GS's 1.0), the GIF registers
 (0x412: STQ, RGBAQ, XYZ2), the VU1 program and its clipping twin.
 
+**The street** [R]: the block grounds' parts (`*Blocks_NN` models: sidewalks, crossings, alleys, grass) are kind 2
+materials; 162 of 167 have flags 0xC, which 0x16F030's kind 2 table (0x3B1680: six flag bytes and the shader per
+12-byte row, in the order bit 0, bit 1, 0x100000, 0x200000, 0x2000000, 0x8000000) gives shader 1: one pass, GS state
+1 (ALPHA 0x44, TEST 0x50002, PRMODE 0x38): opaque, Z tested (GEQUAL) and written. The other five are shader 2
+(flags 0x100100: state 2, TEST 0x5000D, the alpha test GREATER 0, Z written) and 0xC (kind 1). So the street writes
+depth, and an effect on it is cut by it (FX_NOTES.md "Ground-level quads").
+
 **The damage blend (kind 8)** [R]. All 38 materials have flags 0x0800000C or 0x08000000 (bit 27, not bits 0 / 1), so
 0x16F030 gives shader 0x7A (descriptor 0x416000, record 122 at 0x3BA110; kind 8 with bit 27 gives 0x7A, 0x60
 see-through (bit 1), 0x7B two-sided (bit 0), 0x61 both; without bit 27 0x5E, 0x5C, 0x5F, 0x5D). Its record: two
