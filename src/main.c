@@ -268,7 +268,12 @@ typedef struct Viewer {
      * slots that have one, the menus' repeat clocks (up, down, left, right) */
     int pads_live; unsigned pads_on;
     PadState pads[PAD_SLOTS], pads_prev[PAD_SLOTS];
-    float pad_rep[PAD_SLOTS][4];
+    struct MenuPad {                                 /* [R] MenuEventHandler's per pad (+0x10 + 0x3C k, 0x16A810) */
+        uint8_t armed[2];                            /* +0x00: the left stick's flick (x, y) */
+        float ref[2];                                /* +0x04: where it has to move 0.45 from */
+        int held;                                    /* +0x20: the event code held (0 none) */
+        float now, start, last;                      /* the handler's clock +0x1F4; +0x24 the press, +0x28 the last */
+    } menu_pad[PAD_SLOTS];
     int vibrate;                                     /* gCommon.setEnableRumble's answer: the pad's +0xC84 [R 0x1A5020] */
     /* --autoplay (autoplay.h; a test, not the game's): every monster the computer's, the menus answered, the watchdog;
      * simulated time ap_t; the autopilot's next press, the mode, players, bots and city (-1 the campaign's next) it
@@ -5902,48 +5907,98 @@ static void pad_to_pad(const PadState *p, const PadState *prev, Pad *pd)
     }
 }
 
-/* the menus' bits of a controller: HUD_EV_* for the d-pad or the left stick past 0.5, Cross (accept), Circle (the
- * GUI's Back: CommonGUI's Controller_Back is a circle [R]) and Start; PADM_B0 / B1 / B4 for Square, Triangle and R2
- * (HUD_EV_BUTTON 0, 1, 4) */
-enum { PADM_B0 = 1 << 16, PADM_B1 = 1 << 17, PADM_B4 = 1 << 18 };
-static int pad_menu_bits(const PadState *p)
-{
-    uint32_t b = p->buttons;
-    int m = 0;
-    if (b >> PAD_UP & 1 || p->ly < -0.5f) m |= HUD_EV_UP;
-    if (b >> PAD_DOWN & 1 || p->ly > 0.5f) m |= HUD_EV_DOWN;
-    if (b >> PAD_LEFT & 1 || p->lx < -0.5f) m |= HUD_EV_LEFT;
-    if (b >> PAD_RIGHT & 1 || p->lx > 0.5f) m |= HUD_EV_RIGHT;
-    if (b >> PAD_A & 1) m |= HUD_EV_ACCEPT;
-    if (b >> PAD_B & 1) m |= HUD_EV_BACK;
-    if (b >> PAD_START & 1) m |= HUD_EV_START;
-    if (b >> PAD_X & 1) m |= PADM_B0;
-    if (b >> PAD_Y & 1) m |= PADM_B1;
-    if (b >> PAD_RT & 1) m |= PADM_B4;
-    return m;
-}
+/* ---- the menus' pad: MenuEventHandler (0x169880 .. 0x16A870) [R]. Each pad event becomes an event code (0x16A430):
+ * a button that went down by its logical slot (0x3F67C0, the table 0x40F130): Up 1, Down 2, Left 3, Right 4, A (Cross)
+ * 5, B (Circle) 6, Start 7, X (Square) 8, Y (Triangle) 9, Z 10, LTrigger (L2) 11, RTrigger (R2) 12, W 13; Back
+ * (Select), the shoulders and the thumbs none; the left stick by its flicks (0x16A5B0). GuiManager::input (0x22F7A0,
+ * its table 0x422410) makes them the GuiEvents: 1 .. 4 up, down, left, right, 5 Accept, 6 Back, 7 Start, 8 .. 13
+ * Button code - 8. */
+enum { MC_UP = 1, MC_DOWN, MC_LEFT, MC_RIGHT, MC_A, MC_B, MC_START, MC_X, MC_Y, MC_Z, MC_LT, MC_RT, MC_W };
 static const struct { int bit, ev, button; } PAD_MENU_EV[] = {
-    { HUD_EV_UP, HUD_EV_UP, 0 }, { HUD_EV_DOWN, HUD_EV_DOWN, 0 }, { HUD_EV_LEFT, HUD_EV_LEFT, 0 },
-    { HUD_EV_RIGHT, HUD_EV_RIGHT, 0 }, { HUD_EV_ACCEPT, HUD_EV_ACCEPT, 0 }, { HUD_EV_BACK, HUD_EV_BACK, 0 },
-    { HUD_EV_START, HUD_EV_START, 0 }, { PADM_B0, HUD_EV_BUTTON, 0 }, { PADM_B1, HUD_EV_BUTTON, 1 },
-    { PADM_B4, HUD_EV_BUTTON, 4 } };
+    { 1 << MC_UP, HUD_EV_UP, 0 }, { 1 << MC_DOWN, HUD_EV_DOWN, 0 }, { 1 << MC_LEFT, HUD_EV_LEFT, 0 },
+    { 1 << MC_RIGHT, HUD_EV_RIGHT, 0 }, { 1 << MC_A, HUD_EV_ACCEPT, 0 }, { 1 << MC_B, HUD_EV_BACK, 0 },
+    { 1 << MC_START, HUD_EV_START, 0 }, { 1 << MC_X, HUD_EV_BUTTON, 0 }, { 1 << MC_Y, HUD_EV_BUTTON, 1 },
+    { 1 << MC_Z, HUD_EV_BUTTON, 2 }, { 1 << MC_LT, HUD_EV_BUTTON, 3 }, { 1 << MC_RT, HUD_EV_BUTTON, 4 },
+    { 1 << MC_W, HUD_EV_BUTTON, 5 } };
 
-/* pad slot k's menu events this frame (pad_menu_bits): what went down, and a direction held again after 0.4 s, then
- * every 0.1 s (a port convenience) */
+/* [R 0x16A5B0] a stick axis (a: 0 x, 1 y) moved to x: inside 0.15 (or coming from the other side) it rests at 0.15;
+ * 0.45 past its rest (so first at 0.6) it flicks, the code of that way, and is armed; armed, it follows the stick out
+ * and is disarmed 0.45 back from there; disarmed, it follows it back in (0.45 out again is the next flick) */
+static int menu_flick(struct MenuPad *m, int a, float x)
+{
+    float s = x < 0 ? -1.0f : 1.0f, d = s * x, r = s * m->ref[a];   /* as on the + side */
+    if (d < 0.15f || r < 0.15f) {
+        m->ref[a] = s * 0.15f;
+        m->armed[a] = 0;
+        return 0;
+    }
+    if (d - r > 0.45f && !m->armed[a]) {
+        m->armed[a] = 1;
+        m->ref[a] = x;
+        return a ? (x < 0 ? MC_UP : MC_DOWN) : (x < 0 ? MC_LEFT : MC_RIGHT);
+    }
+    if (d - r < -0.45f && m->armed[a])
+        m->armed[a] = 0;
+    if (m->armed[a] ? d > r : d < r)
+        m->ref[a] = x;
+    return 0;
+}
+
+/* [R 0x169E90] the code held is still held: its d-pad button, or the stick armed that way (up / down past 0.15,
+ * left / right past 0); the others never are */
+static int menu_still_held(const struct MenuPad *m, const PadState *p, int code)
+{
+    switch (code) {
+    case MC_UP:    return (p->buttons >> PAD_UP & 1) || (m->armed[1] && m->ref[1] < -0.15f);
+    case MC_DOWN:  return (p->buttons >> PAD_DOWN & 1) || (m->armed[1] && m->ref[1] > 0.15f);
+    case MC_LEFT:  return (p->buttons >> PAD_LEFT & 1) || (m->armed[0] && m->ref[0] < 0);
+    case MC_RIGHT: return (p->buttons >> PAD_RIGHT & 1) || (m->armed[0] && m->ref[0] > 0);
+    }
+    return 0;
+}
+
+/* pad slot k's menu events this frame, a bit (1 << code) each: its events as they come (the stick's, then the buttons
+ * that went down [G: the order within a frame]), the held one again (0x169910's frame, 0x169E90) once it has been held
+ * 0.5 s (+0x30) and 0.125 s (+0x34) since it last came, until it is let go */
 static int pad_menu(Viewer *v, int k, float dt)
 {
-    static const int DIRS[4] = { HUD_EV_UP, HUD_EV_DOWN, HUD_EV_LEFT, HUD_EV_RIGHT };
-    if (!v->pads_live || !(v->pads_on >> k & 1))
+    static const struct { int pad, code; } BUTTONS[] = {   /* in the logical slots' order */
+        { PAD_UP, MC_UP }, { PAD_DOWN, MC_DOWN }, { PAD_LEFT, MC_LEFT }, { PAD_RIGHT, MC_RIGHT },
+        { PAD_START, MC_START }, { PAD_RT, MC_RT }, { PAD_LT, MC_LT }, { PAD_A, MC_A }, { PAD_B, MC_B },
+        { PAD_X, MC_X }, { PAD_Y, MC_Y } };
+    struct MenuPad *m = &v->menu_pad[k];
+    if (!v->pads_live || !(v->pads_on >> k & 1)) {   /* a pad not there (0x45AA48): nothing held */
+        m->held = 0;
         return 0;
-    int now = pad_menu_bits(&v->pads[k]), m = now & ~pad_menu_bits(&v->pads_prev[k]);
-    for (int d = 0; d < 4; d++)
-        if (m & DIRS[d])
-            v->pad_rep[k][d] = 0.4f;
-        else if ((now & DIRS[d]) && (v->pad_rep[k][d] -= dt) <= 0) {
-            m |= DIRS[d];
-            v->pad_rep[k][d] += 0.1f;
+    }
+    const PadState *p = &v->pads[k], *was = &v->pads_prev[k];
+    int codes[2 + sizeof BUTTONS / sizeof *BUTTONS], n = 0, out = 0;
+    codes[n++] = menu_flick(m, 0, pad_axis(p->lx));
+    codes[n++] = menu_flick(m, 1, pad_axis(p->ly));
+    for (size_t i = 0; i < sizeof BUTTONS / sizeof *BUTTONS; i++)
+        if ((p->buttons >> BUTTONS[i].pad & 1) && !(was->buttons >> BUTTONS[i].pad & 1))
+            codes[n++] = BUTTONS[i].code;
+    for (int i = 0; i < n; i++)
+        if (codes[i]) {                              /* [R 0x16999C] a new code is held from now */
+            if (codes[i] != m->held) {
+                m->held = codes[i];
+                m->start = m->now;
+            }
+            m->last = m->now;
+            out |= 1 << codes[i];
         }
-    return m;
+    m->now += dt;                                    /* [R 0x169A60] the frame's step */
+    if (m->held) {
+        int due = m->now - m->start >= 0.5f && m->now - m->last >= 0.125f;
+        if (!menu_still_held(m, p, m->held)) {
+            m->held = 0;
+            m->start = m->last = m->now;
+        } else if (due) {
+            m->last = m->now;
+            out |= 1 << m->held;
+        }
+    }
+    return out;
 }
 
 /* pad slot k's button went down this frame */

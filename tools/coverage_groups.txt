@@ -39,7 +39,7 @@ platform  0x168C00-0x169120  AppPS2: the PS2 app's frame loop, VSync timing, the
 engine    0x169120-0x1694E0  FullMotionVideo / its manager's slots: movie.c decodes and plays the .pss movies
 engine    0x1694E0-0x169760  the movie file pick (0x169360's tail): movie.c's movie_pick, the European disc's _pal and language files
 engine    0x169760-0x169880  FullMotionVideoManager's remaining slots: movie.c
-open      0x169880-0x16A870  MenuEventHandler: the menus' pad events, held repeat (+0x30, +0x34) and stick 0.15; main.c's pad_menu guesses
+engine    0x169880-0x16A870  MenuEventHandler: the menus' pad codes, the stick's flicks, the held repeat (0.5 s, 0.125 s): main.c's pad_menu
 engine    0x16A870-0x16AF40  the controller map (which pads talk to the GUI): shell.c's controller_table [G: details of 0x16AC70]
 engine    0x16AF40-0x16B150  a material's flags to its blend mode: render_gl.c sets GL blending from the same flags
 engine    0x16B150-0x16D8A0  the view: projection, frustum planes, sphere culling, screen points: camera.c, render_gl.c, main.c

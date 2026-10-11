@@ -361,12 +361,12 @@ fill the same pad; buttons add up, the stick pushed further wins):
 
 | PS2 | game variable (MV) | Xbox / SDL name | menus (shell, Pause, results) |
 |---|---|---|---|
-| left stick | LX, LY 0, 1 | left stick | past 0.5: up / down / left / right; pad 0's x moves the sliders |
+| left stick | LX, LY 0, 1 | left stick | a flick (0.6 out, again after coming 0.45 back): up / down / left / right, held as the d-pad; pad 0's x moves the sliders |
 | right stick | RX, RY 2, 3 (the head) | right stick | |
-| d-pad | UP .. RIGHT 4 .. 7 | d-pad | up / down / left / right (held: again after 0.4 s, then every 0.1 s) |
+| d-pad | UP .. RIGHT 4 .. 7 | d-pad | up / down / left / right (held: again after 0.5 s, then every 0.125 s; MenuEventHandler) |
 | Start | START 8 | Start / Options / + | Start (in play: the Pause menu, from that pad) |
 | Select | SELECT 9 | Back / Share / Create / − | |
-| R2, L2 | R2 10, L2 11 | RT, LT (from a quarter of their travel) | R2 = button 4; L2 + R2 held on pad 0 alone: the main menu's cheat entry (F2 on the keys) |
+| R2, L2 | R2 10, L2 11 | RT, LT (from a quarter of their travel) | R2 = button 4, L2 = button 3; L2 + R2 held on pad 0 alone: the main menu's cheat entry (F2 on the keys) |
 | R1, L1 | R1 12, L1 13 | RB, LB | |
 | Cross | CROSS 14 (jump) | A / Cross / the bottom button | accept |
 | Circle | CIRCLE 15 (grab) | B / Circle | back (CommonGUI's `Controller_Back` is a circle) |

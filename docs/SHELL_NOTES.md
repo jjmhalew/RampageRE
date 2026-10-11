@@ -398,6 +398,19 @@ Italian, 7 Spanish, 8 Dutch, 9 Portuguese; the port's `--lang` + 1; `== 7`, Span
 - It is 0x3063A0: `desi/m1` or `desi/jarvos` through `LoadExecPS2`, with `-game rampage` / `rwt`.
 - The port gives `SHELL_EVT_EMULATOR` and returns to the menu.
 
+**The pad in the menus** [R] (MenuEventHandler 0x169880 .. 0x16A870, a base of GuiManager / RGuiManager; per pad
+0x3C bytes at +0x10, made by 0x16A810): each pad event becomes a code (0x16A430): a button going down by its logical
+slot (the table 0x40F130): Up 1, Down 2, Left 3, Right 4, A (Cross) 5, B (Circle) 6, Start 7, X (Square) 8, Y
+(Triangle) 9, Z 10, LTrigger (L2) 11, RTrigger (R2) 12, W 13 (Back, the shoulders and the thumbs none); the left stick
+by flicks (0x16A5B0, per axis): it rests at 0.15 (inside 0.15 it goes back there and disarms), 0.45 past its rest it
+fires the way it went and arms, armed it follows the stick out and disarms 0.45 back from there, disarmed it follows
+it in (0.45 out again fires again). GuiManager::input (0x22F7A0, the table 0x422410) turns 1 .. 7 into Up, Down,
+Left, Right, Accept, Back, Start and 8 .. 13 into Button 0 .. 5. The code that came last is held (+0x20, from +0x24,
+last +0x28); every frame (0x169910's event 2, the clock +0x1F4 += dt) 0x169E90 sends it again once it is 0.5 s
+(+0x30) from the press and 0.125 s (+0x34) from the last, while it is held: its d-pad button, or the stick armed that
+way (up / down beyond 0.15, left / right beyond 0); only the four directions are. main.c's `pad_menu` is this, over
+the pack's axis (`pad_axis`); the keys' menu presses are the port's own.
+
 **Cheat entry:**
 - It opens when pad 0 holds exactly L2 + R2 (`getButtons() == 128 | 64`) [R]. getButtons (0x16A180) sets a bit per
   held logical button in the order of the names at 0x3F67C0: Up 1, Down 2, Left 4, Right 8, Start 16, Back 32,
