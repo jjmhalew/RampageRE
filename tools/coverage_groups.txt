@@ -226,13 +226,13 @@ unused    0x26CF30-0x26CF80  gSndDev.setSfxFilter: no script calls it
 engine    0x26CF80-0x26D5B0  enableSfx (a one-frame flush at block teardown / game over, 0x2B6760, 0x324584), playSound, 3D sounds: sound.c
 unused    0x26D5B0-0x26D660  gSndDev.getVelocityScalar (0x26D5B0), querySoundFlag (0x26D5E0): no script calls them
 engine    0x26D660-0x2750F0  the event player, banks (.uber / .samp), voice layer, music slots, 3D list: sound.c (MultiStream itself is platform)
-open      0x2750F0-0x2755F0  the script type SoundEffect (start / stop / setPoint): Traffic.bsf's crowd sound Crowd_Panic; city.c's crowds are silent
+engine    0x2750F0-0x2755F0  the script type SoundEffect (start / stop / setPoint; getPosition, setVelocity ... unused): sound.c's sound_effect_*, Traffic's Crowd_Panic from city.c
 engine    0x2755F0-0x275F20  gSndDev bindings (dispatcher 0x2755F0, table 0x427110): sound.c's calls for what the scripts ask
 unused    0x275F20-0x276080  the script type SoundEffect_array: no script declares one
-open      0x276080-0x2762C0  SoundEffect (cont.): its object and type glue (see 0x2750F0)
+engine    0x276080-0x2762C0  SoundEffect (cont.): its object and type glue; the port has no script objects (sound.c's slots)
 engine    0x2762C0-0x276490  gSndDev binding stubs, the device's per-package hooks: sound.c
-open      0x276490-0x2765C0  SoundEffect.start: a 3D sound at the effect's point through add3DSfx (0x26D560); see 0x2750F0
-engine    0x2765C0-0x276700  SoundDevice teardown (0x2765C0 from PackageApp +0x54): sound.c
+engine    0x276490-0x2765C0  SoundEffect.start (0x276430 kills all 16): sound.c's sound_effect_start, sound_effect_stop_all
+engine    0x2765C0-0x276700  SoundEffect's frame (0x2765C0, after the device's in PackageApp's frame 0x28BE84): sound.c's effects_tick
 unused    0x276700-0x2767F0  SoundEffect_array (no script declares one)
 engine    0x2767F0-0x276880  gSndDev binding stubs
 unused    0x276880-0x276920  SoundEffect_array type (no script declares one)

@@ -885,6 +885,8 @@ static void build(Viewer *v)
 {
     if (v->have_scene)
         scene_free(&v->scene);
+    if (!v->game_built)                              /* a new world: its scripts' onInit (Traffic's crowds) */
+        city_new_world(v->city);
     v->have_scene = city_build(v->city, v->blocks[v->block], v->night, &v->scene) == 0;
     if (v->have_scene && v->game_built && v->left_block >= 0)
         city_build_left(v->city, v->blocks[v->left_block], &v->scene);
@@ -5498,6 +5500,8 @@ static void popup_free(Viewer *v);
 static void shell_enter(Viewer *v, const ShellStart *st)
 {
     popup_free(v);                                   /* (before the textures are dropped: its bundle goes) */
+    sound_effect_stop_all();                         /* [R] the package changes: the scripts' SoundEffects stop
+                                                      * (0x28BE1C) */
     ShellProfile sp;
     shell_profile(v, &sp);
     v->shell = shell_open(&v->vol, st, &sp);

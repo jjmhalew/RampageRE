@@ -130,6 +130,24 @@ integer (0x135320). [G: the SPU2 interpolates with its 4-point gaussian (hardwar
   when within range, killed when outside (and dropped unless added with an id, as `add3DSfx` does), dropped when
   their sound has ended.
 
+## The scripts' SoundEffect (0x2750F0)
+- [R] A script type (methods by the dispatcher 0x275180, its jump table 0x427060: `start` 0x2751C0, `stop` 0x2751E8,
+  `getPosition`, `setPosition`, `setPoint` 0x2752B8, `getVelocity`, `setVelocity`, `setVelPoint`, `isValid`
+  0x2753A8 = a slot); the variable holds a slot of the table at 0x4CFB90: 16 of 0x20 bytes (+0x00 the 3D object,
+  +0x04 the place, +0x10 the velocity, +0x1C `start`'s second argument != 0, +0x1D a frame gone by).
+- `start(name, autoStop)` (0x276490): the free slot from the last down, zeroed, then `add3DSfx` with the slot as the
+  object, the slot's place (the world's origin until a `setPoint`) and range 0; the velocity pointer only when it is
+  not all zero (never). The object reads the place through the pointer, so `setPoint` moves it at once.
+- Every frame after the device's (PackageApp's frame 0x28BDE0: 0x26D960, then 0x2765C0): a slot with autoStop
+  whose sound is not playing (0x274CF0 finds the object, 0x26BC90 asks after its instance +0x3C) a frame after its
+  start loses its object (0x26D530): it has played, or never started (out of range). When the package changes the
+  same frame kills all 16 first (0x276430 at 0x28BE1C).
+- The only user is `Traffic::onActivateBlock`: `sfx.start("Crowd_Panic", 1)` and `setPoint(0, 0, 0)` with the two
+  crowds (a one-shot of sample 208, 4.7 s, range 1000). `SoundEffect_array` is declared by no script.
+- `src/sound.c` keeps the table (`sound_effect_start`, `_set_point`, `_stop`, `_stop_all`) and runs 0x2765C0's
+  pass at the end of `sound_update`; city.c starts the crowd's, main.c stops them all when the world goes back to the
+  shell.
+
 ## Not settled
 - [G] The event player's random seed (+0x50): 0x106C80 sets it at start-up to the EE timer's count (0x10D4D0, which
   starts that timer on its first call) | 1, a value of a few ticks that cannot be known; `src/sound.c` uses 12345.

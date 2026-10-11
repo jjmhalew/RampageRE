@@ -669,7 +669,10 @@ y = 41 × slot − 12.5 (the front lane, turned −90°); slot is the block's pl
 `NoFrontTraffic` / `NoRearTraffic` switch a lane off; two release timers start at 2 + 3 × rand seconds (probably
 one per lane), and the type is picked at random by `Frequency`. `Vehicle.bsf` takes a vehicle off at the end of its line.
 `Traffic.bsf` adds two crowds when a block becomes active: 4–8 people of the block's occupant types
-(`<Occupant>Runner`) around (−14, 0.5) and (8, −3), running 50 units towards −y.
+(`<Occupant>Runner`) around (−14, 0.5) and (8, −3), running 50 units towards −y, and plays `Crowd_Panic` at the
+block's origin (a `SoundEffect`, FORMAT_SOUND.md). Only once a world (`bCreateCrowd`, set by its `onInit`): on the
+first block with occupants whose `CreateCrowd` (1 unless set) is not 0; `HK01_WaterfrontA`, `HK02_WaterfrontB` and
+`SF10_Presidio` set it to 0.
 
 `tools/city.py` places the actors that are there from the start, each looping the clip of its default state, and
 a looping traffic clip: per open lane, round(10 s / 3.5 s) = 3 vehicles (at most `MaxVehicles` / 2) spread evenly

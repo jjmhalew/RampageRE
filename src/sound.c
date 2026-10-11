@@ -147,6 +147,11 @@ static struct {
     float pending;                       /* seconds of audio to move on by when nothing pulls */
     int (*pull)(void *ctx, int16_t *out, int frames);   /* sound_stream */
     void *pull_ctx;
+    struct {                             /* [R] the scripts' SoundEffects (0x4CFB90: 16 of 0x20 bytes) */
+        int h;                           /* +0x00: the 3D object, 0 = a free slot */
+        float pos[3];                    /* +0x04: its place (the object follows it), +0x10 the velocity: none set */
+        int auto_stop, seen;             /* +0x1C: start's second argument, +0x1D: a frame has gone by */
+    } se[16];
 } S;
 
 /* ---- PS-ADPCM ([R] the SPU's format: 16-byte frames, shift | filter << 4, flags, 28 nibbles) */
@@ -733,6 +738,34 @@ static void objects_tick(float dt)
     }
 }
 
+/* ---- the script type SoundEffect ([R] 0x2750F0 its methods: start, stop, setPoint, ...; the table 0x4CFB90) */
+static int effect_playing(int h)         /* [R] 0x274CF0 finds the object, 0x26BC90 asks after its sound (+0x3C) */
+{
+    Track *t = track_find(h);
+    return t && t->inst >= 0 && inst_find(t->inst) != NULL;
+}
+
+/* [R] 0x2765C0: every frame, an effect started with auto_stop goes once its sound is not playing (ended, or never
+ * started: out of range, refused), a frame after its start */
+static void effects_tick(void)
+{
+    for (int i = 0; i < 16; i++) {
+        if (!S.se[i].h || !S.se[i].auto_stop)
+            continue;
+        int playing = effect_playing(S.se[i].h);
+        if (!S.se[i].seen)
+            S.se[i].seen = 1;
+        else if (!playing) {
+            if (getenv("RAMPAGE_TRACE"))
+                printf("sound effect %d has played\n", i);
+            Track *t = track_find(S.se[i].h);   /* 0x26D530: the 3D object goes */
+            if (t)
+                track_drop(t);
+            S.se[i].h = 0;
+        }
+    }
+}
+
 /* ---- music ([R] 0x26FF60: "<name>.mic", 2 slots (SoundDevice +0x3D4), group 3's volume) */
 static void music_off(Music *m)
 {
@@ -1197,6 +1230,7 @@ void sound_update(float dt)
         if (S.track[i].id && !S.track[i].obj && !inst_find(S.track[i].inst))
             S.track[i].id = 0;
     music_tick();
+    effects_tick();                      /* [R] 0x2765C0, right after the device's tick in PackageApp's frame (0x28BE84) */
     if (out_open())
         out_feed();
     else if (!S.manual_mix) {            /* nobody listens: the voices still move on, so their ends come */
@@ -1319,6 +1353,49 @@ int sound_active(int h)
     if (t && !t->obj && !inst_find(t->inst))
         t->id = 0;
     return t && t->id;
+}
+
+int sound_effect_start(const char *name, int auto_stop)
+{
+    int i = 15;
+    while (i >= 0 && S.se[i].h)          /* [R] 0x276490: the free slot from the last down */
+        i--;
+    if (i < 0)
+        return -1;
+    memset(&S.se[i], 0, sizeof S.se[i]);
+    /* [R] add3DSfx (0x26D560 -> 0x274840) with the slot as the object, its place (zeroed: the world's origin until a
+     * setPoint), no velocity (all zero), range 0 (1000 x the event's scale); the list keeps it while out of range */
+    S.se[i].h = sound_add3d(name, S.se[i].pos, 0, 1, 1);
+    if (!S.se[i].h)
+        return -1;
+    S.se[i].auto_stop = auto_stop != 0;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("sound effect %d: %s\n", i, name);
+    return i;
+}
+
+/* [R] the methods by the dispatcher 0x275180 (its table 0x427060): start 0x2751C0 (the name, its second argument
+ * != 0), stop 0x2751E8, setPoint 0x2752B8 (0x1CB020 copies the point into the slot's +0x04), isValid 0x2753A8 (a slot) */
+void sound_effect_set_point(int slot, const float pos[3])
+{
+    if (slot < 0 || slot >= 16 || !pos)
+        return;
+    memcpy(S.se[slot].pos, pos, sizeof S.se[slot].pos);
+    sound_move(S.se[slot].h, pos);       /* (the game's object reads the slot's place each frame) */
+}
+
+void sound_effect_stop(int slot)         /* [R] 0x2751E8 (stop): 0x26D530 takes the object out of the list */
+{
+    if (slot < 0 || slot >= 16 || !S.se[slot].h)
+        return;
+    sound_kill(S.se[slot].h);
+    S.se[slot].h = 0;
+}
+
+void sound_effect_stop_all(void)         /* [R] 0x276430, from PackageApp's frame when the package changes (0x28BE1C) */
+{
+    for (int i = 0; i < 16; i++)
+        sound_effect_stop(i);
 }
 
 void sound_volume(float sfx, float music)

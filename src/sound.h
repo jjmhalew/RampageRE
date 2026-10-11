@@ -8,6 +8,7 @@
  *   object.add3DSfx(name, keep)      0x26D560 -> sound_add3d(name, pos, 0, 1, 1) (a sound that follows an object)
  *   the monsters' clip sounds        0x287860 -> sound_play(name, pos, 1) (3D, range 0 = 1000 x the event's scale)
  *   gSndDev.killSound(name)          0x26B960 -> sound_kill_name(name)
+ *   SoundEffect.start / setPoint     0x276490 -> sound_effect_start(name, auto_stop), sound_effect_set_point
  *   gSndDev.playMusic(name)          0x26C4D0 -> music_play(name)  ("bbop" -> bbop.mic; a BlockDef's Music)
  *   gSndDev.replaceMusic(n, in, out) 0x26BFC0 -> music_replace(n, out, in)
  *   gSndDev.setMusicVolume(v, ms)    0x26B5E0 -> sound_group_volume(3, v, ms) (setSfxVolume group 1, setVoiceVolume 2)
@@ -46,6 +47,13 @@ void sound_move(int h, const float pos[3]);   /* a 3D sound's new place (each fr
 void sound_kill(int h);                  /* 0x2725C0: ends a loop's wait, or fades the sound out in 100 ms */
 void sound_kill_name(const char *name);
 int  sound_active(int h);                /* still playing (or waiting to come into range) */
+/* the scripts' SoundEffect (0x2750F0; Traffic's Crowd_Panic): 16 slots; start = a 3D sound object at the slot's
+ * place (the world's origin until set), auto_stop = it goes once its sound is not playing (0x2765C0, run by
+ * sound_update); the slot, -1 if refused. stop_all: the package changes (the world is left, 0x276430). */
+int  sound_effect_start(const char *name, int auto_stop);
+void sound_effect_set_point(int slot, const float pos[3]);
+void sound_effect_stop(int slot);
+void sound_effect_stop_all(void);
 /* the listener: the camera's place and rows (right, forward, up as in camera.h) */
 void sound_listener(const float pos[3], const float rows[3][3]);
 

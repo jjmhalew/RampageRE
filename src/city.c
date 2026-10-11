@@ -17,6 +17,7 @@
 #include "ik.h"
 #include "look.h"
 #include "rail.h"
+#include "sound.h"
 
 #define CELL 5.0f
 #define GROUND_FLOOR 6.0f
@@ -33,6 +34,7 @@ struct City {
     Group world;
     char template_books[4][64]; int ntemplate_books;
     char (*model_key)[64];                           /* per city entry: model name of a mesh entry ("model|object") */
+    int create_crowd;                                /* Traffic.bsf's bCreateCrowd (city_new_world) */
 };
 
 /* ---------------------------------------------------------------- matrices */
@@ -182,6 +184,12 @@ City *city_open(const Vol *vol, const char *name)
         c->model_key[i][k] = 0;
     }
     return c;
+}
+
+void city_new_world(City *c)
+{
+    if (c)
+        c->create_crowd = 1;                         /* [R] Traffic::onInit: bCreateCrowd = 1 */
 }
 
 void city_close(City *c)
@@ -2911,10 +2919,18 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         if (rt.at && nrun < 16)
             runners[nrun++] = rt;
     }
-    if (nrun) {
+    /* [R] Traffic::onActivateBlock: the crowds come once a world (bCreateCrowd, set by its onInit), on the first block
+     * with occupants whose CreateCrowd (1 unless set; 0 in HK01, HK02, SF10) is not 0; with them the 3D sound
+     * Crowd_Panic at the block's origin (SoundEffect.start(name, 1): it goes when it has played, sound.c) */
+    if (c->create_crowd && s->noccupants && group_num(block, "CreateCrowd", 1) != 0) {
         static const float CROWD[2][3] = { { -14, 0.5f, 0 }, { 8, -3, 0 } };
-        for (int k = 0; k < 2; k++)
+        static const float ORIGIN[3] = { 0, 0, 0 };
+        c->create_crowd = 0;
+        for (int k = 0; k < 2 && nrun; k++)
             s->people += people_crowd(s->folk, runners, nrun, CROWD[k]);
+        int se = sound_effect_start("Crowd_Panic", 1);
+        if (se >= 0)                                 /* (sfx.isValid()) */
+            sound_effect_set_point(se, ORIGIN);
     }
     traffic(s, block, 0);
     /* the next two blocks behind it (0x302AF0): slot 1 at y + 41, slot 2 at y + 82 (hard-coded), their ground, every
