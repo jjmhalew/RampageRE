@@ -142,9 +142,12 @@ typedef struct Mon {
      * a bone's): damage (+0x2C), the knock's distance and time (+0x30, +0x34), ReactionLevel (+0x24), the flags
      * (+0x14: 2 in front, 4 behind), the monsters it may hit (+0x18), and the ones it hit already (the bones' +0x18,
      * cleared by 0x2E33A0 on every part of the record that hit, 0x2E45A0: each once an arming); parts: the record's;
-     * seq orders the armings */
-    struct MonAtk { float damage, knock, knock_time; int level; uint32_t flags, victims, hit, parts; unsigned seq; }
+     * seq orders the armings; kind .. over what the blow does (+0x20, +0x1C, +0x38, +0x3C, +0x64 .. +0x70, look.c
+     * monster_blow) */
+    struct MonAtk { float damage, knock, knock_time; int level; uint32_t flags, victims, hit, parts; unsigned seq;
+                    int kind, side; float lift, turn; int over[4]; }
         atk[MOVES_PARTS];
+    int air_hits;                                    /* +0xA9C: the blows it took in the air (MONSTER_AIR_HITS land) */
     unsigned atk_seq;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
     float ev16, ev16x;                               /* the kept type-16 event record's +0x10 and +0xC (+0xBAA0),
@@ -325,6 +328,7 @@ static void mon_rumble(const Mon *mo, int ms)
 }
 
 static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3]);
+static void monster_blow_hit(Mon *mo, const Mon *by, const struct MonAtk *atk, const char *name);
 static int mon_water(Mon *mo);
 static void challenge_stats(Viewer *v, const char *name, int points);
 static void power_from_profile(Mon *mo);
@@ -553,6 +557,7 @@ static void start_moves(Mon *mo)
     memset(&mo->head, 0, sizeof mo->head);
     look_limits_default(&mo->look_lim);
     mo->friction = MONSTER_FRICTION;
+    mo->air_hits = 0;                                /* (0x2E9D90, the setup's only) */
     face_default(mo);                                 /* Monsters::PostInit */
     memset(&mo->input, 0, sizeof mo->input);
     memset(mo->vel, 0, sizeof mo->vel);
@@ -1626,7 +1631,8 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             for (int p = 0; p < MOVES_PARTS; p++)
                 if (e->value >> p & 1)
                     mo->atk[p] = (struct MonAtk){ e->p[1], e->p[2], e->p[3], e->level, e->aflags, e->victims, 0,
-                                                  e->value, mo->atk_seq };
+                                                  e->value, mo->atk_seq, e->kind, e->side, e->lift, e->turn,
+                                                  { e->over[0], e->over[1], e->over[2], e->over[3] } };
         }
         if (getenv("RAMPAGE_TRACE"))
             printf("  attack %x %s (%g %g %g)\n", e->value, e->p[0] != 0 ? "on" : "off", e->p[1], e->p[2], e->p[3]);
@@ -2391,8 +2397,8 @@ static int mon_shape_spheres(const Mon *mo, float out[64][4])
  * spheres, each swept from its place last frame (0x100230 on the pair's offset then and now: the closest the two
  * came; unswept without last frame's), a pair meeting when that is within the radii; a victim within 40, not hidden,
  * not down, is hit by the closest pair of a part whose attack allows it (in front or behind, in its victims' mask,
- * not hit by that part's arming yet): that attack's damage and ReactionLevel, knocked its distance in its time away
- * from the attacker (0x2D6A50 as for the army's hits). No points, no team [R] */
+ * not hit by that part's arming yet): 0x2D6A50 with that attack's record (monster_blow_hit: its damage, its knock
+ * and reaction by look.c monster_blow). No points, no team [R] */
 static void monsters_fight(Viewer *v)
 {
     static float now[MONSTERS][64][4];
@@ -2438,12 +2444,9 @@ static void monsters_fight(Viewer *v)
             for (int q = 0; q < MOVES_PARTS; q++)      /* 0x2E33A0 on each of the record's parts: hit once */
                 if (atk->parts >> q & 1)
                     at->atk[q].hit |= 1u << j;
-            float l = sqrtf(dx * dx + dy * dy), sp_ = atk->knock_time > 0 ? atk->knock / atk->knock_time : 0;
-            float knock[3] = { l > 1e-4f ? dx / l * sp_ : 0, l > 1e-4f ? dy / l * sp_ : 0, 0 };
-            float from[3] = { at->mx, at->my, at->mz };
             char name[16];
             snprintf(name, sizeof name, "monster %d", a + 1);
-            monster_hit(vi, name, atk->damage, atk->level, knock, from);
+            monster_blow_hit(vi, at, atk, name);
         }
     }
     for (int a = 0; a < v->nmon; a++) {               /* this frame's places, for the next frame's sweep */
@@ -3435,27 +3438,66 @@ static int take_damage_level(const Mon *mo, float amount)
     return amount < (t ? t[0] : 3) ? 4 : amount < (t ? t[1] : 15) ? 0 : amount < (t ? t[2] : 30) ? 1 : 2;
 }
 
-/* 0x2D6A50: a hit on the monster: HP off, the reaction by its level and the knock */
-static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3])
+/* 0x2D6A50's start: no hit at 0 HP (+0xA4C), in a grab (+0xB9C4: no monster grabs another) or with cheat 986960
+ * (0x4D7E68 & 4); the interruptible byte (+0xAA2) is always set in play [R] */
+static int monster_hittable(const Mon *mo)
 {
-    if (mo->defeated || (mo->v->prof.cheats & PCH_4))   /* cheat 986960: no monster can be hit (0x2D6A50) */
-        return;
-    mo->hp = fmaxf(0, mo->hp - amount);
-    float heading = mo->heading / 57.2957795f, at[3] = { mo->mx, mo->my, mo->mz };
-    int slot = army_reaction_slot(level, knock, mo->mode, army_hit_behind(at, heading, from));
-    if (slot >= 0) {
-        mo->friction = monster_knock_shot(mo->vel, knock);   /* 0x2D9650: per axis the larger of knock and velocity */
-        mo->pending_slot = slot;
-    }
-    if (level == 1 || level == 2)                    /* the pad: 400 ms at level 1, 800 at 2 [R 0x2D8BE4, 0x2D8C14] */
+    return !mo->defeated && mo->hp > 0 && !(mo->v->prof.cheats & PCH_4);
+}
+
+/* 0x2D6A50's end, after the knock: the reaction's slot (0x2D7F38 .. 0x2D8BB0; set_reaction: not while defeated or
+ * shrunk below 0.3), the pad by the level (400 ms at 1, 800 at 2 [R 0x2D8BE4, 0x2D8C14]), the HP off (0x2D9364). At 0
+ * HP with no reaction asked (+0x110) the defeat: slot 67 React_Defeated, the velocity 0, +0xA59 (0x2D9518 ..
+ * 0x2D95F4); with one asked it plays, and the update's own test fells the monster once it has started and the
+ * monster is out of the air (mon_step, 0x2E68D0) [R] */
+static void monster_take(Mon *mo, const char *name, float amount, int level, int slot)
+{
+    if (slot >= 0)
+        set_reaction(mo, slot);
+    if (level == 1 || level == 2)
         mon_rumble(mo, level == 1 ? 400 : 800);
-    if (mo->hp <= 0) {                                /* 0x2D9364: at 0 HP slot 67, React_Defeated */
+    mo->hp = fmaxf(0, mo->hp - amount);
+    if (mo->hp <= 0 && mo->pending_slot < 0) {
+        set_reaction(mo, 67);
         mo->defeated = 1;
-        mo->pending_slot = 67;
         memset(mo->vel, 0, sizeof mo->vel);
     }
     if (getenv("RAMPAGE_TRACE"))
         printf("  hit by %s: %.1f, HP %.0f, slot %d\n", name ? name : "?", amount, mo->hp, slot);
+}
+
+/* 0x2D6A50 without an attack record (a shot, the roar, TakeDamage): the reaction by its level and the knock */
+static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3])
+{
+    if (!monster_hittable(mo))
+        return;
+    float heading = mo->heading / 57.2957795f, at[3] = { mo->mx, mo->my, mo->mz };
+    int slot = army_reaction_slot(level, knock, mo->mode, army_hit_behind(at, heading, from));
+    if (slot >= 0)
+        mo->friction = monster_knock_shot(mo->vel, knock);   /* 0x2D9650: per axis the larger of knock and velocity */
+    monster_take(mo, name, amount, level, slot);
+}
+
+/* 0x2D6A50 with the attacker's attack record (the fight, 0x2E35D0): the knock and the reaction by look.c monster_blow
+ * (the attacker's front and right are its +0x14 and +0x8 rows, its state's node its +0x10C), then the hit's end */
+static void monster_blow_hit(Mon *mo, const Mon *by, const struct MonAtk *atk, const char *name)
+{
+    if (!monster_hittable(mo))
+        return;
+    float h = by->heading / 57.2957795f, vh = mo->heading / 57.2957795f;
+    const MoveState *st = by->have_graph ? &by->graph.states[by->run.state] : NULL;
+    MonsterBlow b = { atk->level, atk->kind, atk->side, atk->knock, atk->knock_time, atk->lift, atk->turn,
+                      { atk->over[0], atk->over[1], atk->over[2], atk->over[3] }, { by->mx, by->my },
+                      { -sinf(h), cosf(h) }, { cosf(h), sinf(h) }, st && st->aim, by->mirror };
+    float at[3] = { mo->mx, mo->my, mo->mz }, from[3] = { by->mx, by->my, by->mz }, right[2] = { cosf(vh), sinf(vh) };
+    int slot = monster_blow(&b, at, right, mo->mirror, mo->mode, army_hit_behind(at, vh, from), &mo->air_hits,
+                            mo->vel, &mo->friction);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  blow by %s (kind %d, level %d): %s, velocity %.1f %.1f %.1f, friction %.1f\n", name, atk->kind,
+               atk->level, slot == MONSTER_BLOW_BLOCKED ? "none (past the air hits)" : "knocked", mo->vel[0],
+               mo->vel[1], mo->vel[2], mo->friction);
+    if (slot != MONSTER_BLOW_BLOCKED)
+        monster_take(mo, name, atk->damage, atk->level, slot);
 }
 
 /* the vehicles' frame (vehicle.c): what they see of the monster and the buildings, then what they did */

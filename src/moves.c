@@ -70,7 +70,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
                 ev->p[j] = rdf(d + o + 12 + 4 * j);
         } else if (ev->type == 6) {                  /* {6, at, ?, name} */
             ev->name = name_at(b, (int32_t)rd32(d + o + 12));
-        } else if (ev->type == 0 && o + 0x38 <= size) {   /* {0, at, i16 part[4], u16 count, flags, ...} */
+        } else if (ev->type == 0 && o + 0x74 <= size) {   /* {0, at, i16 part[4], u16 count, flags, ...}, 0x80 */
             int count = d[o + 0x10] | d[o + 0x11] << 8;
             for (int j = 0; j < count && j < 4; j++) {
                 int part = (int16_t)(d[o + 8 + 2 * j] | d[o + 9 + 2 * j] << 8);
@@ -83,6 +83,12 @@ int moves_read(const Bundle *b, MoveGraph *g)
             ev->level = (int32_t)rd32(d + o + 0x24);
             for (int j = 1; j < 4; j++)
                 ev->p[j] = rdf(d + o + 0x28 + 4 * j);
+            ev->side = (int32_t)rd32(d + o + 0x1C);
+            ev->kind = (int32_t)rd32(d + o + 0x20);
+            ev->lift = rdf(d + o + 0x38);
+            ev->turn = rdf(d + o + 0x3C);
+            for (int j = 0; j < 4; j++)
+                ev->over[j] = (int32_t)rd32(d + o + 0x64 + 4 * j);
         } else if (ev->type == 12) {                 /* {12, at, i16 slot, i16 effect, u16 on, u16 ground} */
             int fx = (int16_t)(d[o + 0xA] | d[o + 0xB] << 8);
             ev->value = (uint32_t)(int16_t)(d[o + 8] | d[o + 9] << 8);
@@ -179,6 +185,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
             s->fwd[0] = rdf(nd + 0x18);
             s->fwd[1] = rdf(nd + 0x1C);
             s->flags = rd32(nd + 0x2C);
+            s->aim = (nd[0x62] & 3) == 3;
             if (!(s->rate > 0))
                 s->rate = 1;
             s->clip = name_at(b, (int32_t)rd32(d + node + 0x78));

@@ -322,7 +322,8 @@ float monster_ground_follow(float z, float ground, int no_gravity)
     return no_gravity ? z : 0.3f * ground + 0.7f * z;
 }
 
-/* [R] 0x2D77D8 (0x2D6A50 on the ground; dist the attack record's +0x30 x its modifiers, time its +0x34) */
+/* [R] 0x2D77D8 (a blow's slide, monster_blow; dist the attack record's +0x30, time its +0x34); the spin's axis (0, 0, 1)
+ * and its rate 0 (+0xBD3C, +0xBD48) */
 float monster_knock_ground(float vel[3], const float dir[3], float dist, float time)
 {
     if (time <= 0)
@@ -333,7 +334,7 @@ float monster_knock_ground(float vel[3], const float dir[3], float dist, float t
     return v / time;
 }
 
-/* [R] 0x2D7558 (mode 1 or 2): dir x dist / time, z = tan(+0x38 of the attack record) x |that|, then a spin and +0xF4
+/* [R] 0x2D7558 (a blow's flight, monster_blow): dir x dist / time, z = tan(+0x38 of the attack record) x |that|, then a spin and +0xF4
  * = 50 (0x2D77C8). +0x38 (0, 1 or 1.8 in the data) goes to tanf (0x1576D8 at 0x2D7600) as it is: radians, so 1 lifts
  * the victim at tan 1 = 1.56 x its speed [R]. The spin (0x2D76B8 .. 0x2D77B4): +0xBD3C its axis, +0xBD48 = 4 pi n /
  * t and +0xBD4C that / t, n the record's +0x4C (over the dynamic scale while one is set), t the flight's time to the
@@ -356,6 +357,103 @@ float monster_knock_shot(float vel[3], const float knock[3])
         if (fabsf(knock[i]) > fabsf(vel[i]))
             vel[i] = knock[i];
     return MONSTER_FRICTION;
+}
+
+/* [R] 0x2D6A50 with an attack record (the attacker a monster, flag 0x40, a victim's sphere and the record given,
+ * 0x2D6D60 .. 0x2D6D88; otherwise the shot's path, 0x2D7928):
+ * - the way: the attacker's front, or, its state's node aiming (+0x62 has 1 and 2, 0x2D6E18), from the attacker to
+ *   the victim (as when the attacker's target handle +0xADC holds the victim, 0x2FF760, which nothing sets: LOOK_NOTES.md
+ *   "Tracking"); flat, 1 long, the front when shorter than 1e-3 (0x2D6F08 .. 0x2D6FC8); turned about z by +0x3C,
+ *   negated when the attacker plays mirrored (0x1015B0) [G: the VU0 micro program 0xE00 gives the angle's sine and
+ *   cosine (0x106750), so which way it turns is not in the ELF; +0x3C is 0 in all 685 attack records];
+ * - the damage and distance by the four records at +0xBA8C (+0x8, +0xC, matched by DamageType and the hit's side,
+ *   0x2D7060 .. 0x2D715C), the block at +0xBAAC and the distance's scale at +0xBAA8 (0x2D7160, 0x2D71D8): the clip
+ *   events 1, 20 and 19 fill them (0x2E7988, 0x2E7CD0, 0x2E7F40), and no clip of the 30 monsters has one: none here;
+ * - in the air (mode 1) the blow counts at +0xA9C, and with MONSTER_AIR_HITS counted it does nothing: no damage,
+ *   level 4, the velocity kept (0x2D7188 .. 0x2D71D4). Only the monster's setup clears +0xA9C (0x2E9D90), so of all
+ *   the blows a monster takes in the air in a block the first three land;
+ * - the knock (0x2D7208 .. 0x2D78EC): none, the velocity 0, with a distance within 0.001; a flight (0x2D7558) at
+ *   ReactionLevel 2, at 1 with the kind 2, or in modes 1 and 2; else a slide (0x2D77D8);
+ * - the reaction (0x2D7F38 .. 0x2D8BB0; a victim's sphere's body part would give a state of its own, its +0x8 at
+ *   0x2D7F84, but the load makes every part's -1 a none, 0x2F4098): level 4 none; by the victim's mode (0x431270):
+ *   - 0 and 5 by the kind: 4 24 + level (27 + level from behind), 3 18 + level (21 +), 1 0 + level (3 +; level 2
+ *     with the knock's up velocity within 0.001 71, 72), 0 6 + level (with a side: 9 + level, 12 + when the attacker's
+ *     right is against the victim's; from behind 15 +; 71 / 72 as 1), 2 30 + level, 3 more when the rights agree
+ *     (from behind 36 +); then +0x64 in front, else (and from behind) +0x68, when set;
+ *   - 1: 43 (45 from behind), 2: 42 (44); then +0x6C in front, else +0x70, when set;
+ *   - 4 (just landed): 54, or 55 when the ground's normal (+0xAF4, through MONSTER_DATA +0x9CC's node) points against
+ *     the monster's up, as the landing's 56 / 57 (0x2DC4F0) [G: the port's landing keeps no normal and takes 56: 54
+ *     here], and the knock halved (0x2D8AA8);
+ *   - 3: none.
+ * The hit's effect call (0x2F46C0 with the slot's level, at 0x2D7918) is an empty function. */
+int monster_blow(const MonsterBlow *b, const float at[2], const float right[2], int mirror, int mode, int behind,
+                 int *air_hits, float vel[3], float *friction)
+{
+    float d[2] = { b->fwd[0], b->fwd[1] };
+    if (b->aim) {
+        d[0] = at[0] - b->from[0];
+        d[1] = at[1] - b->from[1];
+    }
+    float l2 = d[0] * d[0] + d[1] * d[1];
+    if (l2 < 1e-6f) {
+        d[0] = b->fwd[0];
+        d[1] = b->fwd[1];
+    } else {
+        d[0] /= sqrtf(l2);
+        d[1] /= sqrtf(l2);
+    }
+    float t = b->mirror ? -b->turn : b->turn, c = cosf(t), s = sinf(t);
+    float k[3] = { d[0] * c - d[1] * s, d[0] * s + d[1] * c, 0 };
+    if (mode == 1) {                                 /* the juggle's limit */
+        if (*air_hits >= MONSTER_AIR_HITS)
+            return MONSTER_BLOW_BLOCKED;
+        (*air_hits)++;
+    }
+    if (fabsf(b->dist) <= 0.001f)
+        vel[0] = vel[1] = vel[2] = 0;
+    else if (b->level == 2 || (b->level == 1 && b->kind == 2) || mode == 1 || mode == 2)
+        *friction = monster_knock_air(vel, k, b->dist, b->time, b->lift);
+    else
+        *friction = monster_knock_ground(vel, k, b->dist, b->time);
+    int lv = b->level, side = b->side, slot;
+    if (lv == 4)
+        return -1;
+    if (b->mirror && (side == 1 || side == 2))       /* the attacker mirrored: the side the other (0x2D6DC0) */
+        side = 3 - side;
+    float r = (side == 2) != (mirror != 0) ? -1.0f : 1.0f;   /* the victim's right, turned (0x2D80E0, 0x2D8118) */
+    float rights = (b->right[0] * right[0] + b->right[1] * right[1]) * r;
+    int low = lv == 2 && vel[2] <= 0.001f;
+    switch (mode) {
+    case 0:
+    case 5:
+        switch (b->kind) {
+        case 4: slot = (behind ? 27 : 24) + lv; break;
+        case 3: slot = (behind ? 21 : 18) + lv; break;
+        case 2: slot = (behind ? 36 : 30) + (rights > 0 ? 3 : 0) + lv; break;
+        case 1: slot = low ? (behind ? 72 : 71) : (behind ? 3 : 0) + lv; break;
+        case 0: slot = low ? (behind ? 72 : 71) : (behind ? 15 : side == 0 ? 6 : rights < 0 ? 12 : 9) + lv; break;
+        default: return -1;
+        }
+        if (!behind && b->over[0] != MONSTER_BLOW_NONE)
+            slot = b->over[0];
+        else if (b->over[1] != MONSTER_BLOW_NONE)
+            slot = b->over[1];
+        return slot;
+    case 1:
+    case 2:
+        slot = mode == 1 ? (behind ? 45 : 43) : (behind ? 44 : 42);
+        if (!behind && b->over[2] != MONSTER_BLOW_NONE)
+            slot = b->over[2];
+        else if (b->over[3] != MONSTER_BLOW_NONE)
+            slot = b->over[3];
+        return slot;
+    case 4:
+        for (int i = 0; i < 3; i++)
+            vel[i] *= 0.5f;
+        return 54;
+    default:
+        return -1;
+    }
 }
 
 /* ---- 4. the tail ---------------------------------------------------------------------------------------------- */

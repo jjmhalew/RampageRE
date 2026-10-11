@@ -102,13 +102,37 @@ void monster_air_velocity(float vel[3], float pos[3], float dt, int no_gravity);
  * (none while gravity is off), at once within 0.001 */
 float monster_ground_follow(float z, float ground, int no_gravity);
 
-/* the knocks of a hit (0x2D6A50). On the ground: the monster slides `dist` in `time` and stops: the velocity
+/* the knocks of a hit (0x2D6A50). A blow's slide: the monster slides `dist` in `time` and stops: the velocity
  * dir x 2 dist / time, the returned friction 2 dist / time^2 (keep it until the next knock). dir 1 long. */
 float monster_knock_ground(float vel[3], const float dir[3], float dist, float time);
-/* in the air (mode 1 or 2): dir x dist / time, up tan(angle) x that speed; friction back to MONSTER_FRICTION */
+/* a blow's flight: dir x dist / time, up tan(angle) x that speed; friction back to MONSTER_FRICTION */
 float monster_knock_air(float vel[3], const float dir[3], float dist, float time, float angle);
 /* a shot's knock (army, 0x2D9650): per axis the larger of the knock and the velocity; friction MONSTER_FRICTION */
 float monster_knock_shot(float vel[3], const float knock[3]);
+
+/* a monster's blow on another monster: 0x2D6A50 with the attacker's attack record (the fight, 0x2E35D0; the clip's
+ * attack event, docs/FORMAT_MONSTER.md "Clip events" type 0) */
+typedef struct {
+    int level, kind, side;                           /* the record's ReactionLevel (+0x24), the reaction's kind (+0x20:
+                                                        1 the street's, 3 from above, 4 from below, 0 and 2 by the
+                                                        side; no attack has 0 or 2) and its side (+0x1C, 0 in all) */
+    float dist, time, lift, turn;                    /* +0x30 the knock's distance, +0x34 its time, +0x38 the lift's
+                                                        angle, +0x3C the knock's turn about z (0 in all) */
+    int over[4];                                     /* +0x64 / +0x68 the slot in front / behind on the ground, +0x6C /
+                                                        +0x70 in the air; MONSTER_BLOW_NONE none */
+    float from[2], fwd[2], right[2];                 /* the attacker: its place, its front and its right (the +0x14 and
+                                                        +0x8 rows of its matrix) */
+    int aim, mirror;                                 /* its state's node aims the blow (+0x62 has 1 and 2), it plays
+                                                        mirrored (+0x7DA1) */
+} MonsterBlow;
+#define MONSTER_BLOW_NONE 74                         /* an override slot left empty (as the record's default, 0x2D6B38) */
+#define MONSTER_BLOW_BLOCKED (-2)                    /* monster_blow: no hit at all (no damage, knock or reaction) */
+#define MONSTER_AIR_HITS 3                           /* the blows a monster takes in the air (+0xA9C, 0x2D7198) */
+/* the blow on the victim (its place at[2], right[2], mirrored, its mode and whether the attacker is behind it): its
+ * velocity and friction knocked; returns the reaction slot (-1 none) or MONSTER_BLOW_BLOCKED for a blow past the
+ * air hits (*air_hits counts the blows taken in the air, mode 1) */
+int monster_blow(const MonsterBlow *b, const float at[2], const float right[2], int mirror, int mode, int behind,
+                 int *air_hits, float vel[3], float *friction);
 
 /* ---- 4. the tail ---------------------------------------------------------------------------------------------- */
 

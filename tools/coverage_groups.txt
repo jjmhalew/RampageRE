@@ -296,7 +296,7 @@ engine    0x2D34C0-0x2D4A80  Monster: its getters and plumbing (main.c Mon, move
 engine    0x2D4A80-0x2D4C40  Monster fireWeapon (army.c army_mon_weapon_fire, from Monsters.bsf's clip event) / stopWeapon (no script calls it)
 engine    0x2D4C40-0x2D6680  Monster: weapons' setup (read), climbing, the hit search (climb.c, collide.c, main.c)
 engine    0x2D6680-0x2D6880  the monster's draw matrix: its building's sway (city.c monster_sway), the hair's scale and offset (city.c skin_item)
-engine    0x2D6880-0x2E7988  Monster: the hit's mode cases (army.c army_reaction_slot), script getters, the update: main.c, look.c, climb.c
+engine    0x2D6880-0x2E7988  Monster: the hit's mode cases (army.c army_reaction_slot; a monster's blow look.c monster_blow), script getters, the update: main.c, look.c, climb.c
 unused    0x2E7988-0x2E7CC0  clip events of types 1, 3, 4 (0x2E7840's cases): no monster's clips have them (FORMAT_MONSTER.md "Clip events")
 engine    0x2E7CC0-0x2E7E30  clip events 5/20/21 (script calls), 22/23, 6 (sound), 7, 9: main.c clip_event, sound.c
 unused    0x2E7E30-0x2E7E90  clip events of types 10, 11: no monster's clips have them

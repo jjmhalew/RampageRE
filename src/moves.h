@@ -40,6 +40,9 @@ typedef struct {                                     /* a timed event of the sta
     uint32_t aflags, victims; int level;             /* 0: its flags (+0x14: 2 victims in front, 4 behind), the
                                                         monsters it may hit (+0x18: bits 0 .. 3 the slots, 4 objects)
                                                         and its ReactionLevel (+0x24) (0x2E35D0) */
+    int kind, side; float lift, turn; int over[4];   /* 0: what a blow on a monster does (0x2D6A50, look.c
+                                                        monster_blow): +0x20 the reaction's kind, +0x1C its side,
+                                                        +0x38 the lift, +0x3C the turn, +0x64 .. +0x70 its slots */
     /* 12 (0x2F5800): an effect of the list +0xA90 on (p[0] 1) or off (0) in a slot: name the effect (index +0xA),
      * value the slot (+0x8, also its node, moves_fx_node), aflags +0xE (set: the effect kept on the ground, 0x2918D0;
      * no clip has it) */
@@ -55,6 +58,9 @@ typedef struct {
     float tail;                                      /* node +0x10: the tail's springs' weight (look.c tail_blend):
                                                         1 in Ground_Walk (and the Jump_Air_Borne_Profile pair of
                                                         some), 0 in every other state */
+    int aim;                                         /* node +0x62 has 1 and 2: its blows knock the victim away from
+                                                        the attacker, not along its front (0x2D6E18; Side_L_Punch,
+                                                        and some monsters' Ground_Punch .. _3) */
     MoveTrans *trans; int ntrans;
     MoveEvent *events; int nevents;                  /* in time order */
 } MoveState;

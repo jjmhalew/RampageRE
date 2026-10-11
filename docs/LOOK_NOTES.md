@@ -150,10 +150,18 @@ F (+0xF4) is 50 at spawn (0x2E98C0). A hit (0x2D6A50) sets it:
 
 | | velocity | F |
 |---|---|---|
-| a monster's attack, the victim on the ground (0x2D77D8) | dir × 2d / T | 2d / T²: it slides d in T and stops |
-| the same in the air, modes 1 and 2 (0x2D7558) | dir × d / T, z = tan(attack +0x38) × that speed (tanf 0x1576D8 of the record's 0, 1 or 1.8 as radians), a spin of 4π n / t, n the record's +0x4C, t the time to the ground (0x2D76B8 .. 0x2D77B4; n is 0 in all 2014 attack events of the 30 monsters: none) | 50 (0x2D77C8) |
+| a monster's blow that slides (0x2D77D8) | dir × 2d / T | 2d / T²: it slides d in T and stops |
+| a monster's blow that flies: ReactionLevel 2, level 1 with the record's +0x20 = 2, or the victim in modes 1 and 2 (0x2D7224 .. 0x2D7260, then 0x2D7558) | dir × d / T, z = tan(attack +0x38) × that speed (tanf 0x1576D8 of the record's 0, 1 or 1.8 as radians), a spin of 4π n / t, n the record's +0x4C, t the time to the ground (0x2D76B8 .. 0x2D77B4; n is 0 in all 2014 attack events of the 30 monsters: none) | 50 (0x2D77C8) |
+| a monster's blow without a distance (d within 0.001, 0x2D7890) | 0 | kept |
 | a shot's knock (army, 0x2D7928) | each axis the knock's if larger in size | 50 (0x2D79E0) |
 
-d is the attack record's +0x30 (15, 10; times its modifiers), T its +0x34 (0.2 … 0.4) (FORMAT_MONSTER.md "Clip
-events", type 0). `setVel` / `addVel` (0x2E74F0, 0x2E7330) do not touch F, so a knocked monster slides with the F of
+d is the attack record's +0x30 (0, 6 … 16), T its +0x34 (0.2 … 0.8) (FORMAT_MONSTER.md "Clip events", type 0).
+A blow replaces the whole velocity, the victim's own (a jump's) included. Its dir is the attacker's front (the +0x14
+row of its matrix, the node's +0x20 / +0x24 = (0, 1) in all 5284 states), or the way from the attacker to the
+victim when the attacker's state node has +0x62 bits 1 and 2 (0x2D6E18: Side_L_Punch of all 30, Ground_Punch ..
+Ground_Punch_3 of some; or the target handle holds the victim, never), made flat and 1 long, then turned about z by
+the record's +0x3C (0 in all). In mode 4 (landed, or down) the reaction halves it (0x2D8AA8). The scales of d at
++0xBA8C (+0xC) and +0xBAA8 (+0x8) come from clip events 1 and 19 that no monster has [R]. The rest of the blow (the
+air hits, the reactions) is in MULTIPLAYER_NOTES.md "Monster against monster"; here look.c `monster_blow`, from
+main.c `monster_blow_hit`. `setVel` / `addVel` (0x2E74F0, 0x2E7330) do not touch F, so a knocked monster slides with the F of
 its last hit. Walking adds the stick's own velocity (+0xA68) on top and is not subject to this friction.

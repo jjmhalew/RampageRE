@@ -110,9 +110,27 @@ set [R]:
   0 .. 1; a pair meets within the radii's sum, each × its monster's +0xA78 (else 1; the attacker's last place
   also by its +0x688), and the closest pair is kept (after a bounding test of the two sweeps, 0x102DA0) [R]; as here
   (main.c `monsters_fight`, `seg_dist2`; the radii unscaled);
-- the hit: 0x2D6A50(victim, …, level = +0x24, damage = +0x2C (5 a punch, 20 the kick)), the reaction by
-  army_reaction_slot's table, the knock: the victim slides +0x30 in +0x34 s on the ground; HP −= damage, at 0 slot 67;
-  ignored while the victim is not interruptible, held, at 0 HP, or with cheat flag 4 (0x4D7E68);
+- the hit: 0x2D6A50(victim, DamageType = +0x28 (Blunt 4, Unresistable 11), the attacker, the victim's sphere, the
+  point, no knock, level = +0x24, damage = +0x2C (5 a punch, 20 the kick), +0x20, the record) [R]; ignored while the
+  victim is not interruptible, held, at 0 HP, or with cheat flag 4 (0x4D7E68). With a record and a monster attacker
+  it takes its own path (0x2D6D78 .. 0x2D78EC, look.c `monster_blow`, LOOK_NOTES.md "The knocks"), not the shot's:
+  - the way: the attacker's front, or from it to the victim when the attacker's state node has +0x62 bits 1 and 2
+    (Side_L_Punch; Ground_Punch .. _3 of 7 monsters), flat; turned about z by +0x3C (0 in all);
+  - in the air (mode 1) a monster takes three blows at most: +0xA9C counts them and only the setup (0x2E9D90) clears
+    it, so the fourth and later in the block do nothing at all (no damage, reaction or knock) (0x2D7188);
+  - the knock: none (the velocity 0) without a distance (+0x30 0, 247 of the 685 armed records); a flight (d / T, up
+    tan(+0x38) of that) at level 2, at level 1 with +0x20 = 2, or on a victim in modes 1 and 2; else a slide (2d / T,
+    friction 2d / T²: d in T);
+  - the reaction by the victim's mode and the record's kind +0x20 (1 535 records, 4 90, 3 60): on the street
+    (modes 0, 5) 1: 0 / 3 + level (71 / 72 at level 2 without lift), 3: 18 / 21 + level (React_Ground_Overhead),
+    4: 24 / 27 + level, then +0x64 in front / +0x68 behind (8 and 17 in the 60 records of Ground_Punch_3 and
+    Ground_Punch_Up: React_Ground_Knockdowns / _Back); in the air 43 / 45 (mode 1), 42 / 44 (mode 2), +0x6C / +0x70
+    (none set); just landed or down (mode 4) 54 (George's Ground_Rampage: the taunt) with the knock halved; 3 none;
+  - the modifiers of the damage and the distance (four records at +0xBA8C, +0xBAA8, the block +0xBAAC) come from clip
+    events 1, 19 and 20, which no monster has: never; the victim's body part's own reaction (part +0x8) is −1 in all;
+  - then as every hit: the reaction slot unless the victim is shrunk below 0.3 (+0xA78), the pad, HP −= damage; at
+    0 HP the defeat (slot 67) only when no reaction was asked (+0x110), else the update's test fells it once out of
+    the air (0x2D9518, 0x2E68D0);
 - `Monsters::onLightHit` only changes the face; the attacker's follow-up slots (+0x50 / +0x54 / +0x58 by the
   result) when it is interruptible, +0xA59 clear and its scale ≥ 0.3;
 - 0x2E33A0 clears the victim's bit: **each attack hits each monster once**. Each bone's 0x1C bytes are the record
@@ -195,7 +213,9 @@ pays +0x190 as well. Everything else (army, people, vehicles) goes through addSt
 - **director.c**: `DG_DESTROY`, `dir_ai_destroy`, `dir_ai_on_hit`, `dir_ai_on_mount`, `dir_ai_avoid`; the host fills a
   `DirBotView` each frame (the buildings, the monsters, the bot itself, the climbing code's answers).
 - **game.c**: BeginBlockNI's GE_AI says `b = 1` for destroyBuildings.
-- **moves.c**: an attack event keeps its record's flags, victims and level for the monsters' fight.
+- **moves.c**: an attack event keeps its record's flags, victims, level, kind, side, lift, turn and override slots
+  for the monsters' fight, a state its node's aim (+0x62); **look.c** `monster_blow` is the blow's knock and reaction,
+  main.c `monster_blow_hit` the call (and `Mon.air_hits` the count +0xA9C).
 - **people.c**: `people_hit` takes the monster; its events say which monster they are about.
 - **climb.c**: the place check (0x2DDC40) counts the other monsters (−3) [R]: one on a face by its mount point
   (+0xC634), one off a face by its place and only while the asking monster is off a face too, within 8.2 across and
@@ -215,7 +235,8 @@ Stand-ins and gaps:
 - Players 3 and 4 are the port's own: the PS2's NumPlayers box offers 1 or 2, bots included (SHELL_NOTES.md). Here
   they have no keys and are made AI with the bots' goal.
 - Here (main.c `MonAtk`) one record per body part, a bone taking its newest armed part's; the hit marks every part
-  of the record. The follow-up slots are not ported (no attack has one). Needing nothing: the interruptible flag (+0xAA2: set to 1 by every clip's start,
+  of the record. The follow-up slots are not ported (no attack has one). The landing's ground normal is not kept, so
+  a blow in mode 4 takes 54, never 55 (the landing's 56 likewise) [G]. Needing nothing: the interruptible flag (+0xAA2: set to 1 by every clip's start,
   0x2E7F70; cleared only by a clip event no monster has, 0x2E7CC0, or the binding `setInterruptabe` (id 88,
   0x2AB258), which no script calls [R]: always set in play), and held / holder, only ever cleared.
 - The bots' rand01 is the lagged Fibonacci 0x106950 on the world's one state (gWorld +0x82C, seeded by 0x1069C0 from
