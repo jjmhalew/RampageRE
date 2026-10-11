@@ -21,7 +21,7 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0x004..0x128 | | 74 × i32 | event slots: the start list (+0xA5C) of each event, the defaults for every mode |
 | 0x12C..0x134 | | 3, 15, 30 (all 30) | f32 × 3: TakeDamage's reaction level by the amount (0x2D9680): below the first 4 (none), below the second 0, the third 1, else 2 |
 | 0x138 | | 200 | f32 the most HP: 0x2D9374 clamps a hit to it, addStats (0x2C51A0) and the respawn (0x2D3930) fill to it. 200 for most; Amanda and Wally 250, Jack 180, Jill 170, Marco 150, Snapper 320 [R] |
-| 0x13C..0x9C0 | | | not decoded (0x13C .. 0x168: twelve f32 1.0, as many as the DamageTypes [G: what they are]; the hit, 0x2D6A50, reads none of them) |
+| 0x13C..0x9C0 | | | not decoded (0x13C .. 0x168: twelve f32 1.0, as many as the DamageTypes, read by nothing [R]: no load at those offsets and no address built from +0x13C in the monster's code; the loads elsewhere at such offsets are other structs' (the effects, the camera, the foot objects from 0x33D820 on)) |
 | 0x9C4..0xA2C | | | name indices (−1 = none), settings (f32 0x9F4..0xA10) |
 | 0xA30, 0xA34, 0xA38 | | | names of the skeleton, the mesh and the cloth model |
 | 0xA44 / 0xA48 | collision spheres | 11 × 24 at 0xAA8 | f32[3] centre in the bone's frame, f32 (not traced), f32 radius, i16 bone, i16 body part; 0x2DA9E0 places them: bone matrix, the monster's scale (+0xA78), its matrix |
@@ -167,8 +167,9 @@ The monster's effect record (monster +0x7DFC, FOOTSTEP_NOTES.md) begins with 32 
    place is scaled by the dynamic scale (+0xA78) when +0xA74 is set. 0x292010 → 0x292050 → 0x291A20 makes a
    FollowEffect on the monster with that bone and that matrix as its offset; it follows the bone each frame
    (0x290F60 → 0x291440: the offset × the object's node, vtable +0x4C) and keeps the bone it started on. A missing
-   definition leaves the slot empty. The new FollowEffect gets +0x4C |= 0x80 (0x2F5A28) [G: no reader of that
-   world-object bit was found].
+   definition leaves the slot empty. The new FollowEffect gets +0x4C |= 0x80 (0x2F5A28) [G: no code tests +0x4C
+   against 0x80 and no query's mask found holds it (the shots' 4, 0x2000, 0x2040: 0x2953E0, 0x33B770); only a mask
+   from a script could].
 Nothing else touches the slots: no clip start, death or respawn; the record's release (0x2F5AF0, from the Monster's
 destructor 0x2EACA0) frees the definitions, not the slots. A one-shot ends by itself; a looping one (`Charged_Punch`,
 `Roar_Weapon`) burns until its slot's next event, past its clip when that is cut short (`Front_Charge_Punch` turns it
@@ -189,8 +190,10 @@ the mantle's `footfall_Big`). Of the 862 events of the 30 monsters 583 are on an
 The port: moves.c reads the nodes (`MoveGraph.fxnode`, `moves_fx_node`) and the events (the effect's name, the slot,
 on); main.c `mon_fx_event` starts and stops them in `Mon.fx_slot` (fx.c `fx_spawn_frame`, `fx_stop`) and
 `mon_fx_follow` places them each frame (`fx_place`) on the bone as drawn (a mirrored monster's bone is the other
-side's node reflected, `scene_monster_node`). A new monster in the slot stops the old one's [G: the game's old
-Monster goes and its FollowEffects lose their object].
+side's node reflected, `scene_monster_node`). A new monster in the slot stops the old one's, for the viewer's
+monster swap; in the game the old Monster goes and its FollowEffects lose their object, keep their own last matrix
+(0x290F60 → 0x291440) and run on: they would shut down only with +0xF4 bit 8 (0x291238), which 0x291A20 never sets
+[R].
 
 The monster's event player (+0 the monster, +0x4 the node, +0x8 the time, +0xC the next event, +0x10 the count)
 starts with the clip (0x2F45D0, from the monster's command): at the clip's first event, the time where the clip
@@ -277,8 +280,11 @@ in this clip, whether it is coming down from the top.
   up or down of the point), any other (flag 0x40000) an obstacle when its shape meets the box (0x2801A0: −2), −9 out
   of the camera's reach (not asked of an AI, +0x108). A template's `Flags` with `IsObstacle` sets 0x40000 (0x335ED0),
   as the electric side signs (`DefElectricSideSignProps`) have, so climbing into one is `hitElectricSign` (−2) and
-  the clip `React_Side_L_Zap`, whose `faceAnim` plays `Expression_Zap`. climb.c `place_ok` (the other monsters' grid
-  objects taken as their collision boxes [G]).
+  the clip `React_Side_L_Zap`, whose `faceAnim` plays `Expression_Zap`. climb.c `place_ok`; the other monsters'
+  grid objects as the box query (0x282D70) sees a WCISpheres: half sizes r, r, r (its bound's radius, 0x29A918 ..
+  0x29A924) turned by |M| (0x101C20) about the bound's centre (main.c `climber`, `mon_shape`) [R]; the query's
+  sphere test before the box (0x282EE4) is not made [G: it would need the query's sphere in climb.c; only with more
+  than one monster].
 - **Getting on**: `prepareToMount` takes the point canMount chose, `mountBuilding` mounts it (and
   `transitionToMount(t)` slides the monster onto it over t seconds, root motion still moving the start).
 - **On the face** (each frame in mode 5, 0x2D5870, after the root motion): the monster faces the wall (+y at the

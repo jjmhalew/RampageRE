@@ -1303,10 +1303,14 @@ static float players_mid_x(const Viewer *v)
 }
 
 /* the monster as the climbing code sees it: the camera's reach (-9) is measured from the players' middle, and is
- * not asked of an AI monster (0x2DDC40); the other monsters in the world (their objects in the grid: the box of
- * their collision spheres taken as their collision box [G]) */
+ * not asked of an AI monster (0x2DDC40); the other monsters in the world: their objects in the grid as the box query
+ * (0x282D70) sees them, a WCISpheres' half sizes r, r, r (its bound's radius, 0x29A918 .. 0x29A924) turned by |M|
+ * (0x101C20) about the bound's centre [R]; without a shape the box of their radius and height. Still different: the
+ * query's sphere test before the box (0x282EE4: the query box's bounding sphere against the bound), which climb.c's
+ * box test does not make [G: it would need the query's sphere in climb.c; only with more than one monster] */
 static float mon_radius(const Mon *mo);
 static float mon_half_height(const Mon *mo);
+static void mon_shape(const Mon *mo, float c[3], float *r);
 /* isHoldlingEdible: hasGrabbedObject is 2 (0x2E5590) when the held object has flag 0x80000 [R]: the people and the
  * army's soldiers (actors), the vehicles Vehicle.bsf flags Animates or Edible (its Construct's setFlags) and the
  * parade's carts and bikers (GroundCart.bsf, parade.c's PAF_EDIBLE); no rail object, parked car or army vehicle
@@ -1338,13 +1342,22 @@ static Climber climber(Mon *mo)
         Mon *o = &mo->v->mon[k];
         if (o == mo || !o->have_graph || !mon_in(o))
             continue;
-        float r = mon_radius(o), hh = mon_half_height(o), *pt = c.other[c.nother].pt;
+        float r = mon_radius(o), hh = mon_half_height(o), *pt = c.other[c.nother].pt, sc[3], sr;
         if (o->mount.mounted)
             memcpy(pt, o->mount.at.pt, sizeof o->mount.at.pt);
         else {
             pt[0] = o->mx; pt[1] = o->my; pt[2] = o->mz;
         }
         float lo[3] = { o->mx - r, o->my - r, o->mz }, hi[3] = { o->mx + r, o->my + r, o->mz + 2 * hh };
+        mon_shape(o, sc, &sr);
+        if (sr >= 0) {                               /* its WCISpheres' box, turned with it */
+            float h = o->heading / 57.2957795f, e[3] = { sr * (fabsf(cosf(h)) + fabsf(sinf(h))), 0, sr };
+            e[1] = e[0];
+            for (int k = 0; k < 3; k++) {
+                lo[k] = sc[k] - e[k];
+                hi[k] = sc[k] + e[k];
+            }
+        }
         memcpy(c.other[c.nother].lo, lo, sizeof lo);
         memcpy(c.other[c.nother].hi, hi, sizeof hi);
         c.other[c.nother++].mounted = o->mount.mounted;
@@ -1808,7 +1821,9 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::throwObject")) {  /* (eat, x, y, z) (0x2D9DC0): eaten, or smashed away */
         /* [R 0x2D9DC0] throwObject(vel, 0, eat): the velocity in the monster's frame, turned by its matrix (x
-         * mirrored with it) [G: and by its +0x2560 angle, taken as 0] */
+         * mirrored with it) and by its +0x2560 angle, always 0: the head animator's +0x68 (the animator at +0x24F8,
+         * the animation player's +0x1A10, set by 0x3022DC), zeroed by 0x2FB734 and written only with one head bone
+         * (0x2FC2D4); all 30 monsters have two (MONSTER_DATA +0xA14) [R] */
         float h = mo->heading / 57.2957795f, lx = mo->mirror ? -e->p[1] : e->p[1];
         float vel[3] = { cosf(h) * lx - sinf(h) * e->p[2], sinf(h) * lx + cosf(h) * e->p[2], e->p[3] };
         if (mo->held_unit >= 0 && v->army) {
@@ -2257,6 +2272,17 @@ static int mon_spheres(const Mon *mo, float out[][4], int max)
     return n;
 }
 
+/* the monster's WCISpheres bound (0x29A880: sphere 0 merged with the rest, over the entries 0x2DA9E0 fills, their
+ * radii x the dynamic scale, 0x2DAB60): r -1 without a shape [R] */
+static void mon_shape(const Mon *mo, float c[3], float *r)
+{
+    float sp[64][4], s = mo->scale > 0 ? mo->scale : 1;
+    int n = mon_spheres(mo, sp, 64);
+    for (int i = 0; i < n; i++)
+        sp[i][3] *= s;
+    army_monster_shape((const float (*)[4])sp, n, c, r);
+}
+
 /* the armed part whose attack the collision shape i's bone holds (the newest arming of a part with that bone), or
  * -1 unarmed */
 static int shape_part(const Mon *mo, int i)
@@ -2447,7 +2473,7 @@ static int take_damage_level(const Mon *mo, float amount);
  *   round(10 / 2.5) dents and the cell's 2 HP. The roar cracks the buildings beside it */
 static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c[3])
 {
-    float r = w->radius, amount = w->dps, sp[64][4], mc[3], mr;
+    float r = w->radius, amount = w->dps, mc[3], mr;
     char name[16];
     snprintf(name, sizeof name, "monster %d", mo->slot + 1);
     int hit = 0;
@@ -2456,7 +2482,7 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
         if (vi == mo || !vi->have_graph || !mon_in(vi) || mon_in(vi)->hidden)
             continue;
         float sc[3], sr;
-        army_monster_shape((const float (*)[4])sp, mon_spheres(vi, sp, 64), sc, &sr);
+        mon_shape(vi, sc, &sr);
         float d[3] = { sc[0] - c[0], sc[1] - c[1], sc[2] - c[2] };
         if (sr < 0 || d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (r + sr) * (r + sr))
             continue;
@@ -2467,7 +2493,7 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
         monster_hit(vi, name, amount, w->level >= 0 ? w->level : take_damage_level(vi, amount), knock, from);
         hit++;
     }
-    army_monster_shape((const float (*)[4])sp, mon_spheres(mo, sp, 64), mc, &mr);
+    mon_shape(mo, mc, &mr);
     if (mr < 0) {                                    /* without a shape its place (+0x2C, 0x2BC390) */
         mc[0] = mo->mx;
         mc[1] = mo->my;
@@ -4190,7 +4216,8 @@ static int mon_fx_frame(Mon *mo, int node, float pos[3], float R[3][3])
  * monster, the bone and offset of the slot's node, 0x2DACA0, the other side's while mirrored, kept for its life).
  * Nothing else frees a slot (no clip start, death or respawn touches +0x0 .. +0xFF): a one-shot ends by itself, a
  * looping one (Charged_Punch, Roar_Weapon) until its slot's next event, past its clip if that is cut short.
- * Not ported: the started FollowEffect's +0x4C |= 0x80 (0x2F5A28) [G: no reader of that world-object bit found] */
+ * Not ported: the started FollowEffect's +0x4C |= 0x80 (0x2F5A28) [G: no code tests +0x4C against 0x80 and no
+ * query's mask found holds it (the shots' 4, 0x2000, 0x2040: 0x2953E0, 0x33B770); only a mask from a script could] */
 static void mon_fx_event(Mon *mo, const MoveEvent *e)
 {
     Viewer *v = mo->v;
@@ -4239,8 +4266,10 @@ static void mon_fx_follow(Mon *mo)
     }
 }
 
-/* a new monster in the slot: the old one's slot effects shut down [G: the game's old Monster goes, 0x2EACA0 ->
- * 0x2F5AF0 releases the record's definitions but not the slots; its FollowEffects lose their object] */
+/* a new monster in the slot: the old one's slot effects shut down, for the viewer's monster swap. In the game the
+ * old Monster goes (0x2EACA0 -> 0x2F5AF0 releases the record's definitions but not the slots): its FollowEffects
+ * lose their object, keep their own last matrix (0x290F60 -> 0x291440) and run on; they would shut down only with
+ * +0xF4 bit 8 (0x291238), which 0x291A20 never sets [R] */
 static void mon_fx_stop_all(Mon *mo)
 {
     for (int k = 0; k < MON_FX_SLOTS; k++)
