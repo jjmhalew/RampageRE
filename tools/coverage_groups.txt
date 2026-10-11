@@ -138,7 +138,7 @@ engine    0x1D4B10-0x1D5470  Localization: .loc tables, the language, lookups; h
 platform  0x1D5470-0x1D57D0  the movie decoder's buffers (from 0x1AE150, 0x1A67E8, 0x1A66E0); movie.c
 engine    0x1D57D0-0x1DB940  ClothInstance: destructor, draw scale/centre setters, the ClothRenderer ctor; cloth.c (the rest is ported)
 unused    0x1DB940-0x1E10F0  cloth built from a loose file (0x19AE80 -> 0x1DB0B0 when 0x10C0E0 finds one): springs, bends; the 44 cloths are bundled
-engine    0x1E10F0-0x1E1240  vector maths (a point against a segment [G]), also used by ParticleSystemFx; C maths in fx.c / cloth.c
+engine    0x1E10F0-0x1E1240  a box's bounding sphere (the centre, the radius squared; -1 for an empty box), for ParticleSystemFx (0x1F1DC0, 0x1F3150; also the unused cloth builder 0x1E0010): C maths in fx.c
 unused    0x1E1240-0x1E1750  the loose-file cloth builder's helpers (from 0x1DF500, 0x1E0010 only)
 unused    0x1E1750-0x1E1E60  the cloth props text reader (BEGIN_CLOTH_PROPS): ClothProps files (Cloth_Test_Props.txt) are not on the disc
 engine    0x1E1E60-0x1E1FF0  cloth part defaults before a props file (the entry's own settings hold) and ClothEntry's destructor; cloth.c

@@ -293,8 +293,9 @@ key's index into the table 0x3F5990; `Glass_Small` 0x33 is never asked for) [R]:
   `Wall_Large` (0x36). A cell flagged 0x400 (FloorFlags, "hidden behind a front-row building") gets none at the first
   crack and at 0 (not kept in building.c: Chicago's 447 FloorFlags lists are all 0). One hit can give two or three.
 - the destroyed front's crack (0x2BD7D0): a cell it raises to MinCollapseCrackLevel gets the first crack's effect when
-  a random number mod (gWorld +0x28 + 1) is 0 [G: that member (0x4D17C8, set through the world's vtable +0x14,
-  0x284AF0) taken as 0, so always];
+  the world's Park-Miller number (gWorld +0x828, 0x106BD0) mod (gWorld +0x28 + 1) is 0 (0x2BDAA8, 0x2BDB68): that
+  member is 1 (the world's init 0x285A20, from RWorld's 0x2B7800; its setter, vtable +0x14 0x284AF0, has no caller),
+  so a cell gets it half the time [R] (`src/building.c` `crack_step`);
 - a floor's collapse (0x2BAE70) none per cell: `Floor_Large` for the floor (0x2BD610, 0x2BD7D0);
 - a hit of kind 4 `Wall_Small` at the hit point (0x2BC88C, through 0x30FCB0; not ported).
 They are placed in the cell's face frame (0x30F710: the matrix of the face from 0x430F10, the front's the identity) at
@@ -337,7 +338,9 @@ offset [G: for GEQUAL's equal-depth pass; how two coplanar draws round on the GS
 - Not ported because no effect uses them: the Streams modes, RenderAsDatapoints (emitter 0x4000), the orbit graphs
   (fx.bdp's 287 effects and the menus' have none of them).
 - Which update an emitter gets (0x21AD40 matches a descriptor of its features against the 3 templates at 0x4CAE10,
-  the draw 0x2213F0 against the 4 at 0x4CAF80): both tables are filled at start-up by code that names them through no
-  address in the ELF. The update variants compute the same; they differ in the draws: 0x216470 picks the texture,
+  the draw 0x2213F0 against the 4 at 0x4CAF80; the counts 3 and 4 are .data, gp −0x7DFC / −0x7DF8): both tables are
+  bss, and nothing in the ELF writes them (no address into 0x4CAE10 .. 0x4CB140 but the two matchers' and the draws'
+  reads); the update's pointers to member are constants at 0x3B2630 / 0x3B2640 / 0x3B2650 (0x20EFD0, 0x213F30,
+  0x216470), which nothing reads either, so the descriptor that goes with each is not in the code. The update variants compute the same; they differ in the draws: 0x216470 picks the texture,
   tile and angle (0x2193A0, 0x219410, 0x219530: two randoms for a RandomStartRotation emitter, XForm or not), 0x20EFD0
   and 0x213F30 none of them (0x2122D0, 0x2119C0, 0x212240). The XForm emitters are taken as the latter [G].

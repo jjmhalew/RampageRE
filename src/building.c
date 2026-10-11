@@ -475,8 +475,9 @@ static void collapse_step(Building *b, float dt)
 }
 
 /* 0x2BD7D0: one step of the destroyed building's front cracking, bottom row first. A cell it raises gets a debris
- * effect (Glass_Large or Wall_Small by its Outline, as a first crack) when a random number mod (gWorld +0x28 + 1) is 0
- * [R 0x2BDA94..0x2BDB08; G: that member (0x4D17C8, set by the world's vtable +0x14, 0x284AF0) taken as 0: always] */
+ * effect (Glass_Large or Wall_Small by its Outline, as a first crack) when a random number mod (gWorld +0x28 + 1) is 0,
+ * that member being 1: the world's init sets it (0x285A20, from RWorld's 0x2B7800) and its setter (vtable +0x14,
+ * 0x284AF0) has no caller; so half the time [R 0x2BDA94..0x2BDB08] */
 static int crack_step(Building *b)
 {
     int cols = b->width + 1;
@@ -491,7 +492,8 @@ static int crack_step(Building *b)
                 for (int c = v - 1; c <= v; c++) {
                     int ci = building_cell_index(b, FACE_FRONT, c);
                     if (ci >= 0 && b->cell[b->live[j - 1]][ci].state < b->min_crack) {
-                        debris(b, b->live[j - 1], c, DEBRIS_CRACK);
+                        if (rnd(b) % (1 + 1) == 0)
+                            debris(b, b->live[j - 1], c, DEBRIS_CRACK);
                         set_state(b, b->live[j - 1], c, b->min_crack);
                     }
                 }

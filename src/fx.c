@@ -1329,9 +1329,11 @@ static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
         p->tile0 = (uint16_t)((n > 0 ? rnd(w) % (uint32_t)n : 0) * (uint32_t)d->tile_step);
     }
     /* 0x219530 (the update 0x216470): a start angle and a spin; 0x212240 (0x20EFD0, 0x213F30) sets neither. Which
-     * update an emitter gets is 0x21AD40's template match against the table at 0x4CAE10, which start-up code fills
-     * through no address the ELF names [G: an XForm emitter as 0x212240; with 0x219530 the RandomStartRotation ones
-     * would draw two more random numbers, the angle and the spin, which a mesh does not use] */
+     * update an emitter gets is 0x21AD40's template match against the table at 0x4CAE10 (bss, 3 of 0x6C bytes: the
+     * update's pointer to member, then the descriptor 0x21A770 compares) [G: an XForm emitter as 0x212240. Nothing in
+     * the ELF writes that table or reads the three pointers' constants (0x3B2630 / 40 / 50), so which descriptor goes
+     * with which update is not in the code; with 0x219530 the RandomStartRotation ones would draw two more random
+     * numbers, the angle and the spin, which a mesh does not use] */
     if ((d->pmode & 2) && (d->pflags & PF_RANDOMROT) && d->ptype != PT_XFORM) {
         p->ang0 = (float)((rnd(w) >> 8) & 0xFF) * (2 * FX_PI / 256);
         p->spin = graph_eval(w->lib, &d->g[G_SRD], rnd01(w));
