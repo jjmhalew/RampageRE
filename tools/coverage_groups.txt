@@ -288,9 +288,9 @@ unused    0x2B6DA0-0x2B72B0  RWorld::+0x20's debug modes 2/3/6/7 (a pick ray, "T
 engine    0x2B72B0-0x2B8200  RWorld's update and reset, RWorldPackage (the city's bundles, volumes Game/Shell/Audio/Video): main.c, city.c, vol.c
 unused    0x2B8200-0x2B8480  light / fog workers of gWorld.setLightColour, setLightDirection, setAmbient, enableLight, getAmbient ...: no script calls
 engine    0x2B8480-0x2B9150  the banner font and HUD links (hud.c), RWorldRenderer's passes and its debug window count: building.c, city.c
-open      0x2B9150-0x2B92F0  [G] RWorldRenderer::+0x24: RCUBEMAP materials take the block's CubeMap|EnvMap; the port draws the bundle's own texture
+engine    0x2B9150-0x2B92F0  RWorldRenderer::+0x24: the cube-map materials' EnvMap cleared at the block's end; render_gl.c draws BUILDING_CUBEMAP / RCUBEMAP* with the block's EnvMap (FORMAT_BDP "The reflections")
 engine    0x2B92F0-0x2C2680  RWorldScript, Building / ROBuilding (building.c, city.c), RCameraMgr (camera.c, director.c), RController (moves.c), loaders
-open      0x2C2680-0x2C2970  [G] RWorldMaterialFilter: reflective BUILDING_CUBEMAP / RCUBEMAP* materials listed for the block's EnvMap (see 0x2B9150)
+engine    0x2C2680-0x2C2970  RWorldMaterialFilter (shader 0x1B for BUILDING_CUBEMAP, the RCUBEMAP* list) and its list's helpers: render_gl.c cube_material
 engine    0x2C2970-0x2C6090  gCommon's junctions (RCommon, Player, Profile, GameStatus), RGuiScript / RGuiScreen / RGuiManager: shell.c, profile.c, hud.c
 engine    0x2C6090-0x2D34C0  a building's cells, adornments and windows (dtors, small queries): building.c, city.c
 engine    0x2D34C0-0x2D4A80  Monster: its getters and plumbing (main.c Mon, moves.c, edible.c)

@@ -180,6 +180,9 @@ typedef struct {
     BuildingLight building_light; ShadowLighting shade_light;
     float fog_colour[3], fog_start, fog_end;
     float cube_tint[3];                               /* LightingData's CubeTint (the window glass), 0 .. 255 */
+    /* LightingData's CubeMap|EnvMap (0x2B92F0): a texture of the city bundle (its name index, 0 none), the sphere map
+     * the world's BUILDING_CUBEMAP and RCUBEMAP* materials take (render_gl.c draw_part) */
+    uint32_t env_map;
     int sky;                                          /* the SkyBox's instance, -1 none: drawn around the camera */
     int ground_inst;                                  /* the block's GroundShape, -1 none: the shadow grid goes on it */
     const ShadowList *shadows; const Bundle *shadow_bundle;   /* this frame's shadows (shadow.c), their textures */

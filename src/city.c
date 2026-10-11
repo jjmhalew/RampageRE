@@ -2181,6 +2181,11 @@ static void lighting(City *c, Scene *s, Group ld)
     }
     for (int k = 0; k < 3; k++)
         s->cube_tint[k] = group_num(ld, k == 0 ? "CubeTintR" : k == 1 ? "CubeTintG" : "CubeTintB", 192);
+    /* [R 0x2B92F0] the key EnvMap (type 2, a name) loaded through the texture manager (0x171C10) and set into the
+     * listed cube-map materials (0x260040) */
+    const char *env = group_str(ld, "CubeMap|EnvMap");
+    int env_name = env && s->city ? bdp_find_name(s->city, env) : -1;
+    s->env_map = env_name > 0 ? (uint32_t)env_name : 0;
     /* the buildings' light (0x2B92F0: the light file's ambient and first three lights, the Ramp keys; a missing
      * float key reads as 0) and the facade darkening's colour (MShadowR/G/B, +0x314 ..) */
     static const float WHITE[3] = { 1, 1, 1 };       /* no light file: everything at full light, as rnd_frame does */

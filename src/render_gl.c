@@ -625,6 +625,51 @@ static int part_blended(const SceneMesh *sm, const MeshPart *p)
 
 static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32_t i, uint32_t first, double t);
 
+/* the world's cube-map materials [R]: RWorldMaterialFilter (vtable 0x44AAC0) gives a material named BUILDING_CUBEMAP
+ * shader 0x1B in place of its own (+0x8, 0x2C2680) and lists it and every RCUBEMAP* one (strncasecmp, 0x2C26E0) for
+ * the renderer, which sets the block's EnvMap into the first's texture slot 0 and the others' slot 1 (0x2B92F0 ..
+ * 0x2B96F8; cleared by +0x24, 0x2B9150). Only the city bundle's materials go through the filter. 1 BUILDING_CUBEMAP,
+ * 2 RCUBEMAP* (in the data: the NY blimp's rcubemap_blimp, kind 5), 0 neither */
+static int cube_material(const Scene *s, const SceneMesh *sm, uint32_t material)
+{
+    if (sm->b != s->city || !s->env_map)
+        return 0;
+    const char *name = bdp_name(sm->b, material);
+    if (!name)
+        return 0;
+    if (_stricmp(name, "BUILDING_CUBEMAP") == 0)
+        return 1;
+    return _strnicmp(name, "RCUBEMAP", 8) == 0 ? 2 : 0;
+}
+
+/* the sphere-map coordinates of shader 0x1A's second pass and of 0x1B (VU1 programs 0x34F1C8, 0x34FB78) [R]: the view
+ * ray V (the vertex in view space: 0x265500 uploads world x view, flag 8 of the pass) reflected on the normal N
+ * (rotated by the same matrix, not renormalised), R = (V - 2 (N.V) N) / |V|, then u = 0.5 + 0.3394 Rx / sqrt(1 - Rz),
+ * v = 0.5 - 0.3394 Ry / sqrt(1 - Rz), z running into the screen. That is the GL sphere map (whose eye space has z out
+ * of the screen: 1 / (2 sqrt(2 (1 + Rz)))) scaled by 0.3394 x 2 sqrt 2 = 0.96 about the centre and turned upside
+ * down: the reflection back at the eye at the centre, straight up at the top, all of it within 0.48 of the centre
+ * (the env pictures are mirror balls of radius 0.48: the black outside is never reached). View x is taken as right
+ * [G: a left-handed view space; the pictures are near symmetric]. On: texture unit 0's coordinates generated */
+static void sphere_coords(int on)
+{
+    glMatrixMode(GL_TEXTURE);
+    glLoadIdentity();
+    if (on) {
+        glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+        glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+        glEnable(GL_TEXTURE_GEN_S);
+        glEnable(GL_TEXTURE_GEN_T);
+        const float k = 0.3394f * 2.828427f;
+        glTranslatef(0.5f, 0.5f, 0);
+        glScalef(k, -k, 1);
+        glTranslatef(-0.5f, -0.5f, 0);
+    } else {
+        glDisable(GL_TEXTURE_GEN_S);
+        glDisable(GL_TEXTURE_GEN_T);
+    }
+    glMatrixMode(GL_MODELVIEW);
+}
+
 /* the mesh's parts in order; while r->hold (the ambient occlusion is on: rnd_frame) the blended ones are held back
  * and drawn after it, so it does not darken what shows through them */
 static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double t)
@@ -676,6 +721,16 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     float reg[4], rs[2] = { 1, 1 };                      /* a texture region: its tile (region_texture) */
     GLuint rid = p->uv && material_region(sm->b, p->material, reg) ? region_texture(r, sm->b, tex, reg, rs) : 0;
     GLuint id = rid ? rid : texture(r, sm->b, tex);
+    int cube = cube_material(s, sm, p->material);
+    GLuint cube_env = cube ? texture(r, s->city, s->env_map) : 0;
+    /* BUILDING_CUBEMAP, shader 0x1B (record 27 at 0x3B5CC8) [R]: one pass, texture slot 0 (the EnvMap, in place of its
+     * own Concrete_Grey) at the sphere-map coordinates, TFX 1 DECAL with TCC 0 and colour mode 0 (the texture's colour
+     * as it is: unlit), GS state 1 (opaque, no alpha test, fogged). The fountain sculpture of NY05, CH and the others */
+    int env_only = cube == 1 && cube_env && (p->nrm || skin);
+    if (env_only) {
+        id = cube_env;
+        rid = 0;
+    }
     if (material_flags(sm->b, p->material) & MAT_TWO_SIDED) glDisable(GL_CULL_FACE);
     else glEnable(GL_CULL_FACE);
     if (id) {
@@ -726,7 +781,29 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glAlphaFunc(GL_GREATER, 0.01f);
         glDepthMask(GL_FALSE);
     }
+    /* a reflective material (kind 5: shader 0x1A, record 26 at 0x3B5C10; 0x19 with flag 2, set on none) [R]: its first
+     * pass is GS state 1, TEST 0x50002, no alpha test: the texture's alpha is not a cut-out but the share of the
+     * reflection (written into the frame's alpha for the second pass; the blimp's envelope, not its lettering or
+     * gondola). So it is drawn whole */
+    uint32_t layer = p->nrm || skin ? material_env(sm->b, p->material) : 0;
+    GLboolean test_was = (layer || env_only) && !p->blend && !see_through ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
+    if (test_was)
+        glDisable(GL_ALPHA_TEST);
+    GLboolean lit_was = env_only ? glIsEnabled(GL_LIGHTING) : GL_FALSE;
+    if (env_only) {
+        sphere_coords(1);
+        glDisable(GL_LIGHTING);
+        glDisableClientState(GL_COLOR_ARRAY);
+        glColor4f(1, 1, 1, 1);
+    }
     glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+    if (env_only) {
+        sphere_coords(0);
+        if (lit_was)
+            glEnable(GL_LIGHTING);
+    }
+    if (test_was)
+        glEnable(GL_ALPHA_TEST);
     if (rid) {                                           /* the region is texture slot 0's alone (0x265840) */
         glMatrixMode(GL_TEXTURE);
         glLoadIdentity();
@@ -760,24 +837,30 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
             glEnable(GL_ALPHA_TEST);
     }
     r->drawn += p->ntris;
-    GLuint env = p->uv || p->nrm || skin ? texture(r, sm->b, material_env(sm->b, p->material)) : 0;
-    if (env && (p->nrm || skin)) {                       /* the reflection layer: its sphere map added over
-                                                          * the part [G: the blend and its strength] */
+    /* the reflection layer, shader 0x1A's second pass [R]: texture slot 1 (the material's +0x3A `cubemap`, or for an
+     * RCUBEMAP* material the block's EnvMap, 0x2B96E4) at the sphere-map coordinates (VU1 0x34F1C8, sphere_coords),
+     * TFX 1 DECAL, TCC 0, colour mode 0 (the texture's colour, unlit), GS state 10: ALPHA 0x58 = Cs x Ad + Cd (added,
+     * by the frame's alpha, which the first pass left: the texture's alpha x the vertex's, 0x80 = 1), PRMODE 0x58 (not
+     * fogged), Z tested, not written. The frame's alpha is GL_DST_ALPHA here (1 where the frame has none: then the
+     * whole reflection is added) */
+    GLuint env = layer ? (cube == 2 && cube_env ? cube_env : texture(r, sm->b, layer)) : 0;
+    if (env) {
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT | GL_LIGHTING_BIT);
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, env);
-        glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
-        glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
-        glEnable(GL_TEXTURE_GEN_S);
-        glEnable(GL_TEXTURE_GEN_T);
+        sphere_coords(1);
         glDisable(GL_LIGHTING);
+        glDisable(GL_FOG);
+        glDisable(GL_ALPHA_TEST);
         glDisableClientState(GL_COLOR_ARRAY);
         glColor4f(1, 1, 1, 1);
         glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE);
+        glBlendFunc(GL_DST_ALPHA, GL_ONE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
         glDepthFunc(GL_LEQUAL);
         glDepthMask(GL_FALSE);
         glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+        sphere_coords(0);
         glPopAttrib();
     }
     if (prelit)

@@ -266,7 +266,7 @@ white. Alpha below 1 is see-through glass (9 materials: the saucer's, the hover 
 The byte at +0x2 is the material's kind (how many textures it binds, below): 1 none (222 materials), 2 one
 (1,621), 5 and 8 a second layer named by the u16 at +0x3A (the byte at +0x3 is 0, or 128 on 90 and 150 on one of
 kind 2): 5 a reflection, the sphere map `cubemap` (12 materials: the saucer's top `SB_shinyNOTreflective`, the
-trash cans, the Jumper's shiny body), 8 a damage blend `DestroyedGeneric` (38 vehicle materials, below).
+trash cans, the Jumper's shiny body; below), 8 a damage blend `DestroyedGeneric` (38 vehicle materials, below).
 
 **How a material is built** [R]: the material library's loader 0x16F540 picks the shader with 0x16F030 from the kind
 (+0x2) and the u32 at +0x4 (bits 0, 1, 0x100000, 0x200000, 0x2000000, 0x8000000), builds the material object
@@ -311,8 +311,38 @@ red and blue Minis: black where the layer is 0, a burnt shell), on the others wh
 metal on its dents). The viewer draws it so (src/render_gl.c draw_mesh: the part opaque without the alpha test, then
 `material_damage_layer`'s texture over it by the vertex alpha). Record 0x7A [R]: pass 0 state 1 (no blend: it writes
 the destination alpha, the texture's × the vertex's), pass 1 state 0x14 (ALPHA 0x54, × Ad). GL's source alpha stands
-for that destination alpha, the same while both textures are opaque [G: the frame buffer's PSM / FBMSK not read; a
-24-bit one would make Ad 0x80].
+for that destination alpha, the same while both textures are opaque (the frame buffer is PSMCT32 with FBMSK 0, so
+Ad is what pass 0 wrote: 0x25E370 -> 0x263380 PSM 0, ZPSM 0x31; FRAME_1 built by 0x264440 [R]).
+
+**The reflections (kind 5) and the cube-map materials** [R]. Kind 5 with flags 0xC (bit 1 clear, as on all 12) is
+shader 0x1A (0x19 with bit 1; record 26 at 0x3B5C10), two passes, vertex format 0x112:
+- pass 0, slot 0 (the material's own texture), state 1 (opaque, fogged, TEST 0x50002: **no alpha test**), TFX 0
+  MODULATE with TCC 1, lit (colour mode 3): it writes the texture's alpha x the vertex's into the frame's alpha. That
+  alpha is the reflection's share: `Blimp` has 0 on the gondola and the lettering, 1 on the envelope; `Shiny` a
+  gradient; the trash cans, `Train_Tanker` and `Concrete_Grey` 1 all over.
+- pass 1, slot 1 (+0x3A: `cubemap`), state 10: ALPHA 0x58 = Cs x **Ad** + Cd (added, by that alpha), PRMODE 0x58
+  (blended, **not fogged**), TFX 1 DECAL with TCC 0 and colour mode 0: the texture's colour as it is. VU1 program
+  0x34F1C8 (flag 8 of the pass, 0x265500, uploads the world x view matrix): the view ray V (the vertex in view space)
+  reflected on the normal N (rotated, not renormalised), R = (V - 2 (N.V) N) / |V|, u = 0.5 + 0.3394 Rx /
+  sqrt(1 - Rz), v = 0.5 - 0.3394 Ry / sqrt(1 - Rz) (z into the screen, y up): a sphere map with the reflection back
+  at the eye in the centre, up at the top, reaching 0.48 from the centre. The pictures (`cubemap`, the cities'
+  `<City>_Cubemap`, 128 x 128, New York's 64 x 64) are mirror balls of radius 0.48, black and alpha 0 outside.
+
+The world's renderer swaps in the block's own picture (0x2B92F0): its material filter RWorldMaterialFilter (vtable
+0x44AAC0) gives a material named `BUILDING_CUBEMAP` shader 0x1B instead of the one 0x16F030 picks (+0x8, 0x2C2680),
+and lists it and every `RCUBEMAP*` one (case-insensitive, +0xC, 0x2C26E0, into 0x4D2918); at the block's start the
+LightingData key `EnvMap` (`CubeMap|EnvMap`: `<City>_Cubemap`, London `NewYork_Cubemap`) is loaded through the
+texture manager (0x171C10) and set into texture slot 0 of `BUILDING_CUBEMAP` and slot 1 of the `RCUBEMAP*` ones
+(0x260040, 0x2B96E4); +0x24 (0x2B9150) clears them at the end. Only the city bundles' materials go through the filter.
+In the data: `BUILDING_CUBEMAP` (kind 2, its own texture `Concrete_Grey`) on `FOUNTAIN_Sculpture` (the fountain
+sculpture: New York, Chicago, Hong Kong, London, Los Angeles, San Francisco), and `rcubemap_blimp` (kind 5) on the
+New York blimp (`Blimp|Blimp`, its engines, `Blimp_Rotate`, `Blimp_Elevate`); `Rcube_tanker`, the trash cans and the
+rest keep their `cubemap`. Shader 0x1B (record 27 at 0x3B5CC8) is one pass: slot 0 at the same sphere-map coordinates
+(VU1 0x34FB78), TFX 1 DECAL, TCC 0, colour mode 0, state 1 (opaque, fogged, no alpha test): a chrome sculpture
+mirroring the block's skyline. The port: render_gl.c `draw_part` (`cube_material`, `sphere_coords`: GL's sphere map,
+whose eye space has z out of the screen, scaled 0.96 about the centre and turned upside down, which is the same
+formula), city.c `lighting` (Scene.env_map); the reflection added by GL_DST_ALPHA [G: x taken as right in the
+game's view space; on a frame without alpha bits the whole reflection is added].
 
 Material flags (+0x4, u16): bit 0 two-sided (65 of 1,893: flags, girders, trees, cloth, teeth), bit 1 see-through
 (fog masks, skylines, tree cards), 0xC the monsters' own. 0x100 (78 materials, all kind 2) is the texture region
@@ -693,7 +723,7 @@ below are the same in all seven cities; Las Vegas has no `AnimatingSkyData`:
 | `text\|LightFile` | `default_lights.txt` | `default_night_lights.txt` | in `common.bdp` (type 2) |
 | `FogR/G/B`, `FogStart`, `FogEnd` | 120, 152, 226; −2 … 200.5 | 50, 37, 122; 5 … 200.5 | |
 | `AnimatingSkyData` | `MaterialName` (the cloud band), `UAnimRate` 0.009, `VAnimRate` 0 | – | scrolls the material's texture; given to a material animator |
-| `CubeMap\|EnvMap`, `CubeTintR/G/B` | `Chicago_Cubemap`, 192 | 255 | reflections, not used here |
+| `CubeMap\|EnvMap`, `CubeTintR/G/B` | `Chicago_Cubemap`, 192 | 255 | the cube-map materials' sphere map ("The reflections"); the window glass's tint |
 | `GroundShadowIntensity`, `MonsterShadowIntensity`, `MShadow*`, `TShadow*`, `Texture\|MonsterBlob` | | | shadows ([SHADOW_NOTES.md](SHADOW_NOTES.md)) |
 | `RampStart`, `RampEnd`, `RampIntensity` | 6, 35, 0.35 | 6, 35, −0.5 | the buildings' light brightens (night: darkens) with height ([BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md)) |
 
