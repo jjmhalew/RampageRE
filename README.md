@@ -23,7 +23,7 @@ with their challenges, bosses, results screens and the credits, the other play m
 included), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch (homebrew)
 and Android, on keyboard, controllers (rumble included) or the touch screen, with texture packs and graphics
 settings (GTAO, SMAA / MSAA). It has been played on Windows; the Switch, phones and controllers are not yet tried on
-real hardware. Still missing: the unlockable arcade games and the demo, and the smaller
+real hardware. Still missing: the two arcade games of Bonus Content (Midway Classics) and the demo, and the smaller
 gaps that the notes in `docs/` list under "Not ported" (and mark [G] where the port guesses).
 
 The recompiled game (`build.ps1`) is the reference the port is checked against. It runs the front end and the first

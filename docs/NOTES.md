@@ -13,7 +13,7 @@ campaign level (Las Vegas). See "Current state" for what is still wrong.
   [FORMAT_BDP.md](FORMAT_BDP.md)),
   `.zip` (real PKZIP, 60: each holds a byte-identical copy of the `.cmp` of the same name),
   `.pss` (21 MPEG-2 videos), `.mic` (11 audio streams), `.samp`, `.uber`, `.txt`.
-- `DESI/JARVOS.ELF` + `M1.ELF` + `*.SR`: emulators for the unlockable arcade Rampage games (skip).
+- `DESI/M1.ELF` (Rampage 1986: a Z80 core, MCR-3) and `DESI/JARVOS.ELF` (Rampage World Tour: a TMS34010 core, Wolf unit), Digital Eclipse's MAT2 emulators, with their data and sound samples in `DESI/*.SR`: Bonus Content's Midway Classics, always offered (not unlocked), started by `gShell.startEmulator` (0x3063A0 -> 0x308BB0, LoadExecPS2) and returning with `-reentry` (0x2A3350).
 - 0x430000–0x443b50 also holds a table of script-binding names (`ChallengeStatus::updateBossHealth`,
   `getNumPlayers`, ...): useful for naming functions later.
 - Metrowerks RTTI is intact: about 516 vtables with class names (`RApp`, `PS2PreEnumFileSystemVolume`,
