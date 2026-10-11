@@ -1400,7 +1400,11 @@ static void hit_building_front(Mon *mo, const float *p)
         /* facing the street the script leaves side as it was declared: 0 */
     }
     float l[3] = { (mirror && side == 2) || side == 1 ? -p[1] : p[1], p[2], p[3] };
-    float c = cosf(mo->heading / 57.2957795f), sn = sinf(mo->heading / 57.2957795f);
+    /* 0x2B3A80: on a face (mode 5) the point is added to the monster's place as it is, in the world's axes
+     * (0x2B3AC4 .. 0x2B3B08); otherwise turned with the monster [R]. So a side's punch (Side_L_Punch, kind 2) lands on
+     * the front's corner column beside it */
+    float c = mo->mode == MODE_BUILDING ? 1 : cosf(mo->heading / 57.2957795f),
+          sn = mo->mode == MODE_BUILDING ? 0 : sinf(mo->heading / 57.2957795f);
     float w[3] = { mo->mx + c * l[0] - sn * l[1], mo->my + sn * l[0] + c * l[1], mo->mz + l[2] };
     float bq[3];                                     /* 0x2D54F0's search (collide.c, 0x2A3D20) [R] */
     int bi = collide_hit_point(&v->cw, w, side, bq);
