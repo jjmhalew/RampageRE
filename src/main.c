@@ -1234,6 +1234,28 @@ static float players_mid_x(const Viewer *v)
  * their collision spheres taken as their collision box [G]) */
 static float mon_radius(const Mon *mo);
 static float mon_half_height(const Mon *mo);
+/* isHoldlingEdible: hasGrabbedObject is 2 (0x2E5590) when the held object has flag 0x80000 [R]: the people and the
+ * army's soldiers (actors), the vehicles Vehicle.bsf flags Animates or Edible (its Construct's setFlags) and the
+ * parade's carts and bikers (GroundCart.bsf, parade.c's PAF_EDIBLE); no rail object, parked car or army vehicle
+ * (no script sets it on them) */
+static int held_edible(const Mon *mo)
+{
+    const Viewer *v = mo->v;
+    if (mo->held >= 0)
+        return 1;
+    if (mo->held_unit >= 0 && v->army) {
+        const ArmyUnit *u = army_unit(v->army, mo->held_unit);
+        return u && (u->kind == AK_TROOP || u->kind == AK_WINDOW);
+    }
+    if (mo->held_vehicle >= 0 && v->veh) {
+        const VehObj *o = vehicle_obj(v->veh, mo->held_vehicle);
+        return o && (o->oflags & VF_EDIBLE) != 0;
+    }
+    if (mo->held_parade >= 0 && v->parade)
+        return parade_is_edible(v->parade, mo->held_parade);
+    return 0;
+}
+
 static Climber climber(Mon *mo)
 {
     Climber c = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->graph.box[0],
@@ -1302,9 +1324,9 @@ static int answer(void *ctx, const char *call, const float *a)
     if (strstr(call, "::canGrabPowerup") || strstr(call, "::checkForHazard"))
         return edible_call(mo, call, a + 1) > 0;
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
-        return mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 || mo->held_parade >= 0 ||
-               (mo->held_sobj >= 0 && call[10] == 'p');   /* hasGrabbedObject: 2 for an actor (0x2E5590);
-                                                      * isHoldlingEdible wants 2, and a parked car is no actor */
+        return call[10] == 'p' ? mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 ||
+                                 mo->held_parade >= 0 || mo->held_sobj >= 0 :
+               held_edible(mo);                      /* hasGrabbedObject 2 (0x2E5590): the held object's flag 0x80000 */
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&mo->mount, sc, &c, mo->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
