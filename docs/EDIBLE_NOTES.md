@@ -185,7 +185,9 @@ The substitutes have no look record; they exist only to be eaten.
 - `hasRoarEnergy`: energy ≥ 15 with ability 4 (or cheat 8), or raging.
 - `hasRoarAttack`, `hasChargePunch`, `hasJumpSmash`: ability 4 / 1 / 8, cheat 8, or raging.
 - `canStartRage` (0x2ABF00): energy ≥ 100 and no monster raging.
-- `useRoarEnergy`: −15, not while raging.
+- `useRoarEnergy`: −15, not while raging. The same clip event's neighbour `fireWeapon(0, ...)` fires the roar, the
+  monster's RoarWeapon (a Shockwave: 10 HP, ReactionLevel 1 and TakeDamage 10 to everything within 10 of its
+  mouth, once a roar), ARMY_NOTES.md "The monster's weapons".
 - `hitBuildingFront` (kinds 0 … 2 and 6, on a hit):
   - +2 energy, not while raging;
   - in the air the energy stops at 99;

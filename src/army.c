@@ -3932,3 +3932,154 @@ int army_hit_behind(const float monster_pos[3], float monster_heading, const flo
     float fwd[2] = { -sinf(monster_heading), cosf(monster_heading) };
     return (at[0] - monster_pos[0]) * fwd[0] + (at[1] - monster_pos[1]) * fwd[1] < 0;
 }
+
+void army_monster_shape(const float (*spheres)[4], int n, float centre[3], float *radius)
+{
+    ArmyMonster m;
+    memset(&m, 0, sizeof m);
+    m.spheres = spheres;
+    m.nspheres = n;
+    *radius = -1;
+    if (n <= 0)
+        return;
+    monster_centre(&m, centre);
+    float r2 = spheres[0][3] * spheres[0][3];        /* the same merge for its radius */
+    float c[3] = { spheres[0][0], spheres[0][1], spheres[0][2] };
+    for (int i = 1; i < n; i++)
+        sphere_merge(c, &r2, spheres[i], spheres[i][3] * spheres[i][3]);
+    *radius = sqrtf(r2);
+}
+
+/* ---- the monster's own weapons */
+
+/* a weapon's definition over one group: the base desc (0x297DC0: FiringOffset +0x10, RefireDelay +0x14, ChargeTime
+ * +0x18, DamageType +0x28 by the table 0x3F5E40, FireEffect +0x30) and the Shockwave's WSDesc (0x31C1C0: Duration +0x3C,
+ * DamagePerSec +0x40, CollisionRadius +0x44, HorizontalKnockback +0x48, VerticalKnockback +0x4C, ReactionLevel +0x50);
+ * a key that is absent keeps what it had [R] */
+static void mon_weapon_read(ArmyMonWeapon *w, Group g)
+{
+    if (!g.at)
+        return;
+    Record r;
+    const char *s;
+    w->offset = group_num(g, "FiringOffset", w->offset);
+    w->refire = group_num(g, "RefireDelay", w->refire);
+    w->charge = group_num(g, "ChargeTime", w->charge);
+    if ((s = group_str(g, "DamageType")) != NULL)
+        for (int i = 0; i < 12; i++)
+            if (same_text(s, DAMAGE_TYPE[i]))
+                w->damage_type = i;
+    if ((s = gstr(g, "FireEffect")) != NULL)
+        w->fire_fx = s;
+    if ((s = group_str(g, "WeaponNode")) != NULL)
+        w->node = s;
+    w->duration = group_num(g, "Duration", w->duration);
+    w->dps = group_num(g, "DamagePerSec", w->dps);
+    w->radius = group_num(g, "CollisionRadius", w->radius);
+    w->h_knock = group_num(g, "HorizontalKnockback", w->h_knock);
+    w->v_knock = group_num(g, "VerticalKnockback", w->v_knock);
+    if (group_get(g, "ReactionLevel", &r))
+        w->level = (int)record_num(r);
+}
+
+/* [R] 0x2D4C40 (the monster's setup, 0x2E86C0): the count +0xC614 to 0, then each Weapon|<key> record of the book's
+ * WeaponList (0x1B0210; its type part compared without case, 0x32EC30): WeaponName's group of Weapons.bdp (gWorld's
+ * book, 0x285710), WeaponType of the key's group else of the book's; the weapon made by that type's name (0x283E90 /
+ * 0x283DA0 in the pool 0x4D0000; an unknown type makes none), the book's group read and then the key's (0x297AA0), its
+ * key +0x88 (0x287680), flag 0x200000 (it stays when the block's objects go, 0x2B66C0), its init (vtable +0x64 with the
+ * monster and the identity frame gp-0x70F0: 0x31C080 for a Shockwave, the countdown at ChargeTime + FiringOffset
+ * (0x2978D0), +0x1AC Duration, +0x1B4 1, +0x1B0 0, +0x1B8 0), state 2, and it joins the world's objects (vtable
+ * +0x3C). The WSDesc's defaults (0x31B9D0): Duration 1, CollisionRadius 10, ReactionLevel -1, the rest 0; the base's
+ * DamageType 11. Only RoarWeapon is a Shockwave; BreathWeapon (RBeamWeapon), FartWeapon and TankCannon (FireBall,
+ * RProjectileWeapon) are made and updated but never fired: no clip asks for them (Monsters.bsf's fireWeapon fires
+ * "fart" only for (p0 != 0, p1 == 1), and every monster's clips pass (0, 0, 0, 0)) */
+void army_mon_weapons_read(ArmyMonWeapons *ws, Group list, Group (*find)(void *ctx, const char *book, const char *name),
+                           void *ctx)
+{
+    memset(ws, 0, sizeof *ws);
+    if (!list.at)
+        return;
+    Record r[16];
+    uint32_t n = group_all(list, "Weapon|", r, 16);
+    for (uint32_t i = 0; i < n && ws->n < ARMY_MON_WEAPONS; i++) {   /* [G: the game has room for 4 and no check;
+                                                                       * every book has 4] */
+        Group g = record_group(list, r[i]);
+        const char *name = group_str(g, "WeaponName");
+        Group book = name && find ? find(ctx, "Weapons", name) : (Group){ 0 };
+        const char *type = group_str(g, "WeaponType");
+        if (!type && book.at)
+            type = group_str(book, "WeaponType");
+        if (!type || !g.at)
+            continue;
+        ArmyMonWeapon *w = &ws->w[ws->n++];
+        memset(w, 0, sizeof *w);
+        w->key = r[i].name + 7;                      /* past "Weapon|" */
+        w->name = name;
+        w->shockwave = same_text(type, "Shockwave");
+        w->damage_type = 11;
+        w->level = -1;
+        w->duration = 1;
+        w->radius = 10;
+        mon_weapon_read(w, book);
+        mon_weapon_read(w, g);
+        w->timer = w->charge + w->offset;
+        w->left = w->duration;
+        w->state = 2;
+        w->fx = -1;
+    }
+}
+
+/* [R] 0x2D4B80 fireWeapon(key): every weapon whose key matches (0x32C9C8, any case) to state 3; the monster's own
+ * state (+0x5C, vtable +0x54) follows its weapons' (0x2E142C), which only the weapon's update asks (2, 3 or 7: the
+ * countdown runs) */
+int army_mon_weapon_fire(ArmyMonWeapons *ws, const char *key)
+{
+    int n = 0;
+    for (int i = 0; key && i < ws->n; i++)
+        if (ws->w[i].key && same_text(ws->w[i].key, key)) {
+            ws->w[i].state = 3;
+            n++;
+        }
+    return n;
+}
+
+/* [R] the monster's update over its weapons (0x2E1400 .. 0x2E14E0), then the Shockwave's update with 1 (0x31BE50 ->
+ * 0x2971A0) and its burst (vtable +0x70, 0x31BAD0):
+ * - a state 3 calls the weapon's tryFire (+0x68: no target, 0, rate 1, 1) and becomes 2. The Shockwave's (0x31BF20)
+ *   starts a burst only with the countdown at 0, none on and the weapon updated once (+0xF4): +0x1AC = Duration, its
+ *   FireEffect started at the weapon's place and frame (+0x2C, +0x8: the WeaponNode's world, not moved after),
+ *   +0xF5 = 1, +0x1B8 = 0. So a roar within a burst's Duration of the last does nothing;
+ * - the update: +0x1AC falls by dt; at 0 a burst that is on ends: its effect stopped (0x292670 + the handle's +0x30),
+ *   the countdown RefireDelay (desc +0x14: 0), +0xF5 / +0xF6 0. Then 0x2971A0: the place from the node, the countdown
+ *   down by the rate x dt (weapons are on in play, gp-0x772C, set at 0x3243A8 / 0x324494 as play starts and cleared
+ *   with the block won, 0x324510; the monster's state is 2 or 3), not below 0 (the update's 1);
+ * - the burst (0x31BAD0), once a burst (+0x1B8): see main.c roar_burst. The Shockwave counts no ammo (Ammo 100 stays) */
+int army_mon_weapon_step(ArmyMonWeapon *w, float dt)
+{
+    int out = 0;
+    if (w->state == 3) {
+        if (w->shockwave && w->timer == 0 && !w->firing) {
+            w->left = w->duration;
+            w->firing = 1;
+            w->applied = 0;
+            out |= AMW_START;
+        }
+        w->state = 2;
+    }
+    if (!w->shockwave)                               /* never fired: their countdowns change nothing seen */
+        return out;
+    w->left -= dt;
+    if (w->left <= 0 && w->firing) {
+        w->timer = w->refire;
+        w->firing = 0;
+        out |= AMW_STOP;
+    }
+    w->timer -= dt;
+    if (w->timer < 0)
+        w->timer = 0;
+    if (w->firing && !w->applied) {
+        w->applied = 1;
+        out |= AMW_BURST;
+    }
+    return out;
+}

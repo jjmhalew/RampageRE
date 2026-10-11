@@ -294,7 +294,7 @@ open      0x2C2680-0x2C2970  [G] RWorldMaterialFilter: reflective BUILDING_CUBEM
 engine    0x2C2970-0x2C6090  gCommon's junctions (RCommon, Player, Profile, GameStatus), RGuiScript / RGuiScreen / RGuiManager: shell.c, profile.c, hud.c
 engine    0x2C6090-0x2D34C0  a building's cells, adornments and windows (dtors, small queries): building.c, city.c
 engine    0x2D34C0-0x2D4A80  Monster: its getters and plumbing (main.c Mon, moves.c, edible.c)
-open      0x2D4A80-0x2D4C40  Monster fireWeapon / stopWeapon: the monster's own WeaponList (RoarWeapon, FartWeapon, BreathWeapon); the port fires none
+engine    0x2D4A80-0x2D4C40  Monster fireWeapon (army.c army_mon_weapon_fire, from Monsters.bsf's clip event) / stopWeapon (no script calls it)
 engine    0x2D4C40-0x2D6680  Monster: weapons' setup (read), climbing, the hit search (climb.c, collide.c, main.c)
 open      0x2D6680-0x2D6880  a monster on (or at) a shaking building is drawn moved by its sway, its hair too; the port sways the building only
 engine    0x2D6880-0x2E7988  Monster: the hit's mode cases (army.c army_reaction_slot), script getters, the update: main.c, look.c, climb.c
@@ -317,7 +317,7 @@ unused    0x2FADC0-0x2FB950  MonsterTorsoTwistAnimator: made for the node named 
 engine    0x2FB950-0x30AE90  head animator (look.c), ROMonster (city.c), block manager (city.c), gShell junction (shell.c), ActorAnimShape (people.c)
 unused    0x30AE90-0x30C020  ActorAnimBitmap: made for an "ActorAnim|" group (0x30D280); the books have 546 ActorAnimShape| and no ActorAnim|
 engine    0x30C020-0x31B9C0  Actor / ROActor (people.c, city.c), HeldObjectMover, RScriptCam / RTTCamera (director.c), AttackMover, LineMover (army.c)
-open      0x31B9C0-0x31C4D0  Shockwave and WSDesc: the RoarWeapon (Weapons.bdp: radius 10, 10 a second, Concussive) the roar fires; the port has none
+engine    0x31B9C0-0x31C4D0  Shockwave and WSDesc, the roar: army.c army_mon_weapons_read / army_mon_weapon_step, main.c roar_burst; its ctor, dtors and pool are the engine's
 engine    0x31C4D0-0x31DF10  RotationMover: edible.c, streetobj.c (the MerryGoRound), city.c, shadow.c
 unused    0x31DF10-0x31F340  HelicopterMover: only registered by name (0x442EF0); no script createMover and no data file names it
 engine    0x31F340-0x326C20  the game flow (game.c), the music cases of 0x323CE0 (sound.c), endResults (hud.c), the shadow data (shadow.c)

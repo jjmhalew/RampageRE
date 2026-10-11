@@ -513,7 +513,9 @@ in its column, so a held Cross jumps higher, a double jump flips, a butt slam la
 ([FORMAT_MONSTER.md](FORMAT_MONSTER.md) "Movement", "Slots"). The people are their templates' scripts ported (src/people.c, [PEOPLE_NOTES.md](PEOPLE_NOTES.md)):
 window occupants lean out and fall when their window breaks, crowds run, punks throw, tourists take photos; the
 monster grabs one from a window (`canGrabPerson`) or the street (`doGrabObject` at its `Helper R Hand`), holds,
-eats (health, energy) or throws them, and its attacks send them flying. Script checks the graph asks (`Monsters::canMount`,
+eats (health, energy) or throws them, and its attacks send them flying; its roar (R2, with roar energy) is the
+game's RoarWeapon, a burst of 10 on everything within 10 of its mouth: people, cars, the army, the other monsters,
+and the front cells of the buildings around ([ARMY_NOTES.md](ARMY_NOTES.md) "The monster's weapons"). Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
 punch); as Monsters.bsf has them, a jump has one double jump (`hasDoubleJump` / `didDoubleJump`, the monster's +0xAB7)
 and one spin, three with MULTI-SPIN, cheat 8 or the rage (`canSpin`, the count +0xAC0), both back once it is out of

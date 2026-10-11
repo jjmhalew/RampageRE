@@ -61,7 +61,7 @@ object) names `WeaponName`, a group of Weapons.bdp.
 - **Read order** [R] (0x299EC8): the definition reads the book's group first and then the template's own group over
   it. So `Tank11sec` keeps TankWeapon but with `RefireDelay 11`, and the SWAT rifle does `ImpactDamage 2.5`.
 - **The type** comes from the template's `WeaponType`, else the book's. `RProjectileWeapon` fires shots,
-  `RBeamWeapon` fires beams, and `Shockwave` (the roar) is not fired here.
+  `RBeamWeapon` fires beams, and `Shockwave` is the monsters' roar ("The monster's weapons" below).
 
 **The definition** (0x297DC0, then projectiles 0x296830 + 0x33B860, beams 0x2960D0 + 0x33B5F0). Defaults [R]
 (0x296BC0, 0x296230, 0x33B3E0): `MaxFiringRange` 10, `DamageType` 11 (Unresistable), `StartAmmo` −1 (use Ammo),
@@ -258,6 +258,81 @@ This is `AE_HIT`, and `army_reaction_slot` is the monster side:
 The script calls go straight to slots: `setReaction(n)` (0x2E1AD0) is slot n. 2 is a knock-down (the priest),
 19 an overhead hit (a droppable), 54 the rampage. `addHitPoints` (0x2DA530) clamps HP to 0 … most and does nothing
 at 0.
+
+## The monster's weapons (the roar)
+**The list** [R] (0x2D4C40, from the monster's setup 0x2E86C0): the property book's `WeaponList` (the seven books
+the 30 monsters share, Amanda_, Cal_, George_, Jill_, Lizzie_, Ralph_ and Rhett_prop, alike) has four
+`Weapon|<key>` groups: `Breath` (BreathWeapon, an RBeamWeapon, on `Lift_Node`),
+`Fart` (FartWeapon, RProjectileWeapon, `fxNode_Fart`), `FireBall` (TankCannon, `Lift_Node`) and `Roar` (RoarWeapon,
+a `Shockwave`, `fxNode_Belch`, the mouth). Each is made like an army weapon: WeaponName's group of Weapons.bdp read
+first and the key's group over it, the type the key's `WeaponType` else the book's; the key is its name (+0x88),
+compared without case (0x32C9C8). They are world objects that stay when a block's objects go (flag 0x200000, see
+GAME_NOTES.md), kept at +0xC5E4 + 8 i with a state at +0xC604 + 4 i (room for four, no check) and the count +0xC614.
+
+**Who fires** [R]: only Monsters.bsf's `fireWeapon(p0, p1, ...)`, a clip event: `monster.fireWeapon("roar")` when p0
+is 0, else `"fart"` when p1 is 1. All 30 monsters call it in their three roar states alone, with (0, 0, 0, 0), beside
+`useRoarEnergy` and `faceAnim(12)` (Expression_Roar): `Ground_Roar` (taunt2, at 0.063 s), `Front_Roar` and
+`Side_L_Roar` (the face and side Powerup clips, at 0.38 s), all reached by R2 when `hasRoarEnergy`. So the breath,
+the fart and the fireball are made and updated but never fired. The binding `fireWeapon` (0x2D4B80) puts each weapon
+of that key in state 3; `stopWeapon` (0x2D4A80: state 2 and the weapon held, vtable +0x7C) no script calls. The
+other way in, `setWeaponControl(state, weapon)` (0x2E8DB0, every monster's `<Name>::EnableWeapon` clip event asks
+for `"Expression_Weapon"` and `"Roar"`): a state of that name would fire the weapon (state 3, 0x2E7248 .. 0x2E72F8,
+when the node flag 2 turns on, the weapon's +0x78 allows and +0xA50 ≥ 0.25, which it then loses) while playing it on
+the face layer; no monster has an `Expression_Weapon` state, so +0xC620 = 0 and +0xC624 = −1 and it never fires.
+
+**Each frame** [R] (the monster's update 0x2E1400 .. 0x2E14E0, per weapon): the monster's own state (+0x5C, vtable
++0x54) takes the weapon's; a state 3 calls the weapon's tryFire (vtable +0x68: no target, rate 1, 1) and becomes 2;
+then the weapon's update (vtable +0x6C with 1).
+
+**The Shockwave** (vtable 0x44B540; its WSDesc 0x44B5E0, 0x54 bytes, made by 0x31B9D0) [R]:
+- WSDesc (0x31C1C0, over the base definition 0x297DC0): `Duration` +0x3C (default 1), `DamagePerSec` +0x40 (0),
+  `CollisionRadius` +0x44 (10), `HorizontalKnockback` +0x48, `VerticalKnockback` +0x4C (0), `ReactionLevel` +0x50
+  (−1). RoarWeapon: Duration 1, DamagePerSec 10, CollisionRadius 10, DamageType Concussive (0), ReactionLevel 1,
+  FireEffect `Roar_Weapon`, Ammo 100 (never counted down), no RefireDelay.
+- Init (0x31C080): the countdown at ChargeTime + FiringOffset (0), +0x1AC = Duration.
+- tryFire (0x31BF20): the charge (0x297760, no ChargeEffect), then only with the countdown at 0, no burst on (+0xF5)
+  and the weapon updated once (+0xF4): +0x1AC = Duration, the `FireEffect` started at the weapon's place and frame
+  (+0x2C / +0x8: the WeaponNode's world, the weapon's +0xBC being the identity; the effect is not moved after),
+  +0xF5 = 1 and +0x1B8 = 0. A roar within a burst's Duration of the last does nothing.
+- Update (0x31BE50): +0x1AC falls by dt; at 0 a burst that is on ends, its effect stopped, the countdown RefireDelay
+  (0), +0xF5 = 0. Then the common 0x2971A0: the place from the node, and with weapons on (gp−0x772C: set as play
+  starts, 0x3243A8 / 0x324494, cleared with the block won, 0x324510; off, every monster weapon is held each frame)
+  the countdown falls by the rate × dt, not below 0; then the burst (vtable +0x70).
+- **The burst** (0x31BAD0), once a burst (+0x1B8): the RGridMgr's sphere query (vtable +0x3C / +0x40 / +0x44 =
+  0x282BC0 / 0x282A40 / 0x282A30, include −1, exclude 0) over the world's objects: each one whose shape's bounding
+  sphere (centre +0xC through the object's matrix, radius +0x18) is within CollisionRadius of the weapon's place,
+  but the monster itself (+0xB0). Its way from the place, made 1 long ((1, 0, 0) when too near):
+  - a monster (flag 0x40): the knock (the way's x, y made 1 long × HorizontalKnockback, VerticalKnockback up: none
+    for the roar) to 0x2D9650 → 0x2D6A50 with the DamageType, the roaring monster, no point, the ReactionLevel and
+    DamagePerSec as the amount: 10 HP and level 1 (React_Ground_Heavy on the street, slot 1) once a roar. Without a
+    point 0x2D6A50 takes the knock against the monster's +y row for "from behind": a zero knock is from the front;
+  - anything else: its TakeDamage (vtable +0x34) with the DamageType (Concussive 0, as an armed attack's), the
+    monster, no point, the way, and the amount 10: people fly as from a blow, the parked cars, the army's units,
+    the bosses' parts, the parade and street objects, the huts and the MonsterUpgrade take it as from an attack;
+  - a building (0x2BC150): a hit of type 0 from a monster with a way and no point takes its own path (0x2BC328):
+    only a standing building with storeys (+0x1D0 > 0); the monster's shape centre (0x287F00; its place without a
+    shape) picks the front cell: column (x − min x) / 5 and storey (z − 6) / 3, each clamped to the building's
+    (+0x1C8 columns, +0x1D0 storeys); that cell is hit at its middle (min x + 2.5 + 5 column, the front's y, min z
+    + 6 + 3 storey + 1.5) as an ordinary hit (0x2BC4B0 on) whose radius is the amount, 10: 12 dents and the cell's
+    2 HP, its Scoring paying the monster (+0x190). The bounding sphere of a building is large (its box's half
+    diagonal, about 16 for a 3-wide building of six storeys), so a roar on the street cracks the front-row
+    buildings beside it and the back row behind them (New York 3 at x 25: three cells, two of them a row back).
+- No sound of its own (the roar's sound is the clip's); the Expression_Roar face is `faceAnim(12)`.
+- **One Roar_Weapon a roar** [R]: the roar's look is the Shockwave's own FireEffect (tryFire's 0x208220 on the
+  effect manager 0x48A340, released by 0x207A40 when the burst ends). The three roar states have no clip event 12,
+  and their face clip (Expression_Roar) starts no effect. Roar_Weapon.edf as a clip event 12 (slot 0, on, then off
+  0.43 .. 0.45 s later) is in the other three states of every monster, `Ground_Rampage`, `Front_Rampage` and
+  `Side_L_Rampage` (the rage's start, slot 54), which call no fireWeapon: the rage shows the rings and deals nothing.
+
+Here army.c `army_mon_weapons_read` (the list), `army_mon_weapon_fire`, `army_mon_weapon_step` (the update and
+tryFire: AMW_START / AMW_STOP / AMW_BURST), `army_monster_shape` (the WCISpheres' bounding sphere), and main.c
+`mon_weapons_step` (the effect at the node's world, `fx_spawn_frame`, stopped after Duration) and `roar_burst`: the
+other monsters by their spheres' bounding sphere (`monster_hit`), the buildings by their box's (`building_hit` at
+the cell above), the rest through the modules' attack entries (`army_hit`, `vehicle_hit`, `rail_hit`, `boss_hit`,
+`parade_hit`, `streetobj_hit`, `people_hit`, `scene_huts_hit`, `upgrade_touch`) with a fresh attack record, the
+sphere being the roar's [G: those test their own shapes against the sphere, the game the shapes' bounding spheres;
+a box's reach is a little shorter here]. The roar feeds no challenge of its own: the things it breaks count by their
+scripts' addStats as from a blow (CHALLENGE_NOTES.md); `RoarAttack` is the upgrade that unlocks it (ability 4).
 
 ## The units
 

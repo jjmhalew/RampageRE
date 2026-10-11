@@ -113,6 +113,7 @@ typedef struct Mon {
     int held_sobj;                                   /* or a parked car (streetobj.c), -1 none */
     int streaker;                                    /* the defeated monster's streaker (people.c), -1 none */
     EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
+    ArmyMonWeapons weapons;                          /* its WeaponList (+0xC5E4, army.c): the roar's Shockwave */
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
     int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
     float look_yaw, look_pitch;                      /* the head animator's angles now (+0xBC, +0xE8) */
@@ -505,6 +506,7 @@ static float mon_hp_max(const Mon *mo)
 static void mon_fx_event(Mon *mo, const MoveEvent *e);
 static void mon_fx_stop_all(Mon *mo);
 static void mon_fx_follow(Mon *mo);
+static Group army_find(void *ctx, const char *book, const char *name);
 
 static void start_moves(Mon *mo)
 {
@@ -534,6 +536,11 @@ static void start_moves(Mon *mo)
         memset(&mo->feet_ik, 0, sizeof mo->feet_ik);
         mo->feet_ik.links = mo->feet.links;
         memset(&mo->tail, 0, sizeof mo->tail);       /* found on the next posing (0x2FABC0) */
+        for (int i = 0; i < mo->weapons.n; i++)      /* a burst on stops with the weapons it had */
+            if (mo->weapons.w[i].firing && mo->weapons.w[i].fx >= 0 && v->fxw)
+                fx_stop(v->fxw, mo->weapons.w[i].fx);
+        g = book[0] ? city_book_group(v->city, book, "WeaponList") : (Group){ 0 };   /* its weapons (0x2D4C40) */
+        army_mon_weapons_read(&mo->weapons, g, army_find, v);
     }
     if (mo->have_ag)
         dir_graph_free(&mo->ag);
@@ -1857,6 +1864,11 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::useRoarEnergy")) { edible_power_use_roar(&mo->power); mo->energy = mo->power.energy; return; }
+    else if (!strcmp(n, "Monsters::fireWeapon")) {   /* Monsters.bsf: p0 == 0 "roar", else p1 == 1 "fart" [R] */
+        if (e->p[0] == 0 || e->p[1] == 1)
+            army_mon_weapon_fire(&mo->weapons, e->p[0] == 0 ? "roar" : "fart");
+        return;
+    }
     else if (!strcmp(n, "Monsters::changeMountRail")) {
         float d = mo->mirror ? -e->p[0] : e->p[0];
         climb_change_rail(&mo->mount, d < 0 ? -1 : 1);
@@ -2408,6 +2420,144 @@ static void monsters_fight(Viewer *v)
         for (int i = 0; i < nnow[a]; i++)
             memcpy(mo->sph_prev[i], now[a][i], sizeof mo->sph_prev[i]);
         mo->sph_prev_n = nnow[a];
+    }
+}
+
+static int take_damage_level(const Mon *mo, float amount);
+
+/* the Shockwave's burst (0x31BAD0, once a burst) [R]: the RGridMgr's sphere query (vtable +0x3C / +0x40, 0x282BC0 /
+ * 0x282A40: include -1, exclude 0) over the world's objects: each one whose shape's bounding sphere (its centre +0xC
+ * through its matrix, radius +0x18) reaches the sphere of CollisionRadius about the weapon's place, but the monster
+ * itself (+0xB0). Its way from the place, made 1 long ((1, 0, 0) when nearer than 1e-6 squared), then:
+ * - a monster (flag 0x40): the knock, that way's x, y made 1 long times HorizontalKnockback and VerticalKnockback up
+ *   (both 0: no knock), to 0x2D9650 -> 0x2D6A50 (type, the monster, no point, the knock, ReactionLevel, the amount:
+ *   DamagePerSec as it is, once, not by time); a level < 0 would go to its TakeDamage (+0x34);
+ * - anything else: its TakeDamage (+0x34: DamageType, the monster, no point, the way, DamagePerSec). Here the modules'
+ *   sphere entries, which test their own shapes against the sphere [G: the game tests the shapes' bounding spheres;
+ *   a box's reach is a little short here], a fresh attack record so each is hit once;
+ * - a building (0x2BC150 with type 0, a monster, a way and no point, 0x2BC328): only a standing one with storeys
+ *   (+0x1D0), its Scoring paying the monster (+0x190); the front cell under the monster's shape centre (0x287F00:
+ *   column (x - its min x) / 5 and storey (z - 6) / 3, each clamped to the building's), hit at its middle (min x +
+ *   2.5 + 5 column, the front, min z + 6 + 3 storey + 1.5) as Building::hit with the amount as its radius: 3 x
+ *   round(10 / 2.5) dents and the cell's 2 HP. The roar cracks the buildings beside it */
+static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c[3])
+{
+    float r = w->radius, amount = w->dps, sp[64][4], mc[3], mr;
+    char name[16];
+    snprintf(name, sizeof name, "monster %d", mo->slot + 1);
+    int hit = 0;
+    for (int k = 0; k < v->nmon; k++) {              /* the other monsters: their WCISpheres' bounding sphere */
+        Mon *vi = &v->mon[k];
+        if (vi == mo || !vi->have_graph || !mon_in(vi) || mon_in(vi)->hidden)
+            continue;
+        float sc[3], sr;
+        army_monster_shape((const float (*)[4])sp, mon_spheres(vi, sp, 64), sc, &sr);
+        float d[3] = { sc[0] - c[0], sc[1] - c[1], sc[2] - c[2] };
+        if (sr < 0 || d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (r + sr) * (r + sr))
+            continue;
+        float l = sqrtf(d[0] * d[0] + d[1] * d[1]), kx = l > 1e-4f ? d[0] / l : 1, ky = l > 1e-4f ? d[1] / l : 0;
+        float knock[3] = { kx * w->h_knock, ky * w->h_knock, w->v_knock };
+        float from[3] = { vi->mx - knock[0], vi->my - knock[1], vi->mz };   /* behind: the knock along its front
+                                                                              * (0x2D6A50 without a point) */
+        monster_hit(vi, name, amount, w->level >= 0 ? w->level : take_damage_level(vi, amount), knock, from);
+        hit++;
+    }
+    army_monster_shape((const float (*)[4])sp, mon_spheres(mo, sp, 64), mc, &mr);
+    if (mr < 0) {                                    /* without a shape its place (+0x2C, 0x2BC390) */
+        mc[0] = mo->mx;
+        mc[1] = mo->my;
+        mc[2] = mo->mz;
+    }
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {   /* the buildings: their box's bounding sphere */
+        SceneBuilding *sb = &v->scene.buildings[i];
+        Building *b = &sb->b;
+        float d[3], br = 0;
+        for (int k = 0; k < 3; k++) {
+            d[k] = (b->min[k] + b->max[k]) / 2 - c[k];
+            br += (b->max[k] - b->min[k]) * (b->max[k] - b->min[k]) / 4;
+        }
+        br = sqrtf(br);
+        if (b->state != BUILDING_STANDING || b->n <= 0 || b->width <= 0 ||
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (r + br) * (r + br))
+            continue;
+        int col = (int)((mc[0] - b->min[0]) / 5), s = (int)((mc[2] - 6) / 3);
+        col = col > b->width - 1 ? b->width - 1 : col < 0 ? 0 : col;
+        s = s > b->n - 1 ? b->n - 1 : s < 0 ? 0 : s;
+        float at[3] = { b->min[0] + 2.5f + 5 * (float)col, b->min[1], b->min[2] + 6 + 3 * (float)s + 1.5f };
+        sb->hitter = mo->slot;
+        hit += building_hit(b, at, amount);
+    }
+    unsigned rec = ++mo->atk_seq;                    /* the rest: TakeDamage(monster, amount, type 0, the way) */
+    if (v->army)
+        hit += army_hit(v->army, mo->slot, c, r, amount, rec);
+    if (v->veh)
+        hit += vehicle_hit(v->veh, mo->slot, c, r, amount);
+    if (v->rail)
+        hit += rail_hit(v->rail, mo->slot, c, r, amount);
+    if (v->boss)
+        hit += boss_hit(v->boss, mo->slot, c, r, amount, rec);
+    if (v->parade)
+        hit += parade_hit(v->parade, mo->slot, c, r, rec);
+    upgrade_touch(mo, c, r);
+    if (v->sobj) {
+        StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
+        hit += streetobj_hit(v->sobj, mo->slot, &me, c, r, amount, rec);
+    }
+    if (v->scene.folk) {
+        hit += people_hit(v->scene.folk, mo->slot, c, r, mo->heading, mo->graph.states[mo->run.state].name);
+        float from[3] = { mo->mx, mo->my, mo->mz };
+        PeopleEaten got = scene_huts_hit(&v->scene, c, r, from);
+        if (got.health != 0 || got.energy != 0 || got.points != 0)
+            monster_stats(mo, got.health, got.energy);
+    }
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %s's %s burst at %.1f %.1f %.1f (radius %g, %g): %d hit\n", name, w->key, c[0], c[1], c[2], r, amount,
+               hit);
+}
+
+/* each monster's weapons each frame (the update 0x2E1400, army.c army_mon_weapon_step): the FireEffect at the
+ * WeaponNode in its frame (the node's world, the weapon's +0xBC the identity) for the burst's Duration, and the
+ * burst's damage the frame it starts [R] */
+static void mon_weapons_step(Viewer *v, float dt)
+{
+    for (int k = 0; k < v->nmon; k++) {
+        Mon *mo = &v->mon[k];
+        if (!mo->have_graph || !mon_in(mo))
+            continue;
+        for (int i = 0; i < mo->weapons.n; i++) {
+            ArmyMonWeapon *w = &mo->weapons.w[i];
+            int what = army_mon_weapon_step(w, dt);
+            if (!what)
+                continue;
+            Mat4 n;
+            float at[3], R[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+            if (w->node && scene_monster_node(&v->scene, mo->slot, w->node, &n) == 0) {
+                for (int a = 0; a < 3; a++) {
+                    float l = sqrtf(n.m[4 * a] * n.m[4 * a] + n.m[4 * a + 1] * n.m[4 * a + 1] +
+                                    n.m[4 * a + 2] * n.m[4 * a + 2]);
+                    for (int j = 0; j < 3 && l > 0; j++)
+                        R[a][j] = n.m[4 * a + j] / l;
+                    at[a] = n.m[12 + a];
+                }
+            } else {                                 /* [G: no node; every monster has its fxNode_Belch] */
+                mon_body_centre(mo, at);
+                at[2] += mon_half_height(mo);
+            }
+            if ((what & AMW_STOP) && w->fx >= 0 && v->fxw) {
+                fx_stop(v->fxw, w->fx);
+                w->fx = -1;
+            }
+            if ((what & AMW_START) && w->fire_fx && v->fxw) {
+                if (w->fx >= 0)
+                    fx_stop(v->fxw, w->fx);
+                w->fx = fx_spawn_frame(v->fxw, w->fire_fx, at, (const float (*)[3])R, 1);
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  effect %s at %.1f %.1f %.1f -> %d (%g s)\n", w->fire_fx, at[0], at[1], at[2], w->fx,
+                           w->duration);
+            }
+            if (what & AMW_BURST)
+                roar_burst(v, mo, w, at);
+        }
     }
 }
 
@@ -4694,6 +4844,7 @@ static void play_step(Viewer *v, float dt, float aspect)
                                                  (mo->mount.mounted && mo->mount.at.building == (int)i)))
                     mon_rumble(mo, 2000);
             }
+    mon_weapons_step(v, dt);                         /* the roar (army.c's monster weapons) */
     street_step(v, dt);
     army_step(v, dt);
     fx_step(v, dt);

@@ -295,6 +295,41 @@ void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], flo
  * grab, or at 0 HP; the HP falls by the damage after the slot is chosen, and at 0 slot 67 (React_Defeated) */
 int army_reaction_slot(int level, const float knock[3], int mode, int behind);
 int army_hit_behind(const float monster_pos[3], float monster_heading, const float at[3]);   /* the hit came from behind */
+/* a monster's shape, its WCISpheres (+0x68C): the bounding sphere of its collision spheres merged in their order
+ * (0x29A880 -> 0x103770) [R]; radius -1 without spheres */
+void army_monster_shape(const float (*spheres)[4], int n, float centre[3], float *radius);
+
+/* ---- the monster's own weapons (docs/ARMY_NOTES.md "The monster's weapons") [R]
+ * Its setup (0x2D4C40, from 0x2E86C0) makes one weapon per Weapon|<key> group of its property book's WeaponList
+ * (George_prop: Breath, Fart, FireBall, Roar): the book's WeaponName group of Weapons.bdp read first, the key's group
+ * over it, the type the key's WeaponType else the book's. Monsters.bsf's fireWeapon (a clip event) asks for one by
+ * its key, any case (0x2D4B80, 0x32C9C8); only the roar is ever asked for, and it is a Shockwave (vtable 0x44B540):
+ * one burst of DamagePerSec on everything within CollisionRadius of its WeaponNode, its FireEffect for Duration */
+#define ARMY_MON_WEAPONS 4                           /* +0xC5E4 + 8 i, +0xC604 + 4 i: room for four, none checked */
+typedef struct {
+    const char *key;                                 /* +0x88 (0x287680): the Weapon|<key> name, "Roar" */
+    const char *name, *node, *fire_fx;               /* WeaponName, WeaponNode, FireEffect (desc +0x30) */
+    int shockwave;                                   /* WeaponType "Shockwave"; the others are never fired */
+    int damage_type, level;                          /* desc +0x28 (DamageType, default 11), +0x50 ReactionLevel (-1) */
+    float duration, dps, radius, h_knock, v_knock;   /* WSDesc +0x3C (1), +0x40 (0), +0x44 (10), +0x48, +0x4C (0) */
+    float refire, charge, offset;                    /* desc +0x14, +0x18, +0x10 */
+    int state;                                       /* +0xC604: 2, or 3 once fireWeapon asked for it */
+    float timer, left;                               /* the countdown +0xB4; the burst's time left +0x1AC */
+    int firing, applied;                             /* +0xF5 the burst is on; +0x1B8 its damage is dealt */
+    int fx;                                          /* the host's handle of its FireEffect, -1 none */
+} ArmyMonWeapon;
+typedef struct { ArmyMonWeapon w[ARMY_MON_WEAPONS]; int n; } ArmyMonWeapons;
+/* the setup over the book's WeaponList group; find gives a group of Weapons.bdp (as ArmyHost.find) */
+void army_mon_weapons_read(ArmyMonWeapons *ws, Group list, Group (*find)(void *ctx, const char *book, const char *name),
+                           void *ctx);
+/* fireWeapon (0x2D4B80): state 3. (stopWeapon, 0x2D4A80: state 2 and the weapon held, Shockwave +0x7C 0x31BA50, the
+ * burst off and its effect stopped; no script calls it.) 0 when the monster has no weapon of that key */
+int army_mon_weapon_fire(ArmyMonWeapons *ws, const char *key);
+/* the monster's update over a weapon (0x2E1400: a state 3 tries to fire, 1, 1, and becomes 2; then the weapon's update
+ * with 1) by dt: what the host does this frame, AMW_* bits: START the FireEffect at the WeaponNode, STOP it (the
+ * burst's Duration is out), BURST the damage (once a burst, the frame it starts) */
+enum { AMW_START = 1, AMW_STOP = 2, AMW_BURST = 4 };
+int army_mon_weapon_step(ArmyMonWeapon *w, float dt);
 
 /* ---- the score (gCommon.addStats, Player.addPoints) */
 #define ARMY_MONSTERS 4
