@@ -5529,11 +5529,14 @@ static void movie_stop(Viewer *v)
         shell_movie_picture(v->shell, 0);
 }
 
-/* SHELL_EVT_MOVIE: playVideo(name), name.pss from the Vol (the NTSC ones) */
+/* SHELL_EVT_MOVIE: playVideo(name), the file by the game's pick (movie.c): the European disc's on a PAL console, at
+ * 50 Hz (its flags +0x50 = 0xC never ask for 60, 0x169020): <name>_<lang>_pal, else <name>_pal; the language the
+ * .loc column (hud.h's + 1) */
 static void movie_start(Viewer *v, const char *name)
 {
+    char picked[96];
     movie_stop(v);
-    v->movie = movie_open(&v->vol, name);
+    v->movie = movie_pick(&v->vol, name, v->lang + 1, 1, picked, sizeof picked);
     if (!v->movie) {
         printf("no movie %s\n", name);
         return;
@@ -5541,7 +5544,7 @@ static void movie_start(Viewer *v, const char *name)
     shell_movie_hold(v->shell);
     sound_stream(movie_pull, v->movie);
     if (getenv("RAMPAGE_TRACE"))
-        printf("  movie %s\n", name);
+        printf("  movie %s (%s)\n", name, picked);
 }
 
 /* the movie at the shell's time: its picture to the Video quad; at its end the shell goes on; skipped: stopped */

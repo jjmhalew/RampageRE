@@ -934,6 +934,47 @@ Movie *movie_open(const Vol *v, const char *name)
     return m;
 }
 
+/* [R] 0x169360, FullMotionVideoManager's file pick: the name without its extension (cut at its '.', 0x32D7B0), the
+ * language's suffix by gApp +0x70 (0x1693D8, the table 0x40F0A0: the .loc column, 1 English .. 9 Portuguese; 0 and
+ * past 9 none), then up to four tries: <name><lang>_pal, <name>_pal, <name><lang>, <name>, the first two only when the
+ * display's rate (0x4CB550) is under 59 (PAL, 50 Hz); each with the name's own extension if it had one, then the
+ * manager's (slot +0x28, PS2FullMotionVideoManager 0x1A6E70: ".PSS" alone), until a file opens (0x10C0E0). The rate
+ * it hands the player is 25 for a _pal one, else 30 (0x169600). */
+static const char *const LANG_SUFFIX[10] = { "", "_a", "_e", "_j", "_f", "_g", "_i", "_s", "_d", "_p" };
+
+Movie *movie_pick(const Vol *v, const char *name, int lang, int pal, char *picked, size_t n)
+{
+    char base[64], ext[16] = "", path[96];
+    if (!v || !name)
+        return NULL;
+    snprintf(base, sizeof base, "%s", name);
+    char *dot = strchr(base, '.');
+    if (dot) {
+        snprintf(ext, sizeof ext, "%s", dot);
+        *dot = 0;
+    }
+    const char *suffix = lang >= 0 && lang < 10 ? LANG_SUFFIX[lang] : "";
+    for (int try = 0; try < 4; try++) {
+        if (!pal && try < 2)                             /* (60 Hz: no _pal) */
+            continue;
+        for (int e = ext[0] ? -1 : 0; ; e++) {
+            const char *x = e < 0 ? ext : e == 0 ? ".PSS" : NULL;
+            if (!x)
+                break;
+            snprintf(path, sizeof path, "%s%s%s%s", base, try & 1 ? "" : suffix, try < 2 ? "_pal" : "", x);
+            if (!vol_find(v, path))
+                continue;
+            Movie *m = movie_open(v, path);
+            if (m) {
+                if (picked && n)
+                    snprintf(picked, n, "%s", path);
+                return m;
+            }
+        }
+    }
+    return NULL;
+}
+
 void movie_close(Movie *m)
 {
     if (!m)

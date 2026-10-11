@@ -18,8 +18,22 @@ menu's retro box, NTSC). `src/movie.c` reads and decodes them by hand; the shell
 | `ballers.pss` | 2163 | 1:12 | I, field and frame DCT |
 
 Every one has a `_pal` twin at 25 frames a second, with fewer pictures (midway_pal 328, intro_pal 3687), and the
-intro and Victory movies have `_f_pal`, `_g_pal`, `_i_pal` and `_s_pal` ones (they decode too). The viewer plays the
-NTSC ones.
+intro and Victory movies have `_f_pal`, `_g_pal`, `_i_pal` and `_s_pal` ones (they decode too).
+
+**Which file** [R] (0x169360, `FullMotionVideoManager`'s pick): the name without its extension, the language's
+suffix by gApp +0x70 (the .loc column: 1 `_a`, 2 `_e`, 3 `_j`, 4 `_f`, 5 `_g`, 6 `_i`, 7 `_s`, 8 `_d`, 9 `_p`; 0
+none; the table 0x40F0A0), then up to four tries: `<name><lang>_pal`, `<name>_pal`, `<name><lang>`, `<name>`, the
+two `_pal` ones only when the display's rate (0x4CB550) is under 59; each with the name's own extension (if any),
+then the manager's (slot +0x28, 0x1A6E70: `.PSS` alone), until a file opens. The rate handed to the player is 25 for
+a `_pal` one, else 30. gApp +0x70 comes from the console's language at start-up (0x10D300, `sceScfGetLanguage`:
+English 1, or 2 on an SLES disc; French 4, Spanish 7, German 5, Italian 6; Japanese 3 (2 on SLES); Dutch and
+Portuguese English). The display is 50 Hz on a PAL console unless the app's flags have 0x80 (0x25E1A0), and they are
+0xC (0x169020): the European disc on a European console plays the `_pal` ones, the French intro `intro_f_pal`, the
+English one `intro_pal` (no `_a`/`_e` files), and the NTSC ones only on an NTSC console.
+
+The port plays as the European disc on a PAL console (`movie_pick`, main.c's `movie_start` with `--lang` + 1): the
+`_pal` files, the language's where there is one. The pictures are timed by the movie's own rate, so the 25 frames a
+second play right whatever the window's rate (the game's frame steps stay at 60 Hz, a port choice).
 
 **The stream:** an MPEG-2 program stream in packs of 4096 bytes (pack header, system header in the first, then one
 PES packet each, padding stream 0xBE to fill), ending in 0xB9.
@@ -96,7 +110,6 @@ it with the movie's texture (`rnd_video`, uploaded when the picture changes). "P
 the stream's volumes to constants (MVOL 0x3FFF, BVOL 0x7FFF, the voices 0x3FFF), never the music setting [R]. With no audio output (`--mute`) the mixer still moves on in real time and drops it. A `--shot` run keeps at
 most 4 MB of it.
 
-**Not played:** the PAL and other languages' versions (the shell names the NTSC ones).
 The sound and the pictures are not synchronised by the PTS [R]: 0x1A6990 decodes up to the picture (timer − start)
 × rate / the timer's frequency + 1, at most 2 past the current one, the start set when the first picture is out and
 the sound starts (0x1A6C90; a pause moves it on, 0x1A6620); the sound streams on its own. Here both start at the

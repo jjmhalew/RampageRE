@@ -37,7 +37,7 @@ engine    0x168B10-0x168BE0  the refcounted resource release (329 callers); the 
 engine    0x168BE0-0x168C00  MaterialLoader's empty slots (render_gl.c builds the materials)
 platform  0x168C00-0x169120  AppPS2: the PS2 app's frame loop, VSync timing, the "%2.2d fps PAUSED" debug line; main.c, plat_sdl.c
 engine    0x169120-0x1694E0  FullMotionVideo / its manager's slots: movie.c decodes and plays the .pss movies
-open      0x1694E0-0x169760  the movie file pick: <name>, language suffix, "_pal" tried in turn (0x1694E0); the port plays the NTSC ones
+engine    0x1694E0-0x169760  the movie file pick (0x169360's tail): movie.c's movie_pick, the European disc's _pal and language files
 engine    0x169760-0x169880  FullMotionVideoManager's remaining slots: movie.c
 open      0x169880-0x16A870  MenuEventHandler: the menus' pad events, held repeat (+0x30, +0x34) and stick 0.15; main.c's pad_menu guesses
 engine    0x16A870-0x16AF40  the controller map (which pads talk to the GUI): shell.c's controller_table [G: details of 0x16AC70]

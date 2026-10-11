@@ -11,12 +11,17 @@
  * seconds in; movie_audio() gives the sound as it is pulled (the mixer, sound_stream). Nothing here is threaded. */
 #ifndef RAMPAGE_MOVIE_H
 #define RAMPAGE_MOVIE_H
+#include <stddef.h>
 #include <stdint.h>
 #include "data.h"
 
 typedef struct Movie Movie;
 
 Movie *movie_open(const Vol *v, const char *name);  /* "intro" -> intro.pss (case-insensitive); NULL if absent */
+/* the game's pick (0x169360): <name><lang>_pal, <name>_pal (pal: a 50 Hz display), <name><lang>, <name> (.pss), the
+ * first there; lang = gApp's language, the .loc column (1 English, 2 English 2, 3 Japanese, 4 French "_f", 5 German
+ * "_g", 6 Italian "_i", 7 Spanish "_s", 8 Dutch, 9 Portuguese). The file it opened into picked (may be NULL). */
+Movie *movie_pick(const Vol *v, const char *name, int lang, int pal, char *picked, size_t n);
 void movie_close(Movie *m);
 void movie_size(const Movie *m, int *w, int *h);    /* the picture's size (0 until the first sequence header) */
 double movie_fps(const Movie *m);
