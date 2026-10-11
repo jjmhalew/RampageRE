@@ -333,9 +333,11 @@ float monster_knock_ground(float vel[3], const float dir[3], float dist, float t
     return v / time;
 }
 
-/* [R] 0x2D7558 (mode 1 or 2): dir x dist / time, z = tan(+0x38 of the attack record) x |that|, then a spin (+0xBD3C ..
- * +0xBD50, not ported) and +0xF4 = 50 (0x2D77C8). +0x38 (0 or 1 in the data) goes to tanf (0x1576D8 at 0x2D7600) as
- * it is: radians, so 1 lifts the victim at tan 1 = 1.56 x its speed [R]. */
+/* [R] 0x2D7558 (mode 1 or 2): dir x dist / time, z = tan(+0x38 of the attack record) x |that|, then a spin and +0xF4
+ * = 50 (0x2D77C8). +0x38 (0, 1 or 1.8 in the data) goes to tanf (0x1576D8 at 0x2D7600) as it is: radians, so 1 lifts
+ * the victim at tan 1 = 1.56 x its speed [R]. The spin (0x2D76B8 .. 0x2D77B4): +0xBD3C its axis, +0xBD48 = 4 pi n /
+ * t and +0xBD4C that / t, n the record's +0x4C (over the dynamic scale while one is set), t the flight's time to the
+ * ground (gravity 60); n is 0 in all 2014 attack events of the 30 monsters, so it never turns [R]; not ported. */
 float monster_knock_air(float vel[3], const float dir[3], float dist, float time, float angle)
 {
     if (time <= 0)

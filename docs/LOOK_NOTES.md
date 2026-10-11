@@ -151,7 +151,7 @@ F (+0xF4) is 50 at spawn (0x2E98C0). A hit (0x2D6A50) sets it:
 | | velocity | F |
 |---|---|---|
 | a monster's attack, the victim on the ground (0x2D77D8) | dir × 2d / T | 2d / T²: it slides d in T and stops |
-| the same in the air, modes 1 and 2 (0x2D7558) | dir × d / T, z = tan(attack +0x38) × that speed (tanf 0x1576D8 of the record's 0 or 1 as radians), a spin | 50 (0x2D77C8) |
+| the same in the air, modes 1 and 2 (0x2D7558) | dir × d / T, z = tan(attack +0x38) × that speed (tanf 0x1576D8 of the record's 0, 1 or 1.8 as radians), a spin of 4π n / t, n the record's +0x4C, t the time to the ground (0x2D76B8 .. 0x2D77B4; n is 0 in all 2014 attack events of the 30 monsters: none) | 50 (0x2D77C8) |
 | a shot's knock (army, 0x2D7928) | each axis the knock's if larger in size | 50 (0x2D79E0) |
 
 d is the attack record's +0x30 (15, 10; times its modifiers), T its +0x34 (0.2 … 0.4) (FORMAT_MONSTER.md "Clip
