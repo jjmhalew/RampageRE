@@ -218,8 +218,9 @@ static void heading_fwd(float heading, float fwd[3])
     fwd[2] = 0;
 }
 
-/* [R] 0x33C5A0 (record r dragged, the other planted): the planted foot as the clip now poses it (0x33C290 mirrored,
- * else the clip's own query, animation player +0x2A24 vtable +0x34, time offset 0), through the monster's matrix, is
+/* [R] 0x33C5A0 (record r dragged, the other planted): the planted foot as the clip now started poses it at its time 0
+ * (0x33C290 mirrored, else the clip's own query, animation player +0x2A24 vtable +0x34 = 0x196D20, f12 = 0: the
+ * clip's keys alone, the root as the clip has it), through the monster's matrix, is
  * short of where it was just planted by d (x, y); the dragged foot as the clip poses it, through the matrix moved by d,
  * is how far from where it is now (0x2E5C40)? 0.333 of that (x, y), at most 3 x the ankle (gp-0x6C68, worked out the
  * first time and kept: gp-0x6C64), times FootIKDragHeightScale (+0xAC4), is the arc's height (+0x8). So the arc
@@ -249,8 +250,8 @@ static void drag_setup(FootState *s, int r, const FootPose *m)
  * 0x4D6A9A; with an anchor (+0x6C): first a footfall at its record's place when the +0x68 byte is set (never: no
  * code sets it, FOOTSTEP_NOTES.md); the anchor let go (-1) when the state now (monster +0x10C) travels (0x50 or
  * 0x1080: 0x33BFE8 .. 0x33C000 go to the drop at 0x33C018) or its record is no longer planted (footStep); else the
- * anchor's foot as the clip alone poses it now (0x33C290 mirrored, else
- * the player's clip query) through the matrix, against the record's place, (x, y): within 1e-6 squared the anchor is
+ * anchor's foot as the clip alone poses it at its time 0 (0x33C290 mirrored, else the clip's query 0x196D20; f12 = 0
+ * at 0x33C04C / 0x33C080) through the matrix, against the record's place, (x, y): within 1e-6 squared the anchor is
  * let go; else the place moves by (1 - RTWSmoothFactor) of it, the rotation kept. */
 int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading)
 {

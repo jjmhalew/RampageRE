@@ -1428,11 +1428,10 @@ static void foot_pose(Mon *mo, FootPose *m)
     m->water_z = wk >= 0 ? water_surface(v->scene.water[wk]) : 0;
     m->node_flags = mo->have_graph ? mo->graph.states[mo->run.state].flags : 0;
     m->mirrored = mo->mirror;
-    if (mo->have_graph && mon_in(mo)) {    /* the clip now started, on its own (0x33C5A0) */
+    if (mo->have_graph && mon_in(mo)) {    /* the clip now started, on its own, at its time 0 (0x33C5A0) */
         const Instance *in = mon_in(mo);
-        double ct = clip_at(mo, &mo->graph.states[mo->run.state], mo->run.time);
-        m->clip_ok = ik_clip_node(in, ct, foot_bone(0, mo->mirror), m->clip_foot[0]) == 0 &&
-                     ik_clip_node(in, ct, foot_bone(1, mo->mirror), m->clip_foot[1]) == 0;
+        m->clip_ok = ik_clip_node(in, 0, foot_bone(0, mo->mirror), m->clip_foot[0]) == 0 &&
+                     ik_clip_node(in, 0, foot_bone(1, mo->mirror), m->clip_foot[1]) == 0;
     }
 }
 
@@ -4148,11 +4147,10 @@ static void mon_step(Mon *mo, float dt)
             clip_events(mo, to, -1, mo->run.time);
         }
         if (mon_in(mo) && mo->feet.anchor >= 0) {   /* the foot lock (0x33BF10): the root eases onto
-                                                      * the planted foot */
+                                                      * the planted foot as the clip has it at its time 0 */
             const Instance *in = mon_in(mo);
-            double ct = clip_at(mo, &mo->graph.states[mo->run.state], mo->run.time);
             float feet[2][3], place[3] = { mo->mx, mo->my, mo->mz };
-            if (ik_clip_node(in, ct, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, ct, "Bip01 R Foot", feet[1]) == 0 &&
+            if (ik_clip_node(in, 0, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, 0, "Bip01 R Foot", feet[1]) == 0 &&
                 foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading)) {
                 mo->mx = place[0];
                 mo->my = place[1];

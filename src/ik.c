@@ -480,21 +480,18 @@ int ik_clip_node(const Instance *in, double seconds, const char *name, float out
     int path[64], np = 0;
     for (int j = i; j >= 0 && (uint32_t)j < in->tree.n && np < 64; j = in->tree.nodes[j].parent)
         path[np++] = j;
+    /* [R] 0x196D20 (KeyInterpAnim's and RawAnim's +0x34): the node's own key (+0x14 at that time), then each parent's
+     * (the skeleton's +0x2C, +0x4 the parent, to -1) put before it (0x196F30, 0x196E70, 0x1859F0): the clip's keys
+     * alone, its root as the clip has it (the motion the monster takes over is taken out only in the animation
+     * player's frame, 0x301080). 0x33C290 composes the same from its own key array, mirrored (0x194BA0) first. */
     Mat4 acc = mat_identity();
     for (int k = np - 1; k >= 0; k--) {
         const TreeNode *nd = &in->tree.nodes[path[k]];
         float tr[3] = { nd->t[0], nd->t[1], nd->t[2] }, q[4] = { nd->q[0], nd->q[1], nd->q[2], nd->q[3] };
         if (in->has_clip)
             clip_pose(&in->clip, seconds, (uint32_t)path[k], tr, q);
-        int root = k == np - 1;
-        if (root)
-            for (int a = 0; a < 3; a++)
-                if (in->still_root >> a & 1)
-                    tr[a] = in->root_hold[a];
         Mat4 local = mat_tq(tr, q);
-        if (root && in->root_turn != 0)
-            local = mat_mul(mat_trs_z(0, 0, 0, -in->root_turn), local);
-        acc = root ? local : mat_mul(acc, local);
+        acc = k == np - 1 ? local : mat_mul(acc, local);
     }
     out[0] = acc.m[12] * (in->mirrored ? -1.0f : 1.0f);
     out[1] = acc.m[13];

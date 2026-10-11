@@ -2279,6 +2279,18 @@ static void light_buildings(Scene *s)
 
 /* ---------------------------------------------------------------- posing */
 
+/* the turn the monster took over out of a root (place and rotation): Rz(-deg) x (t, q), q in the row-vector
+ * convention (mat_tq), so q x (0, 0, sin(deg / 2), cos(deg / 2)) */
+static void root_unturn(float t[3], float q[4], float deg)
+{
+    float a = deg * 3.14159265f / 180.0f, c = cosf(a), sn = sinf(a), x = t[0];
+    t[0] = c * x + sn * t[1];
+    t[1] = c * t[1] - sn * x;
+    float bz = sinf(a / 2), bw = cosf(a / 2), r[4] = { q[0] * bw + q[1] * bz, q[1] * bw - q[0] * bz,
+                                                     q[3] * bz + q[2] * bw, q[3] * bw - q[2] * bz };
+    memcpy(q, r, sizeof r);
+}
+
 static void pose_instance(Scene *s, Instance *in, double t)
 {
     int mk = scene_monster_slot(s, (int)(in - s->instances));
@@ -2291,6 +2303,15 @@ static void pose_instance(Scene *s, Instance *in, double t)
             clip_pose(&in->clip, t + in->offset, i, tr, q);
         if (in->has_face && in->face_mask && in->face_mask[i])   /* the face clip's, fully (weight 1.0) */
             clip_pose(&in->face, in->face_t * in->face.duration, i, tr, q);
+        if (nd->parent < 0) {                        /* [R 0x2FFF10] the root's motion comes out of the clip's
+                                                      * pose (0x301080; the root rewritten at 0x3003C8) before the
+                                                      * blend towards the kept pose, which came out the same way */
+            for (int k = 0; k < 3; k++)
+                if (in->still_root >> k & 1)
+                    tr[k] = in->root_hold[k];
+            if (in->root_turn != 0)
+                root_unturn(tr, q, in->root_turn);
+        }
         float wi = w;                                /* the face bones blend on their own timer (0x2FFF10) */
         if (in->has_face && in->face_mask && in->face_mask[i])
             wi = in->face_held && in->face_blend_left > 0 && in->face_blend_time > 0 ?
@@ -2306,10 +2327,6 @@ static void pose_instance(Scene *s, Instance *in, double t)
             memcpy(in->pose[i], tr, sizeof tr);
             memcpy(in->pose[i] + 3, q, sizeof q);
         }
-        if (nd->parent < 0)
-            for (int k = 0; k < 3; k++)
-                if (in->still_root >> k & 1)
-                    tr[k] = in->root_hold[k];
         Mat4 local = mat_tq(tr, q);
         for (int k = 0; k < in->nturn; k++)          /* [R 0x298980] local = R x pose (row vectors): R first */
             if (in->turn[k].node == (int)i && in->turn[k].angle != 0) {
@@ -2322,8 +2339,6 @@ static void pose_instance(Scene *s, Instance *in, double t)
                 }
                 local = mat_mul(local, r);
             }
-        if (nd->parent < 0 && in->root_turn != 0)
-            local = mat_mul(mat_trs_z(0, 0, 0, -in->root_turn), local);
         int p = nd->parent;
         in->node[i] = p >= 0 && (uint32_t)p < i ? mat_mul(in->node[p], local) : local;
         if (sm && (sm->look_yaw != 0 || sm->look_pitch != 0)) {

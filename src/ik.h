@@ -47,8 +47,9 @@ typedef struct IkFeet {
  * posed node's into the target) */
 void ik_feet(Mat4 *node, const Tree *tree, int mirrored, IkFeet *f);
 /* a node's place in the monster's model space as its clip alone poses it at `seconds` (no blend, no face, no head
- * turn; the root held and turned as pose_instance does), as drawn (mirrored: the other side's node, reflected): the
- * animation player's own clip query (+0x2A24 vtable +0x34, 0x33C290 mirrored). 0 = ok */
+ * turn, and the root as the clip has it: no motion taken out), as drawn (mirrored: the other side's node,
+ * reflected): the animation player's own clip query (+0x2A24 vtable +0x34 = NodeTreeAnim 0x196D20, 0x33C290
+ * mirrored), which the foot object asks at the clip's time 0. 0 = ok */
 int ik_clip_node(const Instance *in, double seconds, const char *name, float out[3]);
 
 #endif

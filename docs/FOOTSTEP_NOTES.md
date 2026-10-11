@@ -121,13 +121,25 @@ No effect. So: **coming to a stop** (a walk into an idle, a reaction ...), the f
 and becomes the anchor, the other one is dragged into the new clip's stance. A standing clip entered from a standing
 state plants nothing (Ground_Idle's own flags are 0).
 
-**The drag (0x33C5A0, s3 the dragged record, s2 the planted)**: the planted foot as the clip now poses it (0x33C290
-mirrored, else the clip's own query, animation player +0x2A24 — the clip 0x2FFA00 started — vtable +0x34, time offset
-0), through the monster's matrix, is short of where it was just planted by d (x, y; z 0); the dragged foot as the
-clip poses it, through the matrix moved by d, is a distance (x, y) from where it is now (0x2E5C40). 0.333 (0x3EAA7EFA)
+**The drag (0x33C5A0, s3 the dragged record, s2 the planted)**: the planted foot as the clip now started poses it
+**at its time 0** (0x33C290 mirrored, else the clip's own query, animation player +0x2A24 — the clip 0x2FFA00 started
+— vtable +0x34, f12 = 0: the clip's own time, as 0x2FFA00 and 0x2FFF10 hand its +0x14 / +0x48 the player's +0x2A28),
+through the monster's matrix, is short of where it was just planted by d (x, y; z 0); the dragged foot as the clip
+poses it, through the matrix moved by d, is a distance (x, y) from where it is now (0x2E5C40). 0.333 (0x3EAA7EFA)
 of that, at most 3 × the ankle (worked out the first time any monster drags and kept for good: gp−0x6C68, flag
 gp−0x6C64), × `FootIKDragHeightScale` (monster +0xAC4: 1 until read; Lizzie and Ralph 0.5), is the arc's height
 (record +0x8). So the arc scales with how far the foot will be dragged.
+
+### The clip query (+0x2A24 vtable +0x34, 0x33C290) [R]
+The clip object a state node holds (+0x78, handed to 0x2FFA00 at 0x2E6820) is a `KeyInterpAnim` (vtable 0x444C30) or
+`RawAnim` (0x444DF0); their +0x34 is the base `NodeTreeAnim`'s 0x196D20: the node's own key (+0x14: node, time,
+out: a rotation at +0x0, a place at +0x10) and then each parent's (the skeleton's +0x2C table, +0x4 the parent, up to
+−1) put before it (0x196F30 the rotations, 0x196E70 + 0x1859F0 the place). So it is **the clip's keys alone, the root
+as the clip has it**: the motion a monster takes over (0x301080) is taken out only in the animation player's own
+frame, not here. 0x33C290 (mirrored) does the same from its own key array of the requested node and its parents
+(the others left at the identity), mirrored first by 0x194BA0 (with `Lift_Node`, monster +0x7DB4), and composes from
+the node of the other side (0x33C418 .. 0x33C424): the node as the mirrored pose draws it. Both the drag and the
+foot lock ask at time 0.
 
 ## The foot lock and the foot IK
 
@@ -147,10 +159,14 @@ ground; record 1 → 0x2DC350, else 0x2DC3D0) and the byte cleared. **No code se
 +0xC884 in the monster and foot code stores zero), so this footfall never happens: the footfalls are footPlant's
 alone. Then the anchor is dropped (−1) **when the state now (monster +0x10C) travels** (0x50 / 0x1080: 0x33BFE8 ..
 0x33C000 branch to the drop at 0x33C018) **or its record is no longer planted** (footStep). Otherwise the anchor's
-foot as the clip alone poses it now (0x33C290 mirrored, else the player's clip query on node +0x72C0 / +0x72C4,
-swapped when mirrored), through the new matrix, against the record's place, (x, y): within 1e−6 squared
-(0x358637BE) the anchor is dropped and nothing moves; else the matrix's place moves by **(1 − RTWSmoothFactor) of the
-slip**, its rotation kept. The root eases after the planted foot; the IK holds the foot meanwhile.
+foot as the clip alone poses it **at its time 0** (0x33C290 mirrored, else the clip query above on node +0x72C0 /
++0x72C4, swapped when mirrored; f12 = 0 at 0x33C04C / 0x33C080; the place at +0x10 of the result, 0x33C098),
+through the new matrix (rows +0x0 / +0xC / +0x18, place +0x24), against the record's place, (x, y): within 1e−6
+squared (0x358637BE) the anchor is dropped and nothing moves; else the matrix is copied out with its place moved by
+**(1 − RTWSmoothFactor) of the slip**, its rotation kept, and 1 returned. The root eases after the planted foot until
+the clip's first frame stands on it; the IK holds the foot meanwhile. Walking into Ground_Idle (George, 0.7) that is
+the half stride: the walk's forward foot, 2.56 ahead of the place, against the idle's 0.27, so the monster eases 2.3
+forward over its planted foot and stays there.
 
 ### The foot object's update (0x33D450 = 0x33CF90 for 0 and 1, then 0x33D490 = 0x33CDE0 for 0 and 1) [R]
 Run only when the monster has a foot IK. 0x33CF90, per record:
@@ -245,7 +261,8 @@ at once and the walk is as fast as without the IK.
 - Faithful [R]: the four names and their absence, the stillness test, the foot's (x, y), the ground or water z, the
   mirror swap, the per-foot slot, the forward foot as the anchor, Spine1 for the landing; the state left as the
   cancel's test, the drop rule, the slip's share, the easing shares and snaps, the planted z and reach clamp, the
-  drag's arc and its end, the two IK classes and their chains, the 3-link solve at the full share, the ankle.
+  drag's arc and its end, the two IK classes and their chains, the 3-link solve at the full share, the ankle; the
+  clip query (`ik_clip_node`: the clip's keys alone, the root as the clip has it, at time 0, 0x196D20 / 0x33C290).
 - The side convention [R]: the game's foot record is (f + 1) & 1 when mirrored, and the mirrored foot query
   0x33C290 swaps a request for +0x72C0 (L) to +0x72C4 (R) and back (0x33C418 .. 0x33C424), so the mirrored R is the
   clip's L chain, mirrored; the viewer's `foot_bone(0, 1)` ("Bip01 R Foot") through `scene_monster_node` (city.c) is
@@ -262,9 +279,18 @@ at once and the walk is as fast as without the IK.
   viewer) is the same for these one-shot effects; the 3-link's blend below the full share, read as 0x2F7E10's (the
   same blocks with one bone less, as ik_arm ports it) and not traced line by line; 0x1017F0 is a row Gram-Schmidt, a
   no-op on rigid matrices [R]; the arc cap kept per monster (the game keeps the first monster's for the whole game); the shares applied
-  per world step, 1/30 s (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`); `ik_clip_node` holding and turning the root as the viewer's
-  posing does (the player's own clip query was not traced into); the mirrored 3-link solved on the other side's nodes
+  per world step, 1/30 s (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`); the mirrored 3-link solved on the other side's nodes
   with the target reflected (as the arms), where the game solves the mirrored pose itself — the same up to the bend's
   sense, which both put forward.
+- Fixed: the stop that slid the monster on (up to 17 units for George, walking into Ground_Idle on NewYork 3:
+  −12.2 → −29.4). Two causes: the foot lock asked the clip at its time now, with the root held and turned as the
+  posing does (the game: time 0, the root as the clip has it); and the posing (city.c `pose_instance`) kept the pose
+  a blend starts from with the root as the clip has it, so a walk's root (13.6 ahead at its end) came back into the
+  drawn pose over the walk → idle blend and the planted foot's reach clamp dragged the anchor's record along after the
+  hip, which the lock then followed. The game takes the root's motion out of the clip's pose (0x301080, the root
+  rewritten at 0x3003C8) before the blend towards the kept pose (0x30057C ..), the kept one being last frame's final
+  pose; the posing now does the same (the hold and the turn on the root before the blend, and so in the kept pose).
+  Now: −12.24 → −14.52 (0.3 of the slip a frame), the record stays at its planted place; mirrored the same on record
+  1; Ralph −11.6 → −12.7, Rhett −14.4 → −15.7 (were −17.1, −27.8).
 - Not ported: the debug byte; the dynamic scale in 0x2E5C40 (+0xA78; the viewer draws at 1); the state command's own
   0x33D490 refresh (the next frame's update does the same).

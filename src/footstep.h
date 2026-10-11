@@ -51,7 +51,8 @@ typedef struct {
                                                       * node_flags, foot_command) */
     int mirrored;                                    /* +0x7DA1 */
     /* for the drag (cancelFootStep's 0x33C5A0): the feet in the model's frame as the clip now started poses them on
-     * its own (the animation player's clip query, ik_clip_node; indexed as foot[]); clip_ok 0: not given, no lift */
+     * its own at its time 0 (the animation player's clip query, ik_clip_node(in, 0, ..); indexed as foot[]); clip_ok
+     * 0: not given, no lift */
     float clip_foot[2][3];
     int clip_ok;
 } FootPose;
@@ -130,9 +131,10 @@ void foot_ik_props(FootState *s, Group misc, const Tree *skeleton);
 float foot_ankle(const Tree *skeleton);
 
 /* the foot lock (0x33BF10, from the monster update at 0x2E0EFC once the frame's move is known, before the matrix is
- * set): while there is an anchor, the root follows the planted foot: the anchor foot as its clip alone poses it now
- * (foot: per record, model space as drawn: ik_clip_node), put through the monster's matrix (place, heading degrees
- * about z), is short of where it was planted by a slip (x, y); the place moves by (1 - RTWSmoothFactor) of it. The
+ * set): while there is an anchor, the root follows the planted foot: the anchor foot as its clip alone poses it at its
+ * time 0 (foot: per record, model space as drawn: ik_clip_node(in, 0, ..)), put through the monster's matrix
+ * (place, heading degrees about z), is short of where it was planted by a slip (x, y); the place moves by
+ * (1 - RTWSmoothFactor) of it. The
  * anchor is dropped as soon as the state now (node_flags: the current state's) travels (0x50, 0x1080) or the anchor
  * is no longer planted (footStep), and once the slip is within 1e-3. 1 = place moved. */
 int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading);
