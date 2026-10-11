@@ -135,7 +135,10 @@ the same block lost three times running: its next try felled 30 s in; a results 
 moves on, a shell screen standing for 5 minutes (15 with a movie); a monster's place not a number, a monster not
 moving for 90 s, outside the street, more than 4 under its ground or inside a standing building for 2 s, down at 0
 HP for 90 s; the live people or an object list past its bound; more than 3 GB, or 500 MB more after ten blocks),
-`CRASH` (the exception or signal and the last second's state) and `SUMMARY`. Screenshots go to `--ap-shots DIR`: one
+`CRASH` (the exception or signal, its place in the exe and the last second's state; on Windows then a
+`CRASH_FRAME` line per frame of the stack, by dbghelp and the `rampage.pdb` beside the exe; `RAMPAGE_AP_CRASH=1`
+makes one 5 s in, to try it) and `SUMMARY`. A `BLOCK` line also counts the buildings the bots' 60 s guard felled
+(`guard_falls`: the bots stuck on a building). Screenshots go to `--ap-shots DIR`: one
 per problem (80 at most) and every fifth block's end. The exit code is 3 when it saw problems.
 
 `tools/playthrough.py OUT` runs the suite (the campaign from the front end per seed and with the cheats 986960 +

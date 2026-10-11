@@ -41,6 +41,7 @@ typedef struct {
     ApMonster mon[AP_MONSTERS];
     int points[AP_MONSTERS];        /* this block's totals (GPT_TOTAL) */
     int city_score;                 /* the blocks' totals so far */
+    int guard_falls;                /* buildings the bots' 60 s guard felled so far (director.c BOT_STUCK) */
     int boss;                       /* the block has a boss: 1 alive, 2 beaten (none 0) */
     float boss_hp;                  /* its health, 0 .. 1 */
     int nbuildings, standing;

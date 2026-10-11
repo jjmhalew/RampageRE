@@ -269,6 +269,7 @@ typedef struct Viewer {
      * goes for, the demos it waits for (no presses in the menus) */
     Autoplay *ap; double ap_t; float ap_wait;
     int ap_type, ap_players, ap_bots, ap_city, ap_demos;
+    int bot_guard_falls;                             /* buildings the bots' 60 s guard felled (for the watchdog) */
 } Viewer;
 
 /* gCommon.getPlayType() of the game played: the demo's 0, else --play's or the shell's (unset: the campaign) */
@@ -3948,6 +3949,7 @@ static void bot_collapse(void *ctx, int bi)          /* collapseBuilding, scored
     if (bi >= 0 && (uint32_t)bi < mo->v->scene.nbuildings) {
         mo->v->scene.buildings[bi].hitter = mo->slot;
         building_destroy(&mo->v->scene.buildings[bi].b);
+        mo->v->bot_guard_falls++;
     }
 }
 
@@ -5957,6 +5959,7 @@ static int autoplay_watch(Viewer *v)
         f.results = v->hud && hud_results_showing(v->hud);
         f.clock = game_clock(v->game, NULL);
         f.city_score = game_city_total(v->game);
+        f.guard_falls = v->bot_guard_falls;
         f.nmon = v->nmon < AP_MONSTERS ? v->nmon : AP_MONSTERS;
         for (int k = 0; k < f.nmon; k++) {
             Mon *mo = &v->mon[k];

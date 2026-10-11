@@ -12,6 +12,7 @@
 #define PSAPI_VERSION 2                              /* K32GetProcessMemoryInfo, in kernel32 */
 #include <windows.h>
 #include <psapi.h>
+#include <dbghelp.h>                                 /* the crash's stack, by the program's .pdb */
 #else
 #include <sys/resource.h>
 #include <unistd.h>
@@ -39,7 +40,7 @@ struct Autoplay {
     int playing;                                     /* in GS_PLAY */
     double play_since;
     char city[32], block[48];
-    int block_index, play_type, forced, told_block;
+    int block_index, play_type, forced, told_block, guard0;
     char lost_key[96]; int lost_n, force_next;       /* the block lost again and again: how often; forced next time */
     int blocks, won, lost, problems, games, demos, shots_n;
     int pk[AP_MONSTERS];                             /* the PK_ bits told this block */
@@ -171,10 +172,43 @@ static void crash_write(const char *what)
 #ifdef _WIN32
 static LONG WINAPI crash_filter(EXCEPTION_POINTERS *e)
 {
-    char what[96];
-    snprintf(what, sizeof what, "exception_0x%08lX_at_%p", e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionCode : 0,
-             e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionAddress : NULL);
+    char what[128];
+    DWORD64 base = (DWORD64)GetModuleHandleA(NULL);
+    snprintf(what, sizeof what, "exception_0x%08lX_at_%p_(exe+0x%llx)",
+             e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionCode : 0,
+             e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionAddress : NULL,
+             e && e->ExceptionRecord ? (unsigned long long)((DWORD64)e->ExceptionRecord->ExceptionAddress - base) : 0ull);
     crash_write(what);
+    if (g_ap && g_ap->log && e && e->ContextRecord) {   /* the stack, each frame by its symbol and line */
+        HANDLE proc = GetCurrentProcess();
+        SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+        SymInitialize(proc, NULL, TRUE);
+        CONTEXT c = *e->ContextRecord;
+        STACKFRAME64 f;
+        memset(&f, 0, sizeof f);
+        f.AddrPC.Offset = c.Rip;
+        f.AddrFrame.Offset = c.Rbp;
+        f.AddrStack.Offset = c.Rsp;
+        f.AddrPC.Mode = f.AddrFrame.Mode = f.AddrStack.Mode = AddrModeFlat;
+        for (int i = 0; i < 24 && StackWalk64(IMAGE_FILE_MACHINE_AMD64, proc, GetCurrentThread(), &f, &c, NULL,
+                                              SymFunctionTableAccess64, SymGetModuleBase64, NULL) && f.AddrPC.Offset; i++) {
+            char buf[sizeof(SYMBOL_INFO) + 256];
+            SYMBOL_INFO *sym = (SYMBOL_INFO *)buf;
+            memset(buf, 0, sizeof buf);
+            sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+            sym->MaxNameLen = 255;
+            DWORD64 off = 0;
+            DWORD loff = 0;
+            IMAGEHLP_LINE64 ln;
+            memset(&ln, 0, sizeof ln);
+            ln.SizeOfStruct = sizeof ln;
+            int named = SymFromAddr(proc, f.AddrPC.Offset, &off, sym);
+            int lined = SymGetLineFromAddr64(proc, f.AddrPC.Offset, &loff, &ln);
+            fprintf(g_ap->log, "CRASH_FRAME %d %s+0x%llx %s:%lu\n", i, named ? sym->Name : "?", (unsigned long long)off,
+                    lined ? ln.FileName : "?", lined ? (unsigned long)ln.LineNumber : 0ul);
+        }
+        fflush(g_ap->log);
+    }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
@@ -272,11 +306,11 @@ static void block_end(Autoplay *a, const ApFrame *f, const char *result)
     a->mem_last = mem;
     logf_(a, "BLOCK", "n=%d city=%s block=%s index=%d type=%s dur=%.1f result=%s%s score=%s city_score=%d lives=%s hp=%s "
           "states=%s boss=%s boss_hp=%.2f clock=%.0f standing=%d/%d people=%d vehicles=%d army=%d particles=%d "
-          "street=%d mem_mb=%.0f", a->blocks, a->city, a->block, a->block_index, type_name(a->play_type),
+          "street=%d guard_falls=%d mem_mb=%.0f", a->blocks, a->city, a->block, a->block_index, type_name(a->play_type),
           f->t - a->play_since, result, a->forced ? "(forced)" : "", score, f->city_score, lives, hp, st,
           p->boss == 1 ? "alive" : p->boss == 2 ? "beaten" : "none", p->boss_hp, p->clock, p->standing, p->nbuildings,
           a->ob_max[OB_PEOPLE], a->ob_max[OB_VEHICLES], a->ob_max[OB_ARMY], a->ob_max[OB_PARTICLES],
-          a->ob_max[OB_STREET], mem);
+          a->ob_max[OB_STREET], f->guard_falls - a->guard0, mem);
     if (a->blocks == 1 || a->blocks % a->lim.keep_every == 0)
         want_shot(a, 1, result);
     a->playing = 0;
@@ -336,10 +370,15 @@ int ap_frame(Autoplay *a, const ApFrame *f)
         return 0;
     int r = 0;
     a->t = f->t;
+    if (f->t > 5 && getenv("RAMPAGE_AP_CRASH")) {    /* the CRASH lines' test: a write through NULL 5 s in */
+        volatile int *null = NULL;
+        *null = 1;
+    }
     a->in_game = f->in_game;
     if (a->end)                                      /* the block's line, its points and score in */
         block_end(a, f->in_game ? f : &a->last, a->end);
     if (f->in_game) {
+        a->focus[0] = 0;                             /* (the shell's screen is new when it comes back) */
         if (f->state != a->state) {                  /* the state moved on */
             if (a->playing && f->state != GS_PLAY) {
                 a->end = f->state == GS_BLOCK_WON ? (a->last.clock <= 0.5f && a->last.standing > 0 ? "timeup" : "won") :
@@ -352,6 +391,7 @@ int ap_frame(Autoplay *a, const ApFrame *f)
                 snprintf(a->city, sizeof a->city, "%s", f->city ? f->city : "?");
                 snprintf(a->block, sizeof a->block, "%s", f->block ? f->block : "?");
                 a->block_index = f->block_index;
+                a->guard0 = f->guard_falls;
                 a->play_type = f->play_type;
                 a->forced = a->told_block = 0;
                 memset(a->pk, 0, sizeof a->pk);
