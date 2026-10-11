@@ -1723,7 +1723,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             return;
         }
         if (mo->held_rail >= 0 && v->rail) {
-            rail_throw(v->rail, mo->held_rail, mo->slot, e->p[0] != 0, e->p + 1);
+            rail_throw(v->rail, mo->held_rail, mo->slot, e->p[0] != 0, vel);
             mo->held_rail = -1;
             return;
         }
