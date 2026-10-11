@@ -214,7 +214,18 @@ otherwise.
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.
 - With ReactionLevel ≥ 0 the hit goes to 0x2D9650 → 0x2D6A50.
-- Otherwise it goes to the monster's TakeDamage.
+- Otherwise it goes to the monster's TakeDamage (vtable +0x34, 0x2D9680), which picks the level by the amount
+  against MONSTER_DATA +0x12C / +0x130 / +0x134 (3, 15, 30 for all 30 monsters): below 3 level 4 (no reaction),
+  below 15 level 0, below 30 level 1, else 2, then 0x2D6A50 with the same amount [R]. The weapons without a
+  ReactionLevel: BlimpBeam (10 on its first touch: level 0; its DamagePerSec × dt: none), SmartMissile1 (0.5),
+  the monsters' own. Here main.c `take_damage_level`.
+- The amount is the ImpactDamage as it is (a beam's: × the fire's rate +0x1B0, which the actor (0x30F134) and the
+  cluster (+0x6C / +0x70, only written by its constructor 0x2996EC) pass as 1; DamagePerSec × dt × that rate after
+  the first touch) [R]: no difficulty, play type, profile, upgrade or armour enters. 0x2D6A50 takes it straight off
+  HP (0x2D9364), clamped to MONSTER_DATA +0x138 (0x2D9374); its scaling by the four records at +0xBA8C (+0x8 the
+  damage, +0xC the knock, by DamageType masks, 0x2D7138 / 0x2D7C80) is filled only by a clip event no monster has
+  (FORMAT_MONSTER.md). No invulnerability window: only +0xAA2 (always set in play), a grab (+0xB9C4) and 0 HP stop a
+  hit [R].
 
 This is `AE_HIT`, and `army_reaction_slot` is the monster side:
 - **Ignored entirely** while the monster is not interruptible, is in a grab, or has 0 HP. The interruptible byte

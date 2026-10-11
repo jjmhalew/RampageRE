@@ -174,8 +174,9 @@ enum {
     AE_EFFECT_STOP,   /* the effect with handle id stops */
     AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads) */
     AE_HIT,           /* a weapon reached monster `monster`: amount damage, id the DamageType, level the ReactionLevel
-                       * (-1: none, plain TakeDamage), v the knock (0x2D9650's), pos where, dir the shot's way, name the
-                       * weapon. The monster side (0x2D6A50): see army_reaction_slot */
+                       * (-1: none, through TakeDamage 0x2D9680, which picks the level by the amount), v the knock
+                       * (0x2D9650's), pos where, dir the shot's way, name the weapon. The monster side (0x2D6A50):
+                       * see army_reaction_slot */
     AE_REACTION,      /* monster.setReaction(level): slot `level` (columns override as for any slot) */
     AE_PUSH,          /* monster.queuePushRequest(v) */
     AE_STATS_HEALTH,  /* addStats: monster's HP = max(1, HP + amount) within its most, only while HP > 0 */
@@ -284,7 +285,8 @@ void army_hold(Army *a, int unit, const float hand_world[16], int mirrored);
 void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], float monster_heading);
 
 /* [R] 0x2D6A50: the slot an AE_HIT starts. ReactionLevel 4 (pistols, rifles, the pulse cannon) and < 0 start none
- * (-1; the damage still counts). In the air: mode 2 42 / 44 (from behind), mode 1 43 / 45. On the ground or a
+ * (-1; the damage still counts; an AE_HIT of level -1 goes through TakeDamage, whose level by the amount the host
+ * gives: main.c take_damage_level). In the air: mode 2 42 / 44 (from behind), mode 1 43 / 45. On the ground or a
  * building (mode 0, 5): by the knock's direction made 1 long, z > 0.707 24 + level (27 + level from behind),
  * z < -0.707 18 + level (21 +), otherwise 0 + level (3 +), and level 2 with a knock of z <= 0.001 71 (72). The
  * column override applies after; the hit is ignored while the monster is not interruptible (+0xAA2), held in a

@@ -3190,6 +3190,15 @@ static int edible_cell_where(void *ctx, int building, int storey, int column, fl
     return 1;
 }
 
+/* the monster's TakeDamage (vtable +0x34, 0x2D9680), where a weapon without a ReactionLevel goes (0x33BCA0): the
+ * level by the amount against MONSTER_DATA +0x12C, +0x130, +0x134 (3, 15, 30): below the first 4 (no reaction), below
+ * the second 0, below the third 1, else 2; then 0x2D6A50 [R] */
+static int take_damage_level(const Mon *mo, float amount)
+{
+    const float *t = mo->have_graph ? mo->graph.react : NULL;
+    return amount < (t ? t[0] : 3) ? 4 : amount < (t ? t[1] : 15) ? 0 : amount < (t ? t[2] : 30) ? 1 : 2;
+}
+
 /* 0x2D6A50: a hit on the monster: HP off, the reaction by its level and the knock */
 static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3])
 {
@@ -3782,7 +3791,10 @@ static void army_step(Viewer *v, float dt)
                 if (e->level == 0) sound_kill_name(e->name);
                 else sound_play(e->name, e->pos, 1);
                 break;
-            case AE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
+            case AE_HIT:                             /* ReactionLevel < 0: through TakeDamage */
+                monster_hit(mo, e->name, e->amount, e->level >= 0 ? e->level : take_damage_level(mo, e->amount), e->v,
+                            e->pos);
+                break;
             case AE_REACTION: set_reaction(mo, e->level); break;
             case AE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
             case AE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
