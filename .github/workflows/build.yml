@@ -144,6 +144,35 @@ jobs:
           name: RampageRE-linux
           path: ${{ env.PKG }}
 
+  # The OpenGL ES path (GLES=1: src/gles, what a Switch or Android build draws with), built and smoke-tested; no package.
+  linux-gles:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Install SDL2 and GLES
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential libsdl2-dev libgles-dev
+
+      - name: Build
+        run: GLES=1 sh build_viewer.sh rampage && ls -l rampage && ldd rampage
+
+      - name: Smoke test
+        timeout-minutes: 2
+        env:
+          SDL_VIDEODRIVER: offscreen
+          SDL_AUDIODRIVER: dummy
+        run: |
+          rc=0
+          timeout 60 ./rampage no-such-dir/RAMPAGE.VOL --shot smoke.png --mute > smoke.out 2> smoke.err || rc=$?
+          echo "exit code $rc"; echo "stdout:"; cat smoke.out; echo "stderr:"; cat smoke.err
+          if [ "$rc" = 124 ]; then echo "::error::rampage did not exit (timeout)"; exit 1; fi
+          if [ "$rc" = 0 ]; then echo "::error::rampage exited 0 without a RAMPAGE.VOL"; exit 1; fi
+          grep -q "Cannot read no-such-dir/RAMPAGE.VOL" smoke.err || { echo "::error::no error message on stderr"; exit 1; }
+          if [ -e smoke.png ]; then echo "::error::a picture was written"; exit 1; fi
+          rm -f smoke.out smoke.err
+
   # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start.
   release:
     if: github.ref_type == 'tag'

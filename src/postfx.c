@@ -16,8 +16,8 @@
  * image as stored, bottom row first: it then smooths the mirror image, which is just as valid - the lookups are indexed
  * by edge shapes, not by screen position, and the textures are uploaded in their own row order.
  * Needs GL 3.0 or ARB_framebuffer_object (framebuffer objects, multisample renderbuffers, the blit; the same entry points
- * as gl_offscreen), and GLSL 1.30 for SMAA; a GL without them reports "not supported" and draws as before. WoodyRE's
- * OpenGL ES variants (its src/gles shim) are left out until RampageRE has an ES path. */
+ * as gl_offscreen), and GLSL 1.30 for SMAA; a GL without them reports "not supported" and draws as before. On OpenGL
+ * ES 3 (GLES=1) the same code runs through src/gles, which takes the GLSL 1.30 as ES 3.00; ES 2.0 has neither. */
 #include "postfx.h"
 #include <stdio.h>
 #include <stdlib.h>

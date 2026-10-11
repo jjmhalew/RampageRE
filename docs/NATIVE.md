@@ -96,7 +96,7 @@ on every system, so main.c has one spelling of them.
 | Offscreen frame (`--shot`) | a window never shown, the frame in a framebuffer object (`gl_offscreen`, render_gl.c) | `SDL_WINDOW_HIDDEN`, never shown, the same framebuffer object; without one, no window at all |
 | Files, messages, free room | plat.h: `<windows.h>`, MessageBoxA, GetDiskFreeSpaceExA | plat.h / plat_sdl.c: `fopen` looks paths up ignoring case and with `\` as `/` (so `build\disc\RAMPAGE.VOL` works), SDL message box, statvfs |
 | Sound output | sound.c: waveOut (winmm.dll loaded at run time) | sound.c: SDL2's audio queue (`SDL_QueueAudio`), pushed from the main thread as waveOut is |
-| Renderer | render_gl.c: OpenGL 1.1 fixed function, the same on both | |
+| Renderer | render_gl.c: OpenGL 1.1 fixed function, the same on both | the same; `GLES=1`: on OpenGL ES through src/gles (below) |
 
 A `--shot` run opens no window, no sound and no message box anywhere: a message (a missing `RAMPAGE.VOL`) goes to
 stderr and the run exits with 1. A shot from the disc image is byte for byte the one from the extracted files.
@@ -112,6 +112,28 @@ SDL_VIDEODRIVER=offscreen ./rampage build/disc/RAMPAGE.VOL Chicago 1 --mute --sh
 Pass the disc image (`./rampage ~/Rampage.iso Chicago 1`), or put it (or `RAMPAGE.VOL` with `SLES_538.00` or
 `RAMPAGE.ELF`) in `~/.local/share/RampageRE` ("Game data" above). A shot on Mesa's llvmpipe differs from the Windows one only in rounding (under 0.1 % of the pixels by more
 than 8 of 255).
+
+### OpenGL ES
+`GLES=1 ./build_viewer.sh` (needs `libgles-dev` instead of `libgl-dev`) builds the same program on OpenGL ES 3.0, or
+2.0 where there is no 3.0: the path a Switch or Android build takes, testable on a PC (`SDL_VIDEODRIVER=offscreen`
+gives Mesa's ES 3.2 with no display). It adds `-Isrc/gles` (so `#include <GL/gl.h>` is `src/gles/GL/gl.h`),
+`src/gles/gles2.c`, `-lGLESv2` instead of `-lGL`, and `-fsigned-char` (ARM's `char` is unsigned). plat_sdl.c asks
+for an ES context and hands `plat_gl_proc` to the shim (`gles_proc`). The renderer does not change: the shim, after
+WoodyRE's, emulates the fixed function it uses with one shader pair whose stages uniforms switch:
+
+| | |
+|---|---|
+| matrices | modelview, projection and texture stacks; `glGetFloatv(GL_MODELVIEW_MATRIX)` |
+| lighting | up to 4 directional lights per vertex: `GL_POSITION` taken into eye space under the modelview of the call, `GL_DIFFUSE`, `GL_AMBIENT`, the light model's ambient, `GL_COLOR_MATERIAL` (ambient and diffuse), `GL_NORMALIZE`, `glNormalPointer` / `glNormal3f` |
+| fog | `GL_LINEAR` (and `GL_EXP`, `GL_EXP2`) at the eye-plane distance; `glGetFloatv(GL_FOG_COLOR)` answers |
+| textures | `GL_SPHERE_MAP` texgen (the reflection layers), the texture matrix (the drifting clouds), modulate / replace / add / decal / combine, the alpha test, `GL_CLAMP` as `GL_CLAMP_TO_EDGE` |
+| drawing | client arrays as attributes, `GL_UNSIGNED_INT` indices (16 bit or gathered on a bare ES 2.0), `glBegin` / `glEnd` (quads as triangles, line loops), `glPushAttrib` / `glPopAttrib` by group, `glPushClientAttrib`, `glShadeModel` and `glPolygonMode` as no-ops, `glReadPixels` into RGB |
+| shader passes | an own program (postfx.c, gtao.c) passes straight through, the shim's comes back after `glUseProgram(0)`; their GLSL 1.20 / 1.30 is taken as ES 1.00 / 3.00 (highp, `gl_Vertex` = attribute 0, `gl_FragColor` an output), gtao.c blits the depth (ES copies none), and the desktop framebuffer object names are ES 2.0's core ones |
+
+Not there (the renderer uses none): point and spot lights, specular, `glMaterial`, the other texgen modes. On ES 2.0
+GTAO, SMAA and MSAA report "not supported" (no blit, no GLSL 3.00). Shots on llvmpipe, ES against desktop GL: a
+mean difference of 0.0001-0.0006 per channel (alpha-tested edges, the movie's clamped edge), the same with `--ao`,
+`--smaa`, `--msaa`; ES 2.0 and 3.0 give the same picture.
 
 ## Input
 Keys as above, and today's controllers (port extra, WoodyRE's pad code: `src/pad.h`, `src/pad.c` on Windows,
@@ -244,6 +266,7 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms") |
+| `src/gles/GL/gl.h`, `src/gles/gles2.c` | the fixed function on OpenGL ES 2.0 / 3.0 (`GLES=1`, WoodyRE's shim with lighting, fog and sphere maps; "OpenGL ES") |
 | `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |
 | `src/texpack.c` | texture packs: `mods/textures/` replacements and `--dumptex` (WoodyRE's, [TEXTURES.md](TEXTURES.md)); `src/stb/` stb_image and stb_image_write |

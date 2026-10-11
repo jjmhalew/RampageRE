@@ -17,7 +17,8 @@
  * texture with glBlitFramebuffer instead, and the occlusion is multiplied into that target. The frame is whatever
  * framebuffer is bound (GL_FRAMEBUFFER_BINDING: the window's, postfx.c's target, gl_offscreen's for --shot); it is bound
  * again afterwards. Needs GLSL 1.20 and framebuffer objects (GL 3.0 / ARB_framebuffer_object); without them it reports
- * "not supported" and never runs. */
+ * "not supported" and never runs. On OpenGL ES 3 (src/gles, which takes the GLSL as ES 1.00) the depth is always blitted:
+ * ES copies no depth with glCopyTexSubImage2D. */
 #include "gtao.h"
 #include "postfx.h"
 #include <stdio.h>
@@ -73,6 +74,11 @@
 #endif
 #ifndef GL_RGBA8
 #define GL_RGBA8 0x8058
+#endif
+#ifdef RAMPAGE_GLES
+#define GLES 1
+#else
+#define GLES 0
 #endif
 
 /* own names (p_*): Mesa's gl.h already declares some of these (glActiveTexture) as functions */
@@ -255,7 +261,7 @@ void gtao_frame(float zn, float zf, float sx, float sy, float fog_start, float f
     GLint vp[4], scene = 0; glGetIntegerv(GL_VIEWPORT, vp); glGetIntegerv(GL_FRAMEBUFFER_BINDING, &scene);   /* the window, postfx.c's target or gl_offscreen's */
     int w = vp[2], h = vp[3]; if (w <= 0 || h <= 0) return;
     /* the depth: the viewport copied, or under MSAA blitted (one sample of each pixel) into a depth / stencil texture */
-    int blit = postfx_samples() > 0;
+    int blit = postfx_samples() > 0 || GLES;
     if (blit && !p_BlitFramebuffer) return;
     glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_ActiveTexture(GL_TEXTURE0);
@@ -276,7 +282,9 @@ void gtao_frame(float zn, float zf, float sx, float sy, float fog_start, float f
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
         p_BindFramebuffer(GL_FRAMEBUFFER, g_fbo_ds); p_FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, g_tex_ds, 0);
+#ifndef RAMPAGE_GLES                                                    /* (ES: no draw / read buffer to complete it) */
         glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
+#endif
         GLenum st = p_CheckFramebufferStatus(GL_FRAMEBUFFER); p_BindFramebuffer(GL_FRAMEBUFFER, (GLuint)scene);
         if (st != GL_FRAMEBUFFER_COMPLETE) { printf("gtao: depth target incomplete (0x%x), ambient occlusion is off\n", (unsigned)st); g_state = -1; glPopAttrib(); return; }
         g_dw = w; g_dh = h;

@@ -2,7 +2,8 @@
  * (Linux: build_viewer.sh), after WoodyRE's. The Windows build keeps its own Win32 + WGL window in render_gl.c. Keys
  * arrive as SDL scancodes and are stored as the Windows virtual-key codes the rest uses: letters by the layout (as VK
  * letters are on Windows), everything else by position; Ctrl / Shift / Alt set both their side and the plain code.
- * A hidden window (--shot) is never shown and draws into a framebuffer object; headless, SDL_VIDEODRIVER=offscreen. */
+ * A hidden window (--shot) is never shown and draws into a framebuffer object; headless, SDL_VIDEODRIVER=offscreen.
+ * Built with GLES=1 the context is OpenGL ES 3.0 (else 2.0) and the renderer draws through src/gles's shim. */
 #ifndef _WIN32
 #include "plat.h"
 #undef fopen
@@ -75,7 +76,11 @@ FILE *plat_fopen(const char *path, const char *mode)
     return resolve(path, real, sizeof real) ? fopen(real, mode) : NULL;
 }
 
+#ifdef RAMPAGE_GLES                             /* the shim of src/gles (GLES=1): the entry points it emulates or has */
+void (*plat_gl_proc(const char *name))(void) { return gles_proc(name); }   /* (eglGetProcAddress may hand out stubs) */
+#else
 void (*plat_gl_proc(const char *name))(void) { return (void (*)(void))SDL_GL_GetProcAddress(name); }
+#endif
 
 static int g_hidden;                             /* the window is hidden (--shot): no boxes either */
 
@@ -141,11 +146,26 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1); SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+#ifdef RAMPAGE_GLES                             /* OpenGL ES 3.0, else 2.0; src/gles emulates the fixed function on it */
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3); SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
     /* SDL's default context is a compatibility one: the renderer is GL 1.1's fixed function */
     Uint32 flags = SDL_WINDOW_OPENGL | (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_Window *sw = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+#ifdef RAMPAGE_GLES
+    SDL_GLContext gc = sw ? SDL_GL_CreateContext(sw) : NULL;
+    if (!gc) {                                   /* no ES 3.0 (no config for its window, or no context): ES 2.0 */
+        if (sw) SDL_DestroyWindow(sw);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        sw = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+        gc = sw ? SDL_GL_CreateContext(sw) : NULL;
+    }
+    if (!sw) { fprintf(stderr, "SDL window: %s\n", SDL_GetError()); SDL_QuitSubSystem(SDL_INIT_VIDEO); return -1; }
+#else
     if (!sw) { fprintf(stderr, "SDL window: %s\n", SDL_GetError()); SDL_QuitSubSystem(SDL_INIT_VIDEO); return -1; }
     SDL_GLContext gc = SDL_GL_CreateContext(sw);
+#endif
     if (!gc) {
         fprintf(stderr, "SDL OpenGL: %s\n", SDL_GetError());
         SDL_DestroyWindow(sw);
