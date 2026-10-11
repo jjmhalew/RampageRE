@@ -32,10 +32,11 @@ No `BoxWave` is used.
 | 0x337C40 | the waves: every CylWave, then every BoxWave (0x339BB0 evaluates one) |
 | 0x336960, 0x3368F0 | press a disc / a box into the water; 0x336C30 its grid rectangle, 0x336B40 / 0x336A30 the loops |
 | 0x3369E0 | press a disc at a world position (minus the translation): what the monster calls |
+| 0x2D5F00 | the monster's water test: its box against each water's +0x104 (0x2801A0), once a frame |
 | 0x337E00 | the floor under the water at a world (x, y) |
 | 0x339D00 | ROWater draw (vtable +0x1C); 0x339DC0 its bounding sphere; 0x339840 / 0x339AE0 destructors |
 | 0x37C120, 0x3906B0 | the VU1 program of shader 0x7E (and its clipping twin) |
-| 0x304450, 0x3050F0 | the block's object factories that call the reader (f12 = 0; f12 = a float of the caller's +4) |
+| 0x304450, 0x3050F0 | the block's object factories that call the reader (f12 = 0; f12 = the slot's y behind, 41 / 82: the flat quad) |
 
 The key names are pointers in the table at 0x3F5C64 .. 0x3F5C9C ("WaterObject", "Origin", "MinGroundHeight",
 "MinGroundHeightXScale", "MinGroundHeightYScale", "NumRows", "NumCols", "TileSize", "Damp", "WaveSpeed", "EnvMap",
@@ -100,19 +101,65 @@ There is no other input: no rain, no current; the whole look is the CylWaves and
 
 ## The monster
 
-0x2D5F00 finds the water the monster stands in (once a frame: its box, centre its position + height, half sizes
-radius, radius, height, against each water's +0x104 box, the list at 0x4D0AE0 / count 0x4D0AE8). Then
+**The water test** (0x2D5F00, returns the water or 0) [R]:
 
-- **wading** (0x2E2900, when its state +0x2C has 0x1080, 0x50 or 0x80002): 0x2E2BD0 → 0x3369E0 at one of its nodes
-  (0x2E4D30 with node 0x282B90), radius 0.5 x its radius (+0x198 of its props x its scale), depth
-  −0.9 x clamp(water z − f20, 0, height) / height (height: +0x19C x scale; f20 not followed);
-- **landing** (0x2DCA94 in 0x2DC450): radius 1.25 x its radius, depth −(2 s + 0.5 (1 − s)), s = clamp(−vz / 50, f20, 1)
-  from its vertical speed (+0xBD38);
-- **its ground** (0x2E859C in 0x2E8530): +0xA48 = 0x337E00, the floor.
+- Once a frame: the answer is kept at monster +0xC700 with the flag +0xC704, which the update clears at its top
+  (0x2DE5BC; also 0x2DCC04 and the setup's 0x2E9988). Whatever asks first in a frame decides.
+- On a building's face (+0xC644) only a state whose node's action code (+0x3C) is 7 (climbing down) is tested; off
+  it, a state of action 1 (the transitions onto a building) is not. Otherwise none.
+- The box: the **body centre** (0x2E4D30 on the matrix 0x282B90 returns, +0x8: the feet + MONSTER_DATA +0x1A0 along
+  its x axis and +0x1A4 along its y, each plus the kept type-16 record's +0xC / +0x10, x the dynamic scale), raised
+  by the half height +0x19C x scale, and 3 more while airborne (mode 1) more than 3 up (0x2D603C, the same 3 the
+  air case adds to its landing test, 0x2E29A4 .. 0x2E2A9C); half sizes +0x198 x scale twice and +0x19C x scale.
+  George: 2.5 in front of the feet, from the feet to 8.5 up, 3 each way.
+- Against each water of the list at 0x4D0AE0 (count 0x4D0AE8) whose +0x74 (its box +0x104) is set, 0x2801A0:
+  the centre into the water's frame, the box shape's test (vtable 0x449000 +0x10, 0x280D60): per axis
+  a + b − |d|, none below 0. The water's box is (−hx, −hy, −z) .. (hx, hy, 0) about its place (0x339158), i.e. its
+  rectangle from the street (z 0) to the surface, flat for all twelve (Origin z 0). The last that touches.
+
+So a monster is in a water when its feet are at or below the surface (and no more than its height under it) and its
+body centre is over the pool or within its radius of the edge: on the street at the edge of the harbour it already
+splashes, and its ground there is the floor's value outside the rectangle, the surface (0). In the air it is in a
+water only once its feet are under the surface: until then its ground is the street (z 0), after that the floor, so
+a jump into a pool falls on through the surface and lands on the floor.
+
+The users:
+
+- **its ground** (0x2E8530, kept at +0xA48 for the frame): the roof under it (0x2D6150, +0xD4) if any, else in a
+  water the floor (0x337E00) under the body centre (0x2E859C), else the street (gp−0x6D5C vtable +0x34) [R];
+- **wading** (0x2E28A0 .. 0x2E2974, the case of modes 0 and 5 in the monster's ground function 0x2E2770, jump table
+  0x4312B0: 0x2E2870 for 0 and 5, 0x2E2980 for 1, 0x2E2B28 for 2, 0x2E2B58 for 4, nothing for 3): when the state
+  (+0x10C) has a node whose +0x2C has 0x1080, 0x50 or 0x80002 (it travels: the stick or the root along x, y or z),
+  0x2E2BD0 → 0x3369E0 at the body centre, radius 0.5 x +0x198 x scale, depth −0.9 x clamp(surface (+0x34) − the
+  ground (0x2E8530, f20 = the frame's ground at 0x2E27EC), 0, h) / h, h = +0x19C x scale. George in the harbour's
+  middle (floor −5): h 4.25, so 1, pressed 0.9 down. Standing still, prone, in the air: nothing [R];
+- **landing** (0x2DC450 from the mode-1 case at 0x2E2B18): mode 4 first, then the impact's place p = `Bip01 Spine1`
+  (0x2E6000), z the water's +0x34 or the ground; WaterImpactFx or GroundImpactFx (0x2F48D0); then 0x2E2BD0 at the
+  body centre, radius 1.25 x +0x198 x scale, depth −(2 s + 0.5 (1 − s)), s = clamp(−vz / 50, 0, 1) (+0xBD38, f20 =
+  0 at 0x2DC508) [R];
+- **footPlant** (0x2DC350 / 0x2DC3D0): WaterFootStepFx at the foot's (x, y), z the surface
+  ([FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md)) [R];
+- **climbing** (0x2E1618, mounted in mode 5): the place check (0x2DDC40) is asked as ever, and in a water its good
+  answers (1, −9) no longer hold the monster on the face: −8 still gives slot 73 (+0x124), anything else slot 31
+  (+0x7C), as a failed check does (0x2E1660 .. 0x2E1680, 0x2E1780). So climbing down into a water lets go of the
+  wall [R].
 
 The props name the splashes: `WaterFootStepFx = "footfall_water.edf"`, `WaterImpactFx = "footfall_big_water.edf"`
-(George_prop and the others, read by 0x2F5D80 into +0x144 / +0x154 of the props record); they are started by
-`Monster.footPlant` (WaterFootStepFx) and the landing (WaterImpactFx), see [FOOTSTEP_NOTES.md](FOOTSTEP_NOTES.md).
+(George_prop and the others, read by 0x2F5D80 into +0x144 / +0x154 of the props record); they carry the sounds
+(`Rampage|Splash`, `Rampage|Geyser`). Nothing else spawns a splash: no effect sets `CollidesWithWater` (0x1FCE9C,
+particle flag 0x400; FX_NOTES.md), no other object asks for the water (0x2D5F00's callers are the monster's alone:
+0x2DC364, 0x2DC3E4, 0x2DC63C, 0x2E1618, 0x2E28F0, 0x2E2BF0, 0x2E855C), and the string "Water" at 0x4180A8 is only a
+name 0x1AC480 compares (0x1AC558, with a texture's mip setup after it) [R; its purpose not followed]. No wading sound: the effects' own.
+
+## The blocks behind
+
+The factory of the two blocks behind (0x3050F0, called by 0x302AF0 for slots 1 and 2) makes a WaterObject when the
+group has `LoadWhenWaiting` (key 0x3F5DA0) on slot 1 or `LoadWhenDistant` (0x3F5DA4) on slot 2 set
+(0x305888 .. 0x305960) and reads it with f12 = the slot's y (its argument's +0x4: 41, 82), so it is the flat
+stand-in (0x3381B0: one still quad over the pool at the surface, no waves) [R]. All twelve have LoadWhenWaiting 1, so
+the block before each water block shows its pools flat in the gap behind its back row (without it that gap is the
+basin, open to the fog colour); only Chicago's river has LoadWhenDistant 1 and shows two blocks ahead too. The block
+being played gets the full grid from 0x304450 (f12 = 0) [R].
 
 ## The floor (0x337E00)
 
@@ -165,5 +212,12 @@ plays a part [R: nothing in 0x3368C0 .. 0x339DF0 reads them; they are read by 0x
 - The pass [R]: slot 0, state 1, TCC 0, TFX 1 (DECAL: the pixel is the texture's colour and the vertex alpha, no
   alpha test), texture flags 0x11: bit 0 makes CLAMP_1 REPEAT on S and T (0x265840 -> 0x26AA20); the material is built
   in code, so no region override (material +0x80 zero). Here GL_REPEAT both ways, the alpha test off.
-- Not ported: the splash effects' spawning, the monster's water test (0x2D5F00) and its wading depth input; the
-  LoadWhenDistant / LoadWhenWaiting choice of factory (0x3050F0, keys 0x3F5DA0 / 0x3F5DA4).
+- The monster [R]: the water test (main.c `mon_water`: the gating by the face and the action codes, the body centre
+  `mon_body_centre`, the box with the airborne 3, `water_box_touches` for 0x2801A0, the last one, once a frame), the
+  ground under the body centre, the wading's states, modes, place, radius and depth, the landing's press at the body
+  centre, the footfalls' and landing's choice of effect, letting go of the face in a water (climb.c `climb_check`,
+  `Climber.in_water`). The type-16 record's +0xC (added to +0x1A0) is not kept by the viewer: 0 there [G] (George's
+  +0x1A0 is 0 anyway). The water list holds the flat stand-ins of the blocks behind as well [G: which list the game
+  adds them to was not followed; a monster cannot reach them].
+- The blocks behind [R]: city.c makes the flat quads for the waters with LoadWhenWaiting (slot 1) / LoadWhenDistant
+  (slot 2), at y + 41 / + 82.

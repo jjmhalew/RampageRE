@@ -377,7 +377,7 @@ int climb_check(Mount *m, const Scene *s, const Climber *c, int mode)
         return -1;
     m->at.storey = clampi((int)((c->pos[2] + 3) / 3), 0, b->n - 1 > 0 ? b->n - 1 : 0);
     int r = place_ok(s, m->at.building, m->at.pt, c->focus_x);
-    if (r == 1 || r == -9)
+    if (!c->in_water && (r == 1 || r == -9))         /* climbing down into a water: let go [R 0x2E1660] */
         return -1;
     return r == -8 ? 73 : 31;                        /* knocked off: the falling building's slot, or the plain one */
 }

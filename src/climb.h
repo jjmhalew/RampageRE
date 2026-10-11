@@ -33,6 +33,8 @@ typedef struct {                                     /* what the climbing code a
     float half_width;                                /* MONSTER_DATA +0x198 (3 for George) */
     float focus_x;                                   /* the middle of the players' x (0x336360): its own x alone */
     float probe[2];                                  /* MONSTER_DATA +0x1A0, +0x1A4: where it looks for a face */
+    int in_water;                                    /* its box is in a water (0x2D5F00; on a face only in a climb
+                                                        down): climb_check lets go (0x2E1660) */
 } Climber;
 
 int climb_can_mount(Mount *m, const Scene *s, const Climber *c, int side, float zoff);   /* 1 = yes, else -2 .. -9 */
@@ -52,7 +54,8 @@ float climb_wall_heading(const Mount *m, const Scene *s);
  * state's node flags; delta the root's travel this frame (for transitionToMount); dt seconds */
 void climb_place(Mount *m, const Scene *s, uint32_t flags, const float delta[3], float dt, float pos[3], float *heading);
 /* each frame (0x2E14F0): the place re-checked; the slot to fire when the monster is knocked off (31, or 73 when the
- * building falls), else -1. Mode: its movement mode (off a building it lets go). */
+ * building falls), else -1. Mode: its movement mode (off a building it lets go). In a water (c->in_water) a
+ * good place does not hold it: it lets go (0x2E1660). */
 int climb_check(Mount *m, const Scene *s, const Climber *c, int mode);
 
 /* the hands on the wall (monster +0xC77C, 0x323180): attachHand (0x3228B0, 0x3219D0), detachHand (0x3218C0), the

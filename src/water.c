@@ -372,6 +372,27 @@ int water_contains(const Water *w, float x, float y)
     return !(dx < -w->half[0]) && !(dy < -w->half[1]) && dx <= w->half[0] && dy <= w->half[1];
 }
 
+/* the monster's test (0x2D5F00 -> 0x2801A0 with the water's +0x74, which points at its box +0x104): the box's
+ * centre into the water's frame (minus the translation, the matrix has no turn), its sizes as they are, against
+ * the box shape (vtable 0x449000 +0x10, 0x280D60): per axis a + b - |d|, none below 0 [R]. The water's box is
+ * (-hx, -hy, -z) .. (hx, hy, 0) about its place (0x339158 .. 0x3391A4, 0x281170 keeps the middle and the half
+ * sizes): from z 0 (the street) up to the surface; flat, z 0, for every water there is [R] */
+int water_box_touches(const Water *w, const float centre[3], const float half[3])
+{
+    if (!w || !centre || !half)
+        return 0;
+    float mid[3] = { 0, 0, -0.5f * w->origin[2] }, size[3] = { w->half[0], w->half[1], 0.5f * w->origin[2] };
+    for (int k = 0; k < 3; k++)
+        if (size[k] + half[k] - fabsf(centre[k] - w->origin[k] - mid[k]) < 0)
+            return 0;
+    return 1;
+}
+
+float water_surface(const Water *w)
+{
+    return w ? w->origin[2] : 0;
+}
+
 float water_floor(const Water *w, float x, float y)
 {
     if (!w)

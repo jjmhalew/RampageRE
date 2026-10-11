@@ -135,6 +135,8 @@ typedef struct Mon {
     unsigned atk_seq;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
     float ev16;                                      /* the kept type-16 event record's +0x10 (+0xBAA0), 0 none */
+    const Water *water_in; int water_tested;         /* 0x2D5F00's answer this frame (+0xC700), asked (+0xC704) */
+    const Water *water_was;                          /* the answer the frame before (for the trace) */
     float sph_prev[64][3]; int sph_prev_n;           /* its collision spheres' centres last frame (+0x430, valid +0x688) */
     int reveal, shown;                               /* the cryotube's monster (Viewer.extra): out of the world
                                                       * (+0x108 / +0x109) until the reveal shows it */
@@ -275,13 +277,15 @@ static void mon_rumble(const Mon *mo, int ms)
 }
 
 static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3]);
-static int water_at(const Viewer *v, float x, float y);
+static int mon_water(Mon *mo);
 static void challenge_stats(Viewer *v, const char *name, int points);
 static void power_from_profile(Mon *mo);
 static void upgrade_touch(Mon *mo, const float centre[3], float radius);
 static void street_step(Viewer *v, float dt);
-static float water_surface(const Water *w);
-static float ground_at(const Viewer *v, float x, float y, float z);
+static float ground_at(Mon *mo);
+static void mon_body_centre(const Mon *mo, float out[3]);
+static float mon_radius(const Mon *mo);
+static float mon_half_height(const Mon *mo);
 
 static void hud_frame(Viewer *v, int after);
 static void rage_started(Mon *mo);
@@ -1172,7 +1176,8 @@ static float players_mid_x(const Viewer *v)
 static Climber climber(Mon *mo)
 {
     Climber c = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->graph.box[0],
-                  mo->v->nmon > 1 && !mo->is_ai ? mo->v->mid_x : mo->mx, { mo->graph.probe[0], mo->graph.probe[1] } };
+                  mo->v->nmon > 1 && !mo->is_ai ? mo->v->mid_x : mo->mx, { mo->graph.probe[0], mo->graph.probe[1] },
+                  0 };
     return c;
 }
 
@@ -1362,8 +1367,8 @@ static void foot_pose(Mon *mo, FootPose *m)
     }
     for (int k = 0; k < 3; k++)
         m->vel[k] = mo->vel[k] + mo->air[k];
-    m->ground = ground_at(v, mo->mx, mo->my, mo->mz);
-    int wk = water_at(v, mo->mx, mo->my);
+    m->ground = ground_at(mo);
+    int wk = mon_water(mo);                          /* 0x2DC350 / 0x2DC3D0 -> 0x2D5F00 */
     m->in_water = wk >= 0;
     m->water_z = wk >= 0 ? water_surface(v->scene.water[wk]) : 0;
     m->node_flags = mo->have_graph ? mo->graph.states[mo->run.state].flags : 0;
@@ -1702,29 +1707,82 @@ static void stick_world(Mon *mo, float lx, float ly, float w[3])
 /* the monster's collision box (0x2E2C50): MONSTER_DATA +0x198 across (3 each way) and +0x19C up (4.25 each way from
  * its middle: 8.5 tall), against the buildings' boxes */
 #define MONSTER_HALF_WIDTH 3.0f
-#define MONSTER_HEIGHT 8.5f
 #define ROOF_BAND 1.5f                               /* a building box's top 1.5 is its roof's band (0x2D1A30) */
 
-/* the highest ground at (x, y) not above z + 1: the street, or the roof of a building it stands over */
-/* the water the monster stands in (0x2D5F00: its box against the waters'), -1 none */
-static int water_at(const Viewer *v, float x, float y)
+/* the monster's radius and half height (MONSTER_DATA +0x198, +0x19C) x its dynamic scale (+0xA78 while +0xA74) */
+static float mon_radius(const Mon *mo)
 {
+    return (mo->graph.box[0] > 0 ? mo->graph.box[0] : MONSTER_HALF_WIDTH) * (mo->scale > 0 ? mo->scale : 1);
+}
+
+static float mon_half_height(const Mon *mo)
+{
+    return (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * (mo->scale > 0 ? mo->scale : 1);
+}
+
+/* its body centre (0x2E4D30 with its matrix, 0x282B90: +0x8): the feet + MONSTER_DATA +0x1A0 along its x axis and
+ * +0x1A4 plus the kept type-16 record's +0x10 along its y, x its scale; z the feet's. (The record's +0xC, added to
+ * +0x1A0, is not kept here: 0 [G].) */
+static void mon_body_centre(const Mon *mo, float out[3])
+{
+    float s = mo->scale > 0 ? mo->scale : 1, h = mo->heading / 57.2957795f, c = cosf(h), sn = sinf(h);
+    float ax = mo->graph.probe[0] * s, ay = (mo->graph.probe[1] + mo->ev16) * s;
+    out[0] = mo->mx + c * ax - sn * ay;
+    out[1] = mo->my + sn * ax + c * ay;
+    out[2] = mo->mz;
+}
+
+/* the water the monster is in (0x2D5F00), -1 none. Once a frame: the answer is kept (+0xC700, flag +0xC704, cleared
+ * at the top of the update 0x2DE5BC) [R]. None on a building's face (+0xC644) unless its state's action code (node
+ * +0x3C) is 7, climbing down; none off it in a state of action 1, the transitions onto a building. Else its box:
+ * the body centre raised by the half height (3 more while airborne, mode 1, more than 3 up), half sizes radius,
+ * radius, half height, against every water's box (0x2801A0, the list at 0x4D0AE0 / count 0x4D0AE8); the last that
+ * touches [R]. So it is in a water standing in it, or on the street within its radius of the pool's edge. */
+static int mon_water(Mon *mo)
+{
+    Viewer *v = mo->v;
+    if (mo->water_tested) {
+        for (int k = 0; mo->water_in && k < v->scene.nwater; k++)
+            if (v->scene.water[k] == mo->water_in)
+                return k;
+        if (!mo->water_in)
+            return -1;
+    }                                                /* (a water no longer in the scene: asked again) */
+    mo->water_tested = 1;
+    mo->water_in = NULL;
+    int act = mo->have_ag && mo->ag.action && mo->run.state >= 0 && mo->run.state < mo->ag.n ?
+              mo->ag.action[mo->run.state] : DA_NONE;
+    if (mo->mount.mounted ? act != DA_CLIMB_DOWN : act == DA_TRANSITION)
+        return -1;
+    float r = mon_radius(mo), hh = mon_half_height(mo), c[3], half[3] = { r, r, hh };
+    mon_body_centre(mo, c);
+    c[2] += hh;
+    if (mo->mode == MODE_AIRBORNE && mo->mz > 3)    /* 0x2D603C: the same 3 as the landing's (0x2E29A4) */
+        c[2] += 3;
+    int found = -1;
     for (int k = 0; k < v->scene.nwater; k++)
-        if (water_contains(v->scene.water[k], x, y))
-            return k;
-    return -1;
+        if (water_box_touches(v->scene.water[k], c, half))
+            found = k;
+    mo->water_in = found >= 0 ? v->scene.water[found] : NULL;
+    if (mo->water_in != mo->water_was && getenv("RAMPAGE_TRACE")) {
+        if (found >= 0)
+            printf("  in water %d at %.1f %.1f %.1f\n", found, mo->mx, mo->my, mo->mz);
+        else
+            printf("  out of the water at %.1f %.1f %.1f\n", mo->mx, mo->my, mo->mz);
+    }
+    mo->water_was = mo->water_in;
+    return found;
 }
 
-/* a water's surface: its z (water_floor gives it outside the pool's rectangle) */
-static float water_surface(const Water *w)
+/* the highest ground not above z + 1: the street, or the roof of a building it stands over; in a water (0x2E8530:
+ * 0x2E859C, +0xA48 = 0x337E00) the water's floor under its body centre */
+static float ground_at(Mon *mo)
 {
-    return water_floor(w, 1e9f, 1e9f);
-}
-
-static float ground_at(const Viewer *v, float x, float y, float z)
-{
-    int wk = water_at(v, x, y);                      /* in the water: its floor (0x2E859C: +0xA48 = 0x337E00) */
-    float g = wk >= 0 ? water_floor(v->scene.water[wk], x, y) : 0;
+    Viewer *v = mo->v;
+    float x = mo->mx, y = mo->my, z = mo->mz, c[3];
+    int wk = mon_water(mo);
+    mon_body_centre(mo, c);
+    float g = wk >= 0 ? water_floor(v->scene.water[wk], c[0], c[1]) : 0;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
         float top = b->max[2];
@@ -2170,7 +2228,6 @@ static void hands_step(Mon *mo, float dt);
 static void feet_update(void *ctx, IkFeet *f)
 {
     Mon *mo = ctx;
-    Viewer *v = mo->v;
     if (!mo->feet_due || !mon_in(mo))
         return;
     mo->feet_due = 0;
@@ -2179,7 +2236,7 @@ static void feet_update(void *ctx, IkFeet *f)
     memset(&m, 0, sizeof m);
     m.place[0] = mo->mx; m.place[1] = mo->my; m.place[2] = mo->mz;
     m.heading = mo->heading;
-    m.ground = ground_at(v, mo->mx, mo->my, mo->mz);
+    m.ground = ground_at(mo);
     for (int r = 0; r < 2; r++) {
         m.ok[r] = f->ok[r];
         memcpy(m.foot[r], f->foot[r], sizeof m.foot[r]);
@@ -3766,20 +3823,22 @@ static void mon_step(Mon *mo, float dt)
         float t0 = mo->run.time, length = st->length;
         float cdt = dt * mo->power.speed;             /* the clips run at the speed scale x their rate (0x2EBFE0:
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
-        int ev = -1;
+        int ev = -1, was_mode = mo->mode;            /* the mode 0x2E2770 switches on (the landing sets 4) */
+        mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
         if (mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF) {   /* the air: velocity, then gravity */
             float pos[3] = { mo->mx, mo->my, mo->mz };  /* 0x2DEBD8: drag, the move, gravity */
             monster_air_velocity(mo->vel, pos, dt, mo->no_gravity);
             mo->mx = pos[0]; mo->my = pos[1]; mo->mz = pos[2];
-            float g = ground_at(v, mo->mx, mo->my, mo->mz);
+            float g = ground_at(mo);
             if (mo->mz <= g && mo->vel[2] <= 0) {
                 mo->mz = g;
-                int wk = water_at(v, mo->mx, mo->my);
-                if (mo->mode == MODE_AIRBORNE && wk >= 0) {   /* into the water (0x2DCA94): pressed down 1.25 x its
-                                                      * radius across, by its fall speed */
-                    float s = fminf(fmaxf(-mo->vel[2] / 50, 0), 1), at[3] = { mo->mx, mo->my, 0 };
-                    at[2] = water_surface(v->scene.water[wk]);
-                    water_disturb(v->scene.water[wk], at, 1.25f * MONSTER_HALF_WIDTH, -(2 * s + 0.5f * (1 - s)));
+                int wk = mon_water(mo);
+                if (mo->mode == MODE_AIRBORNE && wk >= 0) {   /* into the water (0x2DCA94 -> 0x2E2BD0): pressed down
+                                                      * 1.25 x its radius across at its body centre, by its fall speed
+                                                      * (+0xBD38) */
+                    float s = fminf(fmaxf(-mo->vel[2] / 50, 0), 1), at[3];
+                    mon_body_centre(mo, at);
+                    water_disturb(v->scene.water[wk], at, 1.25f * mon_radius(mo), -(2 * s + 0.5f * (1 - s)));
                 }
                 if (mo->mode == MODE_AIRBORNE && v->fxw) {   /* every landing (0x2DC450 -> 0x2F48D0): the big
                                                       * footfall under the spine, GroundImpactFx / WaterImpactFx */
@@ -3818,20 +3877,23 @@ static void mon_step(Mon *mo, float dt)
             float pos[3] = { mo->mx, mo->my, mo->mz };
             monster_ground_velocity(mo->vel, pos, mo->friction, dt, st->flags, mo->pending_slot >= 0);
             mo->mx = pos[0]; mo->my = pos[1]; mo->mz = pos[2];
-            float g = ground_at(v, mo->mx, mo->my, mo->mz);
+            float g = ground_at(mo);
             if (g < mo->mz - 0.5f)                    /* walked off a roof: it falls (a stand-in: the game eases it */
                 mo->mode = MODE_AIRBORNE;             /* down, 0x2E0330) and lands through the landing slot */
             else
                 mo->mz = monster_ground_follow(mo->mz, g, mo->no_gravity);
         }
-        {                                            /* wading (0x2E2900 -> 0x2E2BD0): the water pressed down under
-                                                      * it, half its radius across, by how deep it stands */
-            int wk = mo->mode != MODE_BUILDING ? water_at(v, mo->mx, mo->my) : -1;
+        if ((was_mode == MODE_GROUND || was_mode == MODE_BUILDING) && (st->flags & 0x810D2)) {
+            /* wading (0x2E2870, the case of modes 0 and 5 in 0x2E2770: 0x2E28A0 .. 0x2E2974): in a state that
+             * travels (node +0x2C & 0x1080, 0x50 or 0x80002), the water pressed down at its body centre (0x2E2BD0)
+             * half its radius across, to 0.9 x how far its ground (0x2E8530) is under the surface over its half
+             * height (+0x19C x scale), that at most 1. Standing still, prone or in the air it presses nothing [R] */
+            int wk = mon_water(mo);
             if (wk >= 0) {
-                float at[3] = { mo->mx, mo->my, water_surface(v->scene.water[wk]) };
-                float deep = fminf(fmaxf(at[2] - mo->mz, 0), MONSTER_HEIGHT);
-                if (deep > 0)
-                    water_disturb(v->scene.water[wk], at, 0.5f * MONSTER_HALF_WIDTH, -0.9f * deep / MONSTER_HEIGHT);
+                float at[3], hh = mon_half_height(mo);
+                float deep = fminf(fmaxf(water_surface(v->scene.water[wk]) - ground_at(mo), 0), hh) / hh;
+                mon_body_centre(mo, at);
+                water_disturb(v->scene.water[wk], at, 0.5f * mon_radius(mo), -0.9f * deep);
             }
         }
         air_control(mo, st, lx, ly, dt);
@@ -3855,6 +3917,7 @@ static void mon_step(Mon *mo, float dt)
         }
         if (ev != 0) {                               /* 0x2E14F0: held on the face, or knocked off it */
             Climber cl = climber(mo);
+            cl.in_water = mon_water(mo) >= 0;        /* 0x2E1618, while mounted in mode 5 */
             int was = mo->mount.at.building;
             int slot = climb_check(&mo->mount, &v->scene, &cl, mo->mode);
             int to = slot >= 0 ? moves_slot(&mo->graph, slot, mo->column) : -1;

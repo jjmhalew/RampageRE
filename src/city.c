@@ -2633,8 +2633,8 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     }
     traffic(s, block, 0);
     /* the next two blocks behind it (0x302AF0): slot 1 at y + 41, slot 2 at y + 82 (hard-coded), their ground, every
-     * building (0x3059D0) and the objects LoadWhenWaiting (slot 1) or LoadWhenDistant (slot 2) has (0x3050F0), and
-     * their traffic; no people. Every BlockList ends in two buffer blocks, so the last block has them too. */
+     * building (0x3059D0) and the objects and waters LoadWhenWaiting (slot 1) or LoadWhenDistant (slot 2) has
+     * (0x3050F0), and their traffic; no people. Every BlockList ends in two buffer blocks, so the last block has them too. */
     Group bl = group_sub(group_sub(c->world, "BlockData"), "BlockList");
     Record lr[MAX_REC];
     uint32_t nl = group_items(bl, lr, MAX_REC);
@@ -2664,6 +2664,17 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
                 if (group_num(o, slot == 1 ? "LoadWhenWaiting" : "LoadWhenDistant", 0) != 0)
                     place_object(c, s, o, there);
             }
+        }
+        /* its waters with the same key (0x3050F0 at 0x305888 .. 0x305960: the reader with f12 = the slot's y > 0):
+         * the far-off stand-in, one still flat quad at the surface (0x3381B0), no waves [R] */
+        n = group_all(nb, "WaterObject|", r, MAX_REC);
+        for (uint32_t i = 0; i < n && s->nwater < 16; i++) {
+            Group o = record_group(nb, r[i]);
+            WaterDef wd;
+            float off[3] = { 0, y0, 0 };
+            if (group_num(o, slot == 1 ? "LoadWhenWaiting" : "LoadWhenDistant", 0) != 0 && water_read(o, &wd) == 0 &&
+                (s->water[s->nwater] = water_new(&wd, off, 1)) != NULL)
+                s->nwater++;
         }
         traffic(s, nb, y0);
     }

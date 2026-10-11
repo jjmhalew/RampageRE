@@ -359,7 +359,8 @@ floors (`Floor|` with ground, middle and top floor shapes, damaged variants), te
 The game draws the next two blocks of `BlockData.BlockList` behind the one being played (the block manager
 0x4D4E80, 0x302AF0): slot 0 the block at y 0, slot 1 the next at y + 41, slot 2 the one after at y + 82 (both
 hard-coded). Slots 1 and 2 get their `Shape|GroundShape`, every `BuildingInstance` (0x3059D0) and only the objects
-with `LoadWhenWaiting` (slot 1) or `LoadWhenDistant` (slot 2) set (0x3050F0), and their traffic; no people or AI.
+with `LoadWhenWaiting` (slot 1) or `LoadWhenDistant` (slot 2) set (0x3050F0; a `WaterObject` so marked is the flat
+stand-in, WATER_NOTES.md "The blocks behind"), and their traffic; no people or AI.
 Three block grounds (y -20 .. 21 each) fill the hole in the backdrop's ground plane exactly (`Chicago_Ground`: x
 -108 .. 107, y -17 .. 98, the same in New York and Las Vegas). Every `BlockList` ends in two buffer blocks
 (`*_BufferBlock01`, `02`), so the last block has two behind it too; entry 0 repeats entry 1.

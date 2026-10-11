@@ -67,9 +67,10 @@ void water_step(Water *w, float dt);
 void water_set_time(Water *w, float t);              /* the clock the waves read (starts at 0; water_step adds dt) */
 float water_time(const Water *w);
 /* press the water down to `depth` (<= 0, units below the surface) inside a disc of `radius` about pos (world; z is
- * ignored) - 0x3369E0, what the monster does: wading every frame (depth -0.9 x how deep it stands / its height,
- * radius half its radius) and landing (depth -(0.5 + 1.5 s), s 0 .. 1 with its fall speed / 50, radius 1.25 x its
- * radius), 0x2E2BD0. A height only goes down to depth, never up. */
+ * ignored) - 0x3369E0, what the monster does through 0x2E2BD0 at its body centre: wading, every frame of a state
+ * that travels (0x2E28A0: depth -0.9 x how deep its ground is under the surface / MONSTER_DATA +0x19C, at most 1;
+ * radius half its radius +0x198) and landing (0x2DCA94: depth -(0.5 + 1.5 s), s 0 .. 1 with its fall speed / 50,
+ * radius 1.25 x its radius). A height only goes down to depth, never up. */
 void water_disturb(Water *w, const float pos[3], float radius, float depth);
 
 /* the floor under the water at (x, y) world (0x337E00, the monster's ground height while it wades): MinGroundHeight
@@ -77,6 +78,11 @@ void water_disturb(Water *w, const float pos[3], float radius, float depth);
  * z where (x, y) is outside it. World z (Origin z + offset z added). */
 float water_floor(const Water *w, float x, float y);
 int water_contains(const Water *w, float x, float y);   /* (x, y) over the water (its rectangle) */
+/* does an axis-aligned box (centre +- half, world) touch the water's box, its rectangle from z 0 up to the surface
+ * (+0x104: (-hx, -hy, -Origin z) .. (hx, hy, 0) about its place)? An overlap of 0 counts. The monster's test
+ * (0x2D5F00 -> 0x2801A0); the monster's box is its body centre (0x2E4D30) up to its height, its radius across */
+int water_box_touches(const Water *w, const float centre[3], const float half[3]);
+float water_surface(const Water *w);                 /* its z (+0x34: Origin z + the offset's z) */
 
 /* the mesh, rebuilt by every water_step. Vertices: water_cols() x water_rows(), row by row along +X, rows along +Y */
 int water_cols(const Water *w);
