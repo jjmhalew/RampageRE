@@ -1375,6 +1375,17 @@ static int answer(void *ctx, const char *call, const float *a)
  * way, not above its top, the point put on its face and kept only within 5 (0x2D54F0 with 0x2A3D20: collide.c's
  * collide_hit_point), and its hit (0x2BC150). Sides: 0 the building's left face (looking +x), 1 its right (-x), 2 its
  * front (+y), 5 its roof. */
+/* setReaction(slot) (0x2E1AD0): taken unless the monster is defeated (+0xA59, set with its slot 67 at 0 HP, 0x2D95F4,
+ * cleared by the respawn, 0x2D3898) or shrunk below 0.3 (+0xA78, the defeat's setDynamicScale); the interruptible
+ * byte +0xAA2 it asks first is always set in play [R]. 1 when taken */
+static int set_reaction(Mon *mo, int slot)
+{
+    if (mo->defeated || mo->scale < 0.3f)
+        return 0;
+    mo->pending_slot = slot;
+    return 1;
+}
+
 static void hit_building_front(Mon *mo, const float *p)
 {
     Viewer *v = mo->v;
@@ -1404,7 +1415,7 @@ static void hit_building_front(Mon *mo, const float *p)
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
         edible_power_hit_building(&mo->power, 1, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF, others_full(mo))) {
         edible_power_start_rage(&mo->power, others_full(mo));
-        mo->pending_slot = 54;
+        set_reaction(mo, 54);
         rage_started(mo);
     }
     mo->energy = mo->power.energy;
@@ -3220,7 +3231,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
                 break;
             case VE_SOUND: sound_play(e->name, e->pos, 1); break;
             case VE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
-            case VE_REACTION: mo->pending_slot = e->level; break;
+            case VE_REACTION: set_reaction(mo, e->level); break;
             case VE_SET_VEL: memcpy(mo->vel, e->v, sizeof mo->vel); break;
             case VE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
             case VE_STATS:                           /* id 1: the army applied it (its events follow) */
@@ -3345,7 +3356,7 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             /* a knock-down is asked again every frame until its slot starts (the viewer takes pending_slot at the
              * clip's next event): setReaction (0x2E1AD0) puts the slot's entry in +0x110 each time, the same one, so
              * one is enough [R] */
-            case RE_REACTION: if (mo->pending_slot < 0) { mo->pending_slot = e->level; mo->rail_knock = 1; } break;
+            case RE_REACTION: if (mo->pending_slot < 0 && set_reaction(mo, e->level)) mo->rail_knock = 1; break;
             case RE_SET_VEL: if (mo->rail_knock < 2) memcpy(mo->vel, e->v, sizeof mo->vel); break;
             case RE_HP: if (mo->hp > 0 && mo->rail_knock < 2) mo->hp = fmaxf(0, fminf(200, mo->hp + e->amount)); break;
             case RE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
@@ -3751,7 +3762,7 @@ static void army_step(Viewer *v, float dt)
                 else sound_play(e->name, e->pos, 1);
                 break;
             case AE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
-            case AE_REACTION: mo->pending_slot = e->level; break;
+            case AE_REACTION: set_reaction(mo, e->level); break;
             case AE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
             case AE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             case AE_STATS_HEALTH: mo->hp = mo->hp > 0 ? fmaxf(1, fminf(200, mo->hp + e->amount)) : mo->hp; break;
