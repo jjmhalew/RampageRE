@@ -1413,7 +1413,7 @@ static void hit_building_front(Mon *mo, const float *p)
         best->hitter = mo->slot;
     if (best && mo->is_ai) {                         /* the AI's onHit (hitBuildingPt -> 0x2EED40) */
         float off[3] = { w[0] - mo->mx, w[1] - mo->my, w[2] - mo->mz };
-        dir_ai_on_hit(&mo->ai, off);
+        dir_ai_on_hit(&mo->ai, off, mo->mirror);
     }
     int hit = best && building_hit(&best->b, bq, 2.0f);
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */

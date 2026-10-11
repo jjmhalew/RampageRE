@@ -386,9 +386,11 @@ int dir_ai_destroy(DirAI *ai, const MoveGraph *g, uint32_t seed)
     return (int)(gl - ai->q);
 }
 
-void dir_ai_on_hit(DirAI *ai, const float off[3])    /* +0x28 0x2EED40 [R] */
+void dir_ai_on_hit(DirAI *ai, const float off[3], int mirror)   /* +0x28 0x2EED40 [R] */
 {
     memcpy(ai->bot.hit_off, off, sizeof ai->bot.hit_off);
+    if (mirror)                                      /* 0x2EEDAC: x negated while mirrored (+0xAA0) */
+        ai->bot.hit_off[0] = -off[0];
     ai->bot.use_hit = 1;
 }
 
@@ -722,7 +724,9 @@ static void bot_update_cell(DirBot *bt, const DirBotView *v)
     const DirBuilding *b = &v->b[bt->target];
     if (bt->use_hit) {
         float at = v->mounted >= 0 ? b->min[0] + 5.0f * (float)v->rail : v->pos[0];   /* (off a face: its place) */
-        float x = at + bt->hit_off[0], z = v->pos[2] + bt->hit_off[2];
+        /* 0x2EEB10: the offset's x negated again while mirrored now: a hit to its right stays to its right, so once
+         * it mirrors to go the other way the cell is the one on that side [R] */
+        float x = at + (v->mirror ? -bt->hit_off[0] : bt->hit_off[0]), z = v->pos[2] + bt->hit_off[2];
         if (z < b->min[2] + 6.02f)
             z = b->min[2] + 6.02f;
         bt->cur_col = (int)floorf((x - b->min[0]) / 5);

@@ -141,9 +141,9 @@ void dir_ai_seed(uint32_t seed);
 /* +0x38 (0x2EEBD0): the monster's foot lock moved it, or its hands lifted it: the destroy goal's cooldown */
 void dir_ai_cooldown(DirAI *ai);
 /* what the monster tells the goal (MonsterAI's forwarders 0x2ED680 .., only while it is AI): a hit on a building's
- * face at pt (hitBuildingPt, x in its frame mirrored as it plays), mounted on building b at rail (mountBuilding),
- * knocked off building b (avoid) */
-void dir_ai_on_hit(DirAI *ai, const float off[3]);
+ * face off from the monster (hitBuildingPt; mirror: the monster plays mirrored, the x is kept negated), mounted on
+ * building b at rail (mountBuilding), knocked off building b (avoid) */
+void dir_ai_on_hit(DirAI *ai, const float off[3], int mirror);
 void dir_ai_on_mount(DirAI *ai, int b, int rail, int width);
 void dir_ai_avoid(DirAI *ai, int b, const DirBotView *view);
 
