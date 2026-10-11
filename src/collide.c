@@ -399,7 +399,10 @@ int collide_add_building(CollideWorld *w, const float min[3], const float max[3]
     }
     collide_shape_box(&s, lo, hi);
     collide_matrix(m, 0, c);
-    b->obj = state ? collide_add(w, &s, m, 4u | COLLIDE_F_BUILDING, tag, -1) : -1;   /* [G] a gone one's box left out */
+    /* a gone one keeps its (flat) box: the game never removes a building's object (removeObject's only callers are
+     * the block's unload 0x2B66C0, the monster 0x2EACA0 and 0x29A0F0); the collapse's last frame (0x2D2D00) sets the
+     * grid box's top (+0x1F0) to 0 and the update (0x2BDCE0 -> 0x2BDDB8) still takes its shape from it [R] */
+    b->obj = collide_add(w, &s, m, 4u | COLLIDE_F_BUILDING, tag, -1);
     if (b->obj >= 0)
         w->o[b->obj].building = w->nb;
     if (w->nrow[b->row] < COLLIDE_ROW_MAX)
@@ -794,7 +797,10 @@ void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut
         out->below = b;
         float q[3];
         probe_point(m, q);
-        if (b >= 0 && q[2] > w->b[b].max[2] - 1) {
+        /* not over a gone one: 0x2E3020 skips the roof when Building +0x38C (its grid's +0x1D4) is set, which the
+         * set-up clears (0x2D2848) and the end of the collapse sets (0x2D2D58); then the street's push as if no
+         * building were below, and the rubble's footprint is walked onto [R] */
+        if (b >= 0 && w->b[b].state != 0 && q[2] > w->b[b].max[2] - 1) {
             float o2[3];
             collide_roof_clamp(w, b, q, 0.1f * hw, hw, o2);
             m->pos[0] += o2[0] - q[0];
@@ -839,6 +845,17 @@ void collide_mover_init(CollideMover *mv, float radius, float gravity, float mas
     mv->axis[2] = 1;
     float in = (0.67f - 0.27f * solidity) * mv->mass * radius * radius;
     mv->inertia[0] = mv->inertia[1] = mv->inertia[2] = in > 1e-6f ? in : 1e-6f;
+}
+
+void collide_mover_kinematic(CollideMover *mv, float mass, float restitution, float friction)
+{
+    memset(mv, 0, sizeof *mv);
+    mv->kinematic = 1;
+    mv->mass = mass > 0 ? mass : 1;
+    mv->restitution = restitution;
+    mv->friction = friction;
+    mv->axis[2] = 1;
+    mv->inertia[0] = mv->inertia[1] = mv->inertia[2] = 3.4028235e38f;
 }
 
 void collide_mover_spin(CollideMover *mv, const float w[3])
@@ -928,7 +945,7 @@ void collide_set_mover(CollideWorld *w, int obj, CollideMover *mv, float m[12], 
     if (!w || obj < 0 || obj >= w->no)
         return;
     w->o[obj].mv = mv;
-    w->o[obj].mvm = m;
+    w->o[obj].mvm = m ? m : w->o[obj].m;
     w->o[obj].mvel = vel;
 }
 
@@ -1002,7 +1019,9 @@ static float exchange_k(const CollideMover *a, const float ma[12], const float r
  * out of B, P1 the contact on A's surface, P2 on B's. The relative velocity at the contacts; nothing when they part
  * (u.N >= 0); the restitution and friction 0.7 x the lesser + 0.3 x the greater; the normal impulse and two tangent
  * ones, held to mu |jn| by max + 1/2 min of theirs; the push shared by the masses, a lift off the street where it
- * would go under; then each its impulse (0x28E0D0: the velocity, the push, the spin about its own inertia) [R] */
+ * would go under; then each its impulse (vtable +0x24, 0x28E0D0: the velocity, the push, the spin about its own
+ * inertia) [R]. A driven A (kinematic: its mover's velocity, 0 unless set, no spin, inertia FLT_MAX) takes neither
+ * its push nor its impulse (its +0x24 is 0x287390, nothing); B's are as for a flying A [R] */
 static void exchange(CollideObj *oa, CollideObj *ob, CollideMover *b, float mb[12], const float N[3],
                      const float P1[3], const float P2[3])
 {
@@ -1014,7 +1033,7 @@ static void exchange(CollideObj *oa, CollideObj *ob, CollideMover *b, float mb[1
     for (int k = 0; k < 3; k++) {
         ra[k] = P1[k] - ma[9 + k];
         rb[k] = P2[k] - mb[9 + k];
-        u[k] = a->vel[k] - b->vel[k];
+        u[k] = (a->kinematic && oa->mvel ? oa->mvel[k] : a->vel[k]) - b->vel[k];
     }
     cross3(wa, ra, x);
     for (int k = 0; k < 3; k++)
@@ -1051,14 +1070,16 @@ static void exchange(CollideObj *oa, CollideObj *ob, CollideMover *b, float mb[1
         pa[k] = fb * N[k];
         pb[k] = -(1 - fb) * N[k];
     }
-    street_push(oa, ma, pa);
     street_push(ob, mb, pb);
-    for (int k = 0; k < 3; k++) {
-        ma[9 + k] += pa[k];
+    for (int k = 0; k < 3; k++)
         mb[9 + k] += pb[k];
-    }
-    collide_mover_impulse(a, ma, nJ, P1);
     collide_mover_impulse(b, mb, J, P2);
+    if (a->kinematic)
+        return;
+    street_push(oa, ma, pa);
+    for (int k = 0; k < 3; k++)
+        ma[9 + k] += pa[k];
+    collide_mover_impulse(a, ma, nJ, P1);
     memcpy(oa->m, ma, sizeof oa->m);                 /* the one met: its world shape and its module's velocity */
     if (oa->mvel)
         memcpy(oa->mvel, a->vel, sizeof a->vel);

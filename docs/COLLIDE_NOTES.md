@@ -97,7 +97,7 @@ Then the buildings, from its body's centre (0x2E4D30: the feet + MONSTER_DATA +0
 along its y, × scale, plus the move's offset at +0xBAA0 +0xC / +0x10):
 - **On the ground** (mode 0) over a building (0x2D6150: the one at the body's centre, if its top is no more than 5
   above the feet; none once +0xA4C ≤ 0; cached for the frame) whose top is less than 1 above the centre, and the
-  building's +0x38C clear: **the roof** (0x2A49C0): the centre kept within the roof's rectangle (+0x1DC .. +0x1EC),
+  building's +0x38C clear (0x2E3020; the building's grid's +0x1D4: a gone building's, below): **the roof** (0x2A49C0): the centre kept within the roof's rectangle (+0x1DC .. +0x1EC),
   0.1 × half width (0.3) in from an edge with a neighbour, half width (3) from one without; no limit on an edge
   where the neighbour is flush and as high. The neighbours (0x2A4C70, built once): in a row, standing ones
   (+0x14C 1 .. 3, not falling) at most 2 apart: as high and touching → both 1 (walk across); the higher one's
@@ -156,10 +156,10 @@ pushing out); both with movers — an exchange between them (0x285E90) [R]. A is
   (0, 0, d + 0.001 r) when its shape's sphere would be d under the street where it is pushed to (0x282330);
 - A takes −J at P1, B +J at P2 (0x28E0D0: v += J / m, the push, then ω += R I⁻¹ Rᵀ (r × J) about its own inertia).
 Every other mover class answers no spin and ignores the impulse (0x2873A0, 0x287390), held objects included. Here
-(collide.c `exchange`) for two flying objects, each module naming its flying ones' movers (`collide_set_mover`); P2
-is taken as P1 − n × depth (0x27FD70 leaves the second point of a sphere against a box unwritten); an object on
-another mover (a Line or Spline mover: a car driving) is met as static, where the game would read that mover's fields
-as a SpherePhysicsMover's.
+(collide.c `exchange`) for two flying objects, each module naming its flying ones' movers (`collide_set_mover`), and
+for a flying one meeting a driven one (a Line or Spline mover: a car driving; a held object), which the modules name
+with `collide_mover_kinematic`: velocity 0, no spin, inertia FLT_MAX, no push or impulse for it (below); P2 is taken
+as P1 − n × depth (0x27FD70 leaves the second point of a sphere against a box unwritten).
 
 There is no rest and no rolling resistance in the mover: friction makes it roll, and it rolls on (the scripts stop
 or delete what they throw). The street test (0x28E6F4) takes the sphere about the mover's position, with no offset
@@ -172,7 +172,13 @@ a thrown object rests r above the street [R].
   0x4D6A9A is set, which nothing writes (FLOW_NOTES.md; read only at 0x2E2C84, 0x2E3620, 0x2EDC94, 0x33CA38). The
   fields it reads: +0x108 setIsAI (0x2E35C0), +0xB9C0 (`Monster.isClimbing` tests it ≠ 0, BOSS_NOTES.md; the held
   monster's slot word, MULTIPLAYER_NOTES.md), +0x258C the foot IK (FOOTSTEP_NOTES.md), +0xBAA0 the kept type-16 move
-  record (its +0xC / +0x10, main.c `Mon.ev16x` / `ev16`) [R]; the building's +0x38C [G: not followed].
+  record (its +0xC / +0x10, main.c `Mon.ev16x` / `ev16`) [R].
+- The building's +0x38C [R]: the byte at its grid's +0x1D4 (the grid at +0x1B8), cleared at the set-up (0x2D2848)
+  and set when the sinking collapse ends (0x2D2D58, with the box's top +0x1F0 set to 0, +0x38 of the grid): a gone
+  building. 0x2E3020 then skips the roof, and the monster takes the street's push as if no building were below; the
+  rows' push leaves out the ones not standing (+0x14C 0), so the rubble's footprint is walked onto and off
+  (collide.c `collide_monster`: the roof only for `state != 0`; before, the roof held the body's centre 3 inside the
+  footprint's edges).
 - The order of 0x101A90 [R]: a × b of the game's 3 × 4 row matrices (rows the axes, v' = v a b), called by the
   SpherePhysicsMover as (the object's matrix, R(axis, angle)) (0x28E610 .. 0x28E618): the spin turns about a world
   axis, as collide.c has it; the HeldObjectMover's blend as (the rest, the hand's place): the rest in the hand's frame
@@ -201,9 +207,24 @@ a thrown object rests r above the street [R].
   OnlyHitWithEffNodes; boss.c, rail.c, city.c's huts) [R]: the monster's object test 0x2E22B0, its unarmed spheres
   against each object's shape (0x280470), not 0x2E2C50.
 - `isSphereVisible` is the camera's, not the collision world's.
-- Not traced: what the other mover classes keep at +0x10 … +0x2C for the exchange (they answer no spin and ignore the
-  impulse, 0x2873A0, 0x287390); which of two boxes 0x27F620 takes as the sphere [G]; whether a gone building keeps a
-  box (collide_add_building leaves it out) [G].
+- The other mover classes in the exchange (0x285E90) [R]: LineMover, SplineMover, RotationMover, HelicopterMover,
+  AttackMover and HeldObjectMover all have 0x28F220 as vtable +0x1C (the base init: velocity +0x10 zeroed, inertia
+  +0x24 .. +0x2C FLT_MAX, Mass, Restitution and SlidingFriction read), their spin getter (+0x10) 0x2873A0 gives the
+  zero vector at 0x409FF8 and their impulse (+0x24) 0x287390 does nothing. The exchange reads each mover's velocity
+  at +0x10 directly (0x2860F0, 0x286148) and hands each its push with its impulse (0x287308, 0x287324): a driven
+  object meeting a flying one is not moved, the flying one's push, street lift and impulse are as for two flying
+  ones, with the driven one's restitution, friction and mass in the blend and the levers from its tensor (FLT_MAX:
+  none). Its +0x10 is 0: only the setters (+0x18: the LineMover's 0x315BD0, the SplineMover's 0x2A7EF0, the
+  AttackMover's 0x313D90; the others' write elsewhere or nothing) write it, and the one caller of a mover's +0x18
+  found, 0x2B71A8, is the world's unused debug ball (COVERAGE.md). collide.c `collide_mover_kinematic`; vehicle.c,
+  rail.c and parade.c give one to an object on a LineMover, a SplineMover (rail.c) or held.
+- Two boxes never meet [R]: 0x27F620 passes the higher type first and 0x27FF14 returns 0 for a box against a box
+  (0x27FFC0); collide_pair the same.
+- A gone building keeps its box [R]: the game never removes a building's object (removeObject's only callers are
+  the block's unload 0x2B66C0, the monster 0x2EACA0 and 0x29A0F0), and the collapse's last frame (0x2D2D00) sets
+  the grid box's top to 0, which the update (0x2BDCE0 -> 0x2BDDB8) still takes the shape from: a flat box at the
+  street (collide_add_building adds it for every state). A mover meets it only past depth² 1e-5, and a ray's tie at
+  z = 0 gives the street's normal, so nothing changes in play.
 
 ## Wired in (main.c and the modules)
 

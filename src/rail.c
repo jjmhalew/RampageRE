@@ -2216,6 +2216,12 @@ void rail_collide_add(Rail *r, CollideWorld *w)
         o->cobj = collide_add(w, &c.shape, c.m, c.flags, COLLIDE_TAG(COLLIDE_OWN_RAIL, i), 0);
         if (o->mv == MV_SPHERE && o->cm_on)          /* flying: another flying object exchanges impulses with it (0x285E90) */
             collide_set_mover(w, o->cobj, &o->cm, o->cmat, o->sphere.vel);
+        else if (o->mv == MV_LINE || o->mv == MV_SPLINE || o->mv == MV_HELD) {   /* driven: the exchange moves only
+                                                      * the flying one [R 0x28F220, collide.h] */
+            collide_mover_kinematic(&o->cm, tnum(o, "Mass", 1), tnum(o, "Restitution", 0.8f), tnum(o, "SlidingFriction", 0.4f));
+            o->cm_on = 0;
+            collide_set_mover(w, o->cobj, &o->cm, NULL, NULL);
+        }
     }
 }
 

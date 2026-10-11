@@ -100,8 +100,8 @@ int collide_obj_box(const CollideObj *o, const float centre[3], const float ext[
 int collide_obj_sphere(const CollideObj *o, const float c[3], float r, float normal[3], float point[3], float push[3]);
 /* 0x27FFF0: the ray start + dir t, 0 <= t <= maxt, against the shape: t and the surface's normal */
 int collide_obj_ray(const CollideObj *o, const float start[3], const float dir[3], float maxt, float *t, float normal[3]);
-/* 0x27F620: object a against object b (a box against a box: a's bounding sphere against b's box [G which one]);
- * normal pushes a away from b, point on b, depth how far in. 1 if they meet */
+/* 0x27F620: object a against object b (a box against a box never meets, 0x27FF18 -> 0x27FFC0 [R]); normal pushes a
+ * away from b, point on b, depth how far in. 1 if they meet */
 int collide_pair(const CollideObj *a, const CollideObj *b, float normal[3], float point[3], float *depth);
 
 /* ---- the world's queries */
@@ -166,11 +166,19 @@ typedef struct CollideMover {
     float gravity, mass, restitution, friction;      /* +0x8, +0xC, +0x1C, +0x20 (0x28F220: 9.81, 1, 0.8, 0.4) */
     float inertia[3];                                /* +0x24: (0.67 - 0.27 InertiaSolidity) mass r^2 */
     float radius;                                    /* +0x38 */
+    int kinematic;                                   /* a driven object's mover (LineMover, SplineMover,
+                                                      * RotationMover, HelicopterMover, AttackMover, HeldObjectMover):
+                                                      * its spin getter (+0x10) 0x2873A0 gives the zero vector, its
+                                                      * impulse (+0x24) 0x287390 does nothing [R] */
 } CollideMover;
 /* 0x28F220 + 0x28DE70; a property not set: pass the game's default (Gravity: the template's, DefObjectProps 35,
  * else 9.81; Mass 1; Restitution 0.8; SlidingFriction 0.4; InertiaSolidity 1) */
 void collide_mover_init(CollideMover *mv, float radius, float gravity, float mass, float restitution, float friction,
                         float solidity);
+/* a driven object's mover (0x28F220 alone, as their vtables' +0x1C): velocity 0, inertia FLT_MAX, the template's
+ * Mass, Restitution and SlidingFriction; it never steps. Given to collide_set_mover, a flying object meeting it has
+ * the exchange (0x285E90) with it, which moves and turns only the flying one [R] */
+void collide_mover_kinematic(CollideMover *mv, float mass, float restitution, float friction);
 void collide_mover_spin(CollideMover *mv, const float w[3]);   /* setRotation-like: the spin vector (0x28DD80) */
 /* 0x28E0D0: an impulse j at the world point p on the object at m (its velocity and spin) */
 void collide_mover_impulse(CollideMover *mv, const float m[12], const float j[3], const float p[3]);
@@ -191,7 +199,8 @@ int collide_mover_step(CollideWorld *w, CollideMover *mv, float m[12], int self,
 int collide_mover_step_ex(CollideWorld *w, CollideMover *mv, float m[12], int self, float dt, uint32_t exclude,
                           CollideContactFn fn, void *user);
 /* the object obj of the frame's world flies on mv (its matrix m, its module's velocity vel, which the exchange keeps
- * up): another flying object meeting it exchanges an impulse with it (0x285E90) instead of meeting it as static */
+ * up): another flying object meeting it exchanges an impulse with it (0x285E90) instead of meeting it as static.
+ * A kinematic mv: m NULL takes the object's own matrix, vel (NULL: the mover's, 0) is only read */
 void collide_set_mover(CollideWorld *w, int obj, CollideMover *mv, float m[12], float vel[3]);
 
 /* ---- 0x2E33A0's hit lists, kept the other way round: each attack record (an arming, 0x2E7880: the parts it arms
