@@ -113,8 +113,7 @@ typedef struct Obj {
     float point[3];
     int fx_die[MAX_FX_DIE], nfx_die;                 /* effects with setTurnOffWhenObjectDies(1) */
     int spawner, pending, anim_done;                 /* pending: onInit waits for the first update */
-    float osc_scale, osc_phase, osc_prev[3];         /* AttackObject +0x190 OscillationScale, +0x18C its phase
-                                                      * (OscillationOffset), +0x180 the last wobble [R 0x315330] */
+    ArmyOsc osc;                                     /* the AttackObject's wobble (army.h) [R 0x315330, 0x314EF0] */
     union {
         TankDef tank;
         TankBombDef tbomb;
@@ -317,16 +316,6 @@ static float unum(const Obj *o, const char *key, float def)   /* getFloatProp / 
 static int upoint(const Obj *o, const char *key, float out[3])   /* getPoint3Prop: 0 = absent (the default stays) */
 {
     return gpoint(o->p.inst, key, out) || gpoint(o->p.tmpl, key, out);
-}
-/* a float record of the book by its bare key (0x1B43C0, then the record's type byte tested for 1: an int there reads
- * as absent) [R 0x315830] */
-static int fkey(Group g, const char *key, float *out)
-{
-    Record r;
-    if (!g.at || !group_get(g, key, &r) || (r.kind & 0xFF) != PK_FLOAT)
-        return 0;
-    *out = record_num(r);
-    return 1;
 }
 static Group find_tmpl(Boss *b, const char *name)
 {
@@ -832,26 +821,6 @@ static int ln_step(Obj *o, float dt)
 
 /* ---------------------------------------------------------------- the parts */
 
-/* a facing (x, y, z) as a turn: Rz(z) Rx(x) Ry(y) [R 0x101330], into the 3 x 3 of the column-major w */
-static void facing_turn(const float f[3], float *w)
-{
-    float h = f[2], ax = f[0], ay = f[1];
-    float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
-    float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,   /* Rz(h) Rx(ax) Ry(ay) */
-                   -sh * cx, ch * cx, sx,
-                   ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
-    for (int c = 0; c < 3; c++)
-        for (int k = 0; k < 3; k++)
-            w[4 * c + k] = r[3 * c + k];
-}
-/* and back (0x101220, its inverse): the facing of the turn in w */
-static void turn_facing(const float *w, float f[3])
-{
-    f[0] = asinf(clampf(w[6], -1, 1));
-    f[2] = atan2f(-w[4], w[5]);
-    f[1] = atan2f(-w[2], w[10]);
-}
-
 static void obj_matrix(Obj *o)
 {
     float *w = o->p.world;
@@ -878,8 +847,8 @@ static void obj_matrix(Obj *o)
             w[4 + k] = o->lrot[3 + k];
             w[8 + k] = o->lrot[6 + k];
         }
-    } else                                           /* setFacing(x, y, z) */
-        facing_turn(o->p.facing, w);
+    } else                                           /* setFacing(x, y, z): Rz Rx Ry (0x101330) */
+        army_facing_turn(o->p.facing, w);
     w[3] = w[7] = w[11] = 0;
     w[12] = o->p.pos[0];
     w[13] = o->p.pos[1];
@@ -1099,18 +1068,9 @@ static Obj *obj_new(Boss *b, const char *name, Group tmpl, Group inst, const flo
     o->spawner = -1;
     o->pulse_delay = 0.25f;                          /* [R as army.c] an AttackObject's pulse */
     o->weapons_on = 1;                               /* [G] Boss_Helicopter never calls enableWeapons, yet fires */
-    /* [R 0x315810 .. 0x3159F0, the AttackObject's init] OscillationScale: the template's, else (0 or less) the
-     * instance's; OscillationOffset: the template's, then the instance's over it; below 0 a random phase
-     * (gWorld.frand x 2 pi). Of the bosses only BossSaucerAmbient has one (0.075) */
-    if (!fkey(tmpl, "OscillationScale", &o->osc_scale))
-        o->osc_scale = 0;
-    if (o->osc_scale <= 0 && inst.at && !fkey(inst, "OscillationScale", &o->osc_scale))
-        o->osc_scale = 0;
-    fkey(tmpl, "OscillationOffset", &o->osc_phase);
-    if (inst.at)
-        fkey(inst, "OscillationOffset", &o->osc_phase);
-    if (o->osc_phase < 0)
-        o->osc_phase = 2 * (PI * frand(b));
+    /* [R 0x315810 .. 0x3159F0, the AttackObject's init] its wobble's keys (army_osc_init). Of the bosses only
+     * BossSaucerAmbient has one (0.075) */
+    army_osc_init(&o->osc, tmpl, inst);
     /* its shape (0x28FD70, collide_shape_pick): the template's CollisionBox { min x y z, max x y z } (the
      * generators'), CollisionRadius or AutoCollisionBox (the blimp) with the model's box, then the instance's; else
      * the model's bounding sphere [G: taken as its box's; no model: radius 1 at the origin]. lo / hi: its box */
@@ -3642,28 +3602,16 @@ static void obj_update(Boss *b, Obj *o, float dt)
     }
     if (!o->p.alive)
         return;
-    float d[3] = { 0, 0, 0 };
-    if (o->osc_scale > 0) {                          /* [R 0x314F18 .. 0x315168] after the object's own update
+    float d[3];                                      /* [R 0x314F18 .. 0x315168] after the object's own update
                                                       * (0x309AC0: its mover, pulse and script) */
-        o->osc_phase += dt;                          /* (the world's step, gWorld +0x4) */
-        float now[3] = { sinf(o->osc_phase * 2) * o->osc_scale, cosf(o->osc_phase * 3) * o->osc_scale, 0 };
-        for (int k = 0; k < 3; k++) {                /* the turn's facing + this wobble - the last one */
-            d[k] = now[k] - o->osc_prev[k];
-            o->osc_prev[k] = now[k];
-        }
-        if (!o->oriented)                            /* the facing the script set stays and carries it */
-            for (int k = 0; k < 3; k++)
-                o->p.facing[k] += d[k];
-    }
-    obj_matrix(o);
-    if (o->osc_scale > 0 && o->oriented) {           /* a mover's frame: its facing (0x101220) + the change, made
-                                                      * again (0x101330) */
-        float f[3];
-        turn_facing(o->p.world, f);
+    int wobble = army_osc_step(&o->osc, dt, d);
+    if (wobble && !o->oriented)                      /* the facing the script set stays and carries it */
         for (int k = 0; k < 3; k++)
-            f[k] += d[k];
-        facing_turn(f, o->p.world);
-    }
+            o->p.facing[k] += d[k];
+    obj_matrix(o);
+    if (wobble && o->oriented)                       /* a mover's frame: its facing (0x101220) + the change, made
+                                                      * again (0x101330) */
+        army_osc_turn(o->p.world, d);
     if (o->nw)
         obj_weapons_tick(b, o, dt);
 }

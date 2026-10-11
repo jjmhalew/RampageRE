@@ -494,6 +494,7 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         so->last = (int)s->ninstances;
         so->building = s->placing_building;
         so->nrel = -1;                               /* the cloths' places: taken at its first move */
+        so->attack = s->placing_block && s->placing_attack;
         memcpy(so->world, at.m, sizeof so->world);
     }
     const char *flags = group_str(t, "Flags");
@@ -2579,9 +2580,11 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     s->placing_block = 1;
     for (int k = 0; k < 3; k++) {
         n = group_values(block, objects[k], &where, r, MAX_REC);
+        s->placing_attack = k == 1;                  /* [R 0x3050F0: these are made AttackObjects, 0x315330] */
         for (uint32_t i = 0; i < n; i++)
             place_object(c, s, record_group(where, r[i]), root);
     }
+    s->placing_attack = 0;
     s->placing_block = 0;
     /* the people (people.c): the block's ActorInstance| entries (SpawnedItem = 1: comes after an earlier one is
      * gone), Traffic's two crowds of the block's occupants' runners, the window occupants later */

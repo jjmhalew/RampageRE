@@ -36,6 +36,7 @@
 #include <stdint.h>
 #include "data.h"
 #include "collide.h"
+#include "army.h"
 
 typedef struct StreetObjs StreetObjs;
 
@@ -89,6 +90,7 @@ typedef struct {
     float attach_delay;
     float axis[3], prev_mpos[3], total_angle, sway_time, sway_intensity;   /* StreetObject: the sway, the fall */
     float osc, osc_scale, osc_base;                  /* StreetObject: the custom oscillation */
+    ArmyOsc wobble;                                  /* an AttackObjectInstance|'s: the AttackObject's (0x314EF0) */
     float elapsed, move_time, y_per_frame, latency, ydir, rpf[3];   /* RoofItem: the fall */
 } StreetObj;
 
@@ -123,8 +125,10 @@ void streetobj_free(StreetObjs *s);
  * StreetObject.bsf part is challenge.c's) */
 int streetobj_kind_of(Group tmpl);
 /* an object the city placed (its ObjectInstance|: the block's own, or one of its buildings' with building >= 0), at
- * world (its model's base); its Construct runs. The index, or -1 if the template is not ours or the list is full */
-int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building);
+ * world (its model's base); its Construct runs. attack: the block placed it as an AttackObjectInstance| (an
+ * AttackObject, 0x3050F0 -> 0x315330: the trees' and palms' OscillationScale wobble, army.h ArmyOsc). The index, or -1
+ * if the template is not ours or the list is full */
+int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building, int attack);
 /* the block's start (0x2B6580 -> 0x309E20): each object without a building is attached to the building whose
  * footprint holds it (inclusive, the last such one: 0x2A3D20 with no direction) */
 void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb);

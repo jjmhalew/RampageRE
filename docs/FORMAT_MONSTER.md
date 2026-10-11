@@ -289,6 +289,20 @@ start list entry at +0x110 of the monster, and the controller (0x2C0AD0) switche
 vtable +0x60, 0x2E6580) first resets the column to −1, gravity to on, the movement mode to 0 (so each clip's own
 events set the mode it is in), the attacks and the event records (0x2E7F70).
 
+The landing test [R] (the mode-1 case of 0x2E2770, 0x2E29A4 .. 0x2E2A9C; 0x2E2770 runs in the world's pass,
+0x2B6D20, after the monsters' own updates with their movement and box test): z is the monster's place (+0x34) after
+this frame's move, the ground 0x2E8530's (the roof, +0xD4, of the building 0x2D6150 finds under the body centre while
+its top is no more than 5 above the feet; else in a water its floor; else the street). More than 3 up, the body is
+taken as 3 higher (the jump clips hold George's feet 2.5 … 4.4 above his place): it lands when z + 3 ≤ the ground,
+and is put at the ground − 3; at 3 or below, when z ≤ the ground, put on it. There is no velocity in the test, and
+no landing while that building's state (+0x14C) is 4 or more (cracking, shaking, falling, 0x2E2A2C): it falls on
+through. The matrix goes back with the new z (vtable +0x24), then 0x2DC450. The ground follow of modes 0 and 4
+(0x2E0330: 0.3 × ground + 0.7 × z a frame) lifts the 3 back over the next frames while the landing clip crouches, so
+the feet stay about on the roof. On the street the 3 never shows (z + 3 ≤ 0 cannot hold above 3). Here main.c
+`mon_step` (`ground_under`, the building looked for over the feet [G]; the box test of the landing frame sees the
+monster still in the air, as the game's did, `Mon.landed`; taking off, mode 2, keeps the port's old test [G]: the
+game has none in that mode, 0x2E2B28).
+
 Landing (0x2DC450) sets mode 4 and fires slot 56, or 57 when the ground's normal points against the monster's up
 axis: for George `Jump_Finish` by default, `Jump_Butt_Slam_impact` in the butt slam's column, `Jump_Fall_Finish2`
 when knocked down. Hits (0x2D8078) appear to pick their slot from the direction and strength of the blow. That is why

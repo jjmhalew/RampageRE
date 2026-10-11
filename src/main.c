@@ -136,6 +136,9 @@ typedef struct Mon {
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
     float ev16;                                      /* the kept type-16 event record's +0x10 (+0xBAA0), 0 none */
     const Water *water_in; int water_tested;         /* 0x2D5F00's answer this frame (+0xC700), asked (+0xC704) */
+    int landed; float landed_z;                      /* it landed this frame from the air at landed_z: the box test
+                                                      * (0x2E2C50, in its update) came before the landing (0x2E2770,
+                                                      * the world's pass after, 0x2B6D20) and saw it in the air */
     const Water *water_was;                          /* the answer the frame before (for the trace) */
     float sph_prev[64][3]; int sph_prev_n;           /* its collision spheres' centres last frame (+0x430, valid +0x688) */
     int reveal, shown;                               /* the cryotube's monster (Viewer.extra): out of the world
@@ -897,7 +900,7 @@ static void build(Viewer *v)
         }
         for (int k = 0; k < v->scene.nstreet; k++) {
             const struct SceneStreetObj *so = &v->scene.street[k];
-            v->sobj_of[k] = v->sobj ? streetobj_add(v->sobj, so->t, so->inst, so->world, so->building) : -1;
+            v->sobj_of[k] = v->sobj ? streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack) : -1;
             if (v->sobj_of[k] >= 0)
                 v->street_of[v->sobj_of[k]] = k;
         }
@@ -1782,23 +1785,34 @@ static int mon_water(Mon *mo)
     return found;
 }
 
-/* the highest ground not above z + 1: the street, or the roof of a building it stands over; in a water (0x2E8530:
- * 0x2E859C, +0xA48 = 0x337E00) the water's floor under its body centre */
-static float ground_at(Mon *mo)
+/* its ground (0x2E8530): the roof of the building under it (0x2D6150: its box's top +0xD4, the building kept only
+ * while its top, +0x1F0, is no more than 5 above the feet, 0x2D6200 [R]; here the highest such one over the feet [G:
+ * the game looks under its body centre, 0x2A3D20 at 0x2E4D30's point, and takes the last such building; with the
+ * walk-off stand-in below, the centre leaving a roof edge first made it fall too soon]), else the street; in a water
+ * (0x2E859C, +0xA48 = 0x337E00) the water's floor under its body centre. *under: that building, -1 none */
+static float ground_under(Mon *mo, int *under)
 {
     Viewer *v = mo->v;
     float x = mo->mx, y = mo->my, z = mo->mz, c[3];
     int wk = mon_water(mo);
     mon_body_centre(mo, c);
     float g = wk >= 0 ? water_floor(v->scene.water[wk], c[0], c[1]) : 0;
+    *under = -1;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
         float top = b->max[2];
         if (b->max[2] > b->min[2] + ROOF_BAND && x >= b->min[0] && x <= b->max[0] && y >= b->min[1] && y <= b->max[1] &&
-            top <= z + 1 && top > g)
+            top - z <= 5 && top > g) {
             g = top;
+            *under = (int)i;
+        }
     }
     return g;
+}
+static float ground_at(Mon *mo)
+{
+    int under;
+    return ground_under(mo, &under);
 }
 
 /* the monster's collision spheres (MoveShape: a bone and an offset) in the world now: centre, radius; how many */
@@ -1915,7 +1929,9 @@ static void push_out(Mon *mo)
                                                       * the revealed monster's: none of it, so it walks off the street */
         return;
     float s = mo->scale > 0 ? mo->scale : 1;
-    CollideMonster m = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->mode,
+    int landed = mo->landed;                         /* the frame it landed: as it was in the air */
+    mo->landed = 0;
+    CollideMonster m = { { mo->mx, mo->my, landed ? mo->landed_z : mo->mz }, mo->heading, landed ? MODE_AIRBORNE : mo->mode,
                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
                          { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, mo->is_ai, 0,
                          { mo->vel[0], mo->vel[1], mo->vel[2] }, { mo->air[0], mo->air[1], mo->air[2] } };
@@ -3864,9 +3880,22 @@ static void mon_step(Mon *mo, float dt)
             float pos[3] = { mo->mx, mo->my, mo->mz };  /* 0x2DEBD8: drag, the move, gravity */
             monster_air_velocity(mo->vel, pos, dt, mo->no_gravity);
             mo->mx = pos[0]; mo->my = pos[1]; mo->mz = pos[2];
-            float g = ground_at(mo);
-            if (mo->mz <= g && mo->vel[2] <= 0) {
-                mo->mz = g;
+            int under;
+            float g = ground_under(mo, &under);
+            /* [R 0x2E29A4 .. 0x2E2A9C, 0x2E2770's mode-1 case] more than 3 up, its body is 3 above its place (the
+             * jump clips carry it so; as for the water, 0x2D603C, and the box, 0x2E2E18): it lands once z + 3 is down
+             * to the ground and is put 3 under it, the ground follow (0x2E0330) lifting it the rest while the
+             * landing crouches. No velocity in the test; none on a building coming down (0x2D6150's +0x14C >= 4,
+             * 0x2E2A2C): it falls on through. Taking off (mode 2, no landing test in the game): as it was [G] */
+            int high = mo->mode == MODE_AIRBORNE && mo->mz > 3;
+            int down = mo->mode == MODE_AIRBORNE ?
+                       mo->mz + (high ? 3 : 0) <= g &&
+                           !(under >= 0 && v->scene.buildings[under].b.state >= BUILDING_CRACKING) :
+                       mo->mz <= g && mo->vel[2] <= 0;
+            if (down) {
+                mo->landed = mo->mode == MODE_AIRBORNE;
+                mo->landed_z = mo->mz;
+                mo->mz = high ? g - 3 : g;
                 int wk = mon_water(mo);
                 if (mo->mode == MODE_AIRBORNE && wk >= 0) {   /* into the water (0x2DCA94 -> 0x2E2BD0): pressed down
                                                       * 1.25 x its radius across at its body centre, by its fall speed

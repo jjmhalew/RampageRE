@@ -81,8 +81,9 @@ with its +0xA2).
 ## The monster (0x2E2C50, from its update) [R]
 
 The box: around its feet ±(MONSTER_DATA +0x198) across, ±(+0x19C) up, both × the scale (+0xA78) when +0xA74;
-its centre +0x19C up. On a building (mode 5), or in the air (mode 1) no more than 3 up, the box and centre are 3
-higher. The box query: include 0x404000 (VolumeTrigger | PushOutMonsters), exclude 0x40 (monsters). For each object
+its centre +0x19C up. On a building (mode 5), or in the air (mode 1) more than 3 up, the box and centre are 3
+higher (0x2E2E18: `c.le.s z, 3` then `bc1f`, the compiler's z > 3; the jump clips carry the body about 3 above the
+place, and the landing, 0x2E29A4, and the water test, 0x2D603C, add the same 3). The box query: include 0x404000 (VolumeTrigger | PushOutMonsters), exclude 0x40 (monsters). For each object
 (on a building only VolumeTriggers), 0x2801A0; when they meet:
 - a VolumeTrigger: 0x335BF0 fires it (when enabled, +0xA0, with a FireFunc, +0xA4, and its refire clock +0x98 run
   down: the script's FireFunc(monster, normal), the clock set to MinRefireTime +0x9C; 0x3361A0 runs the clock), and
@@ -103,7 +104,7 @@ along its y, × scale, plus the move's offset at +0xBAA0 +0xC / +0x10):
   wall → 0 on the lower; front against back: touching (|back min y − front max y| < 0.001), the same x span and
   height → 1, else the higher one's wall. Initially 2 (no neighbour).
 - **Otherwise, unless on a building** (mode 5): 0x2A35A0 with r = half width and the alleys' r2 = half width (+5
-  when +0xB9C0), the centre 3 higher in a low jump; the change in x and y moves the feet, and the velocity (+0xBD30)
+  when +0xB9C0), the centre 3 higher in mode 1 more than 3 up (0x2E3198); the change in x and y moves the feet, and the velocity (+0xBD30)
   and the stick's (+0xA68) are zeroed along an axis it was pushed against.
 
 **0x2A35A0, the rows** (0x2A36F0 for row 1, then row 0, on the same point): a row only matters once p.y + r is past

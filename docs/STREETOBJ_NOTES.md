@@ -122,6 +122,15 @@ frame + the delay. `IsMonsterUpgrade` sets nFlags 2 (challenge.c).
   `CustomOscillationScale` × 2 (the boat rocks harder while touched).
 - The monster's place is kept for the next touch.
 
+**The AttackObjectInstance| ones** [R]: a city book placing a StreetObject.bsf template as an
+`AttackObjectInstance|` (not `ObjectInstance|`) makes it an AttackObject (0x3050F0's second list → 0x315330), which
+rocks after each update (0x314EF0, BOSS_NOTES.md "The AttackObject's oscillation"): Tree1 (template offset −1, the
+instance's `OscillationScale`: 0.035 in Chicago, 0.01 in the other cities), PalmTreeShort / PalmTreeTall (the
+template's 0.02, offset −1) in Las Vegas and Los Angeles. The facing (taken apart from the turn it has: the sway's,
+the fall's) gets (sin 2φ, cos 3φ, 0) × the scale less the last one, φ starting at frand × 2π: a tree rocks by ± the
+scale in radians, on top of its sway. Here `streetobj_add(..., attack)` (city.c's `SceneStreetObj.attack`) reads the
+keys, `step` adds it (army.h `ArmyOsc`).
+
 **TakeImpact** (a thrown object): its `HitEffect` on it, deleted; no score. Its caller is the SpherePhysicsMover of a
 flying object that meets the street object in the collision world (0x287430, docs/COLLIDE_NOTES.md): the viewer
 passes the flying module's impact on to `streetobj_take_impact`.
@@ -163,10 +172,10 @@ street at 6 takes (its z / 6 / a frame; 0.01 for 0, after a dbgAssert); a frame'
 / n) (the z sign at random); the y move 2.5 / (0.5 s of frames).
 
 ## The port (src/streetobj.c)
-- `streetobj_add(tmpl, inst, world, building)` for each object the city placed (city.c records them in
+- `streetobj_add(tmpl, inst, world, building, attack)` for each object the city placed (city.c records them in
   `Scene.street`: the block's own and its buildings' `ObjectInstance|` entries whose script is one of the two, with
-  the instances of its model and its flags' cloths), then `streetobj_start(buildings)` attaches the others by the
-  footprint.
+  the instances of its model and its flags' cloths; attack for the block's `AttackObjectInstance|` ones), then
+  `streetobj_start(buildings)` attaches the others by the footprint.
 - `streetobj_update(dt, monsters, buildings)` runs the pulses at the world's step, 1/30 s (0x2B7800), and
   onBuildingDestruction; `streetobj_hit` (an armed sphere: type 0, once per attack record for an
   0x8000 object) and `streetobj_touch` (the monster's box: type 1, not on 0x8000 objects) call TakeDamage, at most one

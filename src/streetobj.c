@@ -777,7 +777,7 @@ static void object_box(StreetObjs *s, StreetObj *o)
     }
 }
 
-int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building)
+int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building, int attack)
 {
     int kind = tmpl.at ? streetobj_kind_of(tmpl) : -1;
     if (kind < 0 || s->n >= MAX_OBJS)
@@ -805,6 +805,8 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
     if (building >= 0)
         o->oflags |= SF_ATTACHED;                    /* the building that made it (+0x104 already set) */
     object_box(s, o);
+    if (attack)                                      /* [R 0x3050F0's AttackObjectInstance| list -> 0x315330] */
+        army_osc_init(&o->wobble, tmpl, inst);
     if (kind == SK_STREET)
         street_construct(s, o);
     else
@@ -851,6 +853,15 @@ static void step(StreetObjs *s)
             o->oflags &= ~(uint32_t)SF_ATTACHED;
             if (o->kind == SK_ROOF)
                 roof_building_gone(s, o);           /* StreetObject.bsf has none */
+        }
+        float d[3];                                  /* [R 0x314EF0] an AttackObject's wobble, after 0x309AC0: onto
+                                                      * the turn it has (the sway's, the fall's), made again */
+        if (!s->deleting[i] && army_osc_step(&o->wobble, TIMESTEP, d)) {
+            army_osc_turn(o->world, d);
+            for (int c = 0; c < 3; c++)
+                for (int r = 0; r < 3; r++)
+                    o->rot[c * 3 + r] = o->world[c * 4 + r];
+            o->moved = 1;
         }
         if (s->deleting[i])
             delete_now(s, o);

@@ -347,19 +347,73 @@ static void monster_centre(const ArmyMonster *m, float c[3])
     }
 }
 
-/* a unit's world matrix: its place, turned by facing about z, then by tilt (x, y) */
-static void unit_matrix(ArmyUnit *u)
+void army_facing_turn(const float f[3], float *w)
 {
-    float h = u->facing, ax = u->tilt[0], ay = u->tilt[1];
+    float h = f[2], ax = f[0], ay = f[1];
     float ch = cosf(h), sh = sinf(h), cx = cosf(ax), sx = sinf(ax), cy = cosf(ay), sy = sinf(ay);
     float r[9] = { ch * cy - sh * sx * sy, sh * cy + ch * sx * sy, -cx * sy,   /* Rz(h) Rx(ax) Ry(ay) */
                    -sh * cx, ch * cx, sx,
                    ch * sy + sh * sx * cy, sh * sy - ch * sx * cy, cx * cy };
-    for (int c = 0; c < 3; c++) {
+    for (int c = 0; c < 3; c++)
         for (int k = 0; k < 3; k++)
-            u->world[4 * c + k] = r[3 * c + k];
-        u->world[4 * c + 3] = 0;
+            w[4 * c + k] = r[3 * c + k];
+}
+void army_turn_facing(const float *w, float f[3])
+{
+    f[0] = asinf(clampf(w[6], -1, 1));
+    f[2] = atan2f(-w[4], w[5]);
+    f[1] = atan2f(-w[2], w[10]);
+}
+
+/* ---------------------------------------------------------------- the AttackObject's wobble (0x315330, 0x314EF0) */
+
+static int osc_key(Group g, const char *key, float *out)   /* 0x1B43C0, a float record only */
+{
+    Record r;
+    if (!g.at || !group_get(g, key, &r) || (r.kind & 0xFF) != PK_FLOAT)
+        return 0;
+    *out = record_num(r);
+    return 1;
+}
+void army_osc_init(ArmyOsc *o, Group tmpl, Group inst)
+{
+    memset(o, 0, sizeof *o);
+    if (!osc_key(tmpl, "OscillationScale", &o->scale))   /* +0x190: the template's (obj +0x80) */
+        o->scale = 0;
+    if (inst.at && o->scale <= 0 && !osc_key(inst, "OscillationScale", &o->scale))   /* the instance's (+0x7C) */
+        o->scale = 0;
+    osc_key(tmpl, "OscillationOffset", &o->phase);  /* +0x18C: the template's, both times (0x3158E0, 0x315934) */
+    if (o->phase < 0)
+        o->phase = 2 * (PI * wrand_frand());
+}
+int army_osc_step(ArmyOsc *o, float dt, float d[3])
+{
+    d[0] = d[1] = d[2] = 0;
+    if (o->scale <= 0)
+        return 0;
+    o->phase += dt;
+    float now[3] = { sinf(o->phase * 2) * o->scale, cosf(o->phase * 3) * o->scale, 0 };
+    for (int k = 0; k < 3; k++) {
+        d[k] = now[k] - o->last[k];
+        o->last[k] = now[k];
     }
+    return 1;
+}
+void army_osc_turn(float *w, const float d[3])
+{
+    float f[3];
+    army_turn_facing(w, f);
+    for (int k = 0; k < 3; k++)
+        f[k] += d[k];
+    army_facing_turn(f, w);
+}
+
+/* a unit's world matrix: its place, turned by facing about z, then by tilt (x, y) */
+static void unit_matrix(ArmyUnit *u)
+{
+    float f[3] = { u->tilt[0], u->tilt[1], u->facing };
+    army_facing_turn(f, u->world);
+    u->world[3] = u->world[7] = u->world[11] = 0;
     u->world[12] = u->pos[0];
     u->world[13] = u->pos[1];
     u->world[14] = u->pos[2];
@@ -1401,8 +1455,12 @@ static int spline_step(ArmyUnit *u, float dt)
     }
     float tan[3];
     spline_eval(u, u->mv.s, u->pos, tan);
-    if ((u->mv.flags & 2) && (tan[0] != 0 || tan[1] != 0))
+    if ((u->mv.flags & 2) && (tan[0] != 0 || tan[1] != 0)) {
         u->facing = facing_of(tan[0], tan[1]);
+        u->tilt[0] = u->tilt[1] = 0;                 /* [R 0x33AD58] the frame made afresh (its pitch along the
+                                                      * tangent not here): the wobble's change since the last frame
+                                                      * is all it gets (0x314EF0) */
+    }
     return r;
 }
 
@@ -1669,6 +1727,9 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     u->person = -1;
     u->cobj = -1;
     u->pulse_delay = 0.25f;
+    /* [R 0x315330 through the vtable's init 0x304FA0, before onInit] the wobble's keys, the instance book the
+     * AIInstance [G: the Actors (0x44B300) have no wobble; none of their templates has the keys] */
+    army_osc_init(&u->osc, tmpl, inst);
     unit_weapons(a, u);
     unit_matrix(u);
     return k;
@@ -3263,7 +3324,20 @@ static void unit_update(Army *a, int i, float dt)
     }
     if (u->kind == AK_DROP)
         u->tilt[1] += u->spin[1] * dt;               /* Process: rotate(p3RotRate) every frame */
-    if (!(u->mv.kind == 2 && u->cm_on))              /* a flight's matrix is its mover's */
+    float d[3];
+    int flight = u->mv.kind == 2 && u->cm_on;
+    if (army_osc_step(&u->osc, dt, d)) {             /* [R 0x314EF0] the wobble, after the update (0x309AC0) */
+        if (flight) {                                /* onto the mover's frame, which it steps on from */
+            army_osc_turn(u->world, d);
+            collide_matrix_from16(u->cmat, u->world);
+        } else {                                     /* the facing: kept, it carries the whole wobble; a spline's
+                                                      * frame made afresh only this frame's change */
+            u->tilt[0] += d[0];
+            u->tilt[1] += d[1];
+            u->facing += d[2];
+        }
+    }
+    if (!flight)                                     /* a flight's matrix is its mover's */
         unit_matrix(u);
     if (u->phase == AU_ALIVE && u->nw > 0)
         unit_weapons_tick(a, u, dt, u->kind == AK_TURRET && u->count ? u->lock : NULL);

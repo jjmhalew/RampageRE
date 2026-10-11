@@ -213,13 +213,15 @@ typedef struct {
     /* the StreetObject.bsf and RoofItem.bsf objects of the block and its buildings as placed, for streetobj.c (main
      * adds them): the template, its ObjectInstance| group, its instances first .. last - 1 (the model, then its
      * flags' cloths), where it stands, the building whose ObjectInstance| it is (-1 the block's own); model: the
-     * instance of its model now (scene_street_shape), rel: its cloths' places relative to it (scene_street_place) */
+     * instance of its model now (scene_street_shape), rel: its cloths' places relative to it (scene_street_place);
+     * attack: an AttackObjectInstance| of the block (an AttackObject, 0x3050F0) */
 #define SCENE_STREET_MAX 256
-    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel; float world[16]; Mat4 rel[4]; }
-        street[SCENE_STREET_MAX];
+    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel, attack; float world[16];
+                            Mat4 rel[4]; } street[SCENE_STREET_MAX];
     int nstreet;
     int left;                                         /* the game has moved on (scene_block_left): the block is behind */
     int placing_block;                                /* placing the block's own objects (not those behind) */
+    int placing_attack;                               /* ... its AttackObjectInstance| list */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */
     int people, missing;
     SceneMonster mon[SCENE_MONSTERS]; int nmon;      /* the monsters, slot 0 .. nmon - 1 (city_monster adds one) */

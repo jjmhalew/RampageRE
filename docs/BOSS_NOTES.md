@@ -125,10 +125,14 @@ t 0, and places the object at the first point at once [R].
 - `Monster.playReaction(name)`: the move state of that name (0x2D9890), started through 0x2D9710.
 
 **The AttackObject's oscillation** (vtable 0x44B470; its init 0x304FA0 → 0x315330, its update 0x314EF0) [R]:
-- **The keys** (0x315810 .. 0x3159F0): +0x190 = `OscillationScale`, the template's float, else (0 or less) the
-  instance book's; +0x18C = `OscillationOffset`, the template's, then the instance's over it, and below 0
-  gWorld.frand × 2π. Only float records count (the type byte is tested for 1). The constructor (0x315A90) zeroes
-  both and the last wobble (+0x180).
+- **The keys** (0x315810 .. 0x3159F0): +0x190 = `OscillationScale`, the template's (obj +0x80) float, else (0 or
+  less) the instance book's (obj +0x7C); +0x18C = `OscillationOffset`, the template's, read twice: the second read
+  (0x315934) is made only when there is an instance book, but from +0x80 again, so the instance's offset is never
+  read; below 0 gWorld.frand × 2π (0x106BD0 on gWorld +0x828, × 2⁻³¹ × π × 2). Only float records count (the type
+  byte is tested for 1). The constructor (0x315A90) zeroes both and the last wobble (+0x180). 0x315330 runs from the
+  vtable's init (0x304FA0, f12 = 0: the spawner's and createAttackObject's objects) and from the block's load
+  (0x3050F0: its second list, the `AttackObjectInstance|` entries, made from the pool 0x4D5EB0 by 0x283DA0 and given
+  their instance group; the first list, `ObjectInstance|`, makes no AttackObjects).
 - **Each frame**, after the world object's update (0x309AC0: the mover, the pulse, the script), while +0x190 > 0: the
   phase grows by the world's step (gWorld +0x4); the wobble is (sin 2φ, cos 3φ, 0) × the scale; the object's turn
   is taken apart into its facing (0x101220), gets the new wobble less the last one, and is made again (0x101330),
@@ -136,10 +140,18 @@ t 0, and places the object at the first point at once [R].
   y, and a mover's frame made afresh each frame only gets the frame's change.
 - **Which:** of the bosses only `BossSaucerAmbient` has one (0.075: ±4.3°, the tilt and its rotor's, which copies the
   saucer's facing in its Process). The keys (0x3F5DB4, 0x3F5DB8) are read nowhere else, so the others that have them
-  rock only as AttackObjects: the army's helicopters (0.1, not in army.c) and the PirateShip (0.1); the palm trees'
-  0.02 and offset −1 (StreetObject.bsf objects) [G: not AttackObjects, so never read].
-- Ported (boss.c `obj_update`, the keys in `obj_new`): the facing carries it, a part whose turn is its mover's
-  (`oriented`) gets the change through `turn_facing` / `facing_turn`.
+  rock only as AttackObjects: the army's helicopters and news helicopters (0.1; the SplineMover with flag 2 makes
+  their frame afresh each frame, 0x33AD58, so on their path they get only the frame's change, and once a monster is
+  spotted, flag 2 off, the whole ±0.1), the PirateShip (0.1), and the StreetObject.bsf trees the city books place as
+  `AttackObjectInstance|`: Tree1 (offset −1, the scale the instance's: 0.035 in Chicago, 0.01 elsewhere; 119 of
+  them), PalmTreeShort / PalmTreeTall (0.02, offset −1; 92 in Las Vegas and Los Angeles). The same templates placed
+  as `ObjectInstance|` do not rock.
+- Ported, one code for all (army.h `ArmyOsc`: `army_osc_init`, `army_osc_step`, `army_osc_turn`, and
+  `army_facing_turn` / `army_turn_facing` for 0x101330 / 0x101220): boss.c `obj_update` (the keys in `obj_new`; the
+  facing carries it, a part whose turn is its mover's, `oriented`, gets the change on its matrix), army.c
+  `unit_update` (the keys in `unit_new`), streetobj.c `step` (city.c marks the `AttackObjectInstance|` ones,
+  `SceneStreetObj.attack`). The PirateShip has no module: LV05_JollyRogers places it as an `AttackObjectInstance|`
+  and city.c draws it as a still model (army.c's StationaryAttackObject is never spawned), so it does not rock here.
 
 **Sounds** [R]:
 - `add3DSfx(name, keep)` (the binding 0x278810) is 0x287860(object, name, keep != 0): one of the object's 16 sound
@@ -411,7 +423,7 @@ falling back one loses its barriers too.
   - `adjustZRot` (taken as adding to the turn);
   - getFacing().z read back in (−π, π];
   - the numGenerators global and the play values (taken as starting again per block);
-  - the facing the oscillation takes apart (0x101220) is `turn_facing`'s asin / atan2, read for the mover-turned
+  - the facing the oscillation takes apart (0x101220) is `army_turn_facing`'s asin / atan2, read for the mover-turned
     parts only: the others carry their facing as the script set it, plus the wobble.
 - **Sounds:** a `--shot` run moves no sound on (`sound_update(0)`), so there a part's 16 slots fill up and later
   sounds are refused (the trace says so); in play an ended sound frees its slot, as 0x274CF0 does.

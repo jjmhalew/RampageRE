@@ -263,7 +263,17 @@ at 0.
   addStats on their death are a helicopter's.
 - The spline is the SplineMover's (0x33ACA0, BOSS_NOTES.md: a Kochanek-Bartels curve whose place d grows by the
   velocity in the points' own d units, answering 2 every frame past its end) [R], ported as boss.c's (army.c
-  `spline_step`); flag 2 turns the helicopter along the tangent (yaw only here; the game sets its whole frame).
+  `spline_step`); flag 2 turns the helicopter along the tangent (yaw only here; the game sets its whole frame, from
+  the tangent and z up, 0x33AD58: here the tilt goes to 0).
+- **The wobble** [R] (the AttackObject's, BOSS_NOTES.md "The AttackObject's oscillation"; 0x315330, 0x314EF0): every
+  helicopter template, the news helicopters too, has `OscillationScale` 0.1 and no offset, so the phase starts at 0
+  and grows by the world's step, a second a second. After the update the facing gets (sin 2φ, cos 3φ, 0) × 0.1 less
+  the last one: on the path (flag 2, the frame made afresh each frame) only that frame's change, at most 0.3 × the
+  step (0.01 rad at 1/30);
+  once flag 2 is off (a monster spotted: states 2, 1, 3) it keeps its frame and rocks ±0.1 rad (5.7°) about x and
+  y, and state 2's `facing.x × 0.9` each pulse damps the x part. The wreck's flight gets the change onto the
+  SpherePhysicsMover's frame. Here `army_osc_*` in `unit_update`, the keys in `unit_new` (the instance book the
+  AIInstance).
 
 **Trucks and police cars** (`CombatTruck.bsf`) [R]:
 - **Arrival:** they come from x = ±100 to 8 past the nearest monster (within ±40), at 20.
@@ -293,7 +303,9 @@ at 0.
 - `getMonsterDirection` (Actor id 0x3F → 0x2B2850) [R]: of the player monsters, the nearest (d² < 1e5); the eighth of
   the way to it 3 above its feet, in the front's plane (atan2(dz, dx), dy unused).
 
-**StationaryAttackObject** (the pirate ship) [R]:
+**StationaryAttackObject** (the pirate ship) [R] (its only user, the PirateShip, is an `AttackObjectInstance|` of
+LV05_JollyRogers, which city.c draws as a still model: nothing spawns it as a unit here, so it neither fires nor
+rocks):
 - **Aim:** it aims at a point that locks onto the monster after 0.55 s still (+`TargetOffsetZ`) and re-picks when
   the monster moves 3 away for 1.05 s.
 - **Firing:** one round every `WeaponRefireDelay`.
@@ -396,9 +408,7 @@ Floating = 100
   larger, one inside the other the outer, else the sphere round both), so the centre is the spheres' bounding
   sphere's and moves with the pose. As here (army.c `monster_centre`, from `ArmyMonster.spheres`). Both the projectile's wobble (definition flag 8) and its spread (record flag 8) come from flags no book
   sets.
-- **Other:** the camera's place (`army_set_view`, the FlybySound's x), the AttackObject's wobble (OscillationScale
-  +0x190, its phase +0x18C: 0.1 on the helicopters and the PirateShip; traced in BOSS_NOTES.md "The AttackObject's
-  oscillation" [R 0x314EF0], not done here), the
+- **Other:** the camera's place (`army_set_view`, the FlybySound's x), the
   impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).
 - **Elsewhere:** the bosses are boss.c's ([BOSS_NOTES.md](BOSS_NOTES.md)); `Vehicle.bsf` (the `Humvee` and the other
   street vehicles, `AK_OTHER` here) and Rocket / RocketBase are vehicle.c's ([VEHICLE_NOTES.md](VEHICLE_NOTES.md)).

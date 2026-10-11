@@ -755,7 +755,9 @@ void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut
     float hw = m->half_w, hh = m->half_h;
     float centre[3] = { m->pos[0], m->pos[1], m->pos[2] + hh }, ext[3] = { hw, hw, hh };
     float lo[3] = { m->pos[0] - hw, m->pos[1] - hw, m->pos[2] - hh }, hi[3] = { m->pos[0] + hw, m->pos[1] + hw, m->pos[2] + hh };
-    if (m->mode == 5 || (m->mode == 1 && m->pos[2] <= 3)) {   /* climbing, or low in a jump: the box 3 higher */
+    if (m->mode == 5 || (m->mode == 1 && m->pos[2] > 3)) {   /* climbing, or high in a jump (its body 3 above its
+                                                              * place, as the landing's 0x2E29A4): the box 3 higher
+                                                              * [R 0x2E2E18: c.le.s z, 3 then bc1f, so z > 3] */
         lo[2] += 3;
         hi[2] += 3;
         centre[2] += 3;
@@ -803,7 +805,7 @@ void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut
         return;
     float q[3], q0[3];
     probe_point(m, q);
-    if (m->mode == 1 && m->pos[2] <= 3)
+    if (m->mode == 1 && m->pos[2] > 3)               /* [R 0x2E3198, the same test] */
         q[2] += 3;
     copy3(q0, q);
     if (!collide_buildings_push(w, q, hw, hw + (m->wide ? 5.0f : 0)))

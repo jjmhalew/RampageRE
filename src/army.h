@@ -107,6 +107,11 @@ typedef struct {                                     /* one weapon (a Weapon| gr
     int shot;                                        /* a beam's shot id, -1 none */
 } ArmyWeapon;
 
+/* the AttackObject's wobble (vtable 0x44B470) [R]: +0x190 OscillationScale, +0x18C its phase (OscillationOffset),
+ * +0x180 the last wobble. For the army's units, boss.c's parts and the street objects a block places as
+ * AttackObjectInstance| (BOSS_NOTES.md "The AttackObject's oscillation") */
+typedef struct { float scale, phase, last[3]; } ArmyOsc;
+
 #define ARMY_WEAPONS 4
 struct ArmyUnit {
     CollideHitList hits;                             /* the attack records that hit it (0x2E33A0) */
@@ -143,6 +148,7 @@ struct ArmyUnit {
     CollideMover cm; float cmat[12]; int cm_on;
     int cobj;                                        /* its object in the frame's collision world, -1 none */
     CollideShape cshape; int cshape_ok;              /* its shape, read once (WSimpleObject's init, 0x28FD70) */
+    ArmyOsc osc;                                     /* its wobble (the helicopters' 0.1); scale 0: none */
 };
 
 typedef struct {                                     /* a shot in the air, or a beam */
@@ -200,6 +206,21 @@ void army_frame_turn(float F[3][3], float facing, float yaw, float pitch);
 /* a beam's axis (0x226950): the rod's direction through the firing frame F; with no frame, F is made with the rod's
  * main axis along dir (army_frame_point) and that is the axis. rod NULL: +x */
 void army_beam_axis(float F[3][3], int have_frame, const float dir[3], const float *rod, float out[3]);
+/* a facing (x, y, z) as a turn: Rz(z) Rx(x) Ry(y) [R 0x101330], into the 3 x 3 of the column-major 4 x 4 w; and
+ * back [R 0x101220]: x = asin(w[6]), z = atan2(-w[4], w[5]), y = atan2(-w[2], w[10]) */
+void army_facing_turn(const float f[3], float *w);
+void army_turn_facing(const float *w, float f[3]);
+/* the AttackObject's init of its wobble [R 0x315810 .. 0x3159F0]: OscillationScale the template's float, else (0 or
+ * less) the instance book's; OscillationOffset the template's (read twice, the second time only with an instance
+ * book, but from the template again: the instance's is never read); below 0 gWorld.frand x 2 pi. Only float records
+ * count (the type byte tested for 1); the rest 0 (the constructor 0x315A90) */
+void army_osc_init(ArmyOsc *o, Group tmpl, Group inst);
+/* each frame after the object's own update (0x314EF0, after 0x309AC0), while the scale is above 0: the phase grows
+ * by dt (the world's step, gWorld +0x4), the wobble is (sin 2 phase, cos 3 phase, 0) x the scale, and d the wobble
+ * less the last one: what goes onto the object's facing (0 when it has none) */
+int army_osc_step(ArmyOsc *o, float dt, float d[3]);
+/* d onto the turn of w: its facing (0x101220) + d, made again (0x101330); the place stays */
+void army_osc_turn(float *w, const float d[3]);
 void army_free(Army *a);
 /* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
 void army_set_view(Army *a, float xmin, float xmax);
