@@ -130,6 +130,11 @@ typedef struct Mon {
     Hud *hud;                                        /* its HUD (Hud<slot>.ifc); slot 0's is the screen's (Viewer.hud) */
     int human;                                       /* it became human (+0xAB4): its streaker runs */
     int dropping;                                    /* dropping in after a respawn (+0xAB5), until it lands */
+    int double_jumped;                               /* +0xAB7: setHasDoubleJumped (Monsters::didDoubleJump, binding
+                                                      * 90, 0x2AB2A0), hasDoubleJumped (89, 0x2AB270) asked by
+                                                      * hasDoubleJump; cleared each frame out of the air (0x2E0C38) [R] */
+    int spins;                                       /* +0xAC0: the jump's spins (getJumpSpinCount 92, 0x2AB2D0;
+                                                      * incJumpSpinCount 94, 0x2AB318), cleared with it [R] */
     /* each body part's attack (0x2E7880: the record's every bone takes it, +0xBD60 + 0x1C x bone, the newest arming
      * a bone's): damage (+0x2C), the knock's distance and time (+0x30, +0x34), ReactionLevel (+0x24), the flags
      * (+0x14: 2 in front, 4 behind), the monsters it may hit (+0x18), and the ones it hit already (the bones' +0x18,
@@ -1295,15 +1300,24 @@ static int along(Mon *mo, float p0)
 
 static int answer(void *ctx, const char *call, const float *a)
 {
-    static const char *const YES[] = { "Monsters::canSpin", "Monsters::hasDoubleJump" };
     Mon *mo = ctx;
     Viewer *v = mo ? mo->v : NULL;
+    if (!mo)
+        return 0;
+    if (!strcmp(call, "Monsters::hasDoubleJump"))    /* Monsters.bsf: hasDoubleJumped() == 0 (+0xAB7) [R] */
+        return !mo->double_jumped;
+    if (!strcmp(call, "Monsters::canSpin")) {        /* Monsters.bsf: a jump's first spin, two more with MULTI-SPIN
+                                                      * (upgrade flag 2), cheat 8 or the rage; each counted
+                                                      * (incJumpSpinCount) [R] */
+        if (mo->spins == 0 || (mo->spins <= 2 && ((mo->power.abilities & 2) || (mo->power.cheats & 8) || mo->power.rage))) {
+            mo->spins++;
+            return 1;
+        }
+        return 0;
+    }
     int r = v ? edible_power_answer(&mo->power, call) : -1;   /* hasRoarEnergy, hasChargePunch, ... (edible.c) */
     if (r >= 0)
         return r;
-    for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
-        if (strcmp(call, YES[i]) == 0)
-            return 1;
     if (!v)
         return 0;
     Climber c = climber(mo);
@@ -1542,6 +1556,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
     else if (!strcmp(n, "Monsters::disableGravity")) { mo->no_gravity = 1; return; }
+    else if (!strcmp(n, "Monsters::didDoubleJump")) { mo->double_jumped = 1; return; }   /* setHasDoubleJumped(1) */
     else if (!strcmp(n, "Monsters::footStep")) { foot_step(&mo->feet, (int)e->p[0], mo->mirror); return; }
     else if (!strcmp(n, "Monsters::footPlant") || !strcmp(n, "Monsters::cancelFootStep")) {
         FootPose m;                                  /* the footfall under a still monster's foot; the feet set down */
@@ -4116,6 +4131,9 @@ static void mon_step(Mon *mo, float dt)
             }
         }
         air_control(mo, st, lx, ly, dt);
+        if (mo->mode != MODE_AIRBORNE)               /* 0x2E0C38: off the air the double jump and the spins are there
+                                                      * again */
+            mo->double_jumped = mo->spins = 0;
         if (mo->mode == MODE_GROUND || mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF || mo->mode == MODE_PRONE) {
             mo->mx += mo->air[0] * dt;                 /* 0x2E0C50: in modes 0, 1, 2 and 4 */
             mo->my += mo->air[1] * dt;

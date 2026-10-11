@@ -511,7 +511,9 @@ window occupants lean out and fall when their window breaks, crowds run, punks t
 monster grabs one from a window (`canGrabPerson`) or the street (`doGrabObject` at its `Helper R Hand`), holds,
 eats (health, energy) or throws them, and its attacks send them flying. Script checks the graph asks (`Monsters::canMount`,
 `canGrabPerson`, ...) answer no, except the monster's own abilities (roar energy, double jump, jump smash, spin,
-punch). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
+punch); as Monsters.bsf has them, a jump has one double jump (`hasDoubleJump` / `didDoubleJump`, the monster's +0xAB7)
+and one spin, three with MULTI-SPIN, cheat 8 or the rage (`canSpin`, the count +0xAC0), both back once it is out of
+the air (0x2E0C38). While a clip's attack event has a body part armed, its collision spheres are drawn as red wire spheres (H
 hides them): the punch's fist, the kick's foot. The army comes for the monster (src/army.c, [ARMY_NOTES.md](ARMY_NOTES.md)): each block's `AIDef` spawns
 helicopters, SWAT vans, army trucks with troops and tanks, which fire the `Weapons.bdp` weapons at it (hits take its
 health and start its reactions), the punks throw their bottles, droppables fall from windows; blows wreck the
