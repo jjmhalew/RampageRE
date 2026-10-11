@@ -1,4 +1,5 @@
-/* iso.c - the game's data straight from the disc image, and where the data is (iso.h). */
+/* iso.c - the game's data straight from the disc image (or from an APK of make_android_bundle.bat, which carries the
+ * disc's files), and where the data is (iso.h). */
 #include <stdlib.h>
 #include <string.h>
 #include "plat.h"
@@ -7,6 +8,7 @@
 #define SEP "\\"
 #else
 #include <dirent.h>
+#include <sys/stat.h>
 #define SEP "/"
 #endif
 
@@ -31,10 +33,60 @@ static int iso_root(FILE *f, uint32_t *lba, uint32_t *len)
     return 0;
 }
 
+/* ---- an APK of make_android_bundle.bat (tools/native/apkbundle.c): a ZIP whose entries assets/RAMPAGE.VOL,
+ * assets/<the ELF SYSTEM.CNF boots> and assets/SYSTEM.CNF are the disc's files, stored (not compressed), so they are read
+ * in place as from the image: path "RAMPAGE.VOL" is the entry assets/RAMPAGE.VOL. No ZIP64 (the bundle stays below 2 GB) */
+static int zip_find(FILE *f, const char *path, int64_t *offset, uint32_t *size)
+{
+    uint8_t tail[22 + 1024], *cd = NULL;
+    char want[128];
+    int64_t end;
+    if (_fseeki64(f, 0, SEEK_END) != 0 || (end = _ftelli64(f)) < 22 || snprintf(want, sizeof want, "assets/%s", path) >=
+        (int)sizeof want)
+        return 0;
+    for (char *c = want; *c; c++)
+        if (*c == '\\')
+            *c = '/';
+    size_t tn = end < (int64_t)sizeof tail ? (size_t)end : sizeof tail, e = tn - 22;   /* the end record, a short comment */
+    if (!read_at(f, end - (int64_t)tn, tail, tn))
+        return 0;
+    while (e > 0 && !(rd32(tail + e) == 0x06054b50 && e + 22 + rd16(tail + e + 20) == tn))
+        e--;
+    uint32_t cd_size = rd32(tail + e + 12), cd_at = rd32(tail + e + 16);
+    if (rd32(tail + e) != 0x06054b50 || cd_at == 0xffffffffu || cd_size > (16u << 20) || (int64_t)cd_at + cd_size > end ||
+        !(cd = malloc(cd_size ? cd_size : 1)) || !read_at(f, cd_at, cd, cd_size)) {
+        free(cd);
+        return 0;
+    }
+    size_t wl = strlen(want);
+    int found = 0;
+    for (uint32_t o = 0; o + 46 <= cd_size && rd32(cd + o) == 0x02014b50; ) {
+        uint32_t nl = rd16(cd + o + 28), len = 46 + nl + rd16(cd + o + 30) + rd16(cd + o + 32);
+        if (o + len > cd_size)
+            break;
+        if (nl == wl && _strnicmp((const char *)cd + o + 46, want, wl) == 0) {
+            uint8_t lh[30];
+            uint32_t at = rd32(cd + o + 42), n = rd32(cd + o + 24);
+            found = rd16(cd + o + 10) == 0 && rd32(cd + o + 20) == n && read_at(f, at, lh, sizeof lh) &&
+                    rd32(lh) == 0x04034b50;                  /* stored, and its local header */
+            if (found) {
+                *offset = (int64_t)at + 30 + rd16(lh + 26) + rd16(lh + 28);
+                *size = n;
+                found = *offset + n <= end;
+            }
+            break;
+        }
+        o += len;
+    }
+    free(cd);
+    return found;
+}
+
 int iso_is(FILE *f)
 {
-    uint32_t lba, len;
-    return iso_root(f, &lba, &len);
+    uint32_t lba, len, n;
+    int64_t at;
+    return iso_root(f, &lba, &len) || zip_find(f, "RAMPAGE.VOL", &at, &n);
 }
 
 /* the entry name[0..n) in the directory at lba (len bytes): a directory or a file as dir says */
@@ -68,7 +120,7 @@ int iso_find(FILE *f, const char *path, int64_t *offset, uint32_t *size)
 {
     uint32_t lba, len;
     if (!iso_root(f, &lba, &len))
-        return 0;
+        return zip_find(f, path, offset, size);
     while (*path) {
         const char *end = path;
         while (*end && *end != '/' && *end != '\\')
@@ -170,6 +222,68 @@ uint8_t *data_elf(const char *path, uint32_t *size)
     return elf;
 }
 
+static int64_t file_size(FILE *f)
+{
+    return _fseeki64(f, 0, SEEK_END) == 0 ? _ftelli64(f) : -1;
+}
+
+int data_parts(const char *path, DataPart part[3])
+{
+    static const char *const names[3] = { "SYSTEM.CNF", "SLES_538.00", "RAMPAGE.VOL" };
+    memset(part, 0, 3 * sizeof *part);
+    for (int i = 0; i < 3; i++)
+        snprintf(part[i].name, sizeof part[i].name, "%s", names[i]);
+    uint8_t head[4];
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    char *cnf = NULL;
+    uint32_t n = 0;
+    int64_t at;
+    int ok = 0;
+    if (fread(head, 1, 4, f) == 4 && memcmp(head, "PVOL", 4) == 0) {   /* RAMPAGE.VOL, the rest beside it */
+        int64_t size = file_size(f);
+        fclose(f);
+        if (size < 16 || size > 0xffffffffll)
+            return 0;
+        snprintf(part[2].file, sizeof part[2].file, "%s", path);
+        part[2].size = (uint32_t)size;
+        beside(part[0].file, sizeof part[0].file, path, "SYSTEM.CNF");
+        if ((cnf = (char *)slurp(part[0].file, &n)) != NULL)
+            part[0].size = n;
+        const char *elf[2] = { "RAMPAGE.ELF", "SLES_538.00" };   /* as data_elf: build.ps1's split copy first */
+        for (int i = 0; i < 2 && !part[1].size; i++) {
+            beside(part[1].file, sizeof part[1].file, path, elf[i]);
+            FILE *e = fopen(part[1].file, "rb");
+            int64_t es = e ? file_size(e) : -1;
+            if (e)
+                fclose(e);
+            if (es > 0 && es < (1 << 30))
+                part[1].size = (uint32_t)es;
+        }
+        ok = 1;
+    } else {
+        if (iso_is(f) && iso_find(f, "RAMPAGE.VOL", &part[2].at, &part[2].size)) {
+            for (int i = 0; i < 3; i++)
+                snprintf(part[i].file, sizeof part[i].file, "%s", path);
+            if (iso_find(f, "SYSTEM.CNF", &part[0].at, &part[0].size))
+                cnf = (char *)iso_slurp(f, "SYSTEM.CNF", &n);
+            ok = 1;
+        }
+        char boot[64];
+        if (ok && iso_find(f, boot_name(cnf, boot, sizeof boot) ? boot : "SLES_538.00", &at, &n)) {
+            part[1].at = at;
+            part[1].size = n;
+        }
+        fclose(f);
+    }
+    char bn[64];
+    if (boot_name(cnf, bn, sizeof bn))                   /* the name an image holds the ELF under */
+        snprintf(part[1].name, sizeof part[1].name, "%s", bn);
+    free(cnf);
+    return ok;
+}
+
 /* ---- the finder */
 static int readable(const char *path)
 {
@@ -202,6 +316,19 @@ static int has_vol(const char *path)
     int64_t at;
     uint32_t n;
     int ok = f && iso_find(f, "RAMPAGE.VOL", &at, &n);
+    if (f)
+        fclose(f);
+    return ok;
+}
+
+int data_usable(const char *path)
+{
+    uint8_t head[4];
+    FILE *f = fopen(path, "rb");
+    int64_t at;
+    uint32_t n;
+    int ok = f && fread(head, 1, 4, f) == 4 && (memcmp(head, "PVOL", 4) == 0 ||
+             (iso_find(f, "RAMPAGE.VOL", &at, &n) && n >= 16 && read_at(f, at, head, 4) && memcmp(head, "PVOL", 4) == 0));
     if (f)
         fclose(f);
     return ok;
@@ -289,6 +416,58 @@ static void user_dir(char *out, size_t cap)
 #endif
 }
 
+/* the disc image or RAMPAGE.VOL chosen at an earlier start (data_ask): its path, one line in <user folder>/disc.txt */
+static void disc_txt(char *out, size_t cap)
+{
+    char user[1024];
+    user_dir(user, sizeof user);
+    if (user[0])
+        join(out, cap, user, "disc.txt");
+    else
+        out[0] = 0;
+}
+
+static int remembered(char *out, size_t cap)
+{
+    char p[1024], line[1024];
+    disc_txt(p, sizeof p);
+    FILE *f = p[0] ? fopen(p, "rb") : NULL;
+    size_t n = f ? fread(line, 1, sizeof line - 1, f) : 0;
+    if (f)
+        fclose(f);
+    line[n] = 0;
+    line[strcspn(line, "\r\n")] = 0;
+#ifdef _WIN32
+    UINT em = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);   /* a disc drive left empty: no box */
+#endif
+    int ok = line[0] && data_usable(line);
+#ifdef _WIN32
+    SetErrorMode(em);
+#endif
+    if (ok)
+        snprintf(out, cap, "%s", line);
+    return ok;
+}
+
+int data_remember(const char *path)
+{
+    char user[1024], p[1024];
+    user_dir(user, sizeof user);
+    if (!user[0])
+        return 0;
+#ifdef _WIN32
+    CreateDirectoryA(user, NULL);
+#else
+    mkdir(user, 0755);
+#endif
+    disc_txt(p, sizeof p);
+    FILE *f = fopen(p, "wb");
+    if (!f)
+        return 0;
+    fprintf(f, "%s\n", path);
+    return fclose(f) == 0;
+}
+
 int data_find(char *out, size_t cap)
 {
     char exe[1024], user[1024];
@@ -305,23 +484,30 @@ int data_find(char *out, size_t cap)
 #elif defined __ANDROID__
     if (vol_in(android_home(), out, cap) || iso_in(android_home(), out, cap))   /* the app folder (android.c) */
         return 1;
+    if (android_apk()[0] && has_vol(android_apk())) {    /* a bundle (make_android_bundle.bat): the disc's files are in
+                                                          * the installed APK itself, read in place */
+        snprintf(out, cap, "%s", android_apk());
+        return 1;
+    }
 #endif
     return vol_in("build" SEP "disc", out, cap) || vol_in(".", out, cap) || vol_in("data", out, cap) ||
            vol_in(exe, out, cap) || iso_in(exe, out, cap) || iso_in(".", out, cap) || iso_in("data", out, cap) ||
-           vol_in(user, out, cap) || iso_in(user, out, cap);
+           vol_in(user, out, cap) || iso_in(user, out, cap) || remembered(out, cap);
 }
 
 const char *data_where(void)
 {
 #ifdef _WIN32
-    return "build\\disc, the current folder, data\\, beside rampage.exe, %LOCALAPPDATA%\\RampageRE";
+    return "build\\disc, the current folder, data\\, beside the program, %LOCALAPPDATA%\\RampageRE (and the disc image "
+           "chosen at an earlier start)";
 #elif defined __SWITCH__
     return SWITCH_HOME " (the disc image, or RAMPAGE.VOL with RAMPAGE.ELF or SLES_538.00)";
 #elif defined __ANDROID__
     return "the app folder, Android/data/io.github.jjmhalew.rampagere/files (the disc image, or RAMPAGE.VOL with "
-           "RAMPAGE.ELF or SLES_538.00)";
+           "RAMPAGE.ELF or SLES_538.00), and the APK itself (make_android_bundle.bat)";
 #else
-    return "build/disc, the current folder, data/, beside rampage, $XDG_DATA_HOME/RampageRE (~/.local/share/RampageRE)";
+    return "build/disc, the current folder, data/, beside rampage, $XDG_DATA_HOME/RampageRE (~/.local/share/RampageRE; "
+           "and the path in its disc.txt)";
 #endif
 }
 
@@ -365,3 +551,72 @@ int data_check(const char *path, const Vol *v, char *msg, size_t cap)
              "%s.\nThe viewer may not work with it.", path, why);
     return 0;
 }
+
+#if defined _WIN32 && !defined RAMPAGE_TOOL
+/* ---- the first start on Windows: the disc image chosen in a file dialog (never a search of the drives), remembered */
+#include <commdlg.h>
+
+/* a wide path as the ANSI one fopen takes, else its short (8.3) name; 0 = neither spells it */
+static int ansi_path(const wchar_t *w, char *out, size_t cap)
+{
+    wchar_t s[1024];
+    BOOL bad = FALSE;
+    int utf8 = GetACP() == CP_UTF8;                      /* (the UTF-8 code page: every name fits, the flags must be 0) */
+    if (WideCharToMultiByte(CP_ACP, utf8 ? 0 : WC_NO_BEST_FIT_CHARS, w, -1, out, (int)cap, NULL, utf8 ? NULL : &bad) &&
+        !bad)
+        return 1;
+    DWORD k = GetShortPathNameW(w, s, 1024);
+    bad = FALSE;
+    return k && k < 1024 && WideCharToMultiByte(CP_ACP, utf8 ? 0 : WC_NO_BEST_FIT_CHARS, s, -1, out, (int)cap, NULL,
+                                                utf8 ? NULL : &bad) && !bad;
+}
+
+int data_ask(char *out, size_t cap)
+{
+    char where[1024], m[2048];
+    disc_txt(where, sizeof where);
+    snprintf(m, sizeof m, "RampageRE needs the files of your own game disc: Rampage - Total Destruction (Europe, "
+             "PlayStation 2, SLES-53800).\n\nChoose your disc image of it (.iso) in the next window, or the RAMPAGE.VOL "
+             "of a copy of the disc (with SLES_538.00 beside it). It is read where it is, nothing is copied, and "
+             "RampageRE remembers it (in %s).\n\nLooked in: %s.", where[0] ? where : "disc.txt", data_where());
+    if (MessageBoxA(NULL, m, "RampageRE", MB_OKCANCEL | MB_ICONINFORMATION) != IDOK) {
+        plat_told = 1;
+        return 0;
+    }
+    HRESULT co = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    int ok = 0;
+    for (;;) {
+        wchar_t file[1024] = L"";
+        OPENFILENAMEW o;
+        memset(&o, 0, sizeof o);
+        o.lStructSize = sizeof o;
+        o.lpstrFilter = L"Disc image or RAMPAGE.VOL (*.iso, RAMPAGE.VOL)\0*.iso;RAMPAGE.VOL\0All files (*.*)\0*.*\0";
+        o.lpstrFile = file;
+        o.nMaxFile = 1024;
+        o.lpstrTitle = L"Your Rampage - Total Destruction disc image (.iso), or its RAMPAGE.VOL";
+        o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+        if (!GetOpenFileNameW(&o)) {
+            plat_told = 1;                               /* cancelled: nothing more to say */
+            break;
+        }
+        if (!ansi_path(file, out, cap)) {
+            MessageBoxA(NULL, "RampageRE cannot open a file of that name (its letters do not fit this system's code "
+                        "page): move or rename it.", "RampageRE", MB_ICONWARNING);
+            continue;
+        }
+        if (!data_usable(out)) {
+            snprintf(m, sizeof m, "%s is not the game's disc image (an ISO 9660 .iso with RAMPAGE.VOL in it) nor its "
+                     "RAMPAGE.VOL.", out);
+            MessageBoxA(NULL, m, "RampageRE", MB_ICONWARNING);
+            continue;
+        }
+        if (!data_remember(out))
+            printf("data: could not write %s; the disc image is asked for again at the next start\n", where);
+        ok = 1;
+        break;
+    }
+    if (SUCCEEDED(co))
+        CoUninitialize();
+    return ok;
+}
+#endif

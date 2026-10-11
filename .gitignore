@@ -8,13 +8,16 @@ SLES_*
 *.VOL
 __pycache__/
 
-# The native viewer and its compiler
+# The native viewer and its compiler (build.bat, build.sh, build_switch.sh); the standalone exe of make_standalone.bat
+# holds the game's data (its tools are in build/)
 rampage.exe
+RampageRE*.exe
 /rampage
 rampage.nro
 shot_*.png
 tools/zig/
 *.pdb
+rampage.log
 
 # Texture packs and dumps (docs/TEXTURES.md)
 mods/
@@ -32,3 +35,4 @@ android/local.properties
 *.aab
 *.keystore
 *.jks
+*.key

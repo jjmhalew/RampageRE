@@ -5,6 +5,7 @@
 #ifndef RAMPAGE_PLAT_H
 #define RAMPAGE_PLAT_H
 extern int plat_quiet;                           /* set by --shot: plat_message only prints (stderr), never a box */
+extern int plat_told;                            /* a message box has been shown (the Windows GUI build's last word) */
 #ifdef _WIN32
 #include <windows.h>
 #include <stdio.h>
@@ -13,10 +14,11 @@ extern int plat_quiet;                           /* set by --shot: plat_message 
 #define plat_exists(path) (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES)
 static inline void plat_message(const char *text, int warn)
 {
-    if (plat_quiet)
-        fprintf(stderr, "%s\n", text);
-    else
+    fprintf(stderr, "%s\n", text);               /* the console, or rampage.log (the GUI build) */
+    if (!plat_quiet) {
         MessageBoxA(NULL, text, "RampageRE", warn ? MB_ICONWARNING : MB_ICONINFORMATION);
+        plat_told = 1;
+    }
 }
 /* the free room in KB on the drive that holds path's folder (the current drive for a bare name), -1 unknown */
 static inline long long plat_free_kb(const char *path)
@@ -61,6 +63,8 @@ int plat_dialog(const char *text, const char *b1, const char *b2, const char *b3
 void android_init(void);                         /* src/android.c: stdout / stderr to logcat, the app folder as the
                                                   * current directory (rampage.cfg, the profile, the data) */
 const char *android_home(void);                  /* that folder (getExternalFilesDir), "" if none */
+const char *android_apk(void);                   /* the installed APK (getPackageCodePath), "" if unknown: a bundle's
+                                                  * data is read from it in place (iso.c) */
 int android_data_setup(char *out, size_t cap);   /* the first start: the game's data through the file picker, copied
                                                   * into the app folder; 1 = found (out, as data_find), 0 = cancelled */
 #endif

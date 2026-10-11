@@ -7,7 +7,7 @@ Python tools' readers and of `tools/city.py`.
 
 ## Building and running
 ```bat
-build_viewer.bat
+build.bat dev                                 :: rampage.exe, the developer build (a console); build_viewer.bat does the same
 rampage.exe                                   :: the data it finds (below; build\disc\RAMPAGE.VOL first), Chicago, block 1
 rampage.exe NewYork 6 --night                 :: the same, another block
 rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1   :: straight from the disc image
@@ -18,8 +18,9 @@ rampage.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -4, up
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 2 --monster George --monster2 Lizzie   :: two on the keys
 rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 4 --bots 2 --play kingcity            :: two players, two bots
 ```
-`build_viewer.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's `build.bat`: a Zig in `tools\zig`, on `PATH` or
-from `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256.
+`build.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's: a Zig in `tools\zig`, on `PATH` or from
+`pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256 ("Windows
+builds" below has its other targets).
 
 ### Game data
 The viewer needs only the disc: `RAMPAGE.VOL` and the game's ELF (`fx.c` reads the effects' word table from it). The
@@ -37,15 +38,25 @@ Without a path (or with a city name first: `rampage.exe NewYork 6`) it looks, in
    the current folder, then in `data\`
 4. the user's data folder, `RAMPAGE.VOL` or an image in it: `%LOCALAPPDATA%\RampageRE` on Windows,
    `$XDG_DATA_HOME/RampageRE` (else `~/.local/share/RampageRE`) elsewhere
+5. the disc image or `RAMPAGE.VOL` chosen at an earlier start: the path in that folder's `disc.txt`, when it is still
+   there and readable (a disc drive left empty asks nothing)
 
-On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below), on Android the app folder ("Android"; a
-first start without the data asks for the disc image there, the one place the viewer asks).
+On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below), on Android the app folder, then the
+app's own APK when it is a bundle of `make_android_bundle.bat` ("Android"; a first start without either asks for the
+disc image).
 
-It never asks and never searches drives: with nothing found it says where it looked and exits with 1 (a `--shot` run
-prints that to stderr, as every message). An image without `RAMPAGE.VOL` is refused ("not Rampage - Total
-Destruction"). The supported release is the European SLES-53800 version 1.00: when `SYSTEM.CNF` (in the image, or
-beside the VOL) boots another ELF or another version, or the VOL's index is not that release's (352 files ending at
-byte 1,342,827,563), the viewer says so and goes on.
+It never searches drives. With nothing found, the Windows builds ask (not under `--shot`): a message box says what is
+needed, then a file dialog takes the disc image (`*.iso`) or a `RAMPAGE.VOL` (with `SLES_538.00` or `RAMPAGE.ELF`
+beside it); the choice is checked (an image with a `RAMPAGE.VOL` in it, or a VOL), read in place, nothing copied, and
+written to `%LOCALAPPDATA%\RampageRE\disc.txt` (step 5) so the next start finds it. Cancel quits. Elsewhere, and in a
+`--shot` run, it says where it looked and exits with 1 (a `--shot` run prints that to stderr, as every message). An
+image without `RAMPAGE.VOL` is refused ("not Rampage - Total Destruction"). An APK of `make_android_bundle.bat` counts
+as a disc image on every system (`rampage.exe RampageRE-bundle.apk Chicago 1` works too): its stored entries
+`assets/RAMPAGE.VOL`, `assets/SLES_538.00` and `assets/SYSTEM.CNF` are read in place (src/iso.c `zip_find`).
+
+The supported release is the European SLES-53800 version 1.00: when `SYSTEM.CNF` (in the image, or beside the VOL)
+boots another ELF or another version, or the VOL's index is not that release's (352 files ending at byte
+1,342,827,563), the viewer says so and goes on.
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
@@ -96,12 +107,38 @@ world). The fog is on (F toggles it, `--nofog` starts without). Texture packs: P
 game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes
 ([TEXTURES.md](TEXTURES.md)).
 
+### Windows builds
+`build.bat` (after WoodyRE's) builds, with Zig, from the same SRC list:
+
+| | |
+|---|---|
+| `build.bat` | `RampageRE.exe`, the player build (`-DRAMPAGE_GUI -Wl,--subsystem,windows`, the icon and version of `res/rampagere.rc`): no console; started without arguments it opens the front end (`--shell`); stdout and stderr go to `rampage.log` in the current folder (a new one each start, started again past 32 MB; `RAMPAGE_CONSOLE=1` keeps the streams, a `--shot` run too), the window title stays plain (`RAMPAGE_DEBUGTITLE=1`: as rampage.exe's); a message box when it cannot start; started from a read-only folder (Program Files) or a temporary one (from inside a zip) without arguments it works in `%LOCALAPPDATA%\RampageRE` |
+| `build.bat dev` | `rampage.exe`, the developer build: a console, the same command line; what this document and the tests use (`build_viewer.bat` calls this) |
+| `build.bat standalone [DATA]` | `RampageRE.exe`, then `RampageRE-standalone.exe` (`make_standalone.bat`, below) |
+| `build.bat apkbundle` | `build\apkbundle.exe`, the tool of `make_android_bundle.bat` ("Android") |
+| `build.bat tools` | only `build\bundle_stub.exe`, `build\pack.exe` and `build\apkbundle.exe` (the CI builds them) |
+
+Both exes ask for the disc image at a first start without data ("Game data"), never under `--shot`, which keeps every
+run of either offscreen and silent: no window, no message box, no question, messages on stderr.
+
+**The standalone exe** (`make_standalone.bat [disc image or RAMPAGE.VOL]`, WoodyRE's): `tools/native/pack.c` appends
+`RampageRE.exe` and the disc's files the port reads (`RAMPAGE.VOL`, the ELF as `RAMPAGE.ELF`, `SYSTEM.CNF`: 1.35 GB),
+taken from the disc image, from beside the VOL, or (no argument) from the data `RampageRE.exe` finds, to the launcher
+`tools/native/bundle.c`. At its first start it unpacks them into `%LOCALAPPDATA%\RampageRE` (a progress window; the free
+room is checked first; each file is written as `NAME.part` and renamed when whole; `.bundle` lists what is there by
+size and FNV-1a hash, so a newer bundle rewrites only what changed: a new `RampageRE.exe` costs 1.7 MB, not 1.35 GB),
+then starts `RampageRE.exe` there with `RAMPAGE_VOL` set to that VOL and its own command line, so `rampage.cfg`, the
+profile, `rampage.log` and `mods\` live in that folder. The payload's offsets are 64-bit (the file APIs too); the
+packer refuses a result of 4 GB or more (what Windows runs as an exe); the 1.35 GB one starts as any exe. With `--shot`
+in its command line it shows nothing (stderr only); `RAMPAGE_STANDALONE_DIR` unpacks elsewhere (testing). It holds the
+game's data: for your own use only, never share or upload it.
+
 ## Platforms
 As in WoodyRE (its docs/PLATFORM.md): the Windows build keeps its own Win32 + WGL window, and everything else runs on
 SDL2 behind the same functions (`win_*` in render_gl.h, `plat_*` in plat.h). Keys are the Windows virtual-key codes
 on every system, so main.c has one spelling of them.
 
-| | Windows (`build_viewer.bat`) | Linux (`build_viewer.sh`) |
+| | Windows (`build.bat`) | Linux (`build.sh`) |
 |---|---|---|
 | Window, GL context, keys, mouse | render_gl.c (`#ifdef _WIN32`): Win32 + WGL | plat_sdl.c: SDL2; SDL scancodes to VK codes |
 | Offscreen frame (`--shot`) | a window never shown, the frame in a framebuffer object (`gl_offscreen`, render_gl.c) | `SDL_WINDOW_HIDDEN`, never shown, the same framebuffer object; without one, no window at all |
@@ -115,7 +152,7 @@ stderr and the run exits with 1. A shot from the disc image is byte for byte the
 On Linux (Debian / Ubuntu; WSL2 too):
 ```sh
 sudo apt install build-essential libsdl2-dev libgl-dev
-./build_viewer.sh                                   # ./rampage (CC=clang ./build_viewer.sh for another compiler)
+./build.sh                                          # ./rampage (CC=clang ./build.sh for another compiler)
 ./rampage build/disc/RAMPAGE.VOL Chicago 1 --monster George
 SDL_VIDEODRIVER=offscreen ./rampage build/disc/RAMPAGE.VOL Chicago 1 --mute --shot s.png   # no display needed
 ```
@@ -125,7 +162,7 @@ Pass the disc image (`./rampage ~/Rampage.iso Chicago 1`), or put it (or `RAMPAG
 than 8 of 255).
 
 ### OpenGL ES
-`GLES=1 ./build_viewer.sh` (needs `libgles-dev` instead of `libgl-dev`) builds the same program on OpenGL ES 3.0, or
+`GLES=1 ./build.sh` (needs `libgles-dev` instead of `libgl-dev`) builds the same program on OpenGL ES 3.0, or
 2.0 where there is no 3.0: the path a Switch or Android build takes, testable on a PC (`SDL_VIDEODRIVER=offscreen`
 gives Mesa's ES 3.2 with no display). It adds `-Isrc/gles` (so `#include <GL/gl.h>` is `src/gles/GL/gl.h`),
 `src/gles/gles2.c`, `-lGLESv2` instead of `-lGL`, and `-fsigned-char` (ARM's `char` is unsigned). plat_sdl.c asks
@@ -151,7 +188,7 @@ Homebrew, for a Switch that runs custom firmware such as Atmosphère; experiment
 `./build_switch.sh` builds `rampage.nro` with devkitPro's devkitA64, libnx, switch-sdl2 and switch-mesa
 (`dkp-pacman -S switch-dev switch-sdl2 switch-mesa`); without `$DEVKITPRO` it runs itself in the official
 `devkitpro/devkita64` Docker image, which has all of them. It is the OpenGL ES build above: the SRC list of
-`build_viewer.sh` (keep the three scripts in step) with `src/gles/gles2.c`, `-D__SWITCH__ -fsigned-char`, linked
+`build.sh` (keep the three scripts in step) with `src/gles/gles2.c`, `-D__SWITCH__ -fsigned-char`, linked
 with `-lSDL2 -lGLESv2 -lEGL -lglapi -ldrm_nouveau -lnx`, then `nacptool` and `elf2nro` with `res/switch_icon.jpg`
 (the ELF, map and NACP stay in `build/switch/`). CI builds it (the `switch` job, in that image) and a release has
 `RampageRE-switch-<tag>.zip`, laid out as on the SD card.
@@ -220,6 +257,26 @@ copied data and the save with it.
 | Start | the front end (`--shell`); the Pause menu's Quit goes back to its main menu. The app is left with Home, not quit |
 | Screen | the whole screen in landscape (either way round); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` need ES 3.0 |
 | Messages | a dialog (`RampageActivity.dialog`, `plat_dialog`); stdout and stderr go to logcat: `adb logcat -s RampageRE` |
+| Bundle | `make_android_bundle.bat` (below) makes an APK with the disc's files inside; such an app reads them from its own APK (`getPackageCodePath`, `android_apk`) and neither asks nor copies |
+
+**The APK bundle** (`make_android_bundle.bat [RampageRE.apk] [disc image or RAMPAGE.VOL]`, WoodyRE's, with
+`tools/native/apkbundle.c`): the APK of a release (or the one `android\` built: release, else debug) and the three
+files the port reads (`SYSTEM.CNF`, the ELF it boots as `SLES_538.00`, `RAMPAGE.VOL`), taken from the disc image or
+from beside the VOL (or from the data the PC build finds), become `RampageRE-bundle.apk`. Every entry of the APK stays
+byte for byte at its offset (the 16 KB alignment of the native libraries holds: `zipalign -c -P 16 4` passes); the three
+are added stored and 4096-byte aligned, so they are read in place in the installed APK: no second copy of 1.35 GB in
+the app folder, and nothing to ask. Only these files go in, not the whole disc image (a DVD image of up to 4.7 GB): the
+bundle is about 1.35 GB, below 2 GB, so it needs no ZIP64 (which the zip readers of older Android versions do not take)
+and stays clear of signed 32-bit offsets in any tool on the way (adb, file managers, the installer, which copies the
+whole APK into `/data/app`; the device needs that room once more while installing). Android sets no fixed size limit for an
+APK installed by hand (the Play Store's limits are for its own uploads). The bundle is signed again with
+APK Signature Scheme v2 (Android 7+, the app's minSdk 24; v3 would add only key rotation) by an RSA-3072 key made with
+Windows' CNG at the first run and kept in `%LOCALAPPDATA%\RampageRE\android-bundle.key`, so later bundles install as
+updates of it; it does not install over a release APK (another key): uninstall that first, which deletes its app folder
+(copied data, rampage.cfg, the save) with it. `apksigner verify` takes it (v2), `aapt2 dump badging` reads it. It holds
+the game's data: for your own devices only, never share or upload it. Tested here on an APK made with aapt2 and signed by
+apksigner (v2 + v3), with the real 1.34 GB RAMPAGE.VOL: verified, aligned, and read as the data by the Windows and Linux
+builds (`--shot` byte for byte the one from the VOL); not yet installed on a device or the emulator.
 
 **Controls.** The on-screen pad (`src/touch.c`, WoodyRE's with the PS2 pad's buttons): a floating stick on the left
 half of the screen (where the finger lands; move), on the right Cross (jump), Square (punch), Triangle (kick) and
@@ -357,7 +414,8 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 |---|---|
 | `src/data.h` | the formats: declarations and little-endian readers |
 | `src/vol.c` | `RAMPAGE.VOL` (`tools/pvol.py`), from the file or in place from the disc image |
-| `src/iso.c` | the disc image (ISO 9660, `tools/iso9660.py`): a file by its path, read in place; the game's ELF; where the data is (`data_find`) and whether it is the supported release ("Game data") |
+| `src/iso.c` | the disc image (ISO 9660, `tools/iso9660.py`) or an APK bundle (ZIP, stored `assets/`): a file by its path, read in place; the game's ELF; where the data is (`data_find`, the remembered `disc.txt`, the Windows question `data_ask`) and whether it is the supported release ("Game data"); the disc's files for the packers (`data_parts`) |
+| `tools/native/bundle.c`, `pack.c`, `apkbundle.c` | not part of the program: the standalone launcher and its packer, the APK bundler and v2 signer ("Windows builds", "Android") |
 | `src/bundle.c` | Pipeworks bundles, segment 0 (`tools/bdp.py`) |
 | `src/tex.c` | textures to RGBA: PSMT8 unswizzle, CSM1 palettes, PSMCT32 / PSMCT16 (`tools/tex.py`) |
 | `src/mesh.c` | meshes, strips to triangles (`tools/mesh.py`) |
@@ -371,7 +429,7 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
 | `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms"); the Switch's folder, log and error dialog |
 | `build_switch.sh`, `res/switch_icon.jpg` | the Switch homebrew `rampage.nro` and its icon ("Nintendo Switch") |
-| `android/`, `src/android.c`, `src/touch.c`, `src/touch.h` | the Android app: Gradle project, `RampageActivity` (file picker, dialogs), SDL's Java glue; logcat, the app folder and the first start's copy out of the disc image; the on-screen pad ("Android") |
+| `android/`, `src/android.c`, `src/touch.c`, `src/touch.h` | the Android app: Gradle project, `RampageActivity` (file picker, dialogs), SDL's Java glue; logcat, the app folder, the installed APK's path (a bundle's data) and the first start's copy out of the disc image; the on-screen pad ("Android") |
 | `src/gles/GL/gl.h`, `src/gles/gles2.c` | the fixed function on OpenGL ES 2.0 / 3.0 (`GLES=1`, WoodyRE's shim with lighting, fog and sphere maps; "OpenGL ES") |
 | `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |
 | `src/shot.c` | PNG screenshots (stored zlib blocks, no compressor) |

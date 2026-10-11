@@ -17,7 +17,7 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 
 ## Status
 
-**Playable from start to end in the native port** (`rampage.exe`, [docs/NATIVE.md](docs/NATIVE.md)): the front end
+**Playable from start to end in the native port** (`RampageRE.exe`, [docs/NATIVE.md](docs/NATIVE.md)): the front end
 (legal screen, intro movies, the attract mode and its demo games, menus, profiles, monster and city select), the
 campaign's seven cities block by block
 with their challenges, bosses, results screens and the credits, the other play modes, up to four players (bots
@@ -78,17 +78,24 @@ The first build extracts the disc into `build\disc`, recompiles the game to C++ 
 After that, `.\build.ps1 -Run` rebuilds and starts it. Everything generated lives in `build\` and in the
 PS2Recomp submodule's `src/runner` folder, which are not committed.
 
-### Prebuilt viewer
-The native viewer ([docs/NATIVE.md](docs/NATIVE.md)) is built by GitHub Actions on every push and pull request:
-`rampage.exe` for Windows (`build_viewer.bat`) and `rampage` for Linux (`build_viewer.sh`, needs SDL2). Each run of
-the [build workflow](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml) keeps them as artifacts, and
+### Prebuilt
+The native port ([docs/NATIVE.md](docs/NATIVE.md)) is built by GitHub Actions on every push and pull request:
+`RampageRE.exe` and `rampage.exe` for Windows (`build.bat`) and `rampage` for Linux (`build.sh`, needs SDL2). Each run
+of the [build workflow](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml) keeps them as artifacts, and
 each version tag publishes them on the [releases](https://github.com/jjmhalew/RampageRE/releases) page. They hold
-only the port's own code (the program, README.md, LICENSE and two docs), **no game data**: start them with your own
-disc image, read in place, e.g. `rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1`,
-or the `RAMPAGE.VOL` from it (`rampage.exe D:\RAMPAGE.VOL Chicago 1`). Without a path the viewer looks for either
-beside itself, in the current folder and in `%LOCALAPPDATA%\RampageRE` (`~/.local/share/RampageRE` on Linux; the
-whole list is in [docs/NATIVE.md](docs/NATIVE.md) "Game data"). The viewer does not need `build.ps1`. The recompiled
-game (`build.ps1`) is not built there, as it needs the disc.
+only the port's own code (the programs, README.md, LICENSE and two docs), **no game data**.
+
+**Windows**: start `RampageRE.exe` (the exe is not signed, so SmartScreen may say "Windows protected your PC" at the
+first start: *More info*, then *Run anyway*). At the first start it asks for your disc image (`.iso`) of the game, or
+the `RAMPAGE.VOL` of a copy of the disc, in a file dialog; it reads it where it is (nothing is copied) and remembers it
+in `%LOCALAPPDATA%\RampageRE\disc.txt`. It starts in the front end; `rampage.cfg`, the profile, `rampage.log` and
+`mods\` are written beside the exe (or in `%LOCALAPPDATA%\RampageRE` when that folder is read-only or temporary).
+`rampage.exe` is the same program with a console, for the command line of [docs/NATIVE.md](docs/NATIVE.md):
+`rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1`, or the `RAMPAGE.VOL` from
+it (`rampage.exe D:\RAMPAGE.VOL Chicago 1`). Without a path both look for the data beside themselves, in the current
+folder and in `%LOCALAPPDATA%\RampageRE` first (`~/.local/share/RampageRE` on Linux; the whole list is in
+[docs/NATIVE.md](docs/NATIVE.md) "Game data"). They do not need `build.ps1`. The recompiled game (`build.ps1`) is not
+built there, as it needs the disc.
 
 **Nintendo Switch** (homebrew, experimental, not yet tried on a Switch): unpack `RampageRE-switch-<tag>.zip` onto the
 SD card (or build `rampage.nro` with `./build_switch.sh`, devkitPro or its Docker image), put your disc image (or
@@ -100,17 +107,42 @@ B is Cross, the buttons go by place; `rampage.cfg`, the profile and `rampage.log
 **Android** (7.0 and up, arm64 or x86_64; so far tried on the emulator only): install the APK from
 `RampageRE-android-<tag>.zip` (or build it with `android\gradlew.bat -p android assembleDebug`). At the first start it
 asks for your disc image (`.iso`) in the system's file picker and copies `RAMPAGE.VOL` and the game's ELF out of it
-into its own folder once (1.35 GB). It starts in the front end and plays on the on-screen pad (a stick on the left,
+into its own folder once (1.35 GB); an APK with your data already inside (`make_android_bundle.bat`, below) neither
+asks nor copies. It starts in the front end and plays on the on-screen pad (a stick on the left,
 Cross / Square / Triangle / Circle, R2 and Start on the right) or on a controller; the back button is back or the
 Pause menu ([docs/NATIVE.md](docs/NATIVE.md) "Android").
+
+### Building the native port
+Windows 10 or 11; nothing needs to be installed first (the scripts are WoodyRE's, adapted).
+
+| Script | Builds |
+|---|---|
+| `build.bat` | `RampageRE.exe`, the player build: no console, the icon and version of `res/rampagere.rc`, starts in the front end, asks for the disc image at the first start, logs to `rampage.log`, says in a message box when it cannot start |
+| `build.bat dev` | `rampage.exe`, the developer build: the same program with a console that prints what each block holds (the one docs/NATIVE.md and the tests use; `build_viewer.bat`, the old name, builds it) |
+| `build.sh` | `./rampage` for Linux and the Steam Deck (SDL2; `GLES=1` for OpenGL ES; `build_viewer.sh` is the old name) |
+| `build_switch.sh` | `rampage.nro` for the Switch (devkitPro, or its Docker image) |
+| `android\gradlew.bat -p android assembleRelease` | the Android APK (docs/NATIVE.md "Android") |
+| `make_standalone.bat` | `RampageRE-standalone.exe`: `RampageRE.exe` and **your** game data (`RAMPAGE.VOL`, the ELF and `SYSTEM.CNF` from your disc, 1.35 GB) in one exe, which unpacks itself to `%LOCALAPPDATA%\RampageRE` at its first start and runs from there. Drag your disc image or `RAMPAGE.VOL` onto the .bat (else the data `RampageRE.exe` finds is taken) |
+| `make_android_bundle.bat` | `RampageRE-bundle.apk`: the APK of a release (or of your own build) and **your** game data in one APK; the app reads the data from its own APK, so it neither asks for the disc nor copies anything. Drag the APK and your disc image (or `RAMPAGE.VOL`) onto the .bat, or put them next to it. It is signed with a key of your own (made once, kept in `%LOCALAPPDATA%\RampageRE\android-bundle.key`), so later bundles install as updates of it but not over a RampageRE from the Releases page: uninstall that first (its saves and copied files go with it) |
+
+The C compiler is [Zig](https://ziglang.org): one in `tools\zig`, on `PATH` or from `pip install ziglang` is used,
+otherwise `build.bat` downloads Zig 0.16.0 (about 95 MB) into `tools\zig` once and checks its SHA-256.
+`build.bat standalone` and `build.bat apkbundle` are the steps the two make_ scripts run; `build.bat tools` only builds
+their helpers (`build\bundle_stub.exe`, `build\pack.exe`, `build\apkbundle.exe`).
+
+**The standalone exe and the APK bundle contain the game's data: they are for your own use on your own devices only.
+Never share or upload them.**
 
 ## Repository layout
 | Path | |
 |---|---|
 | `build.ps1` | the whole pipeline: disc → split ELF → C++ → `ps2EntryRunner.exe` |
-| `build_viewer.bat`, `src/` | the native viewer `rampage.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
-| `build_viewer.sh`, `build_switch.sh` | the same viewer for Linux (SDL2) and for the Switch (homebrew `rampage.nro`) |
-| `android/` | the same viewer as an Android app (Gradle, SDL2's activity, the on-screen pad of `src/touch.c`) |
+| `build.bat`, `src/` | the native port `RampageRE.exe` / `rampage.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
+| `build.sh`, `build_switch.sh` | the same port for Linux (SDL2) and for the Switch (homebrew `rampage.nro`) |
+| `android/` | the same port as an Android app (Gradle, SDL2's activity, the on-screen pad of `src/touch.c`) |
+| `make_standalone.bat`, `make_android_bundle.bat`, `tools/native/` | your own one-file builds with your game data inside: the standalone launcher (`bundle.c`) and its packer (`pack.c`), the APK bundler and signer (`apkbundle.c`) |
+| `res/` | the port's own icon (`rampagere.ico`, made from `switch_icon.jpg` by `tools/mkicon.py`) and `rampagere.rc` (icon and version of the Windows exes) |
+| `build_viewer.bat`, `build_viewer.sh` | the old names of `build.bat dev` and `build.sh`, kept for older instructions |
 | `recomp/config.toml` | PS2Recomp config: stub bindings for the SCE libraries and newlib, plus Rampage fixes |
 | `recomp/funcmap.csv` | function map (Ghidra CSV format) the current state was tested with |
 | `tools/split_elf.py` | splits the retail ELF's single code+data segment into real sections |
@@ -141,7 +173,11 @@ file), used by the texture packs ([docs/TEXTURES.md](docs/TEXTURES.md)); `src/te
 `src/gtao.c` come from [WoodyRE](https://github.com/jjmhalew/WoodyRE) (GPL-3.0-or-later). `src/smaa/smaa.h` is
 [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego
 Gutierrez (shader source and lookup textures, as generated by WoodyRE), under the MIT licence printed at its top.
-`android/` is WoodyRE's Android project renamed; `src/touch.c` and `src/android.c` follow WoodyRE's. The Java files
+`android/` is WoodyRE's Android project renamed; `src/touch.c` and `src/android.c` follow WoodyRE's. `build.bat`,
+`make_standalone.bat`, `make_android_bundle.bat`, `res/rampagere.rc`, `tools/mkicon.py` and `tools/native/` (`bundle.c`,
+`pack.c`, `apkbundle.c`) are adapted from WoodyRE's files of the same names (GPL-3.0-or-later, the same author). The icon
+(`res/switch_icon.jpg`, `res/rampagere.ico`) is the project's own art (the words RAMPAGE RE over a plain skyline), not
+the game's. The Java files
 in `android/app/src/main/java/org/libsdl/app/` are SDL 2.32.10's (`android-project`, unchanged), Copyright (C)
 1997-2025 Sam Lantinga, under the zlib licence ([android/SDL-LICENSE.txt](android/SDL-LICENSE.txt)); the APK links
 SDL 2.32.10 itself, which the build fetches, under the same licence.

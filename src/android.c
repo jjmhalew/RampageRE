@@ -7,7 +7,9 @@
  * SYSTEM.CNF boots (as RAMPAGE.ELF) and SYSTEM.CNF are copied out of it once (1.35 GB), after the free room is checked,
  * each as NAME.part renamed when its size is right, RAMPAGE.VOL last (the folder is complete once it is there). A folder
  * that already holds them is copied by RampageActivity.java. A disc image put into the app folder by hand is read in
- * place (data_find), nothing copied. */
+ * place (data_find), nothing copied. A bundle of make_android_bundle.bat (tools/native/apkbundle.c) carries the disc's
+ * files inside the APK (stored assets): data_find reads them in place from the installed APK (android_apk), so such an
+ * app neither asks nor copies anything. */
 #ifdef __ANDROID__
 #include "plat.h"
 #include "iso.h"
@@ -46,8 +48,34 @@ static void *log_pump(void *arg)
     return NULL;
 }
 
-static char g_home[1024];
+static char g_home[1024], g_apk[1024];
 const char *android_home(void) { return g_home; }
+const char *android_apk(void) { return g_apk; }
+
+/* the installed APK's path: Context.getPackageCodePath() (/data/app/.../base.apk, readable by the app itself) */
+static void find_apk(void)
+{
+    JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject act = (jobject)SDL_AndroidGetActivity();
+    if (!env || !act)
+        return;
+    jclass c = (*env)->GetObjectClass(env, act);
+    jmethodID m = (*env)->GetMethodID(env, c, "getPackageCodePath", "()Ljava/lang/String;");
+    jstring s = m ? (jstring)(*env)->CallObjectMethod(env, act, m) : NULL;
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        s = NULL;
+    }
+    const char *p = s ? (*env)->GetStringUTFChars(env, s, NULL) : NULL;
+    if (p) {
+        snprintf(g_apk, sizeof g_apk, "%s", p);
+        (*env)->ReleaseStringUTFChars(env, s, p);
+    }
+    if (s)
+        (*env)->DeleteLocalRef(env, s);
+    (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, act);
+}
 
 void android_init(void)
 {
@@ -68,6 +96,8 @@ void android_init(void)
     }
     snprintf(g_home, sizeof g_home, "%s", home ? home : "");
     printf("app folder: %s\n", home ? home : "(none)");
+    find_apk();
+    printf("APK: %s\n", g_apk[0] ? g_apk : "(unknown)");
 }
 
 /* ---- RampageActivity's static methods */

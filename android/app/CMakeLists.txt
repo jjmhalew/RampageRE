@@ -1,6 +1,6 @@
 # The native part of the Android build: SDL2 (fetched, the release whose Java glue is in src/main/java/org/libsdl) and the
 # viewer of ../../src as libmain.so, on OpenGL ES 3.0 / 2.0 through ../../src/gles (GL/gl.h there replaces the desktop
-# header). The SRC list is build_switch.sh's (build_viewer.sh's with src/gles/gles2.c; keep them in step) with
+# header). The SRC list is build_switch.sh's (build.sh's with src/gles/gles2.c; keep them in step) with
 # src/android.c and src/touch.c.
 cmake_minimum_required(VERSION 3.18)
 project(RampageRE C)
@@ -25,7 +25,7 @@ add_library(main SHARED
     ${S}/plat_sdl.c ${S}/pad_sdl.c ${S}/settings.c ${S}/postfx.c ${S}/gtao.c
     ${S}/gles/gles2.c ${S}/android.c ${S}/touch.c)
 target_include_directories(main PRIVATE ${S}/gles ${S})
-# char is unsigned on ARM; the viewer is written for x86, where it is signed (as GLES=1 build_viewer.sh)
+# char is unsigned on ARM; the viewer is written for x86, where it is signed (as GLES=1 build.sh)
 target_compile_options(main PRIVATE -std=gnu99 -O2 -fsigned-char -Wall -Wno-format-truncation)
 target_compile_definitions(main PRIVATE _FILE_OFFSET_BITS=64)
 set_source_files_properties(${S}/main.c PROPERTIES COMPILE_DEFINITIONS main=SDL_main)   # SDLActivity calls SDL_main

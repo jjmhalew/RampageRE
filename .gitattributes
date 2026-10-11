@@ -1,5 +1,8 @@
 * text=auto eol=lf
 *.ps1 text eol=crlf
+# cmd finds the labels of a batch file reliably only with CRLF
+*.bat text eol=crlf
+*.ico binary
 # Gradle's Windows wrapper: cmd finds its labels reliably only with CRLF
 android/gradlew.bat text eol=crlf
 *.jar binary

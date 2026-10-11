@@ -1,0 +1,30 @@
+// Resources of RampageRE.exe, rampage.exe and the standalone launcher (build.bat): the port's own icon (tools/mkicon.py,
+// from res/switch_icon.jpg) and the version. A release tag must match ProductVersion: v0.1.0 = "0.1.0" (the CI checks).
+// After WoodyRE's res/woodyre.rc.
+#include <winver.h>
+
+1 ICON "rampagere.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     0,1,0,0
+PRODUCTVERSION  0,1,0,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "RampageRE contributors"
+            VALUE "FileDescription",  "RampageRE - native port for the original game data"
+            VALUE "FileVersion",      "0.1.0"
+            VALUE "LegalCopyright",   "GPL-3.0. Needs the original game disc; not affiliated with the rights holders."
+            VALUE "ProductName",      "RampageRE"
+            VALUE "ProductVersion",   "0.1.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

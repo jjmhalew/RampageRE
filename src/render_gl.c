@@ -17,7 +17,7 @@
 
 /* ---------------------------------------------------------------- window */
 
-int plat_quiet;
+int plat_quiet, plat_told;
 
 int gl_core_fbo(void)
 {

@@ -1,5 +1,5 @@
 /* plat_sdl.c - the window, keyboard, mouse and OS bits of render_gl.h / plat.h on SDL2, for the builds outside Windows
- * (Linux: build_viewer.sh), after WoodyRE's. The Windows build keeps its own Win32 + WGL window in render_gl.c. Keys
+ * (Linux: build.sh), after WoodyRE's. The Windows build keeps its own Win32 + WGL window in render_gl.c. Keys
  * arrive as SDL scancodes and are stored as the Windows virtual-key codes the rest uses: letters by the layout (as VK
  * letters are on Windows), everything else by position; Ctrl / Shift / Alt set both their side and the plain code.
  * A hidden window (--shot) is never shown and draws into a framebuffer object; headless, SDL_VIDEODRIVER=offscreen.

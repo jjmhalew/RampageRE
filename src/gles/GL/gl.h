@@ -1,4 +1,4 @@
-/* GL/gl.h for OpenGL ES 2.0 / 3.0 (port extra, WoodyRE's src/gles shim; `GLES=1 ./build_viewer.sh` puts src/gles first on
+/* GL/gl.h for OpenGL ES 2.0 / 3.0 (port extra, WoodyRE's src/gles shim; `GLES=1 ./build.sh` puts src/gles first on
  * the include path, so every #include <GL/gl.h> of the viewer lands here). The renderer draws with the fixed-function
  * pipeline of desktop OpenGL 1.1; src/gles/gles2.c emulates the part of it the viewer uses with one shader pair:
  * - the projection, modelview and texture matrix stacks (load, multiply, translate, scale, ortho, push / pop, glGetFloatv)

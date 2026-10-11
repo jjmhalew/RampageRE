@@ -11,7 +11,9 @@
  * (shot_NNN.png), Esc quit. With a monster, G switches to play: the monster runs its own move graph (MONSTER_DATA,
  * moves.c) from a pad made of keys - W A S D / the arrows the left stick, Space Cross (jump), J Square (punch),
  * K Triangle (kick), L Circle (grab), R R2 (roar) - and the game's own camera (camera.c) follows it. Controllers
- * (pad.h) play too, one a player, and rumble where the game does (docs/NATIVE.md "Input"). */
+ * (pad.h) play too, one a player, and rumble where the game does (docs/NATIVE.md "Input").
+ * Built with RAMPAGE_GUI (build.bat: RampageRE.exe, no console) it is the player build: without arguments the front end
+ * (--shell), stdout and stderr in rampage.log, a plain window title, and a message box when it cannot start. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5847,7 +5849,69 @@ static void keys_pad(const Window *w, int drive, Pad *pd)
         pd->lx = pd->ly = pd->rx = pd->ry = 0;
 }
 
-int main(int argc, char **argv)
+#if defined RAMPAGE_GUI && defined _WIN32
+/* ---- the player build's own start (main below): where its files go, the log */
+#define LOG_MAX (32L << 20)                          /* rampage.log starts again past this size */
+static int g_gui_log;                                /* stdout and stderr go to rampage.log */
+
+static int dir_ok(void)                              /* the current folder takes files and is not a temporary one */
+{
+    char cur[MAX_PATH + 2], tmp[MAX_PATH + 2];
+    DWORD c = GetCurrentDirectoryA(MAX_PATH, cur), t = GetTempPathA(MAX_PATH, tmp);   /* tmp ends with a backslash */
+    if (c && c < MAX_PATH && t > 3 && t < MAX_PATH) {     /* Explorer runs an exe opened inside a zip from %TEMP% */
+        if (cur[c - 1] != '\\')
+            strcat(cur, "\\");
+        if (_strnicmp(cur, tmp, t) == 0)
+            return 0;
+    }
+    HANDLE h = CreateFileA("rampage.tmp", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    CloseHandle(h);
+    return 1;
+}
+
+static void gui_start(int argc, char **argv)
+{
+    int shot = 0;
+    for (int i = 1; i < argc; i++)
+        if (strcmp(argv[i], "--shot") == 0)
+            shot = 1;
+    const char *base = getenv("LOCALAPPDATA");
+    if (argc < 2 && !dir_ok() && base && base[0]) {  /* started from a read-only folder (Program Files) or from inside
+                                                      * a zip: rampage.cfg, the profile and the log in the user's folder */
+        char home[MAX_PATH];
+        snprintf(home, sizeof home, "%s\\RampageRE", base);
+        CreateDirectoryA(home, NULL);
+        SetCurrentDirectoryA(home);
+    }
+    if (shot || getenv("RAMPAGE_CONSOLE"))           /* a --shot run keeps its streams (the tests read them) */
+        return;
+    FILE *f = fopen("rampage.log", "w");             /* a new log each start; both streams append to it */
+    if (!f)
+        return;
+    fclose(f);
+    if (freopen("rampage.log", "a", stdout))
+        setvbuf(stdout, NULL, _IOLBF, 1024);
+    if (freopen("rampage.log", "a", stderr))
+        setvbuf(stderr, NULL, _IONBF, 0);
+    g_gui_log = 1;
+}
+
+static void gui_log_bound(void)                      /* a bound for whatever still prints a lot (hours of play) */
+{
+    if (g_gui_log && ftell(stdout) > LOG_MAX && freopen("rampage.log", "w", stdout)) {
+        setvbuf(stdout, NULL, _IOLBF, 1024);
+        freopen("rampage.log", "a", stderr);
+        printf("log: rampage.log passed %d MB and starts again\n", (int)(LOG_MAX >> 20));
+    }
+}
+#define DEBUG_TITLE (getenv("RAMPAGE_DEBUGTITLE") != NULL)   /* the player build: a plain window title */
+#else
+#define DEBUG_TITLE 1                                /* city, block, clip, triangles, fps and effects in the title */
+#endif
+
+static int viewer_main(int argc, char **argv)
 {
     static Viewer v;
     if (getenv("RAMPAGE_TRACE"))                     /* a trace survives a crash */
@@ -5873,6 +5937,9 @@ int main(int argc, char **argv)
 #elif defined __ANDROID__
     android_init();                                  /* logcat; the app folder the current one: the data, rampage.cfg,
                                                       * the profile (RampageActivity starts the front end, --shell) */
+#elif defined RAMPAGE_GUI
+    if (argc < 2)                                    /* RampageRE.exe started as it is: the front end */
+        v.shell_mode = 1;
 #endif
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {   /* no window, no sound, no message boxes */
@@ -5928,16 +5995,26 @@ int main(int argc, char **argv)
             pos[0] = NULL;
             break;
         }
-    if (!pos[0]) {                                   /* no path given: look for the data (iso.h), never asking */
+    if (!pos[0]) {                                   /* no path given: look for the data (iso.h) */
         if (!data_find(found, sizeof found)) {
 #ifdef __ANDROID__                                   /* the first start: the disc image through the file picker */
             if (!android_data_setup(found, sizeof found))
                 return 1;
 #else
-            snprintf(msg, sizeof msg, "Found no game data: no RAMPAGE.VOL, nor a disc image (.iso) with it, in %s.\n"
-                     "Pass the path to RAMPAGE.VOL or to the game's disc image, or set RAMPAGE_VOL.", data_where());
-            plat_message(msg, 1);
-            return 1;
+            int asked = 0;
+#ifdef _WIN32
+            if (!plat_quiet)                         /* the first start: the disc image in a file dialog, remembered
+                                                      * (a --shot run never asks) */
+                asked = data_ask(found, sizeof found);
+            if (!asked && plat_told)                 /* cancelled */
+                return 1;
+#endif
+            if (!asked) {
+                snprintf(msg, sizeof msg, "Found no game data: no RAMPAGE.VOL, nor a disc image (.iso) with it, in %s.\n"
+                         "Pass the path to RAMPAGE.VOL or to the game's disc image, or set RAMPAGE_VOL.", data_where());
+                plat_message(msg, 1);
+                return 1;
+            }
 #endif
         }
         pos[0] = found;
@@ -6387,7 +6464,11 @@ int main(int argc, char **argv)
         }
         win_swap(&w);
         frames++;
-        if (now - title_at > 0.5) {
+#if defined RAMPAGE_GUI && defined _WIN32
+        if (now - title_at > 0.5)
+            gui_log_bound();
+#endif
+        if (now - title_at > 0.5 && DEBUG_TITLE) {
             char title[256], fx[96];
             settings_describe(&gfx, fx, sizeof fx);
             snprintf(title, sizeof title, "RampageRE - %s, %s%s%s%s - %u triangles, %.0f fps%s%s", CITIES[v.city_index],
@@ -6413,4 +6494,19 @@ int main(int argc, char **argv)
     sound_free();
     win_close(&w);
     return 0;
+}
+
+int main(int argc, char **argv)                      /* (Android: SDL_main, android/app/CMakeLists.txt) */
+{
+#if defined RAMPAGE_GUI && defined _WIN32
+    gui_start(argc, argv);
+    int r = viewer_main(argc, argv);
+    fflush(stdout);
+    if (r != 0 && !plat_quiet && !plat_told)         /* nothing said yet: say where to look */
+        MessageBoxA(NULL, g_gui_log ? "RampageRE could not start. rampage.log (beside rampage.cfg) says why." :
+                    "RampageRE could not start.", "RampageRE", MB_ICONERROR);
+    return r;
+#else
+    return viewer_main(argc, argv);
+#endif
 }

@@ -4,7 +4,7 @@
 # with your own disc image (or RAMPAGE.VOL and the ELF) beside it, and start it from the Homebrew Menu (docs/NATIVE.md
 # "Nintendo Switch"). Needs devkitPro's devkitA64 with libnx, switch-sdl2 and switch-mesa (devkitpro.org); without
 # $DEVKITPRO it builds in the official devkitpro/devkita64 Docker image instead, which has all of that.
-# The SRC list is build_viewer.sh's (keep them in step) with src/gles/gles2.c: OpenGL ES through the shim, as GLES=1.
+# The SRC list is build.sh's (keep them in step) with src/gles/gles2.c: OpenGL ES through the shim, as GLES=1.
 set -e
 cd "$(dirname "$0")"
 VERSION=${RAMPAGE_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}
