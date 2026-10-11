@@ -91,12 +91,26 @@ typedef struct {
 } EmDef;
 
 enum { FX_NONE, FX_PARTICLE, FX_COMPOSITE, FX_SHAKE };
+/* the effect header (FxLightWeightBase::+0x10, 0x1EC960) [R]: enum.fxPriority High 0, Medium 1, Low 2 (+0x20, 1 when
+ * absent: the constructor 0x1E7988), the budget's (fx_budget); flags.fxFlags (+0x24: +/- names, "Unrecognized flag"
+ * otherwise). A FollowEffect takes AdvanceOnlyWhenVisible as its +0xF4 0x40 and DeleteWhenNotVisible as 0x80
+ * (0x291AF8): its update (0x290F60) tests the effect's sphere (val.fxRadius, else the effect's own bounds +0x24) against
+ * the camera's frustum (0x16C0A0) and val.fxCullDist; out of view a 0x40 one is not advanced or drawn, a 0x80 one is
+ * deleted and made again (within the budget) once in view, and is made only then (0x2920A0). Not done here: no effect
+ * that is ever started has them (Clouds_NYC is started by nothing, smokestack_small only by the template ExampleShape,
+ * placed in no block), and no file has val.fxRadius or val.fxCullDist. SupposedToBeLarge (Powerup_good_Bling) is read
+ * by nothing */
+enum { FXP_HIGH, FXP_MEDIUM, FXP_LOW };
+enum { FXF_ADVANCE_VISIBLE = 0x1, FXF_DELETE_INVISIBLE = 0x2, FXF_LARGE = 0x4 };
 typedef struct {
     char name[48];
     int type, nem, nchild;
     EmDef *em;
     char child_name[MAX_CHILD][48];
     int child[MAX_CHILD];
+    int prio;                                    /* +0x20 */
+    uint32_t hflags;                             /* +0x24 */
+    float radius, cull_dist;                     /* val.fxRadius +0x28, val.fxCullDist +0x2C (0: none) */
 } Effect;
 
 typedef struct {                                 /* an XForm particle's model: "<name>.pwk", its meshes "<name>|.." */
@@ -720,6 +734,33 @@ static int parse_effect(FxLib *L, Effect *e, const uint8_t *data, uint32_t size)
                 if (k + 1 > e->nchild)
                     e->nchild = k + 1;
             }
+        } else if (_stricmp(key, "enum.fxPriority") == 0) {         /* [R 0x1ECF20..0x1ECFEC] */
+            e->prio = _stricmp(val, "High") == 0 ? FXP_HIGH : _stricmp(val, "Low") == 0 ? FXP_LOW :
+                      _stricmp(val, "Medium") == 0 ? FXP_MEDIUM : e->prio;
+        } else if (_stricmp(key, "flags.fxFlags") == 0) {           /* [R 0x1ECC58..0x1ECDD0]: +name sets, -name clears */
+            for (const char *s = val; *s;) {
+                while (*s == ' ')
+                    s++;
+                int on = *s != '-';
+                if (*s == '+' || *s == '-')
+                    s++;
+                char word[32];
+                int n = 0;
+                while (*s && *s != ' ' && *s != '+' && *s != '-') {
+                    if (n < 31)
+                        word[n++] = *s;
+                    s++;
+                }
+                word[n] = 0;
+                uint32_t bit = !_stricmp(word, "AdvanceOnlyWhenVisible") ? FXF_ADVANCE_VISIBLE :
+                               !_stricmp(word, "DeleteWhenNotVisible") ? FXF_DELETE_INVISIBLE :
+                               !_stricmp(word, "SupposedToBeLarge") ? FXF_LARGE : 0;
+                e->hflags = on ? e->hflags | bit : e->hflags & ~bit;
+            }
+        } else if (_stricmp(key, "val.fxRadius") == 0) {
+            e->radius = (float)atof(val);
+        } else if (_stricmp(key, "val.fxCullDist") == 0) {
+            e->cull_dist = (float)atof(val);
         }
     }
     if (cur)
@@ -837,6 +878,7 @@ FxLib *fx_open(const char *data_path, const Bundle *const *bundles, int nbundles
             L->fx = fx;
             Effect *e = &L->fx[L->nfx];
             memset(e, 0, sizeof *e);
+            e->prio = FXP_MEDIUM;
             snprintf(e->name, sizeof e->name, "%s", name);
             L->nfx++;
             parse_effect(L, e, en->data, en->size);
@@ -884,6 +926,7 @@ typedef struct {
     float origin[3], R[3][3], scale;
     int rod;                   /* the rod emitter (w->em), -1 none (+0x9C) */
     float rod_speed, rod_len, head, tail;   /* the rod's (unscaled), +0xA0, +0xA4 */
+    int counted;               /* started through the budget (fx_spawn): it counts by its priority while it lives */
 } Fx;
 
 struct FxWorld {
@@ -898,6 +941,8 @@ struct FxWorld {
     void *shake_ctx;
     FxSoundFn sound;
     void *sound_ctx;
+    int budget, limit[2];      /* fx_budget: on, the Medium and the Low limits (0x4D0740 +0x0, +0x4) */
+    int exempt;                /* fx_spawn_free is starting one */
 };
 
 /* Park-Miller, x 16807 mod 2^31 - 1 [R 0x106BD0]; the float is x * 2^-31 [R 0x213A90] */
@@ -1486,6 +1531,46 @@ static void spawn_effect(FxWorld *w, int slot, int effect, int depth)
     }
 }
 
+/* the effects budget (the object at 0x4D0740) [R]: counts of the live effects by priority (+0x8 High, +0xC Medium,
+ * +0x10 Low; added when an effect is attached, 0x2926A0 / 0x291920, taken off when it is released, 0x292670 /
+ * 0x292270), and two limits set at the world's start (RWorld +0x34, 0x2B72B0 -> 0x292760): with two monsters or more
+ * in the world (the players and bots, 0x4D7E28, and the one to reveal) Medium 40 and Low 30, else 50 and 35. Before
+ * an effect is started (canStart 0x2926D0; FollowEffect's create 0x292050 and its update 0x290F60, the projectiles
+ * 0x293120 / 0x2944F0, the weapons 0x295750 .. 0x2978D0, the building cells' 0x30FD40 / 0x310260, the shockwave
+ * 0x31BF20): a High one always may, a Medium one while High + Medium <= the Medium limit, a Low one while High +
+ * Medium + Low <= the Low limit; else it is not started at all (a FollowEffect is not even made). The monster's own
+ * (its foot plants and landings 0x2F48D0 .. 0x2F4B70, the rage 0x2F4710), a composite's parts (0x1EB0A0) and the
+ * GuiEffects (0x2377E0) start without asking and are not counted: fx_spawn_free */
+void fx_budget(FxWorld *w, int monsters)
+{
+    if (!w)
+        return;
+    w->budget = 1;
+    w->limit[0] = monsters >= 2 ? 40 : 50;
+    w->limit[1] = monsters >= 2 ? 30 : 35;
+}
+
+static int budget_allows(const FxWorld *w, const Effect *e)
+{
+    if (!w->budget || w->exempt || e->prio == FXP_HIGH)
+        return 1;
+    int n[3] = { 0, 0, 0 };
+    for (int k = 0; k < MAX_FX; k++)
+        if (w->fx[k].used && w->fx[k].counted)
+            n[w->fx[k].e->prio]++;
+    return e->prio == FXP_MEDIUM ? n[0] + n[1] <= w->limit[0] : n[0] + n[1] + n[2] <= w->limit[1];
+}
+
+int fx_spawn_free(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale)
+{
+    if (!w)
+        return -1;
+    w->exempt = 1;
+    int id = fx_spawn(w, effect_name, pos, dir, scale);
+    w->exempt = 0;
+    return id;
+}
+
 int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale)
 {
     if (!w)
@@ -1493,6 +1578,11 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     int effect = fx_find(w->lib, effect_name);
     if (effect < 0)
         return -1;
+    if (!budget_allows(w, &w->lib->fx[effect])) {
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  fx %s: over the budget, not started\n", effect_name);
+        return -1;
+    }
     int slot = 0;
     while (slot < MAX_FX && w->fx[slot].used)
         slot++;
@@ -1507,6 +1597,7 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     f->scale = scale > 0 ? scale : 1;
     f->rod = -1;
     f->head = f->tail = 0;
+    f->counted = w->budget && !w->exempt;
     /* the effect's frame: Y along dir, Z the world's up made square to it. The game's callers hand the effect a
      * whole matrix of their own; a building cell's is its face's from 0x430F10 (0x30F710; the front's the identity:
      * dir +Y here, the effects' -Y out of the facade) [R]; the others are the callers' (fx_spawn_frame for a frame) */

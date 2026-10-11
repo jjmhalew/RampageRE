@@ -33,7 +33,13 @@ void fx_world_free(FxWorld *w);
  * an id, or -1 (unknown name, a camera shake only, or the world is full). Camera shakes inside a composite go to the
  * fx_on_shake callback. */
 int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale);
-void fx_stop(FxWorld *w, int id);       /* shut down: emitters stop, live particles finish (a looping fire, ...) */
+/* the game's effects budget (fx.c, the object at 0x4D0740): once set, fx_spawn starts a Medium or Low priority effect
+ * (enum.fxPriority) only while the live ones it started are within the limits for that many monsters in the world
+ * (2 or more: 40 / 30, else 50 / 35), and returns -1 otherwise. fx_spawn_free starts one without asking and without
+ * counting it (the monster's own footfalls and the like, which the game starts so). Unset: no budget (the front end) */
+void fx_budget(FxWorld *w, int monsters);
+int fx_spawn_free(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale);
+void fx_stop(FxWorld *w, int id);      /* shut down: emitters stop, live particles finish (a looping fire, ...) */
 void fx_kill(FxWorld *w, int id);       /* gone at once: its emitters and particles (a GuiEffect given another edf) */
 /* an effect in a whole frame: R its axes in the world (rows x, y, z, unit length), not made upright; fx_place moves it
  * and turns its emitters with it (an effect on the turning globe of the front end, a beam in its weapon's frame): the

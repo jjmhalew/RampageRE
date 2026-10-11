@@ -1646,7 +1646,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         if (n[10] == 'c')
             foot_cancel(&mo->feet, (int)e->p[0], &m);
         else if (foot_plant(&mo->feet, &mo->feet_fx, (int)e->p[0], &m, &fx) && v->fxw) {
-            fx_spawn(v->fxw, fx.name, fx.pos, NULL, 1);
+            fx_spawn_free(v->fxw, fx.name, fx.pos, NULL, 1);   /* outside the effects budget (0x2F4A20) */
             if (getenv("RAMPAGE_TRACE"))
                 printf("  footfall %s at %.1f %.1f %.1f\n", fx.name, fx.pos[0], fx.pos[1], fx.pos[2]);
         }
@@ -4445,7 +4445,7 @@ static void mon_step(Mon *mo, float dt)
                     }
                     if (foot_impact(&mo->feet_fx, spine, g, wk >= 0,
                                     wk >= 0 ? water_surface(v->scene.water[wk]) : 0, &fx)) {
-                        fx_spawn(v->fxw, fx.name, fx.pos, NULL, 1);
+                        fx_spawn_free(v->fxw, fx.name, fx.pos, NULL, 1);   /* outside the budget (0x2F48D0) */
                         if (getenv("RAMPAGE_TRACE"))
                             printf("  landing %s at %.1f %.1f %.1f%c", fx.name, fx.pos[0], fx.pos[1], fx.pos[2], 10);
                     }
@@ -4705,6 +4705,7 @@ static void play_step(Viewer *v, float dt, float aspect)
     }
     world_build(v);                                  /* the collision world as the frame begins */
     scene_cloth_step(&v->scene, dt);                 /* the cloths' time, simulated at the next posing */
+    fx_budget(v->fxw, v->nmon + (v->extra >= 0));    /* the effects budget, by the monsters in the world (0x2B72B0) */
     v->mid_x = players_mid_x(v);                     /* 0x336360, once a frame (0x2B6CE0) */
     static DirBuilding db[64];
     static DirMonster dm[MONSTERS];

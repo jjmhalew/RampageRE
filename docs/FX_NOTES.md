@@ -25,6 +25,39 @@ Each line is decoded to words separated by one space, `=` stays [R 0x1ED400]: `?
 (a literal may hold spaces), two capitals a dictionary word. Keys are compared to the key table; a flag line is a
 list of tokens. `src/fx.c` decodes all 287 effects of fx.bdp to exactly the text `tools/edf.py` prints.
 
+## The header: priority, flags and the effects budget
+The keys before the emitters go to the definition (FxLightWeightBase::+0x10, 0x1EC960) [R]: `enum.fxPriority`
+High 0 / Medium 1 / Low 2 (+0x20; 1 when absent, the constructor 0x1E7988), `flags.fxFlags` (+0x24: `+` sets, `-`
+clears; AdvanceOnlyWhenVisible 1, DeleteWhenNotVisible 2, SupposedToBeLarge 4; another name is "Unrecognized
+flag"), `val.fxRadius` (+0x28) and `val.fxCullDist` (+0x2C). In the data: fx.bdp's 287 effects are 86 High, 171
+Medium, 29 Low and one without (Chocolate_tower_explode: Medium); one flag each on Clouds_NYC
+(AdvanceOnlyWhenVisible), smokestack_small (DeleteWhenNotVisible), Powerup_good_Bling (SupposedToBeLarge); no file has
+fxRadius or fxCullDist.
+
+**The budget** (the object at 0x4D0740) [R]: +0x0 the Medium limit, +0x4 the Low limit, +0x8 / +0xC / +0x10 the live
+effects by priority. RWorld +0x34 (0x2B72B0, the world's start) sets the limits (0x292760): with two monsters or more
+in the world (the players and bots 0x4D7E28, plus the one to reveal) Medium 40 and Low 30, else 50 and 35. canStart
+(0x2926D0): High always; Medium while High + Medium <= the Medium limit; Low while High + Medium + Low <= the Low
+limit. The callers ask it before they start an effect and count it while it lives (0x2926A0 add, 0x292670 remove):
+FollowEffect's create (0x292050, every script's createAndStart*, the world's own) and update (0x290F60, the counts
+0x291920 / 0x291180), the projectiles (0x293120, 0x2944F0), the weapons (0x295750 .. 0x2978D0), the building cells'
+debris (0x30FD40, 0x310260), the shockwave (0x31BF20). Refused, nothing is made (a FollowEffect not even made: the
+script gets no effect). The monster's own (its foot plants 0x2F4A20 / 0x2F4B70, landings 0x2F48D0, the rage
+0x2F4710), a composite's parts (0x1EB0A0) and the GuiEffects (0x2377E0) start without asking and are not counted.
+
+**The flags**: FollowEffect's init (0x291AF8) makes AdvanceOnlyWhenVisible its +0xF4 0x40 and DeleteWhenNotVisible
+0x80. Its update (0x290F60) then tests the sphere at its place (radius fxRadius, else the effect's own bounds +0x24:
+for a ParticleSystemFx half the diagonal of its particles' box, 0x1F2F68) against the camera frustum (0x16C0A0: four
+side planes, near and far) and, with fxCullDist, the camera's distance; out of view a 0x40 one is neither advanced
+nor drawn (+0xA8 &= ~0x78), a 0x80 one is released and made again (within the budget) once in view, and is made
+only in view to begin with (0x2920A0 skips the budget and the effect). SupposedToBeLarge is read by nothing.
+
+The port (src/fx.c): the keys are read (`Effect.prio`, `.hflags`, `.radius`, `.cull_dist`); `fx_budget` (main.c's
+play_step, by the monsters in the world) turns the budget on and `fx_spawn` asks it and counts what it starts while it
+lives; `fx_spawn_free` is for the monster's own (main.c's foot plants and landings). The visibility flags are not
+ported: nothing ever starts Clouds_NYC, and smokestack_small is only the `Effect|AttachEffect` of the template
+`ExampleShape` (Objects1_props), which no block places.
+
 ## Graphs (0x20D630)
 The value of a `graph.*` key; the factory looks for the words with `strstr` in this order:
 

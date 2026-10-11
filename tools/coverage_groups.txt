@@ -155,7 +155,7 @@ engine    0x1E4BF0-0x1E4C40  deleting dtor of the small graph holder (vtable 0x4
 unused    0x1E4C40-0x1E7BA0  DynLightDef, Billboard/Twinkling/Directional billboards, FxLightWeightBase: no effect has type dynlight/billboard
 engine    0x1E7BA0-0x1E95C0  CameraShakeFx/Def plumbing (stubs, ctors, save/load, reader parts): camera.c / camera.h do the shake
 engine    0x1E95C0-0x1EC960  CompositeFx/Def: fx.c FX_COMPOSITE (parts together); the flags.one_of/all_of/none_of.N keys are in no file
-open      0x1EC960-0x1ED060  effect header: enum.fxPriority (576 effects), flags.fxFlags (3) to def +0x20/+0x24; fx.c drops it [G use]
+engine    0x1EC960-0x1ED060  effect header: enum.fxPriority, flags.fxFlags, val.fxRadius / fxCullDist: fx.c parse_effect, the budget fx_budget (FX_NOTES "The header")
 engine    0x1ED060-0x1EEE90  effect text reader (key=value 0x1ED0B0, file + type switch 0x1ED7D0), FxBase ctor/dtor: fx.c parse_effect
 unused    0x1EEE90-0x1F1BE0  LensFlareFx / LensflareDef: no effect has type lensflare; only FxManager's type switches make them
 engine    0x1F1BE0-0x1F4C78  ParticleSystemFx plumbing, save/load, re-place +0xAC, sound start 0x1F3790: fx.c fx_place/fx_move/fx_on_sound
