@@ -309,10 +309,15 @@ place, owned by the emitter (+0x0 / +0x1) [R 0x1F84C0]; both are killed (0x26D53
 ## Collisions
 ParticleSystemFx::advance (0x1F2A48) builds a mask per emitter from the particle flags: CollidesWithGround 1,
 CollidesWithWater 2, CollidesWithObjects 8 (CollidesWithBuildings is not asked for), and asks the world
-(gp −0x6E8C → +0x6C, vtable +0x2C) for the surfaces within 5 + 1.3 × the effect's radius of it, kept at effect +0x74;
-the ground test (0x2106B0 → 0x206140) checks a particle against up to two planes of that set. No effect sets
-anything but CollidesWithGround, and every `obj_col_resp` / `con_col_resp` is `nothing`, so a ground plane is all
-the effects need.
+(the FxWorldAdapter at gp −0x6E8C, its vtable at +0x6C, slot +0x2C: 0x281FC0) for the surfaces within 5 + 1.3 × the
+effect's radius of it, kept at effect +0x74; the ground test (0x2106B0 → 0x206140) checks a particle against up to
+two planes of that set. 0x281FC0 does not look at the mask: it empties the set (0x2060C0) and adds one triangle
+around the effect's place at the street's height (SceneryMgr vtable +0x34, 0x282320: 0), so the street plane z = 0
+is all a particle meets, whatever its flags and responses [R]. The adapter's world ray (+0x4C, 0x282210: 0x283730,
+include −1, exclude 0) and its two height queries (+0x20 0x282130, +0x24 0x2820C0) have no caller: nothing in the
+ELF calls its slots +0x1C .. +0x24 or +0x4C (+0x34 .. +0x48, which only the unused DynLightFx / ProjectedTexFx call,
+are empty stubs) [R]. In the data no effect sets anything but CollidesWithGround,
+and every `obj_col_resp` / `con_col_resp` is `nothing`. `src/fx.c`: the plane `fx_update`'s ground_z (main.c: 0).
 
 ## Ground-level quads and the depth test (the Las Vegas tank's "square" smoke)
 `Carbinator_Shockwave` (the tank boss's blast, at the tank's place on the street, z = 0) has 100–500 `Suds_3`

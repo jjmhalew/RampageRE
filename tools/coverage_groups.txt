@@ -249,7 +249,7 @@ engine    0x27D1F0-0x27EB50  WScriptableObjectMgr: a template's script attached 
 engine    0x27EB50-0x27F5D0  CameraMgr / WCamController (modes by name, the frame's dt): director.c's camera modes, camera.c
 engine    0x27F5D0-0x281DE0  WCollisionInfo: the shape tests: collide.c
 engine    0x281DE0-0x281FC0  ControllerMgr base (RControllerMgr overrides most): pad.c, shell.c's pad events
-engine    0x281FC0-0x282320  FxWorldAdapter: the effects' hooks into the world (ground, camera): fx.c [G: not compared slot by slot]
+engine    0x281FC0-0x282320  FxWorldAdapter: the effects' hooks into the world: the ground plane z = 0 (+0x2C), the nearest view's distance (+0x50): fx.c; its world ray +0x4C has no caller
 engine    0x282320-0x2825C0  SceneryMgr: the street plane z = 0: collide.c
 unused    0x2825C0-0x2829D0  SceneryMgr +0x18: overridden by RSceneryMgr 0x2A53E0, the only SceneryMgr made (0x441530)
 engine    0x2829D0-0x282A30  SceneryMgr stubs: collide.c
