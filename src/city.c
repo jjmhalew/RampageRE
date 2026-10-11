@@ -720,8 +720,18 @@ PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const 
         if (!s->scripted[k].hut || s->scripted[k].hut_id < 0 || people_hut_state(s->folk, s->scripted[k].hut_id) != 0)
             continue;
         const float *p = s->scripted[k].pos;
-        float d[3] = { p[0] - centre[0], p[1] - centre[1], p[2] + 2 - centre[2] };   /* the hut's middle, 2 up [G] */
-        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (radius + 2) * (radius + 2))   /* 2 its reach [G] */
+        /* [R 0x2E22B0 -> 0x280470] the monster's sphere against the hut's shape (0x28FD70: no CollisionBox,
+         * CollisionRadius or AutoCollisionBox, so the guardshack's own sphere, 0x184CB0) where it stands */
+        const char *shape = s->scripted[k].t.at ? group_str(s->scripted[k].t, "Shape|Shape") : NULL;
+        float c[3] = { 0, 0, 2 }, r = 2;
+        if (!shape || !s->owner || city_shape_sphere(s->owner, shape, c, &r) != 0)
+            c[2] = 2, r = 2;
+        const float *m = s->scripted[k].instance >= 0 ? s->instances[s->scripted[k].instance].base.m : NULL;
+        float at[3];
+        for (int j = 0; j < 3; j++)
+            at[j] = m ? m[12 + j] + m[j] * c[0] + m[4 + j] * c[1] + m[8 + j] * c[2] : p[j] + c[j];
+        float d[3] = { at[0] - centre[0], at[1] - centre[1], at[2] - centre[2] };
+        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (radius + r) * (radius + r))
             continue;
         float dir[3] = { from[0] - p[0], from[1] - p[1], 0 }, l = sqrtf(dir[0] * dir[0] + dir[1] * dir[1]);
         if (l > 1e-4f) { dir[0] /= l; dir[1] /= l; }    /* towards the monster: it flies away from it */
@@ -745,7 +755,8 @@ void scene_huts_update(Scene *s, float dt)
             /* [R] its SphereMover: createSphereMover (World binding 0x23) is the SpherePhysicsMover (collide.c,
              * 0x28E440) with the template's numbers (0x28F220: Gravity, DefObjectProps' 35; Mass, Restitution,
              * SlidingFriction, InertiaSolidity) and the radius of its shape (no CollisionBox, CollisionRadius or
-             * AutoCollisionBox: the guardshack's own sphere, 0x184CB0); the street only (no script OnHitGround) */
+             * AutoCollisionBox: the guardshack's own sphere, 0x184CB0): the street and the frame's objects, the
+             * buildings' fronts too (its script has no OnHitGround nor TakeImpact) */
             Group t = s->scripted[k].t;
             if (!s->scripted[k].cm_on) {
                 const char *shape = t.at ? group_str(t, "Shape|Shape") : NULL;
@@ -758,15 +769,45 @@ void scene_huts_update(Scene *s, float dt)
                 memcpy(s->scripted[k].cm.vel, s->scripted[k].vel, sizeof s->scripted[k].vel);
                 collide_matrix_from16(s->scripted[k].cm_m, s->instances[id].base.m);
                 s->scripted[k].cm_on = 1;
+                s->instances[id].dynamic = 1;            /* its draw items follow its base from now on */
             }
-            collide_mover_step(NULL, &s->scripted[k].cm, s->scripted[k].cm_m, -1, dt, NULL, NULL);
+            int self = s->hut_cw && s->scripted[k].cobj >= 0 ?
+                       collide_check(s->hut_cw, s->scripted[k].cobj, COLLIDE_TAG(COLLIDE_OWN_NONE, k), 0) : -1;
+            collide_mover_step_ex(self >= 0 ? s->hut_cw : NULL, &s->scripted[k].cm, s->scripted[k].cm_m, self, dt,
+                                  COLLIDE_F_MONSTER, NULL, NULL);   /* the buildings, the objects (no TakeImpact) */
             collide_matrix_to16(s->scripted[k].cm_m, s->instances[id].base.m);
             for (int j = 0; j < 3; j++) {
                 s->scripted[k].pos[j] = s->instances[id].base.m[12 + j];
                 s->scripted[k].vel[j] = s->scripted[k].cm.vel[j];
             }
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  a hut flies: at %.1f %.1f %.1f, %.1f %.1f %.1f a second\n", s->scripted[k].pos[0],
+                       s->scripted[k].pos[1], s->scripted[k].pos[2], s->scripted[k].vel[0], s->scripted[k].vel[1],
+                       s->scripted[k].vel[2]);
         } else if (st == 2)
             s->instances[id].hidden = 1;
+    }
+}
+
+void scene_huts_collide_add(Scene *s, CollideWorld *w)
+{
+    s->hut_cw = w;
+    for (int k = 0; k < s->nscripted; k++) {
+        int id = s->scripted[k].instance;
+        s->scripted[k].cobj = -1;
+        if (!w || !s->scripted[k].hut || id < 0 || s->instances[id].hidden || !s->owner)
+            continue;
+        const char *shape = s->scripted[k].t.at ? group_str(s->scripted[k].t, "Shape|Shape") : NULL;
+        float c[3], r;
+        if (!shape || city_shape_sphere(s->owner, shape, c, &r) != 0)
+            continue;
+        CollideShape sh;
+        float m[12];
+        collide_shape_sphere(&sh, c, r);
+        collide_matrix_from16(m, s->instances[id].base.m);
+        s->scripted[k].cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD, COLLIDE_TAG(COLLIDE_OWN_NONE, k), 0);
+        if (s->scripted[k].cm_on && s->scripted[k].cobj >= 0)   /* flying: another flier exchanges with it */
+            collide_set_mover(w, s->scripted[k].cobj, &s->scripted[k].cm, s->scripted[k].cm_m, s->scripted[k].vel);
     }
 }
 

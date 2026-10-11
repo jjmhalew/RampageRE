@@ -209,9 +209,11 @@ typedef struct {
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
     /* the block's scripted objects for people.c: Band.bsf (a band marching in) and RoyalGuardHut.bsf (a guard's hut) */
-    /* a hut sent flying: its SpherePhysicsMover (cm, its matrix cm_m, made at the first flying frame: cm_on) */
+    /* a hut: its object in the frame's collision world (cobj, -1 none; hut_cw that world), and sent flying its
+     * SpherePhysicsMover (cm, its matrix cm_m, made at the first flying frame: cm_on) */
     struct { Group t; float pos[3]; int instance, hut, hut_id; float vel[3]; CollideMover cm; float cm_m[12];
-             int cm_on; } scripted[8]; int nscripted;
+             int cm_on, cobj; } scripted[8]; int nscripted;
+    CollideWorld *hut_cw;
     /* the StreetObject.bsf and RoofItem.bsf objects of the block and its buildings as placed, for streetobj.c (main
      * adds them): the template, its ObjectInstance| group, its instances first .. last - 1 (the model, then its
      * flags' cloths), where it stands, the building whose ObjectInstance| it is (-1 the block's own); model: the
@@ -286,10 +288,14 @@ void scene_block_left(Scene *s);
 int scene_street_shape(Scene *s, int k, const char *shape);
 /* instance inst's model node `name` (or, name NULL, node number id) in the world now (base x node); 0 = ok */
 int scene_instance_node(const Scene *s, int inst, const char *name, int id, float out[16]);
-/* RoyalGuardHut's TakeDamage: a monster's attack sphere (centre, radius) from the monster at `from` sends the huts it
- * reaches flying (people_hut_hit); what the monster gets, summed */
+/* RoyalGuardHut's TakeDamage: a monster's sphere (centre, radius) from the monster at `from` sends the huts it reaches
+ * flying (people_hut_hit): an armed attack sphere, or any of its spheres touching it (TakeDamage 2.0, Collision, every
+ * frame: the hut has no OnlyHitWithEffNodes, 0x2E22B0); what the monster gets, summed */
 PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3]);
 void scene_huts_update(Scene *s, float dt);         /* the flying huts move; a deleted one is no longer drawn */
+/* the huts as world objects (WSimpleObject: the guardshack's sphere, 0x28FD70) in the frame's collision world, between
+ * collide_begin and collide_finish: what a flying hut meets, and what meets it */
+void scene_huts_collide_add(Scene *s, CollideWorld *w);
 Group city_template(City *c, const char *name);     /* an object template by name (the city's template books) */
 /* one play of a look's clip (its AnimName; NULL: the shape's own RawAnim) in seconds; 0 = unknown */
 float city_clip_seconds(City *c, const char *anim, const char *shape);
