@@ -1415,6 +1415,8 @@ static void hit_building_front(Mon *mo, const float *p)
         float off[3] = { w[0] - mo->mx, w[1] - mo->my, w[2] - mo->mz };
         dir_ai_on_hit(&mo->ai, off, mo->mirror);
     }
+    if (best && mo->power.rage)                      /* Monsters.bsf: in the rage hitBuildingPt twice [R] */
+        building_hit(&best->b, bq, 2.0f);
     int hit = best && building_hit(&best->b, bq, 2.0f);
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
         edible_power_hit_building(&mo->power, 1, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF, others_full(mo))) {
