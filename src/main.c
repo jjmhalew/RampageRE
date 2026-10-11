@@ -3655,7 +3655,7 @@ static void army_step(Viewer *v, float dt)
         Mon *mo = &v->mon[k];
         Mat4 h;
         if (mo->held_unit >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            army_hold(v->army, mo->held_unit, h.m);
+            army_hold(v->army, mo->held_unit, h.m, mo->mirror);
     }
 }
 

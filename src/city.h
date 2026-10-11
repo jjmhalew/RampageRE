@@ -219,7 +219,12 @@ typedef struct {
     struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel, attack; float world[16];
                             Mat4 rel[4]; } street[SCENE_STREET_MAX];
     int nstreet;
-    int left;                                         /* the game has moved on (scene_block_left): the block is behind */
+    /* the block's AttackObjectInstance|s that army.c makes units of (the PirateShip, StationaryAttackObject.bsf,
+     * army_load_block): their model as placed (instances first .. last - 1: the model, then its flags' cloths), shown
+     * until the unit whose instance group is inst is drawn; then the cloths ride on the unit (rel: their places
+     * relative to the model) and go with it (seen: it has been drawn) */
+    struct { Group inst; int first, last, seen; Mat4 rel[4]; } army_obj[4]; int narmy_obj;
+    int left;                                        /* the game has moved on (scene_block_left): the block is behind */
     int placing_block;                                /* placing the block's own objects (not those behind) */
     int placing_attack;                               /* ... its AttackObjectInstance| list */
     uint32_t cloud_material; float cloud_rate[2];    /* the material whose texture drifts (AnimatingSkyData) */

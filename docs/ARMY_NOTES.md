@@ -110,14 +110,19 @@ anim's vtable +0x14, made a matrix by 0x104BB0) with a turn put first (row vecto
 z by +0x54 for the rotation node (0x1015B0: rows (c, s, 0), (−s, c, 0), (0, 0, 1)) or about its own x by +0x3C for
 the elevation node (0x101730: rows (1, 0, 0), (0, c, s), (0, −s, c)). So what hangs below the nodes turns with them,
 and the WeaponNode's world, the firing frame, carries the turn. Here city.c `army_sync` / `pose_instance`
-(`Instance.turn`), from `ArmyWeapon.rot_node` / `elev_node` and its `yaw` / `pitch`. The pirate ship's cannons stay
-unturned: it aims as an actor here, keeping no turn [G].
+(`Instance.turn`), from `ArmyWeapon.rot_node` / `elev_node` and its `yaw` / `pitch`: the tanks' turrets, the
+helicopters' bodies and the PirateShip's cannon (`Cannon_Rotation`, `Cannon_Elevation`).
 
-The turn's targets (0x29ADE0): the turn is the angle of the aim's x, y less that of the object's +y row, wrapped
-to ±π [R]; the pitch comes from the aim's rise (the target's z less the weapon's, 0x29B7F8) with a correction for
-the object's own tilt (its x and y rows against the horizontal, 0x105C60, picked by whether the turn is within
-±π/2) [R], not followed to the end. Here the turn is from the unit's facing and the pitch the aim's elevation
-(`weapon_aim`), which agree while the units' frames are upright, as the helicopters' are here [G].
+The turn's targets (0x29ADE0) [R]:
+- **The turn** (0x29B1AC): the angle of the aim's x, y less that of the object's +y row, wrapped to ±π.
+- **The pitch** (0x29B7F8): atan2 of the rise (the lifted target's z less the weapon's) over the level distance
+  (0x29AFF4: √(dx² + dy²)), so the aim's own elevation, plus the object's tilt (0x29B3B8 .. 0x29B7D8): x = the
+  angle of its x row above the level (0x105C60, acos of the row against its level part made 1 long, signed by the
+  row's z), y = minus that of its y row; y negated while the turn (+0x54, before this frame's step) is beyond ±π/2,
+  x while it is below 0; the correction is the larger plus half the smaller. 0 for an upright frame; the rocking
+  PirateShip's is up to about 0.1 rad. The atan2s are the VU0 routine at 0xA00 (vcallms; the quadrant fixes around
+  it: x < 0 → π − r, y < 0 → −r, both 0 → π/2).
+- Here `weapon_aim` (`cluster_tilt`).
 
 The aim [R 0x293050]: actors (0x30EC10) and clusters aim straight at the target lifted by ½ × 9.81 × Gravity ×
 (L / V)² (L the straight distance, V the Velocity; no lift without gravity). A monster's target point (its vtable
@@ -182,10 +187,13 @@ otherwise.
   through the firing frame and its effect is placed in that frame (fx_spawn_frame, fx_place), for the army, the
   bosses and the fire truck. An army unit whose shape has its cluster's control nodes is drawn turned ("The turn is
   drawn" above), so its firing frame is the WeaponNode as drawn, a frame behind (the shape is posed after the
-  update); for the others, and the bosses' and the fire truck's turrets (boss.c, vehicle.c draw no turn), the turn
-  is put on the node's frame about the unit's right and the world's z (`army_frame_turn`) [G]. A shot's way stays
-  the turn's [G]: on the helicopters the drawn Weapon_0's +X and it agree within about 2°. A boss weapon without a
-  node gets a frame with the rod's main axis along its aim.
+  update; the node's world the object hands out, vtable +0x4C, is its last pose), and a shot leaves along that
+  frame's `Direction` axis (0x2963C0: row +0x3C of +0xBC × the node's world, negated by +0x40) [R]. Measured: the
+  tanks' drawn Weapon_0 +Y and the turn's way agree to 0°, the rocking PirateShip's Weapon_Node_1 +Y within 4°.
+  For a shape drawn without the control nodes (the bosses' and the fire truck's turrets: boss.c, vehicle.c), the
+  turn is put on the node's frame about the unit's right and the world's z (`army_frame_turn`) and the shot leaves
+  along the turn's way [G: a stand-in for the nodes the game turns]. A boss weapon without a node gets a frame with
+  the rod's main axis along its aim.
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.
@@ -303,13 +311,35 @@ at 0.
 - `getMonsterDirection` (Actor id 0x3F → 0x2B2850) [R]: of the player monsters, the nearest (d² < 1e5); the eighth of
   the way to it 3 above its feet, in the front's plane (atan2(dz, dx), dy unused).
 
-**StationaryAttackObject** (the pirate ship) [R] (its only user, the PirateShip, is an `AttackObjectInstance|` of
-LV05_JollyRogers, which city.c draws as a still model: nothing spawns it as a unit here, so it neither fires nor
-rocks):
-- **Aim:** it aims at a point that locks onto the monster after 0.55 s still (+`TargetOffsetZ`) and re-picks when
-  the monster moves 3 away for 1.05 s.
-- **Firing:** one round every `WeaponRefireDelay`.
-- **Death:** 3 hits; `IsSinkable` ones sink.
+**StationaryAttackObject** (the PirateShip) [R]:
+- **Made by the block** (0x304450, the current block's objects): its only user, the PirateShip, is an
+  `AttackObjectInstance|` of LV05_JollyRogers at (−3.4, 10, 0), ZRotation 70.69°, in the lagoon. That list is made
+  AttackObjects (the pool 0x4D5EB0, 0x283DA0) unless the instance or the template has `NoLoadOnActiveBlock` or a
+  `SpawnDelay` (gAIMgr makes those later, 0x334A20: only the bikers' actors have one). Its init (vtable +0x14,
+  0x304FA0 → 0x315330, f12 0) runs the world object's 0x287AB0 (Location, ZRotation degrees about z, the group kept
+  as the instance book +0x7C), the script's Construct, the WeaponSystem (0x29C020) and the wobble's keys; then
+  gWorld vtable +0x3C adds it; onInit at the block's start. Its Process runs every frame from the load, without
+  gAIMgr's activation. Here `army_load_block` (`block_attack_objects`) makes it a unit; city.c keeps the still model
+  until the unit is drawn, then carries the flag's cloth (`Flagpole_Pirate`) on it (`Scene.army_obj`).
+- **Aim:** `selectTarget` aims the cluster at a random monster (its target point), and a point (`lTarget`, a
+  DummyObject: its target point is its place, vtable +0x1C 0x285AC0) follows it; once the monster has stayed within
+  0.5 of the point for 0.55 s the point locks onto it 11 up (`TargetOffsetZ`) and the cluster aims there, until the
+  monster is 3 away for 1.05 s. The cluster: `Cannon_Rotation` ±180° at 0.5 rad/s, `Cannon_Elevation` ±160° at 1,
+  neither required on target, so it fires while turning.
+- **Firing:** `TankCannon` over the book's (Velocity 20, Gravity 1, ImpactDamage 5, Blunt, RefireDelay 0) from
+  `Weapon_Node_1` along its +Y. Construct leaves it without ammo; every `WeaponRefireDelay` (8, the first after 2 s)
+  Process gives it one round (setWeaponAmmo, ammo = min(1, 100)) and plays `FireSound` 0.5 s before; the countdown
+  (FiringOffset 3 + ChargeTime 1 the first time, then max(0, 1)) fires it 4 s, then 1 s, later. Aimed at a point 11
+  above the monster's feet with Velocity 20 the ball goes over a monster on the street and comes down far behind it;
+  it hits one wading in the lagoon (its feet at −5).
+- **Death:** 3 hits from a monster (TakeDamage ignores anything else); each stops the last damage effect and
+  starts `HitEffect<n>` attached (`Tank_Smoke_Big`, `_Med`) and `HitEffect` (`Tank_Spank`). The hop (flag 4) is
+  for the unsinkable only. At 0: no `DestShape` (the book has only `xDestShape`), flags 8, no longer
+  PushOutMonsters, weapons off, `IsSinkable` so a LineMover 10 down at `SinkRate` (4), `HitEffect0`
+  (`Tank_Explode`) where it is, addStats type 0 (1000 points). 1.5 s later `HitEffect` and flags 16; 1 s after that
+  removeAIObject and it is gone (2.5 s, as long as the sinking). The script has no onMoverCallback.
+- **The wobble:** `OscillationScale` 0.1, no offset: it rocks ±0.1 rad about x and y all its life (the facing is
+  its own; "The wobble" of the helicopters above).
 
 **Bombers** (`Bomber.bsf`) [R]:
 - **Path:** across at 20, at `Height` (from the AIInstance; 42 by default), at y = 5 (row 0) or 15 (row 1).
@@ -323,6 +353,8 @@ rocks):
 `Droppable.bsf` [R], `army_drop` for people.c's `PE_DROP`:
 - **The path:** a SplineMover at 12 from the window, through a point 0.6 of the way across, 3 out and 1.5 up, to 5
   in front of the wall at z = 1. If a building stands there, the end is on its roof (storeys × 3 + 1.5 + 6).
+  The building there is findBuildingByPosition's (0x2A3D20, no direction): the last in the world's list whose
+  footprint holds the point, rubble too; its place is its box's middle (the box is laid about it) [R].
 - **The landing x:** the column edge at or right of the drop (getCellCenter), ± 2.5 towards the monster below.
 - **The turn:** a quarter turn about y over the fall.
 - **On the ground:** the `GroundEffect`, and it is gone.
@@ -408,8 +440,15 @@ Floating = 100
   larger, one inside the other the outer, else the sphere round both), so the centre is the spheres' bounding
   sphere's and moves with the pose. As here (army.c `monster_centre`, from `ArmyMonster.spheres`). Both the projectile's wobble (definition flag 8) and its spread (record flag 8) come from flags no book
   sets.
-- **Other:** the camera's place (`army_set_view`, the FlybySound's x), the
-  impact's visibility test (ImpactVisRange), and the ImpactEffect's orientation (the surface's normal).
+- **The camera's place** [R]: Bomber's `getCameraPos().x` (id 0x41, 0x2AF220) is gWorld +0x684, the eye the
+  objects' render distance is taken from (0x290FBC); the host sets the view about its camera's x
+  (`army_set_view`). The x range is also what is seen for a host without `visible`.
+- **The hold** [R] (the HeldObjectMover, init 0x310ED0, held 0x3109E0, as people.c's): `MajorAxis` (default 2)
+  along the hand's z, the next along its y, the last their cross product, at the hand plus `HoldOffset`
+  (`MirroredHoldOffset` while the monster plays mirrored) in the hand's frame (`army_hold`). Its blend in from
+  where the unit was (+0x84, 0x310B50, 0.1 s from doGrabObject) is not ported [G: three frames].
+- **Other:** the impact's visibility test (ImpactVisRange) and the ImpactEffect's orientation (the surface's
+  normal) are not traced.
 - **Elsewhere:** the bosses are boss.c's ([BOSS_NOTES.md](BOSS_NOTES.md)); `Vehicle.bsf` (the `Humvee` and the other
   street vehicles, `AK_OTHER` here) and Rocket / RocketBase are vehicle.c's ([VEHICLE_NOTES.md](VEHICLE_NOTES.md)).
   The `BradleyTroopCarrier` is a CombatTruck and is covered.

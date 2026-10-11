@@ -52,7 +52,7 @@ struct Army {
     const ArmyMonster *m; int nm;
     const ArmyBox *b; int nb;
     float dt;
-    float view[2];                                   /* [G] the street the camera sees, along x */
+    float view[2];                                   /* about the camera's x (army_set_view) */
     CollideWorld *cw;                                /* the frame's collision world (army_set_collide), NULL none */
 };
 
@@ -156,7 +156,8 @@ static float dist3(const float p[3], const float q[3])
 
 /* a property as getStringProp / getFloatProp find it: the instance book (obj +0x7C: the AIInstance group) first,
  * then the template (+0x80) [R: 0x2C51A0 does this]. The books keep a record's type before a '|' ("Effect|HitEffect",
- * "Sound|VoiceMove", "OTRef|TroopType1"); the scripts ask by the bare name, so the typed names are tried too [G] */
+ * "Sound|VoiceMove", "OTRef|TroopType1"); the scripts ask by the bare name, which finds it [R 0x1B4490: a record's
+ * name (+0x4) is what follows its "Type|", compared in any case], so the types the army's books use are tried */
 static const char *const TYPED[] = { "", "Effect|", "Sound|", "Shape|", "OTRef|", "Anim|", "Script|" };
 
 static int find_rec(Group g, const char *key, Record *out)
@@ -284,8 +285,6 @@ static int nearest_monster(const Army *a, const float pos[3])   /* getNearestMon
     return best;
 }
 
-/* where a weapon aims: the monster's target point (its vtable +0x1C, 0x2DB030): 6 above its feet [R]; x and y its
- * place [G: the offsets 0x2E6000 / +0xBD54 adds were not traced] */
 /* [R 0x2DB030] the monster's target point: 0x2E6000's place of `Bip01 Spine1` (node +0x7DB0, its model place at
  * +0xB18 + 0x30 node, scaled by +0xA78, turned and moved by the monster's matrix) plus M (+0xBD54), which only the
  * unused script binding setTargetOffset sets (0 at 0x2DA6CC, 0x2E805C, 0x2E9A34), then z = the feet's + 6
@@ -694,6 +693,9 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
     memcpy(s->pos, from, sizeof s->pos);
     memcpy(s->dir, dir0, sizeof s->dir);
     norm3(s->dir);
+    if (u && getenv("RAMPAGE_TRACE"))                /* a unit's (the people's bottles are many) */
+        printf("  %.2f: %s fires %s from %.1f %.1f %.1f along %.2f %.2f %.2f\n", a->now, u->name ? u->name : "?",
+               w->name ? w->name : "?", from[0], from[1], from[2], s->dir[0], s->dir[1], s->dir[2]);
     s->damage = w->damage * w->scale;
     s->duration = w->duration;
     s->vis_range = w->vis_range;
@@ -870,8 +872,8 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
  *  - at 0, with ammo: one shot (or the beam starts for Duration), ammo - 1, and the countdown starts again at
  *    max(RefireDelay, ChargeTime);
  *  - a beam that has run its Duration stops (0x295C20) and the countdown restarts the same way.
- * may: [G] what the weapon system (WeaponCluster, not read) allows: a target within MaxFiringRange, the turret
- * turned onto it */
+ * may: what the weapon system allows [R 0x29ADE0, 0x299010]: a target within MaxFiringRange and, for a cluster, on
+ * target (weapon_aim); an actor's while enableWeapon and setWeaponTarget hold */
 static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const float from[3], const float dir[3],
                         const float frame[3][3], int target, float dt)
 {
@@ -952,10 +954,35 @@ static void lob(const float p[3], const float t[3], float v, float g, float dir[
     norm3(dir);
 }
 
+/* [R 0x29B3B8 .. 0x29B7D8] the cluster's correction of its pitch for the object's own tilt: x the angle of the
+ * object's x row above the level (acos, 0x105C60, of the row against its level part made 1 long; signed by the row's
+ * z), y minus that of its y row; y negated while the turn (+0x54, before this frame's step) is beyond +-pi / 2, x while
+ * it is below 0; the larger of the two plus half the smaller. 0 for an upright frame */
+static float row_rise(const float *row)
+{
+    float h[3] = { row[0], row[1], 0 }, l = sqrtf(h[0] * h[0] + h[1] * h[1]);
+    if (l < 1e-6f)
+        h[0] = 1, h[1] = 0;
+    else
+        h[0] /= l, h[1] /= l;
+    float a = acosf(clampf(h[0] * row[0] + h[1] * row[1], -1, 1));
+    return row[2] < 0 ? -a : a;
+}
+static float cluster_tilt(const float *world, float turn)
+{
+    float x = row_rise(world), y = -row_rise(world + 4);
+    if (fabsf(turn) > PI / 2)
+        y = -y;
+    if (turn < 0)
+        x = -x;
+    return fabsf(x) <= fabsf(y) ? y + 0.5f * x : x + 0.5f * y;
+}
+
 /* where a unit's weapon fires from and which way: the WeaponNode as drawn when the host knows it, along the
- * definition's axis (objects: their turret turned onto the target, [G] at RotationRate / ElevationRate radians per
- * second within the ranges); actors and stand-ins aim straight at the target (a lob for shots that fall) [G].
- * Returns whether the turret is on the target */
+ * definition's axis (objects: their cluster turned onto the target at RotationRate / ElevationRate radians a second
+ * within its ranges, 0x29ADE0 / 0x29BA50 [R]); actors aim their Direction axis straight at the target, lifted for a
+ * shot that falls (0x30EC10 [R]). Without the node (the host has none) the weapon is 2 above the unit's place.
+ * Returns whether the cluster is on the target */
 static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], int has_target, float from[3],
                       float dir[3], float F[3][3], float dt)
 {
@@ -976,7 +1003,7 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
         norm3(F[r]);
     }
     int actor = u->kind == AK_TROOP || u->kind == AK_WINDOW || u->kind == AK_OTHER;
-    if (actor || u->kind == AK_TURRET) {
+    if (actor) {
         if (!has_target) {
             dir[0] = -sinf(u->facing);
             dir[1] = cosf(u->facing);
@@ -1004,10 +1031,12 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
         /* [R] the cluster (0x29ADE0) aims at the target lifted for the shot's fall (0x293050: Velocity, Gravity) */
         float aim[3];
         lob(from, tp, w->velocity, 9.81f * w->gravity, aim);
-        float want_yaw = atan2f(-aim[0], aim[1]) - u->facing;
+        /* [R 0x29B1AC] the turn: the aim's angle less that of the object's +y row, wrapped to +-pi; [R 0x29B7F8]
+         * the pitch: atan2 of the rise over the level distance, plus the object's own tilt (cluster_tilt) */
+        float want_yaw = atan2f(-aim[0], aim[1]) - atan2f(-u->world[4], u->world[5]);
         while (want_yaw > PI) want_yaw -= 2 * PI;
         while (want_yaw < -PI) want_yaw += 2 * PI;
-        float want_pitch = asinf(clampf(aim[2], -1, 1));
+        float want_pitch = asinf(clampf(aim[2], -1, 1)) + cluster_tilt(u->world, w->yaw);
         /* [R] 0x298E70 / 0x298F40: each kept within its ends (0x299640: degrees x pi / 180) */
         if (w->rot_max - w->rot_min < 2 * PI - 1e-3f)
             want_yaw = clampf(want_yaw, w->rot_min, w->rot_max);
@@ -1029,15 +1058,18 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
     float f[3] = { -sinf(h) * cosf(w->pitch), cosf(h) * cosf(w->pitch), sinf(w->pitch) };
     memcpy(dir, f, sizeof f);
     /* [R 0x2971A0, 0x298980] the firing frame is the WeaponNode's world as drawn, which carries the cluster's turn
-     * where the shape has its control nodes (a frame behind: the shape is posed after the update); elsewhere the turn
-     * is put on it here [G]. The shot's way stays the turn's (it agrees with the drawn frame's within about 2 deg) */
+     * where the shape has its control nodes (a frame behind: the shape is posed after the update, and the node's
+     * world the object hands out, vtable +0x4C, is its last pose); [R 0x2963C0] a shot leaves along that frame's
+     * Direction axis (+0x3C, negated by +0x40). Where the shape is not drawn with the cluster's nodes the turn is put
+     * on the frame here and the shot leaves along the turn's way [G: a stand-in for the nodes the game turns; where
+     * both are known the drawn axis agrees with it within 0 deg on the tanks, 4 on the rocking PirateShip] */
     float cn[16];
     const char *ctl = w->rot_node ? w->rot_node : w->elev_node;
     int drawn = have_node && ctl && a->host.node_world(a->host.ctx, u, ctl, cn);
-    if (have_node && !w->rot_rate && !w->elev_rate) {
+    if (have_node && (drawn || (!w->rot_rate && !w->elev_rate))) {
         for (int k = 0; k < 3; k++)
             dir[k] = node[4 * w->axis + k] * (w->axis_neg ? -1.0f : 1.0f);
-    } else if (!drawn)
+    } else
         army_frame_turn(F, u->facing, w->yaw, w->pitch);
     return on;
 }
@@ -1259,6 +1291,42 @@ float army_score_building(Army *a, int monster, int building, Group building_pro
 
 static int unit_new(Army *a, const char *name, Group tmpl, Group inst);
 static void unit_init(Army *a, ArmyUnit *u);
+static int kind_of(const char *script);
+
+/* [R 0x304450, the current block's objects (0x302DE0)] its AttackObjectInstance| list: unless the instance or its
+ * template has NoLoadOnActiveBlock, or a SpawnDelay (then gAIMgr makes it later, 0x334A20: only the bikers' actors
+ * have one), each is an AttackObject from the pool 0x4D5EB0 (0x283DA0) given its init (vtable +0x14, 0x304FA0 ->
+ * 0x315330 with f12 0: the world object's 0x287AB0 places it at Location turned by ZRotation degrees about z and
+ * keeps the group as its instance book (+0x7C), the script's Construct, the WeaponSystem 0x29C020, the wobble's keys)
+ * and added to the world (gWorld vtable +0x3C); onInit at the block's start. Of their templates only the PirateShip
+ * (StationaryAttackObject.bsf, LV05_JollyRogers) is a unit here: the trees are streetobj.c's, the ambient bosses
+ * boss.c's */
+static void block_attack_objects(Army *a, Group block_def)
+{
+    Group where;
+    Record r[256];
+    uint32_t n = group_values(block_def, "AttackObjectInstance|", &where, r, 256);
+    for (uint32_t i = 0; i < n && a->host.find; i++) {
+        Group g = record_group(where, r[i]);
+        const char *name = group_str(g, "Name");
+        Group t = name ? a->host.find(a->host.ctx, "Objects1_Props", name) : (Group){ 0 };
+        Record x;
+        if (!t.at || kind_of(gstr(t, "ScriptName")) != AK_TURRET || group_get(g, "NoLoadOnActiveBlock", &x) ||
+            group_get(t, "NoLoadOnActiveBlock", &x) || group_num(g, "SpawnDelay", group_num(t, "SpawnDelay", 0)) != 0)
+            continue;
+        int k = unit_new(a, name, t, g);
+        if (k < 0)
+            continue;
+        ArmyUnit *u = &a->u[k];
+        Group loc = group_sub(g, "Location");
+        Record lr[3];
+        uint32_t nl = loc.at ? group_items(loc, lr, 3) : 0;
+        for (uint32_t q = 0; q < 3; q++)
+            u->pos[q] = q < nl ? record_num(lr[q]) : 0;
+        u->facing = group_num(g, "ZRotation", 0) * PI / 180;
+        unit_init(a, u);                             /* Construct (+ onInit: its lTarget, the point kept here) */
+    }
+}
 
 /* [R] 0x334C40: the block's AIDef (here, or up its book's chain); each AIInstance child a record (0x3350F0):
  * MinDelay 10, RespawnDelay 10, OffsetDelay 5, MaxOccurances 9999 unless set; the first spawn in
@@ -1267,6 +1335,7 @@ int army_load_block(Army *a, Group block_def)
 {
     a->nsp = 0;
     a->active = 0;
+    block_attack_objects(a, block_def);
     Group ai = group_sub(block_def, "AIDef");
     if (!ai.at)
         return 0;
@@ -1525,8 +1594,8 @@ static const float *book_box(Group g, float b[6])
 }
 
 /* the unit's shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius (DefActorProps: 2)
- * or AutoCollisionBox with the model's box, then the instance's; else the model's bounding sphere [G: taken as its
- * box's, the host's; without one radius 1 at the origin] */
+ * or AutoCollisionBox with the model's box, then the instance's; else the sphere the model keeps (the host's
+ * shape_sphere; a host without it: its box's sphere; without a box radius 1 at the origin) */
 static void unit_shape_read(const Army *a, const ArmyUnit *u, CollideShape *s)
 {
     float tb[6], ib[6], mb[6], c[3] = { 0, 0, 0 }, r = 1;
@@ -1606,9 +1675,9 @@ static void flight_contact(void *user, int other, const float p[3], const float 
 
 /* the SphereMover of a flight (setVelocity, smashObject's SpherePhysicsMover): the game's (collide.c, 0x28E440) with
  * the template's Gravity (DefObjectProps: 35, else 9.81), Mass, Restitution, SlidingFriction and InertiaSolidity
- * (0x28F220); started from the unit's place, velocity and spin (its tilt and facing rates [G: about the unit's x,
- * its y and the world's z]); the street and the frame's objects (TakeImpact). Returns the street contacts this frame
- * (OnHitGround, script event 11, every sub-step it touches) */
+ * (0x28F220); started from the unit's place, velocity and spin (setRotation's rates as they are: an angular velocity
+ * about the world's axes [R 0x2B2F50 -> 0x28DD80]); the street and the frame's objects (TakeImpact). Returns the
+ * street contacts this frame (OnHitGround, script event 11, every sub-step it touches) */
 static int sphere_step(Army *a, ArmyUnit *u, float dt)
 {
     if (!u->cm_on) {
@@ -1728,7 +1797,8 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     u->cobj = -1;
     u->pulse_delay = 0.25f;
     /* [R 0x315330 through the vtable's init 0x304FA0, before onInit] the wobble's keys, the instance book the
-     * AIInstance [G: the Actors (0x44B300) have no wobble; none of their templates has the keys] */
+     * AIInstance; the Actors (0x44B300) have none [R: 0x314EF0 is in the AttackObject's vtable alone, the Actor's
+     * +0x10 is 0x30CD20], and none of their templates has the keys */
     army_osc_init(&u->osc, tmpl, inst);
     unit_weapons(a, u);
     unit_matrix(u);
@@ -2652,8 +2722,9 @@ static int window_anim_done(Army *a, ArmyUnit *u)
         u->state = 2;
     } else if (u->state == 2) {
         int m = nearest_monster(a, u->pos);
-        /* findBuildingByPosition(its place): the building's place, y - 5, against the monster's y [R]; the
-         * building's place taken as its box's middle [G] */
+        /* findBuildingByPosition(its place): the building's place, y - 5, against the monster's y [R]; the place is
+         * its box's middle [R: the box is laid about it, x +- columns x 5 / 2, y +- depth x 5 / 2 (city.c, the grid
+         * 0x2D1A30)] */
         float in[3] = { u->pos[0], u->pos[1] + 0.5f, u->pos[2] };
         const ArmyBox *b = building_at(a, in);
         float by = (b ? (b->min[1] + b->max[1]) / 2 : u->pos[1]) - 5;
@@ -2827,6 +2898,8 @@ static void turret_damage(Army *a, ArmyUnit *u, int monster, const float directi
     if (u->ihp <= 0 || monster < 0)
         return;
     u->ihp--;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("%s hit by monster %d: %d hits left\n", u->name, monster, u->ihp);
     effect_stop(a, (int)u->aux[4]);
     if (!(u->flags & 4)) {
         u->flags |= 4;
@@ -2913,7 +2986,9 @@ static int bomber_pulse(Army *a, ArmyUnit *u)
                 weapons_reload(u);
             }
         }
-        float mid = (a->view[0] + a->view[1]) / 2;   /* gWorld.getCameraPos().x [G: the middle of the view] */
+        /* gWorld.getCameraPos().x [R: id 0x41, 0x2AF220: gWorld +0x684, the eye the objects' render distance is
+         * taken from (0x290FBC)]: the host sets the view about the camera's x (army_set_view) */
+        float mid = (a->view[0] + a->view[1]) / 2;
         if (!u->count && u->pos[0] > mid - 50 && u->pos[0] < mid + 50) {
             u->count = 1;
             sound(a, u, tstr(u, "FlybySound"));
@@ -2962,7 +3037,8 @@ static void bomber_damage(Army *a, ArmyUnit *u, int monster)
     float t[3] = { cosf(u->facing + PI / 2) < 0 ? -1.0f : 1.0f, 0.1f, -0.15f };
     for (int k = 0; k < 3; k++)
         u->vel[k] = t[k] * 20;
-    u->spin[0] = PI / 4;                             /* setRotation(pi / 4, 0, 0) [G: radians per second] */
+    u->spin[0] = PI / 4;                             /* setRotation(pi / 4, 0, 0): [R 0x28DD80] pi / 4 a second
+                                                      * about the world's x */
     u->mv.active = 0;
     u->mv.kind = 2;
     u->cm_on = 0;
@@ -2988,14 +3064,17 @@ static void bomber_ground(Army *a, ArmyUnit *u)      /* onHitGround / TakeImpact
 
 /* ======== Droppable.bsf: falls from a window along three points at 12 per second, turning a quarter on the way */
 
-static const ArmyBox *building_at(const Army *a, const float p[3])   /* findBuildingByPosition [G: its footprint] */
+/* findBuildingByPosition (the binding 0x2AEAA0, 0x2A3D20 with no direction) [R]: of the world's buildings the last
+ * whose box holds the point in x and y, ends included; z and the state are not tested, so rubble counts */
+static const ArmyBox *building_at(const Army *a, const float p[3])
 {
+    const ArmyBox *found = NULL;
     for (int i = 0; i < a->nb; i++) {
         const ArmyBox *b = &a->b[i];
-        if (!b->gone && p[0] >= b->min[0] && p[0] <= b->max[0] && p[1] >= b->min[1] && p[1] <= b->max[1])
-            return b;
+        if (p[0] >= b->min[0] && p[0] <= b->max[0] && p[1] >= b->min[1] && p[1] <= b->max[1])
+            found = b;
     }
-    return NULL;
+    return found;
 }
 
 static void drop_init(Army *a, ArmyUnit *u)          /* onInit + createDropPath + getCellCenter */
@@ -3014,7 +3093,7 @@ static void drop_init(Army *a, ArmyUnit *u)          /* onInit + createDropPath 
         }
     }
     /* getCellCenter: the first column edge (left + 5 i, left = the building's x - columns x 5 / 2) at or right of
-     * the drop, else the drop's own x [R]; the building's place taken as its box's middle [G] */
+     * the drop, else the drop's own x [R]; the building's place is its box's middle (as above) [R] */
     float cell = start[0];
     if (b) {
         float left = (b->min[0] + b->max[0]) / 2 - (float)b->width * 5 / 2;
@@ -3043,8 +3122,9 @@ static void drop_init(Army *a, ArmyUnit *u)          /* onInit + createDropPath 
 }
 
 /* TakeDamage(monster): within 2.5 along x the monster takes it on the head: HitEffect, HitMonsterSound,
- * setReaction(19), gone [R]. [G] When the game calls it (the world's collision of the falling object with the
- * monster, not read): here when it touches the monster's spheres or box, or the monster's attack reaches it */
+ * setReaction(19), gone [R]. When the game calls it [R 0x2E22B0]: the monster's object test, each frame one of its
+ * collision spheres meets the droppable's shape (armed or not), and an attack that reaches it; here the same
+ * (touches, army_hit), with the box against its place for a monster without spheres */
 static int drop_damage(Army *a, ArmyUnit *u, int monster)
 {
     if (monster < 0 || fabsf(a->m[monster].pos[0] - u->pos[0]) >= 2.5f)
@@ -3217,7 +3297,8 @@ static int on_mover(Army *a, ArmyUnit *u, int state)
     case AK_TRUCK: return truck_mover(a, u, state);
     case AK_TROOP: return troop_mover(a, u, state);
     case AK_BOMBER: return bomber_mover(a, u, state);
-    case AK_TURRET: return state == 2 ? DELETE_ME : 1;   /* a sunk boat */
+    case AK_TURRET: return 1;                        /* no onMoverCallback: the sinking ends where it is; Process
+                                                      * deletes it 2.5 s after the last hit (flags 8, then 16) */
     case AK_DROP:
         if (state == 2) {
             effect_at(a, ustr(u, "GroundEffect"), u->pos);
@@ -3272,7 +3353,10 @@ static void unit_update(Army *a, int i, float dt)
     if (u->mv.kind != 2)
         u->cm_on = 0;                                /* a flight is over once another mover takes it */
     if (u->mv.kind == 2)
-        r = sphere_step(a, u, dt) ? -2 : 1;          /* -2: OnHitGround (script event 11) [G: once a frame] */
+        r = sphere_step(a, u, dt) ? -2 : 1;          /* -2: OnHitGround (script event 11): once a frame here, every
+                                                      * sub-step in the game (0x28E440) [R: the same for the two
+                                                      * scripts that have one: CombatTruck's sets state 6, Bomber's
+                                                      * is guarded] */
     else if (u->mv.kind == 3)
         attack_step(a, u, dt);
     else {
@@ -3360,7 +3444,7 @@ Army *army_new(const ArmyHost *host)
     a->cap = MAX_UNITS;
     if (host)
         a->host = *host;
-    a->view[0] = -45;                                /* [G] what the camera sees of the street, along x */
+    a->view[0] = -45;                                /* until the host sets it: the street about x = 0 */
     a->view[1] = 45;
     a->fallback_ts = a->fire_ts = a->move_ts = -3;   /* [R] the scripts' sfx_*PrevTS = -3 */
     a->emerge_ts = -2;
@@ -3637,16 +3721,38 @@ void army_grab(Army *a, int unit, int monster)
         truck_pickup(a, u);
 }
 
-/* [G] in the hand as the hand is (the HeldObjectMover's MajorAxis turn and HoldOffset are left out) */
-void army_hold(Army *a, int unit, const float hand_world[16])
+/* [R] the HeldObjectMover (init 0x310ED0, held 0x3109E0), as people.c's: the unit's MajorAxis (default 2) along the
+ * hand's z, the next one along its y, the last their cross product; at the hand plus HoldOffset (MirroredHoldOffset
+ * while the monster plays mirrored) in the hand's frame. [G: its blend in from where the unit was (+0x84, 0x310B50:
+ * 0.1 s from doGrabObject) is not ported; the unit is in the hand at once] */
+void army_hold(Army *a, int unit, const float hand[16], int mirrored)
 {
     if (unit < 0 || unit >= a->n || a->u[unit].phase != AU_HELD)
         return;
     ArmyUnit *u = &a->u[unit];
-    memcpy(u->world, hand_world, sizeof u->world);
-    u->pos[0] = hand_world[12];
-    u->pos[1] = hand_world[13];
-    u->pos[2] = hand_world[14];
+    int major = (int)tnum(u, "MajorAxis", 2);
+    if (major < 0 || major > 2)
+        major = 2;
+    int i1 = (major + 1) % 3, i2 = (major + 2) % 3;
+    float axis[3][3];
+    memcpy(axis[major], hand + 8, sizeof axis[0]);
+    memcpy(axis[i1], hand + 4, sizeof axis[0]);
+    axis[i2][0] = axis[major][1] * axis[i1][2] - axis[major][2] * axis[i1][1];
+    axis[i2][1] = axis[major][2] * axis[i1][0] - axis[major][0] * axis[i1][2];
+    axis[i2][2] = axis[major][0] * axis[i1][1] - axis[major][1] * axis[i1][0];
+    float off[3] = { 0, 0, 0 };
+    Group og = group_sub(u->tmpl, mirrored ? "MirroredHoldOffset" : "HoldOffset");
+    Record r[3];
+    if (og.at && group_items(og, r, 3) == 3)
+        for (int k = 0; k < 3; k++)
+            off[k] = record_num(r[k]);
+    for (int c = 0; c < 3; c++) {
+        memcpy(u->world + 4 * c, axis[c], sizeof axis[c]);
+        u->world[4 * c + 3] = 0;
+    }
+    for (int k = 0; k < 3; k++)
+        u->world[12 + k] = u->pos[k] = hand[12 + k] + off[0] * hand[k] + off[1] * hand[4 + k] + off[2] * hand[8 + k];
+    u->world[15] = 1;
 }
 
 /* [R] throwObject (0x2D9DC0): onThrow(monster, eat) always; an actor eaten is counted (addStats type 1; a fart one

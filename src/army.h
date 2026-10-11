@@ -200,8 +200,9 @@ void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], cons
 /* [R 0x100F50] row k of F made v (1 long), the other two square to it: row k + 1 (mod 3) from the world's x (its y
  * when v is within 45.6 degrees of x), row k + 2 = row k x row k + 1 made 1 long, then row k + 1 = row k + 2 x row k */
 void army_frame_point(float F[3][3], const float v[3], int k);
-/* the frame F (rows) as a weapon cluster turns it [G: the cluster's turn of its node not read]: about the unit's
- * right by pitch, then about the world's z by yaw, from the unit's front (facing) */
+/* the frame F (rows) as a weapon cluster turns it, for a shape drawn without the cluster's control nodes (the game
+ * turns the nodes, 0x298980: the drawn WeaponNode carries it) [G: a stand-in]: about the unit's right by pitch, then
+ * about the world's z by yaw, from the unit's front (facing) */
 void army_frame_turn(float F[3][3], float facing, float yaw, float pitch);
 /* a beam's axis (0x226950): the rod's direction through the firing frame F; with no frame, F is made with the rod's
  * main axis along dir (army_frame_point) and that is the axis. rod NULL: +x */
@@ -222,7 +223,8 @@ int army_osc_step(ArmyOsc *o, float dt, float d[3]);
 /* d onto the turn of w: its facing (0x101220) + d, made again (0x101330); the place stays */
 void army_osc_turn(float *w, const float d[3]);
 void army_free(Army *a);
-/* [G] gWorld.isSphereVisible's stand-in: the street's x range the camera sees (default -45 .. 45) */
+/* the street's x range about the camera's x (getCameraPos, 0x2AF220: Bomber's FlybySound); also what is seen for a
+ * host without `visible` (default -45 .. 45) */
 void army_set_view(Army *a, float xmin, float xmax);
 
 /* the block's AIDef (its BlockDef| group in <City>_Props; 0x334C40): the spawner's records; their count */
@@ -265,7 +267,8 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
  * radius of hand; -1 none */
 int army_nearest_pickup(const Army *a, const float hand[3], const float root[3], const float forward[3], float radius);
 void army_grab(Army *a, int unit, int monster);      /* the hold (0x2DA310): onPickup */
-void army_hold(Army *a, int unit, const float hand_world[16]);
+/* each frame in the hand (the HeldObjectMover): the hand's world; mirrored: the monster's clip is (MirroredHoldOffset) */
+void army_hold(Army *a, int unit, const float hand_world[16], int mirrored);
 /* throwObject(eat, vel): onThrow; an actor eaten counts (addStats 1) and is gone, one not eaten is smashed; a
  * vehicle is thrown with vel */
 void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], float monster_heading);

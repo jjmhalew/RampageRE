@@ -441,6 +441,8 @@ static void place_flags(City *c, Scene *s, Group t, Mat4 base)
     }
 }
 
+static Mat4 rigid_inverse(Mat4 m);
+
 static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
 {
     Group t = template_of(c, group_str(inst, "Name"));
@@ -485,6 +487,17 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         s->scripted[scripted].instance = id;
     if (id >= 0)
         place_flags(c, s, t, at);
+    if (id >= 0 && s->placing_block && s->placing_attack && script && !_stricmp(script, "StationaryAttackObject.bsf") &&
+        s->narmy_obj < 4) {                          /* army.c's unit (0x304450 -> 0x315330): drawn by army_sync */
+        int k = s->narmy_obj++;
+        memset(&s->army_obj[k], 0, sizeof s->army_obj[k]);
+        s->army_obj[k].inst = inst;
+        s->army_obj[k].first = id;
+        s->army_obj[k].last = (int)s->ninstances;
+        Mat4 inv = rigid_inverse(s->instances[id].base);
+        for (int i = id + 1; i < s->army_obj[k].last && i - id - 1 < 4; i++)
+            s->army_obj[k].rel[i - id - 1] = mat_mul(inv, s->instances[i].base);
+    }
     if (id >= 0 && script && (s->placing_block || s->placing_building >= 0) && s->nstreet < SCENE_STREET_MAX &&
         (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf"))) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
@@ -1035,6 +1048,31 @@ static void army_sync(Scene *s, double t)
             }
         if (in->has_clip && u->anim_len > 0 && u->clip)
             in->offset = (float)(u->anim_time / u->anim_len * in->clip.duration - t);
+    }
+    /* the block's objects that are army units (the PirateShip): the model as placed gives way to the unit's look,
+     * the flags' cloths ride on the unit, and all go with it */
+    for (int k = 0; k < s->narmy_obj; k++) {
+        const ArmyUnit *on = NULL;
+        for (int i = 0, n = army_count(s->army); i < n && !on; i++) {
+            const ArmyUnit *u = army_unit(s->army, i);
+            if (u->phase != AU_GONE && u->inst.at && u->inst.at == s->army_obj[k].inst.at)
+                on = u;
+        }
+        if (on)
+            s->army_obj[k].seen = 1;
+        if (!s->army_obj[k].seen)
+            continue;
+        Mat4 w;
+        if (on)
+            memcpy(w.m, on->world, sizeof w.m);
+        for (int i = s->army_obj[k].first; i < s->army_obj[k].last && (uint32_t)i < s->ninstances; i++) {
+            Instance *c = &s->instances[i];
+            int r = i - s->army_obj[k].first - 1;
+            c->dynamic = 1;
+            c->hidden = !on || r < 0 || r >= 4;
+            if (!c->hidden)
+                c->base = mat_mul(w, s->army_obj[k].rel[r]);
+        }
     }
 }
 
