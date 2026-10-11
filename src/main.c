@@ -1681,13 +1681,17 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::throwObject")) {  /* (eat, x, y, z) (0x2D9DC0): eaten, or smashed away */
+        /* [R 0x2D9DC0] throwObject(vel, 0, eat): the velocity in the monster's frame, turned by its matrix (x
+         * mirrored with it) [G: and by its +0x2560 angle, taken as 0] */
+        float h = mo->heading / 57.2957795f, lx = mo->mirror ? -e->p[1] : e->p[1];
+        float vel[3] = { cosf(h) * lx - sinf(h) * e->p[2], sinf(h) * lx + cosf(h) * e->p[2], e->p[3] };
         if (mo->held_unit >= 0 && v->army) {
-            army_throw(v->army, mo->held_unit, mo->slot, e->p[0] != 0, e->p + 1, mo->heading / 57.2957795f);
+            army_throw(v->army, mo->held_unit, mo->slot, e->p[0] != 0, vel, mo->heading / 57.2957795f);
             mo->held_unit = -1;
             return;
         }
         if (mo->held_vehicle >= 0 && v->veh) {
-            vehicle_throw(v->veh, mo->held_vehicle, mo->slot, e->p[0] != 0, e->p + 1, mo->heading / 57.2957795f);
+            vehicle_throw(v->veh, mo->held_vehicle, mo->slot, e->p[0] != 0, vel, mo->heading / 57.2957795f);
             mo->held_vehicle = -1;
             return;
         }
@@ -1701,11 +1705,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             mo->held_rail = -1;
             return;
         }
-        if (mo->held_sobj >= 0 && v->sobj) {         /* [R 0x2D9DC0] throwObject(vel, 0, eat): the velocity in the
-                                                      * monster's frame, turned by its matrix (x mirrored with it)
-                                                      * [G: and by its +0x2560 angle, taken as 0] */
-            float h = mo->heading / 57.2957795f, lx = mo->mirror ? -e->p[1] : e->p[1];
-            float vel[3] = { cosf(h) * lx - sinf(h) * e->p[2], sinf(h) * lx + cosf(h) * e->p[2], e->p[3] };
+        if (mo->held_sobj >= 0 && v->sobj) {
             streetobj_fly(v->sobj, mo->held_sobj, mo->slot, e->p[0] != 0, vel);
             mo->held_sobj = -1;
             return;
