@@ -2722,7 +2722,7 @@ static void game_step(Viewer *v, float dt)
         in.hp[k] = v->mon[k].hp;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *bb = &v->scene.buildings[i].b;
-        in.buildings += bb->state == BUILDING_STANDING || bb->state == BUILDING_FLOOR_FALLING;
+        in.buildings += bb->state != BUILDING_GONE;  /* [R 0x2AEE00: +0x14C not 0, its fall included] */
         float cy = 10 + v->block_shift;              /* NewYork.scr's centre (0, 10, 1), in the scene */
         if (bb->min[0] <= 0 && bb->max[0] >= 0 && bb->min[1] <= cy && bb->max[1] >= cy)
             in.centre_down = bb->state != BUILDING_STANDING && bb->state != BUILDING_FLOOR_FALLING;   /* (0, 10, 1) */

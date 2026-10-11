@@ -107,7 +107,9 @@ typedef struct {
 /* ---- what the module is told each frame */
 typedef struct {
     float hp[GAME_PLAYERS];                          /* each monster's hit points (+0xA4C): 0 or less = defeated */
-    int buildings;                                   /* gWorld.getCurrentBuildingCount(): standing, not falling */
+    int buildings;                                   /* gWorld.getCurrentBuildingCount(): the block's buildings not
+                                                      * gone (+0x14C not 0: a falling one counts until it is down)
+                                                      * [R 0x2AEE00] */
     int centre_down;                                 /* New York: the building at (0, 10, 1) is falling or destroyed */
 } GameInput;
 

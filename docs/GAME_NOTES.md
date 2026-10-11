@@ -120,7 +120,10 @@ game shows only rubble.
 
 ## When a block is won
 
-`Levels::IsBlockFinished`: `gWorld.getCurrentBuildingCount() <= 0`, checked every frame of state 6. Boss blocks:
+`Levels::IsBlockFinished`: `gWorld.getCurrentBuildingCount() <= 0`, checked every frame of state 6. The count
+(World binding 0x33, 0x2AEE00) is of the block's list (0x4D095C) whose state (+0x14C) is not 0: a falling building
+counts until it is down; the list holds only the instances with LeftEdgeXPos in [-50, 50) (0x3059D0 with a2 = 1:
+the play block makes no Building of the others) [R]. Boss blocks:
 
 - Las Vegas, San Francisco, London, Los Angeles, Chicago and Hong Kong: the boss block uses the default as well.
   `<City>::isBossBlockFinished` would ask for the boss's `CompletionCallback` (`setBossBlockFinished`) *and* no
