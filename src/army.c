@@ -553,6 +553,26 @@ static int weapon_make(Army *a, ArmyWeapon *w, Group g)
     return 1;
 }
 
+/* [R 0x299640] the cluster's keys on a weapon of it: the rates as read (radians a second); the ranges in degrees: Range
+ * r gives -r .. r (negative or missing: the default, turn +-360, pitch +-40), Min / MaxRange each end */
+void army_cluster_read(ArmyWeapon *w, Group cl)
+{
+    float rr = group_num(cl, "RotationRange", -1), er = group_num(cl, "ElevationRange", -1);
+    w->rot_range = (rr >= 0 ? rr : 360) * PI / 180;
+    w->elev_range = (er >= 0 ? er : 40) * PI / 180;
+    w->rot_min = group_num(cl, "RotationMinRange", -w->rot_range * 180 / PI) * PI / 180;
+    w->rot_max = group_num(cl, "RotationMaxRange", w->rot_range * 180 / PI) * PI / 180;
+    w->elev_min = group_num(cl, "ElevationMinRange", -w->elev_range * 180 / PI) * PI / 180;
+    w->elev_max = group_num(cl, "ElevationMaxRange", w->elev_range * 180 / PI) * PI / 180;
+    w->rot_rate = group_num(cl, "RotationRate", 1);
+    w->elev_rate = group_num(cl, "ElevationRate", 0.5f);
+    w->clear_rot = group_num(cl, "RequiresRotationClearToFire", 1) != 0;
+    w->clear_elev = group_num(cl, "RequiresElevationClearToFire", 1) != 0;
+    w->recenter = group_num(cl, "ReCenterWhenNoTarget", 0) != 0;
+    w->rot_node = group_str(cl, "RotationControlNode");
+    w->elev_node = group_str(cl, "ElevationControlNode");
+}
+
 /* the template's weapons: WeaponSystem { WeaponCluster { turret, Weapon| {...} ... } } (objects), Weapon|<name>
  * (actors) */
 static void unit_weapons(Army *a, ArmyUnit *u)
@@ -569,25 +589,8 @@ static void unit_weapons(Army *a, ArmyUnit *u)
             Record wr[8];
             uint32_t nw = group_all(cl, "Weapon|", wr, 8);
             for (uint32_t i = 0; i < nw && u->nw < ARMY_WEAPONS; i++)
-                if (weapon_make(a, &u->w[u->nw], record_group(cl, wr[i]))) {
-                    ArmyWeapon *w = &u->w[u->nw++];
-                    /* [R 0x299640] the rates as read (radians a second); the ranges in degrees: Range r gives
-                     * -r .. r (negative or missing: the default, turn +-360, pitch +-40), Min / MaxRange each end */
-                    float rr = group_num(cl, "RotationRange", -1), er = group_num(cl, "ElevationRange", -1);
-                    w->rot_range = (rr >= 0 ? rr : 360) * PI / 180;
-                    w->elev_range = (er >= 0 ? er : 40) * PI / 180;
-                    w->rot_min = group_num(cl, "RotationMinRange", -w->rot_range * 180 / PI) * PI / 180;
-                    w->rot_max = group_num(cl, "RotationMaxRange", w->rot_range * 180 / PI) * PI / 180;
-                    w->elev_min = group_num(cl, "ElevationMinRange", -w->elev_range * 180 / PI) * PI / 180;
-                    w->elev_max = group_num(cl, "ElevationMaxRange", w->elev_range * 180 / PI) * PI / 180;
-                    w->rot_rate = group_num(cl, "RotationRate", 1);
-                    w->elev_rate = group_num(cl, "ElevationRate", 0.5f);
-                    w->clear_rot = group_num(cl, "RequiresRotationClearToFire", 1) != 0;
-                    w->clear_elev = group_num(cl, "RequiresElevationClearToFire", 1) != 0;
-                    w->recenter = group_num(cl, "ReCenterWhenNoTarget", 0) != 0;
-                    w->rot_node = group_str(cl, "RotationControlNode");
-                    w->elev_node = group_str(cl, "ElevationControlNode");
-                }
+                if (weapon_make(a, &u->w[u->nw], record_group(cl, wr[i])))
+                    army_cluster_read(&u->w[u->nw++], cl);
         }
         return;
     }
@@ -978,6 +981,38 @@ static float cluster_tilt(const float *world, float turn)
     return fabsf(x) <= fabsf(y) ? y + 0.5f * x : x + 0.5f * y;
 }
 
+int army_cluster_turn(ArmyWeapon *w, const float world[16], const float from[3], const float *target, float dt)
+{
+    float sy = w->rot_rate * dt, sp = w->elev_rate * dt;
+    if (!target) {
+        /* [R 0x29ADE0] ReCenterWhenNoTarget (flag 0x10) without a target: the same steps towards 0, 0 */
+        if (w->recenter) {
+            w->yaw += clampf(-w->yaw, -sy, sy);
+            w->pitch += clampf(-w->pitch, -sp, sp);
+        }
+        return 0;
+    }
+    /* [R] the cluster (0x29ADE0) aims at the target lifted for the shot's fall (0x293050: Velocity, Gravity) */
+    float aim[3];
+    lob(from, target, w->velocity, 9.81f * w->gravity, aim);
+    /* [R 0x29B1AC] the turn: the aim's angle less that of the object's +y row, wrapped to +-pi; [R 0x29B7F8] the
+     * pitch: atan2 of the rise over the level distance, plus the object's own tilt (cluster_tilt) */
+    float want_yaw = atan2f(-aim[0], aim[1]) - atan2f(-world[4], world[5]);
+    while (want_yaw > PI) want_yaw -= 2 * PI;
+    while (want_yaw < -PI) want_yaw += 2 * PI;
+    float want_pitch = asinf(clampf(aim[2], -1, 1)) + cluster_tilt(world, w->yaw);
+    /* [R] 0x298E70 / 0x298F40: each kept within its ends (0x299640: degrees x pi / 180) */
+    if (w->rot_max - w->rot_min < 2 * PI - 1e-3f)
+        want_yaw = clampf(want_yaw, w->rot_min, w->rot_max);
+    want_pitch = clampf(want_pitch, w->elev_min, w->elev_max);
+    /* [R 0x29BA50] a step of rate x dt, onto the target once it is that close; on target when the turn is within
+     * pi / 50 and the pitch within pi / 100, or when the cluster does not require it */
+    w->yaw += clampf(want_yaw - w->yaw, -sy, sy);
+    w->pitch += clampf(want_pitch - w->pitch, -sp, sp);
+    return (!w->clear_rot || fabsf(want_yaw - w->yaw) <= PI / 50) &&
+           (!w->clear_elev || fabsf(want_pitch - w->pitch) < PI / 100);
+}
+
 /* where a unit's weapon fires from and which way: the WeaponNode as drawn when the host knows it, along the
  * definition's axis (objects: their cluster turned onto the target at RotationRate / ElevationRate radians a second
  * within its ranges, 0x29ADE0 / 0x29BA50 [R]); actors aim their Direction axis straight at the target, lifted for a
@@ -1026,34 +1061,7 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
         return has_target;
     }
     /* a turret: yaw about the unit's z, pitch up, from its front (+y in its frame) */
-    int on = 0;
-    if (has_target) {
-        /* [R] the cluster (0x29ADE0) aims at the target lifted for the shot's fall (0x293050: Velocity, Gravity) */
-        float aim[3];
-        lob(from, tp, w->velocity, 9.81f * w->gravity, aim);
-        /* [R 0x29B1AC] the turn: the aim's angle less that of the object's +y row, wrapped to +-pi; [R 0x29B7F8]
-         * the pitch: atan2 of the rise over the level distance, plus the object's own tilt (cluster_tilt) */
-        float want_yaw = atan2f(-aim[0], aim[1]) - atan2f(-u->world[4], u->world[5]);
-        while (want_yaw > PI) want_yaw -= 2 * PI;
-        while (want_yaw < -PI) want_yaw += 2 * PI;
-        float want_pitch = asinf(clampf(aim[2], -1, 1)) + cluster_tilt(u->world, w->yaw);
-        /* [R] 0x298E70 / 0x298F40: each kept within its ends (0x299640: degrees x pi / 180) */
-        if (w->rot_max - w->rot_min < 2 * PI - 1e-3f)
-            want_yaw = clampf(want_yaw, w->rot_min, w->rot_max);
-        want_pitch = clampf(want_pitch, w->elev_min, w->elev_max);
-        /* [R 0x29BA50] a step of rate x dt, onto the target once it is that close; on target when the turn is
-         * within pi / 50 and the pitch within pi / 100, or when the cluster does not require it */
-        float sy = w->rot_rate * dt, sp = w->elev_rate * dt;
-        w->yaw += clampf(want_yaw - w->yaw, -sy, sy);
-        w->pitch += clampf(want_pitch - w->pitch, -sp, sp);
-        on = (!w->clear_rot || fabsf(want_yaw - w->yaw) <= PI / 50) &&
-             (!w->clear_elev || fabsf(want_pitch - w->pitch) < PI / 100);
-    } else if (w->recenter) {
-        /* [R 0x29ADE0] ReCenterWhenNoTarget (flag 0x10) without a target: the same steps towards 0, 0 */
-        float sy = w->rot_rate * dt, sp = w->elev_rate * dt;
-        w->yaw += clampf(-w->yaw, -sy, sy);
-        w->pitch += clampf(-w->pitch, -sp, sp);
-    }
+    int on = army_cluster_turn(w, u->world, from, has_target ? tp : NULL, dt);
     float h = u->facing + w->yaw;
     float f[3] = { -sinf(h) * cosf(w->pitch), cosf(h) * cosf(w->pitch), sinf(w->pitch) };
     memcpy(dir, f, sizeof f);

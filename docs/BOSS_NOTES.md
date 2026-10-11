@@ -169,6 +169,23 @@ t 0, and places the object at the first point at once [R].
   key. What the bosses sound like is their scripts' own: `Cyclo_Hum_Loop` (the Saucer), `Cyclo_Wind_Loop` (the
   whirlwind), `Leeper_Hum_Loop`, `Leeper_Servo`, `Leeper_Jump`, `Tim_Impact_Test` (the Jumper), the voices.
 
+**The turrets** [R]: a part's `WeaponCluster`s are army.c's (ARMY_NOTES.md "The turn is drawn"): the keys
+(0x299640, `army_cluster_read`: the rates in radians a second, the ranges in degrees, RequiresRotation /
+ElevationClearToFire, ReCenterWhenNoTarget, the control nodes); each frame the turn steps at the rates onto the target
+lifted for the shot's fall, from the heading of the part's +y row, within the ends, on target within π/50 and π/100
+(0x29ADE0, 0x29BA50, `army_cluster_turn`); the target point is the monster's (0x2DB030: its `Bip01 Spine1`'s x and y,
+its feet + 6; `BossMonster.target`). The WWeaponProcAnimator (0x298980) draws the turn on the control nodes (city.c
+`boss_sync` → `instance_turns`), so the firing frame, the WeaponNode as drawn (main.c `boss_node_world`, a frame
+behind), carries it. Every boss cluster names its nodes, and every model has them:
+- BossTank: `HT_Rotation` / `HT_Elevation`, the SudsGun's dome turned onto the monster (−10 … 90° at 2.5);
+- BossHelicopter: `Helicopter_Base_Rotate` / `_Pitch`, which carry the whole helicopter (as the news helicopters'),
+  ReCenterWhenNoTarget;
+- BossSaucer: `RotationControl` / `ElevationControl` (31.45 a second: at once); the whirlwind's `Rotation` /
+  `Elevation` are on an InvisShape, so its zaps leave from its place;
+- NYBlimp: `Blimp_Rotate` / `Blimp_Elevate`, the gondola gun that hangs under the blimp and turns down onto the
+  monster (0 … −70°); the BlimpBomb, in a cluster of its own, falls from `Blimp_Rotate` (its node is the BlimpBeam
+  cluster's turned node, so a bomb leaves from the turned gun).
+
 **Object flags** (0x3F5F70) [R]:
 - 0x4000 `PushOutMonsters` (Tank, Jumper): a monster is pushed out of the part's box by the collision world
   (collide_monster, 0x2E2C50 [R]: the box query with include VolumeTrigger | PushOutMonsters).
@@ -415,7 +432,6 @@ falling back one loses its barriers too.
     AutoCollisionBox (the blimp) with the model's box, else the sphere the model gives (its vtable +0x14, at
     0x290384): SimpleShape's 0x184CB0, the union of its parts' spheres (0x185AA0) [R]; here the union of its meshes' header spheres, city.c `city_shape_sphere`.
 - **Weapons:**
-  - the turrets' rates (radians a second, as army.c);
   - `setWeaponAmmo` / `reloadWeapon` (the weapon's ammo, as army.c);
   - `setWeaponFlags(-1, 16)` (Boss_Helicopter: not done);
   - AttackObject weapons being on from the start (the helicopter and blimp never call enableWeapons, yet fire).

@@ -190,10 +190,12 @@ otherwise.
   update; the node's world the object hands out, vtable +0x4C, is its last pose), and a shot leaves along that
   frame's `Direction` axis (0x2963C0: row +0x3C of +0xBC × the node's world, negated by +0x40) [R]. Measured: the
   tanks' drawn Weapon_0 +Y and the turn's way agree to 0°, the rocking PirateShip's Weapon_Node_1 +Y within 4°.
-  For a shape drawn without the control nodes (the bosses' and the fire truck's turrets: boss.c, vehicle.c), the
-  turn is put on the node's frame about the unit's right and the world's z (`army_frame_turn`) and the shot leaves
-  along the turn's way [G: a stand-in for the nodes the game turns]. A boss weapon without a node gets a frame with
-  the rod's main axis along its aim.
+  The bosses' and the fire truck's turrets are drawn the same way (boss.c, vehicle.c through `army_cluster_read` /
+  `army_cluster_turn`, which carry the turn from the +y row and the tilt-corrected pitch; city.c `instance_turns`).
+  For a shape drawn without the control nodes the turn is put on the node's frame about the unit's right and the
+  world's z (`army_frame_turn`) and the shot leaves along the turn's way [G: a stand-in for the nodes the game turns;
+  every army, boss and fire truck model with a cluster has them]. A boss weapon without a node gets a frame with the
+  rod's main axis along its aim.
 
 **The impact on a monster** [R] (0x33BCA0 / 0x33B440): an object flagged 0x40 (a monster) gets a knock. The knock is
 the shot's direction in x and y, made 1 long, times `HorizontalKnockback`, with `VerticalKnockback` up.

@@ -848,11 +848,11 @@ static int unit_look(City *c, Scene *s, int who, const ArmyUnit *u)
 
 static int ends_with(const char *s, const char *tail);
 
-int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
+static int look_node(const Scene *s, int who, const char *node, float out[16])
 {
     for (int i = 0; i < s->nlooks; i++) {
         const struct PersonLook *l = &s->looks[i];
-        if (l->who != (1 << 20) + unit || l->inst < 0 || s->instances[l->inst].hidden)
+        if (l->who != who || l->inst < 0 || s->instances[l->inst].hidden)
             continue;
         const Instance *in = &s->instances[l->inst];
         for (uint32_t k = 0; k < in->tree.n && in->node; k++)
@@ -863,6 +863,39 @@ int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
             }
     }
     return -1;
+}
+int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
+{
+    return look_node(s, (1 << 20) + unit, node, out);
+}
+int scene_boss_node(const Scene *s, int part, const char *node, float out[16])
+{
+    return look_node(s, (4 << 20) + part, node, out);
+}
+int scene_vehicle_node(const Scene *s, int obj, const char *node, float out[16])
+{
+    return look_node(s, (2 << 20) + obj, node, out);
+}
+
+/* the weapon clusters' turn on their control nodes (0x299010 hands the shape its WWeaponProcAnimator, the cluster
+ * +0x2C; 0x298980 turns +0x64 by +0x54 and +0x4C by +0x3C): army units, boss parts, the fire truck */
+static void instance_turns(Instance *in, const ArmyWeapon *w, int nw)
+{
+    in->nturn = 0;
+    for (int i = 0; i < nw; i++)
+        for (int e = 0; e < 2; e++) {
+            const char *name = e ? w[i].elev_node : w[i].rot_node;
+            int had = 0;                             /* the weapons of one cluster share its nodes: turned once */
+            for (int t = 0; name && t < in->nturn; t++)
+                had |= _stricmp(in->tree.nodes[in->turn[t].node].name, name) == 0;
+            for (uint32_t k = 0; name && !had && k < in->tree.n && in->nturn < 8; k++)
+                if (_stricmp(in->tree.nodes[k].name, name) == 0) {
+                    in->turn[in->nturn].node = (int)k;
+                    in->turn[in->nturn].axis = e ? 0 : 2;
+                    in->turn[in->nturn++].angle = e ? w[i].pitch : w[i].yaw;
+                    break;
+                }
+        }
 }
 
 /* a vehicle's look (vehicle.c): its shape now (the DamageShape once hit), keyed by the object and the shape */
@@ -927,6 +960,7 @@ static void boss_sync(Scene *s, double t)
         Instance *in = &s->instances[show];
         in->hidden = 0;
         memcpy(in->base.m, p->world, sizeof in->base.m);
+        instance_turns(in, p->w, p->nw);
         float k = p->scale > 0 ? p->scale : 1;
         for (int c = 0; c < 12; c++)
             in->base.m[c] *= k;
@@ -985,6 +1019,7 @@ static void vehicle_sync(Scene *s)
         if (show >= 0) {
             s->instances[show].hidden = 0;
             memcpy(s->instances[show].base.m, o->world, sizeof o->world);
+            instance_turns(&s->instances[show], &o->tc, o->kind == VK_FIRETRUCK);   /* the fire truck's cannon */
             if (o->tmpl.at && !s->instances[show].shadow.at)
                 s->instances[show].shadow = group_sub(o->tmpl, "ShadowData");
         }
@@ -1029,23 +1064,7 @@ static void army_sync(Scene *s, double t)
         Instance *in = &s->instances[show];
         in->hidden = 0;
         memcpy(in->base.m, u->world, sizeof in->base.m);
-        /* the weapon clusters' turn on their control nodes (0x299010 hands the shape its WWeaponProcAnimator, the
-         * cluster +0x2C; 0x298980 turns +0x64 by +0x54 and +0x4C by +0x3C): a wreck's DestShape has no such nodes */
-        in->nturn = 0;
-        for (int w = 0; w < u->nw; w++)
-            for (int e = 0; e < 2; e++) {
-                const char *name = e ? u->w[w].elev_node : u->w[w].rot_node;
-                int had = 0;                         /* the weapons of one cluster share its nodes: turned once */
-                for (int t = 0; name && t < in->nturn; t++)
-                    had |= _stricmp(in->tree.nodes[in->turn[t].node].name, name) == 0;
-                for (uint32_t k = 0; name && !had && k < in->tree.n && in->nturn < 8; k++)
-                    if (_stricmp(in->tree.nodes[k].name, name) == 0) {
-                        in->turn[in->nturn].node = (int)k;
-                        in->turn[in->nturn].axis = e ? 0 : 2;
-                        in->turn[in->nturn++].angle = e ? u->w[w].pitch : u->w[w].yaw;
-                        break;
-                    }
-            }
+        instance_turns(in, u->w, u->nw);             /* a wreck's DestShape has no control nodes */
         if (in->has_clip && u->anim_len > 0 && u->clip)
             in->offset = (float)(u->anim_time / u->anim_len * in->clip.duration - t);
     }

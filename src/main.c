@@ -648,6 +648,25 @@ static int army_node_world(void *ctx, const ArmyUnit *u, const char *node, float
         printf("  %s node %s: %s\n", u->name ? u->name : "?", node, ok ? "found" : "not found");
     return ok;
 }
+static int boss_node_world(void *ctx, const BossPart *p, const char *node, float out[16])
+{
+    Viewer *v = ctx;                                 /* a node of the part's look as drawn */
+    int ok = 0;
+    for (int i = 0, n = v->boss ? boss_count(v->boss) : 0; i < n && !ok; i++)
+        if (boss_part(v->boss, i) == p)
+            ok = scene_boss_node(&v->scene, i, node, out) == 0;
+    if (getenv("RAMPAGE_NODES"))
+        printf("  %s node %s: %s\n", p->name ? p->name : "?", node, ok ? "found" : "not found");
+    return ok;
+}
+static int vehicle_node_world(void *ctx, const VehObj *o, const char *node, float out[16])
+{
+    Viewer *v = ctx;                                 /* a node of the object's look as drawn */
+    int ok = v->veh && scene_vehicle_node(&v->scene, (int)(o - vehicle_obj(v->veh, 0)), node, out) == 0;
+    if (getenv("RAMPAGE_NODES"))
+        printf("  %s node %s: %s\n", o->name ? o->name : "?", node, ok ? "found" : "not found");
+    return ok;
+}
 static float parade_clip_seconds(void *ctx, const char *anim, const char *shape)
 {
     return city_clip_seconds(((Viewer *)ctx)->city, anim, shape);
@@ -881,6 +900,7 @@ static void build(Viewer *v)
         vh.shape_box = army_shape_box;
         vh.shape_sphere = model_sphere;
         vh.rod = effect_rod;
+        vh.node_world = vehicle_node_world;
         vh.ctx = v;
         v->veh = vehicle_new(&vh);
         if (v->veh)
@@ -1046,6 +1066,7 @@ static void build(Viewer *v)
         bh.visible = people_visible;
         bh.weapon_make = boss_weapon_make;
         bh.weapon_tick = boss_weapon_tick;
+        bh.node_world = boss_node_world;
         bh.ctx = v;
         v->boss = boss_new(&bh);
         v->boss_block = 0;
@@ -2450,6 +2471,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
         m[k].nspheres = am[k].nspheres;
         memcpy(m[k].box_min, am[k].box_min, sizeof m[k].box_min);
         memcpy(m[k].box_max, am[k].box_max, sizeof m[k].box_max);
+        memcpy(m[k].target, am[k].target, sizeof m[k].target);
     }
     static BossBuilding bl[64];
     int nb = 0;
@@ -4594,7 +4616,8 @@ static void game_next_block(Viewer *v)
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
- * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "p2" (p1 .. p4): the words
+ * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
+ * object of that template (the FireTruck); "p2" (p1 .. p4): the words
  * after it play
  * that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back to
  * the shell the words stop: the ones left are returned (NULL none), for the shell */
@@ -4668,6 +4691,18 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
             name[k] = 0;
             challenge_stats(v, name, 0);
+            continue;
+        }
+        if (_stricmp(word, "spawn") == 0) {          /* spawn name: vehicle.c's object of that template 6 in front of
+                                                      * the monster (FireTruck, which no block spawns, places itself) */
+            char name[64];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
+            name[k] = 0;
+            float h = mo->heading / 57.2957795f, at[3] = { mo->mx - sinf(h) * 6, mo->my + cosf(h) * 6, 0 };
+            if (!v->veh || vehicle_spawn(v->veh, name, at, h, -1) < 0)
+                printf("no vehicle %s\n", name);
             continue;
         }
         if (_stricmp(word, "pause") == 0) {          /* Start: the Pause menu (the demo: its end) */

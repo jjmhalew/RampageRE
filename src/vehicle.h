@@ -95,13 +95,15 @@ struct VehObj {
     float elapsed, rpf[3], xpf, ypf;                 /* RocketBase.bsf */
     /* Vehicle_FireTruck.bsf */
     int ft_building, ft_stopped, ft_has_target;
-    float ft_target[3], ft_fire_left, ft_velocity, ft_target_dist, ft_yaw, ft_pitch;
+    float ft_target[3], ft_fire_left, ft_velocity, ft_target_dist;
+    /* its WeaponCluster (army.c's: the turn yaw / pitch, the ranges, rates and control nodes): draw the shape with
+     * tc.rot_node turned by tc.yaw about its own z and tc.elev_node by tc.pitch about its own x (0x298980) */
+    ArmyWeapon tc;
     struct {
         const char *name, *node, *fire_fx, *impact_fx;
         int ammo, counts, reaction, on, firing, first;
         float timer, charge, offset, refire, duration, damage, dps, velocity, range, h_knock, v_knock, left, age;
         float head, tail;                            /* the beam's stream (0x226CC0) */
-        float rot_rate, elev_rate, elev_min, elev_max;
     } w;
 };
 

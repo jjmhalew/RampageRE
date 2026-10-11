@@ -80,15 +80,6 @@ static void norm3(float a[3])
         a[2] /= l;
     }
 }
-static float facing_of(float dx, float dy) { return atan2f(-dx, dy); }   /* the facing that looks along (dx, dy) */
-static float wrap_pi(float a)
-{
-    while (a > PI)
-        a -= 2 * PI;
-    while (a < -PI)
-        a += 2 * PI;
-    return a;
-}
 
 /* 3 x 3 column-major: m[c * 3 + r] */
 static void rot_z(float r[9], float a)
@@ -883,8 +874,8 @@ static const char *wstr(Group own, Group book, const char *key)
 
 /* onInit [R]: pulses every frame; a random building; EntryDelay (read, unused), TargetDistance 5, FireDuration 5,
  * MaxVelocity 8; from x = +-75 (a coin) at y = -15 to the other side on a LineMover at 8, facing the way it goes.
- * The weapon (FireEngineStream, an RBeamWeapon on WeaponNode_Y) and the WeaponCluster's turn rates as army.c reads
- * them [R]; their units [G: radians a second, degrees for the ranges] */
+ * The weapon (FireEngineStream, an RBeamWeapon on WeaponNode_Y) and its WeaponCluster (0x299640: army.c
+ * army_cluster_read; rates in radians a second, ranges in degrees) [R] */
 static void ft_init(Vehicles *v, VehObj *o)
 {
     set_pulse(o, TIMESTEP);
@@ -920,10 +911,10 @@ static void ft_init(Vehicles *v, VehObj *o)
     o->w.v_knock = wnum(own, book, "VerticalKnockback", 0);
     o->w.timer = o->w.charge + o->w.offset;
     o->w.on = o->w.name != NULL;
-    o->w.rot_rate = gnum(wc, "RotationRate", 1);
-    o->w.elev_rate = gnum(wc, "ElevationRate", 1);
-    o->w.elev_min = gnum(wc, "ElevationMinRange", -90) * PI / 180;
-    o->w.elev_max = gnum(wc, "ElevationMaxRange", 90) * PI / 180;
+    memset(&o->tc, 0, sizeof o->tc);
+    army_cluster_read(&o->tc, wc);
+    o->tc.velocity = o->w.velocity;
+    o->tc.gravity = wnum(own, book, "Gravity", 0);
 }
 
 /* [G] gWorld.getRandomBuilding: any standing building; Building.getPosition: the middle of its footprint, on the
@@ -1051,8 +1042,7 @@ static float ray_monster(const Vehicles *v, const float p[3], const float d[3], 
  * the weapon has ammo (or does not count it), held at ChargeTime + FiringOffset while it may not fire; at 0 with ammo
  * the beam runs for Duration (ammo - 1; FireEngineStream has 1: one stream a truck); it stops at the first thing it
  * meets: a monster takes ImpactDamage on the first touch, DamagePerSec x dt after, with its ReactionLevel (1).
- * [G] may fire: a target, the turret on it (within 0.02 rad), within MaxFiringRange; the turret's yaw and pitch step
- * at the cluster's rates; the stream reaches out at Velocity a second and stops at its target (the building) */
+ * It may fire with a target, the turret on it and the target within MaxFiringRange (0x299010, as army.c's) [R] */
 static void ft_weapon(Vehicles *v, VehObj *o, float dt)
 {
     float from[3], nw[16];
@@ -1062,32 +1052,27 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
     } else {
         from[0] = o->pos[0]; from[1] = o->pos[1]; from[2] = o->pos[2] + 3;
     }
-    int on_target = 0;
-    float tdist = 0;
-    if (o->ft_has_target) {
-        float d[3] = { o->ft_target[0] - from[0], o->ft_target[1] - from[1], o->ft_target[2] - from[2] };
-        float h = sqrtf(d[0] * d[0] + d[1] * d[1]);
-        tdist = len3(d);
-        float want_yaw = wrap_pi(facing_of(d[0], d[1]) - o->facing), want_pitch = atan2f(d[2], h);
-        if (want_pitch < o->w.elev_min) want_pitch = o->w.elev_min;
-        if (want_pitch > o->w.elev_max) want_pitch = o->w.elev_max;
-        float dy = wrap_pi(want_yaw - o->ft_yaw), dp = want_pitch - o->ft_pitch;
-        float sy = o->w.rot_rate * dt, sp = o->w.elev_rate * dt;
-        o->ft_yaw = wrap_pi(o->ft_yaw + (fabsf(dy) <= sy ? dy : (dy > 0 ? sy : -sy)));
-        o->ft_pitch += fabsf(dp) <= sp ? dp : (dp > 0 ? sp : -sp);
-        /* [R 0x29ADE0] on target: the turn within pi / 50, the pitch within pi / 100 */
-        on_target = fabsf(wrap_pi(want_yaw - o->ft_yaw)) <= 0.0628f && fabsf(want_pitch - o->ft_pitch) < 0.0314f;
-    }
-    float yaw = o->facing + o->ft_yaw, cp = cosf(o->ft_pitch);
-    float dir[3] = { -sinf(yaw) * cp, cosf(yaw) * cp, sinf(o->ft_pitch) };
-    /* [R 0x2971A0, 0x226950] the firing frame is the WeaponNode's world (the identity at +0xBC), the cluster's turn
-     * in it (army_frame_turn); the beam runs along the rod's direction through it and the effect is placed in it */
+    /* [R 0x29ADE0] the cluster's turn (army.c army_cluster_turn): from the heading of the truck's +y row, the pitch
+     * corrected for its tilt (0x29B3B8 .. 0x29B7F8) */
+    float front = atan2f(-o->world[4], o->world[5]);
+    int on_target = army_cluster_turn(&o->tc, o->world, from, o->ft_has_target ? o->ft_target : NULL, dt);
+    float td[3] = { o->ft_target[0] - from[0], o->ft_target[1] - from[1], o->ft_target[2] - from[2] };
+    float tdist = o->ft_has_target ? len3(td) : 0;
+    float yaw = front + o->tc.yaw, cp = cosf(o->tc.pitch);
+    float dir[3] = { -sinf(yaw) * cp, cosf(yaw) * cp, sinf(o->tc.pitch) };
+    /* [R 0x2971A0, 0x226950, 0x298980] the firing frame is the WeaponNode's world (the identity at +0xBC) as drawn,
+     * which carries the cluster's turn on the Rotation / Elevation nodes (city.c, a frame behind); a shape without
+     * them gets the turn put on the frame (army_frame_turn) [G]. The beam runs along the rod's direction through it
+     * and the effect is placed in it */
     const float *m = have_node ? nw : o->world;
     for (int r = 0; r < 3; r++) {
         memcpy(o->beam.R[r], m + 4 * r, sizeof o->beam.R[r]);
         norm3(o->beam.R[r]);
     }
-    army_frame_turn(o->beam.R, o->facing, o->ft_yaw, o->ft_pitch);
+    float cn[16];
+    const char *ctl = o->tc.rot_node ? o->tc.rot_node : o->tc.elev_node;
+    if (!(have_node && ctl && v->host.node_world(v->host.ctx, o, ctl, cn)))
+        army_frame_turn(o->beam.R, front, o->tc.yaw, o->tc.pitch);
     float rd[3], speed, length, cycle;
     int loops, rod = v->host.rod && o->w.fire_fx &&
                      v->host.rod(v->host.ctx, o->w.fire_fx, rd, &speed, &length, &cycle, &loops);

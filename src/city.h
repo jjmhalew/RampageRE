@@ -325,6 +325,9 @@ int city_shape_box(City *c, const char *shape, float min[3], float max[3]);
 int city_shape_sphere(City *c, const char *shape, float centre[3], float *radius);
 /* an army unit's node (a weapon's WeaponNode) in the world as its look is drawn now; 0 = ok */
 int scene_unit_node(const Scene *s, int unit, const char *node, float out[16]);           /* camera.bdp's TwoTilts group; 0 = ok */
+/* the same for boss part `part` (boss.c) and vehicle object `obj` (vehicle.c) as drawn; 0 = ok */
+int scene_boss_node(const Scene *s, int part, const char *node, float out[16]);
+int scene_vehicle_node(const Scene *s, int obj, const char *node, float out[16]);
 void scene_free(Scene *s);
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);   /* the 30 monsters (NAME_anims.cmp) */
 

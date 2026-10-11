@@ -105,9 +105,6 @@ typedef struct Obj {
     float pulse_delay, pulse_time;                   /* setPulseDelay; 0: every frame */
     float lo[3], hi[3];                              /* its collision shape's box in its own frame */
     CollideShape cshape;                             /* its collision shape (WCollisionInfo, 0x28FD70) */
-    ArmyWeapon w[4];
-    int nw, need_rot[4], need_elev[4];
-    float elev_min[4], elev_max[4];
     int weapons_on, target;                          /* setTarget: a monster, or -1 */
     int has_point;                                   /* setTarget(a DummyObject): aim at point */
     float point[3];
@@ -447,15 +444,6 @@ static void m_effect(Boss *b, int i, const char *name)   /* FollowEffect.createA
     e->id = b->next_fx++;
     e->dir[1] = 1;
 }
-static void m_centre(const BossMonster *m, float c[3])   /* [G] where a weapon aims: the box's middle (army.c) */
-{
-    if (m->box_max[2] > m->box_min[2])
-        for (int k = 0; k < 3; k++)
-            c[k] = (m->box_min[k] + m->box_max[k]) / 2;
-    else
-        set3(c, m->pos[0], m->pos[1], m->pos[2] + 4.25f);
-}
-
 /* ---------------------------------------------------------------- the buildings */
 
 /* building.isValid() [R 0x2795E8]: only a handle check (the object there, its serial the same); a building stays in
@@ -880,11 +868,12 @@ static void start_anim(Boss *b, Obj *o, const char *name)   /* Actor.startAnim (
     o->anim_done = 0;
 }
 
-/* the template's weapons: WeaponSystem { WeaponCluster { turret, Weapon| {...} ... } } (army.c unit_weapons) */
+/* the template's weapons: WeaponSystem { WeaponCluster { turret, Weapon| {...} ... } }, each with its cluster's keys
+ * (army.c army_cluster_read, 0x299640) */
 static void obj_weapons(Boss *b, Obj *o)
 {
     Record r[8];
-    o->nw = 0;
+    o->p.nw = 0;
     if (!b->host.weapon_make)
         return;
     Group sys = group_sub(o->p.tmpl, "WeaponSystem|WeaponSystem");
@@ -893,36 +882,29 @@ static void obj_weapons(Boss *b, Obj *o)
     if (!sys.at)
         return;
     uint32_t nc = group_all(sys, "WeaponCluster|", r, 8);
-    for (uint32_t c = 0; c < nc && o->nw < 4; c++) {
+    for (uint32_t c = 0; c < nc && o->p.nw < BOSS_WEAPONS; c++) {
         Group cl = record_group(sys, r[c]);
         Record wr[8];
         uint32_t nw = group_all(cl, "Weapon|", wr, 8);
-        for (uint32_t i = 0; i < nw && o->nw < 4; i++) {
-            ArmyWeapon *w = &o->w[o->nw];
+        for (uint32_t i = 0; i < nw && o->p.nw < BOSS_WEAPONS; i++) {
+            ArmyWeapon *w = &o->p.w[o->p.nw];
             if (!b->host.weapon_make(b->host.ctx, w, record_group(cl, wr[i])))
                 continue;
-            int k = o->nw++;
-            w->rot_range = group_num(cl, "RotationRange", 0) * PI / 180;
-            w->rot_rate = group_num(cl, "RotationRate", 1);
-            w->elev_range = group_num(cl, "ElevationRange", 0) * PI / 180;
-            w->elev_rate = group_num(cl, "ElevationRate", 1);
-            o->elev_min[k] = group_num(cl, "ElevationMinRange", -group_num(cl, "ElevationRange", 90)) * PI / 180;
-            o->elev_max[k] = group_num(cl, "ElevationMaxRange", group_num(cl, "ElevationRange", 90)) * PI / 180;
-            o->need_rot[k] = group_num(cl, "RequiresRotationClearToFire", 1) != 0;
-            o->need_elev[k] = group_num(cl, "RequiresElevationClearToFire", 1) != 0;
+            o->p.nw++;
+            army_cluster_read(w, cl);
             w->on = 1;
         }
     }
 }
 static void weapon_ammo(Obj *o, int n, int i)        /* setWeaponAmmo(n, 0, i) [G: the weapon's ammo, as army.c] */
 {
-    if (i >= 0 && i < o->nw)
-        o->w[i].ammo = n;
+    if (i >= 0 && i < o->p.nw)
+        o->p.w[i].ammo = n;
 }
 static void weapon_reload(Obj *o, int i)             /* reloadWeapon(i, 0) [G: back to its Ammo, as army.c] */
 {
-    if (i >= 0 && i < o->nw)
-        o->w[i].ammo = o->w[i].ammo_max > 0 ? o->w[i].ammo_max : 1;
+    if (i >= 0 && i < o->p.nw)
+        o->p.w[i].ammo = o->p.w[i].ammo_max > 0 ? o->p.w[i].ammo_max : 1;
 }
 static void weapons_enable(Obj *o, int on) { o->weapons_on = on; }   /* enableWeapons */
 static void set_target(Obj *o, int monster)          /* setTarget(monster) / setTarget(nullTarget) */
@@ -938,12 +920,17 @@ static void set_target_point(Obj *o, const float p[3])   /* setTarget(a DummyObj
 }
 
 /* every weapon this frame, through the army (weapon_tick). Where it fires from: the WeaponNode as drawn when the
- * host knows it, else the part's place; which way: the cluster turned onto the target at RotationRate /
- * ElevationRate [G: radians a second, as army.c] within its ranges, and fired once on it (or at once where
- * Requires...ClearToFire is 0) and within MaxFiringRange; a bomb (Direction -Z) drops along the node's -Z */
+ * host knows it, else the part's place; which way: the cluster turned onto the target (army.c army_cluster_turn: the
+ * rates, the ends, the lift for the shot's fall, on target within pi / 50 and pi / 100, ReCenterWhenNoTarget; the
+ * turn from the heading of the part's +y row, the pitch corrected for its tilt: 0x29ADE0, 0x29B3B8 .. 0x29B7F8) [R],
+ * fired once on it (or at once where Requires...ClearToFire is 0) and within MaxFiringRange; a bomb (Direction -Z)
+ * drops along the node's -Z. The firing frame is the node's world as drawn, which carries the turn where the shape
+ * has the cluster's control nodes (city.c draws them turned, 0x298980; a frame behind), and the shot leaves along its
+ * Direction axis (0x2963C0) [R]; elsewhere the turn is put on it (army_frame_turn) and the shot leaves along the
+ * turn's way [G: a stand-in; every boss model has its nodes] */
 static void obj_weapons_tick(Boss *b, Obj *o, float dt)
 {
-    if (!b->host.weapon_tick || o->nw == 0)
+    if (!b->host.weapon_tick || o->p.nw == 0)
         return;
     float tp[3] = { 0, 0, 0 };
     int has = 0;
@@ -951,11 +938,12 @@ static void obj_weapons_tick(Boss *b, Obj *o, float dt)
         copy3(tp, o->point);
         has = 1;
     } else if (m_valid(b, o->target)) {
-        m_centre(&b->m[o->target], tp);
+        copy3(tp, b->m[o->target].target);
         has = 1;
     }
-    for (int i = 0; i < o->nw; i++) {
-        ArmyWeapon *w = &o->w[i];
+    float front = atan2f(-o->p.world[4], o->p.world[5]);   /* the +y row's heading */
+    for (int i = 0; i < o->p.nw; i++) {
+        ArmyWeapon *w = &o->p.w[i];
         float node[16], from[3], dir[3], F[3][3];
         int have_node = b->host.node_world && w->node && b->host.node_world(b->host.ctx, &o->p, w->node, node);
         for (int r = 0; r < 3 && have_node; r++) {   /* [R 0x2971A0] the firing frame: the node's world */
@@ -976,28 +964,17 @@ static void obj_weapons_tick(Boss *b, Obj *o, float dt)
             else
                 set3(dir, 0, 0, -1);
         } else {
-            float want_yaw = 0, want_pitch = 0;
-            if (has) {
-                float d[3];
-                sub3(d, tp, from);
-                float h = sqrtf(d[0] * d[0] + d[1] * d[1]);
-                want_yaw = atan2f(-d[0], d[1]) - o->p.facing[2];
-                while (want_yaw > PI) want_yaw -= 2 * PI;
-                while (want_yaw < -PI) want_yaw += 2 * PI;
-                want_pitch = atan2f(d[2], h);
-                if (w->rot_range > 0 && w->rot_range < PI)
-                    want_yaw = clampf(want_yaw, -w->rot_range, w->rot_range);
-                want_pitch = clampf(want_pitch, o->elev_min[i], o->elev_max[i]);
-            }
-            float sy = w->rot_rate * dt, sp = w->elev_rate * dt;
-            w->yaw += clampf(want_yaw - w->yaw, -sy, sy);
-            w->pitch += clampf(want_pitch - w->pitch, -sp, sp);
-            aimed = (!o->need_rot[i] || fabsf(want_yaw - w->yaw) < 0.05f) &&
-                    (!o->need_elev[i] || fabsf(want_pitch - w->pitch) < 0.05f);
-            float h = o->p.facing[2] + w->yaw;
+            aimed = army_cluster_turn(w, o->p.world, from, has ? tp : NULL, dt);
+            float h = front + w->yaw;
             set3(dir, -sinf(h) * cosf(w->pitch), cosf(h) * cosf(w->pitch), sinf(w->pitch));
-            if (have_node)
-                army_frame_turn(F, o->p.facing[2], w->yaw, w->pitch);
+            float cn[16];
+            const char *ctl = w->rot_node ? w->rot_node : w->elev_node;
+            int drawn = have_node && ctl && b->host.node_world(b->host.ctx, &o->p, ctl, cn);
+            if (drawn)                               /* [R 0x2963C0] along the drawn node's Direction axis */
+                for (int k = 0; k < 3; k++)
+                    dir[k] = F[w->axis][k] * (w->axis_neg ? -1.0f : 1.0f);
+            else if (have_node)
+                army_frame_turn(F, front, w->yaw, w->pitch);
         }
         int may = has && o->weapons_on && aimed && dist3(from, tp) <= w->range;
         b->host.weapon_tick(b->host.ctx, w, may, from, dir, have_node ? (const float (*)[3])F : NULL,
@@ -3612,7 +3589,7 @@ static void obj_update(Boss *b, Obj *o, float dt)
     if (wobble && o->oriented)                       /* a mover's frame: its facing (0x101220) + the change, made
                                                       * again (0x101330) */
         army_osc_turn(o->p.world, d);
-    if (o->nw)
+    if (o->p.nw)
         obj_weapons_tick(b, o, dt);
 }
 

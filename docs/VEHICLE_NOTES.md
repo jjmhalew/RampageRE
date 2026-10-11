@@ -226,12 +226,19 @@ reports every award with its template name, so the viewer can count challenge go
   - getRandomBuilding (0x2AEC40): from (int)(n × frand) round the list, the first not gone [R];
   - Building.getPosition (0x277C60) is +0x2C: (LeftEdgeXPos + 2.5 Width, 2.5 Depth + the row's BackRowOffset, 0),
     set at its making (0x2BCBC4) [R]; as here (`building_pos`);
-  - the turret's rates are radians a second (0x299640) [R];
-  - firing when on target: the turn within π/50, the pitch within π/100 (0x29ADE0) [R];
+  - the turret is army.c's WeaponCluster (`army_cluster_read`, 0x299640; `army_cluster_turn`, 0x29ADE0): rates in
+    radians a second, ranges in degrees, the turn from the heading of the truck's +y row, on target when the turn is
+    within π/50 and the pitch within π/100 [R]; its `Rotation` / `Elevation` nodes are drawn turned (0x298980; city.c
+    `vehicle_sync` → `instance_turns`), so the ladder swings round and up onto the target and `WeaponNode_Y`, at its
+    end, is the firing frame as drawn (main.c `vehicle_node_world`) [R];
   - the stream's reach is Blimp_Laser_Fire's collision rod (500 a second up to 125; ARMY_NOTES.md) [R];
   - the stream is not cut at its target and meets the world's nearest (0x295750: include −1, exclude 8) [R]; as here
     (vehicle.c casts the collision world's ray beside the monsters'); `setWeaponFlags(-1, 16)` holds every weapon (0x29AB60: +0x38 |= 16, untargeted) [R];
   - the weapon node: the host's `node_world`, else 3 above the truck.
+- **Testing it:** no block spawns `FireTruck` (checked: every city's TrafficDef names `FireTruckVehicle`, the plain
+  Vehicle.bsf car with the same `FireTruck` model, and no script asks for `FireTruck`), so the viewer's
+  `--do "spawn FireTruck"` makes one (main.c). In CG01 it picks the building at x −75, stops there 2 s in, swings its
+  ladder round (+85°) and up (14°) at the building's front and streams for 4 s, then drives on.
 - **WorldObject.rotate:** rot × Rz(e[2]) Rx(e[0]) Ry(e[1]), in its own frame (case 0xD, 0x278258) [R].
 - **The first fill** is done again after `vehicle_clear`. Whether a later block load resets it was not traced.
 - **Not ported:** what the 0x80000 / 0x8000000 object flags do in the engine.

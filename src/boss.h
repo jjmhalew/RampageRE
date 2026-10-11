@@ -53,6 +53,8 @@ enum {
     BK_NONE
 };
 
+#define BOSS_WEAPONS 4
+
 /* ---- one part to draw (boss_part) */
 typedef struct {
     const char *name;   /* its template (Objects1_Props) */
@@ -72,6 +74,10 @@ typedef struct {
     float anim_time, anim_len;
     int anim_loop;
     float hp_frac;      /* what updateChallengeHud was last told for it (1 at the start) */
+    /* its weapons (its template's WeaponSystem, the army's ArmyWeapons): draw the shape with each one's rot_node turned
+     * by yaw about its own z and elev_node by pitch about its own x (WWeaponProcAnimator 0x298980) */
+    ArmyWeapon w[BOSS_WEAPONS];
+    int nw;
 } BossPart;
 
 /* ---- what the module asks of its host */
@@ -105,6 +111,7 @@ typedef struct {
     int climbing;                                    /* Monster.isClimbing: +0xB9C0 != 0, on a building's wall */
     const float (*spheres)[4]; int nspheres;         /* its collision spheres in the world */
     float box_min[3], box_max[3];                    /* its collision box in the world (used without spheres) */
+    float target[3];                                 /* where the weapons aim (0x2DB030): ArmyMonster.target */
 } BossMonster;
 
 /* ---- a building as the bosses see it (index = the caller's; events name it) */

@@ -197,6 +197,14 @@ int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group);
 /* frame: the weapon's firing frame (rows x, y, z in the world), NULL: one made with its beam axis along dir */
 void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3],
                       const float frame[3][3], int target, float dt);
+/* a WeaponCluster (cl) on a weapon of it (army.c's units, boss.c's parts, the fire truck): its turn's ranges, rates,
+ * Requires...ClearToFire, ReCenterWhenNoTarget and control nodes (0x299640) */
+void army_cluster_read(ArmyWeapon *w, Group cl);
+/* one frame of the cluster's turn (0x29ADE0, 0x29BA50): w->yaw / pitch step at the rates towards target (in the world,
+ * lifted for the shot's fall from `from`, 0x293050; NULL: no target, back to 0, 0 with ReCenterWhenNoTarget), the turn
+ * from the heading of the object's +y row and the pitch corrected for its tilt (0x29B3B8 .. 0x29B7D8), world its
+ * column-major matrix; within the ends; whether it is on target (pi / 50, pi / 100) */
+int army_cluster_turn(ArmyWeapon *w, const float world[16], const float from[3], const float *target, float dt);
 /* [R 0x100F50] row k of F made v (1 long), the other two square to it: row k + 1 (mod 3) from the world's x (its y
  * when v is within 45.6 degrees of x), row k + 2 = row k x row k + 1 made 1 long, then row k + 1 = row k + 2 x row k */
 void army_frame_point(float F[3][3], const float v[3], int k);
