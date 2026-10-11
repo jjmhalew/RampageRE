@@ -158,6 +158,7 @@ typedef struct {                                     /* a shot in the air, or a 
     int id, beam, alive;
     const char *weapon, *effect;                     /* WeaponName, its FireEffect (the shot's look) */
     int owner;                                       /* the unit, -1 (a person's) */
+    uint32_t owner_tag;                              /* a person's: its actor's collision tag, no hit (0 none) */
     float pos[3], dir[3], speed, age, length;        /* a beam: from pos along dir, length long */
     float head, tail;                                /* a beam's stream (0x226CC0's +0x30 / +0x34) */
     float R[3][3];                                   /* a beam: the weapon's firing frame (rows x, y, z), its effect's */
@@ -251,9 +252,12 @@ int army_spawn(Army *a, const char *tmpl_name, const float pos[3], float facing)
 int army_spawn_window(Army *a, const char *tmpl_name, const float pos[3]);
 /* PE_DROP: the block's droppable template falls from a window at from (Droppable.bsf onInit) */
 int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
-/* PE_WEAPON from people.c: person `who`'s weapon WeaponName on (at its world matrix, at target_monster) or off (NULL) */
-void army_person_weapon(Army *a, int who, const char *weapon, const float person_world[16], int target_monster);
-void army_person_moved(Army *a, int who, const float person_world[16]);
+/* PE_WEAPON from people.c (PAE_WEAPON from parade.c): person `who`'s weapon on, weapon its template's own
+ * Weapon|RifleWeapon group (its WeaponName, at its world matrix, at target_monster), or off (weapon.at NULL) */
+void army_person_weapon(Army *a, int who, Group weapon, const float person_world[16], int target_monster);
+/* each frame: where it is, its collision tag in the frame's world (its shots pass it; 0 none), and its clip's time
+ * and one play's length (its weapon fires within AnimPosMin .. Max) */
+void army_person_moved(Army *a, int who, const float person_world[16], uint32_t tag, float anim_time, float anim_len);
 void army_person_forget(Army *a, int who);           /* the person is gone: its weapon with it */
 
 void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox *b, int nb);

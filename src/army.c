@@ -31,7 +31,9 @@ typedef struct {                                     /* an AIInstance record, 0x
     int alive, enabled;                              /* +1C, +20 */
 } Spawner;
 
-typedef struct { int who, on, monster; float world[16]; ArmyWeapon w; int has; } PersonGun;   /* who: person + 1, 0 free */
+typedef struct { int who, on, monster; float world[16], clip; ArmyWeapon w; int has; uint32_t tag; } PersonGun;   /* who:
+                                                     * person + 1, 0 free; clip, tag: its actor's clip position and its
+                                                     * body's collision tag (army_person_moved) */
 typedef struct { float step, sum; int skip; } Chain; /* a building's +0x194, +0x198, +0x19C [R] */
 
 struct Army {
@@ -46,6 +48,7 @@ struct Army {
     float fallback_ts, fire_ts, move_ts, emerge_ts, now;
     int window_first, window_boss;                   /* Military_Window.bsf's isFirst, makeBoss */
     PersonGun person[MAX_PERSONS];
+    uint32_t person_tag;                             /* persons_update: the body of the person firing now (0 none) */
     ArmyStats stats[ARMY_MONSTERS];
     Chain chain[MAX_BUILDINGS];
     /* this frame */
@@ -653,7 +656,7 @@ static ArmyShot *new_shot(Army *a)
  * Returns the distance, -1 none; *monster the monster it hit (an object tagged COLLIDE_OWN_MONSTER) or -1, *obj the
  * world's object (-1 the street or none), nrm the surface */
 static float ray_hit(Army *a, const float p[3], const float d[3], float len, uint32_t include, uint32_t exclude,
-                     int owner, int beam, int *monster, int *obj, float nrm[3])
+                     int owner, uint32_t owner_tag, int beam, int *monster, int *obj, float nrm[3])
 {
     static CollideWorld none;                        /* no world: the street alone */
     CollideWorld *w = a->cw ? a->cw : &none;
@@ -668,6 +671,8 @@ static float ray_hit(Army *a, const float p[3], const float d[3], float len, uin
         w->o[oo].flags = keep;
     if (!got || (!beam && oo >= 0 && h.obj == oo))
         return -1;
+    if (!beam && owner_tag && h.obj >= 0 && w->o[h.obj].tag == (int)owner_tag)
+        return -1;                                   /* a person's shot: its own actor is no hit either */
     memcpy(nrm, h.normal, sizeof h.normal);
     *obj = h.obj;
     if (h.obj >= 0 && COLLIDE_TAG_OWNER(w->o[h.obj].tag) == COLLIDE_OWN_MONSTER) {
@@ -722,6 +727,7 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
     s->effect = w->fire_fx;
     s->impact_fx = w->impact_fx;
     s->owner = u ? who(a, u) : -1;
+    s->owner_tag = u ? 0 : a->person_tag;
     s->target = target;
     memcpy(s->pos, from, sizeof s->pos);
     memcpy(s->dir, dir0, sizeof s->dir);
@@ -802,7 +808,8 @@ static void shot_update(Army *a, ArmyShot *s, float dt)
     if (step > 0.001f && s->age >= s->impact_delay) {
         int mon, obj;
         float nrm[3];
-        float t = ray_hit(a, s->pos, s->dir, step + 0.001f, s->include, s->exclude, s->owner, 0, &mon, &obj, nrm);
+        float t = ray_hit(a, s->pos, s->dir, step + 0.001f, s->include, s->exclude, s->owner, s->owner_tag, 0, &mon, &obj,
+                          nrm);
         if (t >= 0) {
             float at[3] = { s->pos[0] + s->dir[0] * t, s->pos[1] + s->dir[1] * t, s->pos[2] + s->dir[2] * t };
             if (getenv("RAMPAGE_TRACE")) {           /* what it met: the street, a monster, a module's object */
@@ -875,7 +882,7 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     int mon, obj;
     float nrm[3];
     float t = head - tail > 0.001f ?
-              ray_hit(a, from_t, s->dir, head - tail, ~0u, 0, u ? who(a, u) : -1, 1, &mon, &obj, nrm) : -1;
+              ray_hit(a, from_t, s->dir, head - tail, ~0u, 0, u ? who(a, u) : -1, 0, 1, &mon, &obj, nrm) : -1;
     if (t >= 0)
         head = tail + t;                             /* [R 0x226DF0] the cut */
     s->head = head;
@@ -3656,45 +3663,25 @@ void army_person_forget(Army *a, int person)
         memset(g, 0, sizeof *g);
 }
 
-void army_person_weapon(Army *a, int person, const char *weapon, const float person_world[16], int target_monster)
+void army_person_weapon(Army *a, int person, Group weapon, const float person_world[16], int target_monster)
 {
+    const char *name = weapon.at ? group_str(weapon, "WeaponName") : NULL;
     if (person < 0)
         return;
-    PersonGun *g = person_gun(a, person, weapon != NULL);
+    PersonGun *g = person_gun(a, person, name != NULL);
     if (!g)
         return;
-    if (!weapon) {                                   /* enableWeapon(0): it keeps counting down (0x30EC10) */
+    if (!name) {                                     /* enableWeapon(0): it keeps counting down (0x30EC10) */
         g->on = 0;
         g->w.on = 0;
         return;
     }
-    if (!g->has || !same_text(g->w.name, weapon)) {
-        Group book = a->host.find ? a->host.find(a->host.ctx, "Weapons", weapon) : (Group){ 0 };
-        memset(&g->w, 0, sizeof g->w);
-        g->has = 0;
-        if (book.at) {
-            /* the weapon as weapon_make builds it, from the book's group alone (people.c passes the name only) */
-            ArmyWeapon *w = &g->w;
-            const char *type = group_str(book, "WeaponType");
-            w->type = type && same_text(type, "RBeamWeapon") ? 1 : type && same_text(type, "RProjectileWeapon") ? 0 : 2;
-            w->name = weapon;
-            w->range = 10;
-            w->damage_type = 11;
-            w->start_ammo = -1;
-            w->accel = 1e8f;
-            w->init_vel = 1;
-            w->axis = 2;
-            w->vis_range = 1;
-            w->reaction = -1;
-            weapon_read(w, book);
-            if (w->ammo_max != 0)
-                w->def_flags |= 2;
-            w->ammo = w->start_ammo >= 0 ? w->start_ammo : w->ammo_max;
-            w->scale = 1;
-            w->timer = w->charge_time + w->firing_offset;
-            w->shot = -1;
-            g->has = 1;
-        }
+    if (!g->has || !same_text(g->w.name, name)) {
+        /* [R 0x30F1F0] the actor's weapon: the book's group, then the template's own group over it (0x297AA0 twice,
+         * 0x30F594 / 0x30F5A8), as weapon_make does: the biker's ImpactDamage 2, the street punks' Velocity 12 and
+         * ImpactDelay 0.2; and its AnimPosMin / Max (the biker's 0.4 .. 1) */
+        g->has = weapon_make(a, &g->w, weapon) && g->w.name;
+        g->clip = 0;
     }
     g->on = 1;
     g->w.on = 1;
@@ -3703,15 +3690,19 @@ void army_person_weapon(Army *a, int person, const char *weapon, const float per
         memcpy(g->world, person_world, sizeof g->world);
 }
 
-void army_person_moved(Army *a, int person, const float person_world[16])
+void army_person_moved(Army *a, int person, const float person_world[16], uint32_t tag, float anim_time, float anim_len)
 {
     PersonGun *g = person >= 0 && person_world ? person_gun(a, person, 0) : NULL;
-    if (g)
-        memcpy(g->world, person_world, 16 * sizeof(float));
+    if (!g)
+        return;
+    memcpy(g->world, person_world, 16 * sizeof(float));
+    g->tag = tag;
+    g->clip = anim_len > 0.001f ? anim_time / anim_len : 0;   /* [R 0x30C020] the record's time / its length */
 }
 
 /* [R 0x30EC10] the actor's weapon is updated every frame, enabled or not (its vtable +0x6C with the enable byte
- * +0x0): a disabled one counts down to its floor (ChargeTime + FiringOffset, weapon_tick) and does not fire */
+ * +0x0): a disabled one counts down to its floor (ChargeTime + FiringOffset, weapon_tick) and does not fire; nor does
+ * one whose actor's clip is outside its AnimPosMin .. Max (the biker's bottle leaves 0.4 into its 0.7 s Throw) */
 static void persons_update(Army *a, float dt)
 {
     for (int i = 0; i < MAX_PERSONS; i++) {
@@ -3723,7 +3714,10 @@ static void persons_update(Army *a, float dt)
         if (m >= 0)
             monster_target(&a->m[m], tp);
         lob(from, tp, g->w.velocity, 9.81f * g->w.gravity, dir);   /* the throw's aim: see weapon_aim */
-        weapon_tick(a, NULL, &g->w, g->on && m >= 0 && dist3(from, tp) <= g->w.range, from, dir, NULL, m, dt);
+        int in_clip = g->clip >= g->w.anim_min && g->clip <= g->w.anim_max;
+        a->person_tag = g->tag;
+        weapon_tick(a, NULL, &g->w, g->on && in_clip && m >= 0 && dist3(from, tp) <= g->w.range, from, dir, NULL, m, dt);
+        a->person_tag = 0;
     }
 }
 

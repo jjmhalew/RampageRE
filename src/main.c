@@ -3717,7 +3717,8 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             case PAE_WEAPON:                         /* the biker's bottle: the army's person weapons */
                 if (v->army) {
                     const ParadeObj *o = parade_obj(v->parade, e->obj);
-                    army_person_weapon(v->army, 1000 + e->obj, e->name, o ? o->world : NULL, e->monster >= 0 ? e->monster : 0);
+                    army_person_weapon(v->army, 1000 + e->obj, e->name && o ? group_sub(o->tmpl, "Weapon|RifleWeapon")
+                                       : (Group){ 0 }, o ? o->world : NULL, e->monster >= 0 ? e->monster : 0);
                 }
                 break;
             case PAE_REMOVED:
@@ -3744,7 +3745,7 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
     for (int i = 0, n = parade_count(v->parade); v->army && i < n; i++) {   /* the bikers' weapons go with them */
         const ParadeObj *o = parade_obj(v->parade, i);
         if (o->kind == PAK_BIKER && o->weapon_on)
-            army_person_moved(v->army, 1000 + i, o->world);
+            army_person_moved(v->army, 1000 + i, o->world, COLLIDE_TAG(COLLIDE_OWN_PARADE, i), o->anim_time, o->anim_len);
     }
     for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand */
         Mon *mo = &v->mon[k];
@@ -4771,7 +4772,8 @@ static void play_step(Viewer *v, float dt, float aspect)
                     army_drop(v->army, tmpl, ev[i].v, NULL, 0, NULL, 0);
             } else if (ev[i].type == PE_WEAPON) {            /* enableWeapon(1) with its name, enableWeapon(0) without */
                 int on = ev[i].on && ev[i].name, k;
-                army_person_weapon(v->army, ev[i].who, on ? ev[i].name : NULL, p->world, 0);
+                army_person_weapon(v->army, ev[i].who, on ? group_sub(p->tmpl, "Weapon|RifleWeapon") : (Group){ 0 },
+                                   p->world, 0);
                 for (k = 0; k < v->narmed_people && v->armed_people[k] != ev[i].who; k++)
                     ;
                 if (on && k == v->narmed_people && v->narmed_people < 32)
@@ -4781,7 +4783,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         for (int i = 0; v->army && i < v->narmed_people; i++) {
             const Person *p = people_get(v->scene.folk, v->armed_people[i]);
             if (p && p->phase != PP_GONE)
-                army_person_moved(v->army, v->armed_people[i], p->world);
+                army_person_moved(v->army, v->armed_people[i], p->world, 0, p->anim_time, p->anim_len);
             else {                                   /* [R] a deleted actor's weapon goes with it */
                 army_person_forget(v->army, v->armed_people[i]);
                 v->armed_people[i--] = v->armed_people[--v->narmed_people];

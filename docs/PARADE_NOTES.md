@@ -90,8 +90,9 @@ The bike deletes itself at the end of its line (`Bike.bsf onMoverCallback`, any 
 - state 4 (it threw): weapon off, pulse 2, state 1;
 - state 1: pulse 0.5. If the nearest monster is ahead of it (facing +x and the monster's x greater, or facing −x and
   smaller) and nearer than `ThrowingRange` (3D): `Throw`, its weapon on at that monster (`Weapon|RifleWeapon`:
-  `StreetPunkBottle` from `MuzzleFlash_Small`, RefireDelay 1), state 4. Within 10 of the camera's x it plays its
-  `VisibleSound` (`Harley`, level 1), every pulse.
+  `StreetPunkBottle` from `MuzzleFlash_Small`, RefireDelay 1, ImpactDamage 2, over the book's; it fires only from
+  `AnimPosMin` 0.4 of the clip on, 0.28 s into the 0.7 s `Throw`, 0x30EC10), state 4. Within 10 of the camera's x it
+  plays its `VisibleSound` (`Harley`, level 1), every pulse.
 
 **onAnimComplete** [R]: in states 4 and 1 `Ride` again, in state 2 `PickedUp` again.
 

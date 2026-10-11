@@ -96,15 +96,20 @@ else 0.
   (WalkingAroundPerson.bsf) enable theirs at the end of `Throw` and disable it 0.25 s later (`disableWeaponDelay`
   on the pulse): StreetPunkBottle's countdown starts at 0 (ChargeTime + FiringOffset), so one bottle a throw, a throw
   every `ReloadDelay` (5) at most [R]. Here army.c `army_person_weapon` / `persons_update` (a weapon per person,
-  kept until `army_person_forget`).
+  kept until `army_person_forget`; the bikers' too, parade.c's). The weapon is made as any actor's [R 0x30F1F0]: the
+  book's group (0x297AA0 at 0x30F594), then the template's own `Weapon|RifleWeapon` over it (0x30F5A8): the Hard
+  punks' `ImpactDamage` 8 (the book's 4), the Easy ones' `Velocity` 12, every punk's `ImpactDelay` 0.2, the biker's
+  `ImpactDamage` 2. Its shot passes its own actor (a shot's owner is no hit): the biker's bottle left from inside the
+  biker's box and burst there before.
 - **The actor's weapon** (0x30EC10 each frame; its keys read from the template's own Weapon group by 0x30F1F0:
   `AnimPosMin` +0x18 (0), `AnimPosMax` +0x1C (1), `FromWindow` +0x24, `LimitAngle` +0x28 in degrees, `Direction`)
   [R]: it tries to fire (vtable +0x68, with the target) only while it is enabled, has ammo (+0xEC > 0) and its
   current clip's position (the record's time / its length, 0x30C020; 0 for a length under 0.001) is within
   AnimPosMin .. AnimPosMax; otherwise it holds (+0x7C, 0x297090: the countdown at least ChargeTime + FiringOffset,
   the charge effect stopped). Only `SoldierGrenadierFromWindow` (0.5 .. 0.75 of its 1 s throw) and the `Biker`
-  (0.4 .. 1) narrow it. Here `unit_weapons_tick` for Swat.bsf and Military_Window.bsf units; the biker's weapon is
-  made from the book alone (parade.c passes the name) [G: its AnimPosMin not applied].
+  (0.4 .. 1) narrow it: the biker's bottle leaves 0.28 s into its 0.7 s `Throw`. Here `unit_weapons_tick` for
+  Swat.bsf and Military_Window.bsf units, `persons_update` for the people and the bikers (their clip's time and
+  length handed in by `army_person_moved`).
 - **The actor's aim** (0x30ED9C .. 0x30F0E8) [R]: from the node's world (else the actor's) at p, the target point t;
   with gravity (the definition's +0x1C) t is lifted by 0x293050 over |t − p|, that difference's y zeroed first for
   `FromWindow`. The way is t − p, then with `LimitAngle` > 0 0x30E930 keeps it within that angle of the node's aimed
