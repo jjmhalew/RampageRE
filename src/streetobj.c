@@ -1,6 +1,6 @@
-/* streetobj.c - the street and roof objects: StreetObject.bsf and RoofItem.bsf (streetobj.h,
- * docs/STREETOBJ_NOTES.md). [R] read in the scripts (build/scripts/StreetObject.scr, RoofItem.scr) or the ELF,
- * [G] guessed. */
+/* streetobj.c - the street and roof objects: StreetObject.bsf, RoofItem.bsf and MerryGoRound.bsf (streetobj.h,
+ * docs/STREETOBJ_NOTES.md). [R] read in the scripts (build/scripts/StreetObject.scr, RoofItem.scr, MerryGoRound.scr)
+ * or the ELF, [G] guessed. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -724,6 +724,108 @@ static void roof_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         roof_hit_effect(s, o);
 }
 
+/* ---------------------------------------------------------------- MerryGoRound.bsf */
+
+/* Construct [R]: state 1, a pulse every 0.2 s (currPulseTime 0.2), the object flag 0x2000000 (as the trains': no code
+ * tests it, rail.h), and a RotationMover of (0, 0, 0) set on it: it stands till its first pulse */
+static void merry_construct(StreetObj *o)
+{
+    o->state = 1;
+    set_pulse(o, 0.2f);
+    o->spin_step = 0.2f;
+    o->oflags |= 0x2000000;
+    o->spin = 0;
+    o->grabbed = -1;
+}
+
+/* the RotationMover's step [R 0x31C540]: its rate x the world's step (gp-0x6CFC +4) added to the angles read back
+ * from the matrix (0x101220: z = atan2, within -pi .. pi, as getFacing().z), the matrix made again from them
+ * (0x101330: Rz Rx Ry). The ride stands upright, so x and y stay 0 */
+static void merry_turn(StreetObj *o)
+{
+    float e[3] = { 0, 0, o->facing[2] + o->spin * TIMESTEP };
+    e[2] = atan2f(sinf(e[2]), cosf(e[2]));
+    set_facing(o, e);
+}
+
+/* the monster's side of the script's calls: queueFacingZRequest, queuePushRequest, setVel(v, 0), playReaction */
+static StreetEvent *monster_call(StreetObjs *s, StreetObj *o, int type, int m)
+{
+    StreetEvent *e = emit(s, type, o, NULL, NULL);
+    e->monster = m;
+    return e;
+}
+
+/* onPulse [R] */
+static void merry_pulse(StreetObjs *s, StreetObj *o)
+{
+    if (o->state == 2) {                             /* slowing: 30% of its turn a second, to a quarter turn */
+        if (fabsf(o->spin) <= PI / 2)
+            o->state = 1;
+        else
+            o->spin -= o->spin * 0.3f * o->spin_step;   /* rMover.setRotation(angleVel3) */
+    } else if (o->state == 3) {                      /* a monster on it, every frame */
+        if (o->grabbed < 0 || o->grabbed >= s->nm)  /* grabbedMonster.isValid() */
+            o->state = 2;
+        else {
+            int m = o->grabbed;
+            float angle = o->facing[2];              /* getFacing().z */
+            o->grab -= o->spin_step;
+            if (o->grab > 0) {                       /* faster, the monster at its centre facing its turn */
+                o->spin *= 1.02f;                    /* scaleMerryGoRoundRotation(1.02) */
+                monster_call(s, o, SE_MONSTER_FACING, m)->amount = o->facing[2];
+                monster_call(s, o, SE_MONSTER_PUSH, m);
+            } else {                                 /* flung off along (cos, sin) of its turn, 1.2 x its rate */
+                float k = o->spin * 1.2f;
+                StreetEvent *e = monster_call(s, o, SE_MONSTER_VEL, m);
+                e->v[0] = cosf(angle) * k;
+                e->v[1] = sinf(angle) * k;
+                e->v[2] = 1.2f * k;
+                monster_call(s, o, SE_MONSTER_REACTION, m)->name = "React_Ground_Slip_Heavy";
+                monster_call(s, o, SE_MONSTER_FACING, m)->amount = s->m[m].facing + PI;   /* turned round */
+                o->spin *= 0.3f;                     /* scaleMerryGoRoundRotation(0.3) */
+                set_pulse(o, 0.2f);
+                o->spin_step = 0.2f;
+                o->no_hit = 2.0f;
+                o->state = 2;
+            }
+        }
+    } else if (o->state == 1 && fabsf(o->spin) < PI / 2)
+        o->spin += PI / 2;                           /* rotateMerryGoRound(pi / 2): idling */
+}
+
+/* TakeDamage(who, amount, type, direction) [R]: any type, from anything; each one takes currPulseTime off
+ * durationNoHit, and only with that run out (and no monster on it) does it do anything: 2 s more, and for a monster in
+ * a move whose name starts with "Ground" (getMoveName().fFind("Ground") == 0) the spin and the ride */
+static void merry_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    o->no_hit -= o->spin_step;
+    if (o->no_hit > 0 || o->state == 3)
+        return;
+    o->no_hit = 2.0f;
+    if (!who || mi < 0)
+        return;                                      /* gWorld.coerceToMonster(who) not valid */
+    int ground = who->move && strncmp(who->move, "Ground", 6) == 0;
+    if (fabsf(o->spin) < PI * 6 && ground) {
+        float r = frand(s);
+        if (r < 0.5f)
+            r += 0.5f;
+        o->spin += PI * 4 * r;                       /* rotateMerryGoRound(4 pi x 0.5 .. 1) */
+        effect(s, o, ostr(o, "AttachedEffect"), pos_of(o), 0, NULL, NULL, 0, 0);   /* the twirl, where it stands */
+        effect(s, o, gstr(o->tmpl, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);   /* getTemplateStringProp: on it */
+    }
+    if (o->state == 1)
+        o->state = 2;
+    if (o->state == 2 && ground) {                   /* it takes the monster on: a pulse every frame for 1.3 s */
+        o->grab = 1.3f;
+        o->spin_step = TIMESTEP;                     /* gWorld.getTimeStep() */
+        set_pulse(o, o->spin_step);
+        o->grabbed = mi;
+        o->state = 3;
+        merry_pulse(s, o);
+    }
+}
+
 /* ---------------------------------------------------------------- the module */
 
 StreetObjs *streetobj_new(const StreetHost *host)
@@ -743,7 +845,8 @@ int streetobj_kind_of(Group tmpl)
     float up;
     if (gnum(tmpl, "IsMonsterUpgrade", &up) && up != 0)
         return -1;
-    return same_text(sc, "StreetObject.bsf") ? SK_STREET : same_text(sc, "RoofItem.bsf") ? SK_ROOF : -1;
+    return same_text(sc, "StreetObject.bsf") ? SK_STREET : same_text(sc, "RoofItem.bsf") ? SK_ROOF :
+           same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : -1;
 }
 
 /* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
@@ -814,8 +917,10 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
         army_osc_init(&o->wobble, tmpl, inst);
     if (kind == SK_STREET)
         street_construct(s, o);
-    else
+    else if (kind == SK_ROOF)
         roof_construct(s, o);
+    else
+        merry_construct(o);
     return i;
 }
 
@@ -830,7 +935,8 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
             o->oflags |= SF_ATTACHED;
         if (getenv("RAMPAGE_STREET"))                /* the list, for finding one */
             printf("street object %d %s (%s) at %.2f %.2f %.2f, box %.1f %.1f %.1f .. %.1f %.1f %.1f, flags %#x, "
-                   "building %d\n", i, o->name ? o->name : "?", o->kind == SK_ROOF ? "RoofItem" : "StreetObject",
+                   "building %d\n", i, o->name ? o->name : "?",
+                   o->kind == SK_ROOF ? "RoofItem" : o->kind == SK_MERRY ? "MerryGoRound" : "StreetObject",
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
@@ -896,14 +1002,18 @@ static void step(StreetObjs *s)
         StreetObj *o = &s->o[i];
         if (!o->alive)
             continue;
+        if (o->kind == SK_MERRY)                     /* its RotationMover, before the pulse (as rail.c's movers) */
+            merry_turn(o);
         if (o->pulse_delay >= 0.01f) {               /* onPulse [R 0x309BA0]: the clock runs only with a delay of */
             o->pulse += TIMESTEP;                    /* 0.01 or more; at the delay it is taken off, once a frame */
             if (o->pulse >= o->pulse_delay) {
                 o->pulse -= o->pulse_delay;
                 if (o->kind == SK_STREET)
                     street_pulse(s, o);
-                else
+                else if (o->kind == SK_ROOF)
                     roof_pulse(s, o);
+                else
+                    merry_pulse(s, o);
             }
         }
         /* 0x309AC0 [R]: attached (0x4000000) to a building whose collapsing storey is set: onBuildingDestruction,
@@ -978,8 +1088,10 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         return;
     if (o->kind == SK_STREET)
         street_damage(s, o, mi, who, type);
-    else
+    else if (o->kind == SK_ROOF)
         roof_damage(s, o, mi, who);
+    else
+        merry_damage(s, o, mi, who);
     if (s->deleting[idx(s, o)])
         delete_now(s, o);
 }

@@ -1,10 +1,10 @@
-# Street and roof objects (StreetObject.bsf, RoofItem.bsf)
+# Street and roof objects (StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf)
 
 The lamps, benches, mailboxes, trees, fences and parked cars along the street, the gongs of the Hong Kong shrines,
 and everything that stands on a roof: chimneys, smoke stacks, antennas, fans, the London and Las Vegas trims, the
 pagoda huts, the palace ornaments, the skywalks between two buildings. Two scripts drive them all; `src/streetobj.c`
-ports both, with the engine pieces around them. [R] read in the scripts (`build/scripts/StreetObject.scr`,
-`RoofItem.scr`) or the ELF, [G] guessed.
+ports both, with the engine pieces around them, and a third, the playground's merry-go-round (below). [R] read in the
+scripts (`build/scripts/StreetObject.scr`, `RoofItem.scr`, `MerryGoRound.scr`) or the ELF, [G] guessed.
 
 | What | Where |
 |---|---|
@@ -17,6 +17,9 @@ ports both, with the engine pieces around them. [R] read in the scripts (`build/
 | The attachment to a building | 0x2B6580 (the block's start) → 0x309E20 |
 | findBuildingByPosition | 0x2A3D20 (with no direction) |
 | Building.isFalling | 0x2ADE10 (Building binding 0x45 in 0x2AD610) |
+| MerryGoRound.bsf | Construct, TakeDamage, onPulse (no onInit, onPickup, onThrow, TakeImpact or OnHitGround) |
+| RotationMover | its step 0x31C540; the angles from a matrix 0x101220, the matrix from them 0x101330 |
+| Monster queueFacingZRequest / queuePushRequest | the junction's cases 0x2AB370 / 0x2AB350 → 0x2E97D0 / 0x2E9860; taken by the monster's update at 0x2DEB04 |
 
 ## The templates
 Every template whose `Script|ScriptName` (through `ParentPropertySet`) is one of the two, all in `Objects1_Props`
@@ -183,9 +186,60 @@ for it, so a car is thrown, never eaten.
 street at 6 takes (its z / 6 / a frame; 0.01 for 0, after a dbgAssert); a frame's turn (π/2 / n, ydir π/2 / n, ±π/3
 / n) (the z sign at random); the y move 2.5 / (0.5 s of frames).
 
+## MerryGoRound.bsf [R]
+One template, `MerryGoRound` in `Objects1_Props` (`Shape|Shape` "MerryGoRound_base", `Effect|AttachedEffect`
+"MerryGoRound", `Effect|HitEffect` "object_destroyed_generic", `CollisionRadius` 0.7, `HitPoints` 5 and `Points` 100,
+which the script never reads; no `Flags`), placed once in each of three playgrounds: NY01_School (New York block 1,
+at (−18, 8) by the swings and the basketball hoops), GB04_BakerSt (London block 4, (10, 8) between two benches) and
+SF04_HaightSt (San Francisco block 4, (5.09, 6.43) by the swings). The three cities' `MerryGoRound.bsf` are the same
+script. Its shape is a sphere of 0.7 about its model's sphere's centre (0x28FD70): the monster walks onto the ride (no
+PushOutMonsters) and touches it at the middle.
+
+**Construct.** State 1, a pulse every 0.2 s (`currPulseTime` 0.2), the object flag 0x2000000 (the trains' too; no
+code tests it, RAIL_NOTES.md), a RotationMover of (0, 0, 0) as its mover.
+
+**The RotationMover** (0x31C540): each frame its rate × the world's step (gp−0x6CFC +4, 1/30) is added to the angles
+read back from the matrix (0x101220: z an atan2, within −π .. π, which is also `getFacing().z`) and the matrix made
+again from them (0x101330, Rz Rx Ry). `setRotation(v)` sets the rate. So the ride turns about its centre at the rate
+`angleVel3.z`, in radians a second.
+
+**onPulse.**
+- State 1 (idle): below π/2 the rate gets π/2 more: the ride turns at a quarter turn a second from its first pulse.
+- State 2 (slowing): at π/2 or less, state 1; else the rate loses 30% a second (rate × 0.3 × `currPulseTime`).
+- State 3 (a monster on it, every frame): the monster gone (`isValid`), state 2. Else `durationGrab` runs down;
+  while it lasts the rate grows 2% a frame (`scaleMerryGoRoundRotation(1.02)`: × 2.16 over 1.3 s at 1/30) and the
+  monster gets `queueFacingZRequest(the ride's facing z)` and `queuePushRequest(the ride's place)`; at the end it is
+  flung: `setVel((cos a, sin a, 1.2) × 1.2 × the rate, 0)` with a the ride's facing z (a world velocity: 0x2E74F0
+  turns it by the monster's matrix only for a nonzero second argument), `playReaction("React_Ground_Slip_Heavy")`,
+  `queueFacingZRequest(its facing z + π)` (turned round), the rate × 0.3, the pulse back to 0.2 s,
+  `durationNoHit` 2, state 2.
+
+**TakeDamage(who, amount, type, direction)**, any type (a blow or the every-frame touch), from anything:
+`durationNoHit` loses `currPulseTime`; while it is above 0, or with a monster on the ride (state 3), nothing. Else
+`durationNoHit` is 2 again and, from a monster: if the rate is under 6π and its move's name starts with `Ground`
+(`getMoveName().fFind("Ground") == 0`), the rate gets 4π × r more (r = frand, 0.5 added below 0.5: 0.5 .. 1), its
+`AttachedEffect` (getStringProp: the instance, then the template) starts where it stands (the "MerryGoRound" twirl:
+twirl particles round a 5-high column, its `twirl loop` sound) and its `HitEffect` (getTemplateStringProp) on it.
+Then state 1 becomes 2, and in state 2 a monster in a `Ground` move is taken on: `durationGrab` 1.3, `currPulseTime`
+and the pulse the world's step (a pulse every frame), state 3, onPulse at once.
+
+So a monster walking onto the ride (`Ground_Walk`, `Ground_Idle`) is taken at its first touch: the ride spins up to
+about 3 turns a second with the twirl, the monster stands at its middle turning with it for 1.3 s, then slides off
+along the turn at 1.2 × the rate (30 or so a second), turned round, and `React_Ground_Slip_Heavy` (mode 2 at 0.104,
+mode 1 and `addVelocity(0, 0, −20, 15)` at 0.438, then `Jump_Air_Borne_Fall`) throws it into the air. After a ride
+each touch takes 0.2 off the 2 s: the eleventh touching frame starts the next. No score, no damage, no sound of its
+own (the twirl's loop is the effect's), no pick-up, no TakeImpact.
+
+**The monster's requests** (0x2E97D0, 0x2E9860) [R]: queueFacingZRequest(z) makes Rz(z) (0x1015B0) and stores it at
+monster +0xC754 with the flag +0xC750; queuePushRequest(pos) stores pos at +0xC744 with the flag +0xC740; both then,
+with foot IK (+0x258C), let both feet go (0x33BE90(+0xC81C), as the push-out). The monster's update (0x2DEB04 ..
+0x2DEBAC) takes them into the matrix it starts its frame from: the place replaced (x, y and z), the turn replaced,
+the flags cleared. Only MerryGoRound.bsf calls queueFacingZRequest; queuePushRequest also the freighter and the army's
+pushMonster (rail.c, army.c).
+
 ## The port (src/streetobj.c)
 - `streetobj_add(tmpl, inst, world, building, attack)` for each object the city placed (city.c records them in
-  `Scene.street`: the block's own and its buildings' `ObjectInstance|` entries whose script is one of the two, with
+  `Scene.street`: the block's own and its buildings' `ObjectInstance|` entries whose script is one of the three, with
   the instances of its model and its flags' cloths; attack for the block's `AttackObjectInstance|` ones), then
   `streetobj_start(buildings)` attaches the others by the footprint.
 - `streetobj_update(dt, monsters, buildings)` runs the pulses at the world's step, 1/30 s (0x2B7800), and
@@ -196,6 +250,12 @@ street at 6 takes (its z / 6 / a frame; 0.01 for 0, after a dbgAssert); a frame'
 - Events: effects (with a handle, on the object at an offset or a node, or where they start), their stops, sounds,
   the model changes, the score (route it through `army_add_stats(army, monster, tmpl, 0)`: its AE_SCORE counts the
   template for the block's challenge), the effects on the monster's nodes, the deletions.
+- The MerryGoRound (`SK_MERRY`): its RotationMover runs each step before its pulse (as rail.c's movers); the monster's
+  move name comes in `StreetMonster.move` (getMoveName). Its calls on the monster are events: `SE_MONSTER_FACING`
+  (queueFacingZRequest: main.c sets the heading, z × 57.2957795) and `SE_MONSTER_PUSH` (queuePushRequest: the place),
+  each letting the feet go (`foot_step`, no anchor); `SE_MONSTER_VEL` (setVel(v, 0): `Mon.vel`) and
+  `SE_MONSTER_REACTION` (playReaction: that move state now, while alive). main.c applies them after the objects' step,
+  the game at the monster's next update: the same frame's place and turn, the clip's travel of the frame added after.
 - city.c's `scene_street_place(k, world, hidden)` moves an object's model and its flags' cloths together;
   `scene_street_shape(k, shape)` puts a new model in place of the old; `scene_instance_node` finds the node an
   attached effect sits on.
@@ -208,7 +268,10 @@ damaged shape when either of its buildings comes down; in GB06 a roof top falls 
 the module: a blow on a London chimney (from the roof) scores 50, soots the monster's mouth and shoulders, puts out
 the smoke and deletes it in `Smoke_stack_hit`; the same blow from the street does nothing to the roof trims; the
 palace's HKPalaceTopAdorn2 under forceDamage falls without a score; a tree swayed by the monster walking into it
-leans away, held while the monster stays within 7.
+leans away, held while the monster stays within 7. In NY01_School the merry-go-round turns a quarter turn a second
+on its own (45 degrees between shots 0.5 s apart); George put on it (`--do "at -18 8"`) is taken at once in the twirl,
+turns with it at its middle for 1.3 s and is flung off towards the street, sliding and then thrown up by
+React_Ground_Slip_Heavy, his heading turned round; the same in GB04_BakerSt.
 
 ## Not traced (stand-ins in streetobj.c)
 - The shape tests are the collision world's (collide.c): a blow is the attack sphere against the object's shape

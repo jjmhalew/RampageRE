@@ -1,4 +1,5 @@
-/* streetobj.h - the street and roof objects: StreetObject.bsf and RoofItem.bsf (docs/STREETOBJ_NOTES.md).
+/* streetobj.h - the street and roof objects: StreetObject.bsf, RoofItem.bsf and the playground's MerryGoRound.bsf
+ * (docs/STREETOBJ_NOTES.md).
  *
  * [R] What the game has, and what this is the port of:
  *   - StreetObject.bsf: 75 templates of Objects1_Props (StreetLamp2, the parked cars, benches, trees, mailboxes,
@@ -18,6 +19,14 @@
  *     shoulders (AttachToMonsterMouthEffect); its building starting to come down (onBuildingDestruction) or, for
  *     one across two buildings, either of them, knocks it off too; forceDamage (the boss Leeper landing on the
  *     palace roof, boss.c's BE_FORCE_DAMAGE) does it without a monster (no score).
+ *   - MerryGoRound.bsf: the MerryGoRound template (the ride in the playgrounds of NY01_School, GB04_BakerSt and
+ *     SF04_HaightSt): it turns on its RotationMover (0x31C540) at a quarter turn a second; a monster's touch or blow
+ *     in a Ground move spins it up (4 pi x 0.5 .. 1 rad/s more, its AttachedEffect "MerryGoRound", the twirl, where it
+ *     stands and its HitEffect on it) and takes the monster on: for 1.3 s the ride speeds up 2% a frame and the
+ *     monster is put at its centre facing its turn (queuePushRequest, queueFacingZRequest 0x2E97D0), then it is
+ *     flung off along the turn (setVel, React_Ground_Slip_Heavy) and turned round; the ride slows by 30% a second
+ *     down to its quarter turn, 2 s of touches (at 0.2 s each) before the next ride. No score, no damage, no sound
+ *     of its own.
  *   - the engine around them: the monster's collision with the world's objects (0x2E22B0: TakeDamage(type 0, its
  *     attack's damage) from an armed sphere, once per attack for an OnlyHitWithEffNodes object (the attack's hit
  *     list, 0x2E33A0); every frame type 1 from any other sphere touching an object without that flag; skipped
@@ -49,7 +58,11 @@ typedef struct {
 } StreetHost;
 
 /* a monster as the objects see it (the TakeDamage's `who`, getNearestMonster) */
-typedef struct { float pos[3]; float facing; } StreetMonster;
+typedef struct {
+    float pos[3];
+    float facing;
+    const char *move;                                /* getMoveName: its move state's name ("Ground_Walk"), NULL none */
+} StreetMonster;
 
 /* a building as the objects see it, by the caller's index */
 typedef struct {
@@ -59,7 +72,7 @@ typedef struct {
 } StreetBuilding;
 
 /* ---- the objects */
-enum { SK_STREET, SK_ROOF };                         /* StreetObject.bsf, RoofItem.bsf */
+enum { SK_STREET, SK_ROOF, SK_MERRY };              /* StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf */
 /* object flags (+0x4C) [R]: the template's Flags names (the table 0x3F5F20), StreetObject's Construct (0x8000 unless
  * OnlyHitWithEffNodes is 0 or IsSwaying), onPickup / onThrow clearing 0x4000 / 0x10000, 0x20000 while held,
  * 0x4000000 attached to a building (0x309E20) */
@@ -95,6 +108,10 @@ typedef struct {
     int flying;                                      /* thrown: on its SpherePhysicsMover */
     CollideMover cm;                                 /* that mover (0x28DE70) */
     float cmat[12];                                  /* its matrix while it flies (collide.h's 3 x 4) */
+    /* MerryGoRound: its RotationMover's rate about z (angleVel3.z, radians a second), currPulseTime, durationNoHit,
+     * durationGrab, and grabbedMonster (the caller's monster index, -1 none) */
+    float spin, spin_step, no_hit, grab;
+    int grabbed;
 } StreetObj;
 
 /* ---- what happened */
@@ -114,6 +131,12 @@ enum {
                        * level 0 that node ("fxNode_Belch"); level 1 the series node + "1", "2", ... up to "20", until
                        * a node is missing ("fxNode_Shoulder") */
     SE_REMOVED,       /* obj is gone (requestDelete): no longer drawn */
+    SE_MONSTER_FACING,/* monster.queueFacingZRequest(amount) (0x2E97D0): at its next update its turn becomes Rz(amount)
+                       * (heading amount x 57.2957795) and, with foot IK, both feet let go (0x33BE90) */
+    SE_MONSTER_PUSH,  /* monster.queuePushRequest(pos) (0x2E9860): at its next update its place becomes pos (x, y
+                       * and z), the feet let go as above */
+    SE_MONSTER_VEL,   /* monster.setVel(v, 0) (0x2E74F0): its velocity becomes v, in the world */
+    SE_MONSTER_REACTION, /* monster.playReaction(name): its move state `name` now ("React_Ground_Slip_Heavy") */
     SE_IMPACT         /* obj, flying, met the frame's collision object whose tag is id (level: its kind) at pos:
                        * its TakeImpact (0x287430), amount the mover's Mass (a building: Building::hit at radius
                        * Mass / 1000, main.c impact_route) */
@@ -122,7 +145,7 @@ typedef struct {
     int type, id, obj, monster, level, node_id;
     const char *name, *node;
     Group tmpl;
-    float pos[3], off[3], amount;
+    float pos[3], off[3], amount, v[3];
 } StreetEvent;
 
 StreetObjs *streetobj_new(const StreetHost *host);

@@ -306,7 +306,7 @@ unused    0x2E7EA0-0x2E7EF8  clip events of types 13, 14: no monster's clips hav
 engine    0x2E7EF8-0x2E7F30  clip events 15, 16, 8: main.c clip_event, moves.c
 unused    0x2E7F30-0x2E7F50  clip events of types 17, 19: no monster's clips have them
 engine    0x2E7F50-0x2E97D0  the clip event switch's return, the clip start's disarm, the monster's setup: main.c, moves.c, footstep.c
-open      0x2E97D0-0x2E9860  Monster queueFacingZRequest: only MerryGoRound.bsf uses it, and the port has no MerryGoRound
+engine    0x2E97D0-0x2E9860  Monster queueFacingZRequest: only MerryGoRound.bsf uses it; streetobj.c's ride, main.c street_step
 engine    0x2E9860-0x2F4CC0  Monster ctor / dtor, ROMonster, the AI goals (director.c), MONSTER_DATA's load (moves.c), the event player (main.c)
 unused    0x2F4CC0-0x2F4F60  clip event 13's worker (0x2E7EA0): no monster's clips have type 13
 engine    0x2F4F60-0x2F5800  ROMonster's draw helpers, the event player's steps: city.c, main.c, footstep.c
@@ -318,7 +318,7 @@ engine    0x2FB950-0x30AE90  head animator (look.c), ROMonster (city.c), block m
 unused    0x30AE90-0x30C020  ActorAnimBitmap: made for an "ActorAnim|" group (0x30D280); the books have 546 ActorAnimShape| and no ActorAnim|
 engine    0x30C020-0x31B9C0  Actor / ROActor (people.c, city.c), HeldObjectMover, RScriptCam / RTTCamera (director.c), AttackMover, LineMover (army.c)
 open      0x31B9C0-0x31C4D0  Shockwave and WSDesc: the RoarWeapon (Weapons.bdp: radius 10, 10 a second, Concussive) the roar fires; the port has none
-engine    0x31C4D0-0x31DF10  RotationMover: edible.c, city.c, shadow.c
+engine    0x31C4D0-0x31DF10  RotationMover: edible.c, streetobj.c (the MerryGoRound), city.c, shadow.c
 unused    0x31DF10-0x31F340  HelicopterMover: only registered by name (0x442EF0); no script createMover and no data file names it
 engine    0x31F340-0x326C20  the game flow (game.c), the music cases of 0x323CE0 (sound.c), endResults (hud.c), the shadow data (shadow.c)
 engine    0x331930-0x33FAD0  PointsBanner (hud.c), VolumeTrigger (boss.c), water (water.c), SplineMover, weapons, RProjectile (army.c), profile.c
@@ -332,7 +332,6 @@ engine    0x4373C0-0x43B880  C++ static constructors: fonts, script types, the j
 platform  0x43B880-0x440590  the static constructor filling the renderers' VU1 microprogram tables (sizes of the microcode at 0x34BCB0 ..): render_gl.c
 engine    0x440590-0x443B50  C++ static constructors: TypedObject / WorldObject type registry, gWorld's managers, the RWorld singletons: main.c, collide.c
 # --- found while sorting (shown under "Open" in docs/COVERAGE.md)
-note MerryGoRound.bsf, the ride placed in New York blocks (and in the London and San Francisco books), is not ported: no src file runs it.
 note The monster's cloth scale: while its dynamic scale is on (+0xA74), 0x2D6680 sets ClothInstance +0x8C to the monster's scale (+0xA78), which the ported draw 0x1D5920 reads; the port scales the base matrix instead (main.c). Unchecked whether the two look the same.
 note WCISpheres' ray against the monster's spheres (0x29A300): main.c `world_build` adds the spheres itself; its nearest hit and normal are not compared with the game's.
 note enableSfx pauses the sound event player for a frame at block teardown and game over (0x2B6760, 0x324584); sound.c has none [G: inaudible].

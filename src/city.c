@@ -499,7 +499,8 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
             s->army_obj[k].rel[i - id - 1] = mat_mul(inv, s->instances[i].base);
     }
     if (id >= 0 && script && (s->placing_block || s->placing_building >= 0) && s->nstreet < SCENE_STREET_MAX &&
-        (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf"))) {
+        (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") ||
+         !_stricmp(script, "MerryGoRound.bsf"))) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
         so->t = t;
         so->inst = inst;

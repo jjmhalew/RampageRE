@@ -2248,7 +2248,8 @@ static void hit_spheres(Mon *mo)
             parade_hit(v->parade, mo->slot, c, c[3], atk->seq);
         upgrade_touch(mo, c, c[3]);                   /* and the MonsterUpgrade object */
         if (v->sobj) {                               /* and the street and roof objects (TakeDamage, type 0) */
-            StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
+            StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f,
+                                 mo->graph.states[mo->run.state].name };
             streetobj_hit(v->sobj, mo->slot, &me, c, c[3], 20, atk->seq);
         }
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
@@ -3563,7 +3564,8 @@ static void street_step(Viewer *v, float dt)
     int nm = have_monster(v) ? v->nmon : 0;
     for (int k = 0; k < nm; k++) {
         Mon *mo = &v->mon[k];
-        me[k] = (StreetMonster){ { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
+        me[k] = (StreetMonster){ { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f,
+                                 mo->have_graph ? mo->graph.states[mo->run.state].name : NULL };
         if (mo->monster >= 0 && mo->have_graph) {    /* [R 0x2E22B0] each collision sphere against the shapes */
             float sp[32][4];
             int ns = mon_spheres(mo, sp, 32);
@@ -3612,6 +3614,24 @@ static void street_step(Viewer *v, float dt)
             case SE_SOUND: sound_play(e->name, e->pos, 1); break;
             case SE_SHAPE: scene_street_shape(&v->scene, k, e->name); break;
             case SE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;   /* a thrown car met it */
+            case SE_MONSTER_FACING:                  /* the MerryGoRound's rider: queueFacingZRequest (0x2E97D0) */
+            case SE_MONSTER_PUSH: {                  /* queuePushRequest (0x2E9860): taken [R 0x2DEB04] */
+                Mon *mo = ev_mon(v, e->monster);
+                if (e->type == SE_MONSTER_FACING)
+                    mo->heading = e->amount * 57.2957795f;
+                else {
+                    mo->mx = e->pos[0]; mo->my = e->pos[1]; mo->mz = e->pos[2];
+                }
+                foot_step(&mo->feet, 0, 0);          /* 0x33BE90: both feet let go */
+                foot_step(&mo->feet, 1, 0);
+                mo->feet.anchor = -1;
+                break;
+            }
+            case SE_MONSTER_VEL: memcpy(ev_mon(v, e->monster)->vel, e->v, sizeof e->v); break;   /* setVel(v, 0) */
+            case SE_MONSTER_REACTION:                /* playReaction, while alive */
+                if (ev_mon(v, e->monster)->hp > 0)
+                    force_state(ev_mon(v, e->monster), e->name);
+                break;
             case SE_STATS:                           /* gCommon.addStats(obj, monster, 0) */
                 if (v->army)
                     army_add_stats(v->army, e->monster, e->tmpl, 0);
