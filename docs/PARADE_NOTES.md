@@ -187,8 +187,8 @@ template's name is what the challenge counts (0x346780).
 - **The world's state 6** for the chains: the Actor's destructor tests state 6 (0x4D6A80, a block in play) and a
   current block ≥ 0 (0x4D4E88; 0x30DFC0 .. 0x30DFD4) [R]: main passes the game's state each frame
   (`parade_set_world_state`; 6 without a game), so a biker gone during the intro or the results starts no chain.
-- **getNearestMonster** [R 0x2B26F0]: the nearest player's monster by squared 3D distance, starting at 1000: none
-  beyond about 31.6 (the biker's bottle, the bike's smash).
+- **getNearestMonster** [R 0x2B26F0]: the nearest player's monster by 3D distance (0x2B27E8 is `sqrt.s`), starting
+  at 1000: none beyond 1000, so in a block any (the biker's bottle, the bike's smash).
 - **The hold's blend** [R 0x310B50]: where the object was is kept relative to the hand's place (a turn +0x68, an
   offset +0x78), so it follows the hand; with s the share of the blend left (+0x84 × +0x88) the turn is slerped
   towards none by 1 − s (0x104C60: none above 0.999, as it is below 0.001) and the offset scaled by s, then put on the

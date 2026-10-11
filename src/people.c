@@ -138,8 +138,8 @@ static void actor_on_pickup(People *p, Person *q)
     fx_off(p, q, PFX_CHALLENGE);
 }
 
-/* getNearestMonster [R 0x2B26F0, the Actor binding 0x42 of 0x2A8FA0]: the nearest player monster by squared 3D
- * distance, starting at 1000: none farther than sqrt(1000), about 31.6; NULL with none [G: the game then hands the
+/* getNearestMonster [R 0x2B26F0, the Actor binding 0x42 of 0x2A8FA0]: the nearest player monster by 3D distance
+ * (0x2B27E8 is sqrt.s), starting at 1000: none farther than 1000, so in a block any; NULL with none [G: the game then hands the
  * script gWorld +0x3C (0x4D17DC) as the monster; what the script sees is not followed] */
 static const PeopleMonster *nearest_monster(const People *p, const float pos[3])
 {
@@ -147,7 +147,7 @@ static const PeopleMonster *nearest_monster(const People *p, const float pos[3])
     float bd = 1000;
     for (int i = 0; i < p->nm; i++) {
         float dx = p->m[i].pos[0] - pos[0], dy = p->m[i].pos[1] - pos[1], dz = p->m[i].pos[2] - pos[2];
-        float d = dx * dx + dy * dy + dz * dz;
+        float d = sqrtf(dx * dx + dy * dy + dz * dz);
         if (d < bd) {
             bd = d;
             best = &p->m[i];

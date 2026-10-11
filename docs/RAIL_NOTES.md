@@ -271,8 +271,8 @@ starting at a random share; at its end it starts again from that side. No block 
   when it goes [R: a deleted object (0x290480 -> 0x288050) kills its sound slots added without keep, and these
   scripts all pass add3DSfx(..., 0)].
 - **getNearestMonster** [R 0x2B26F0, the binding 0x42 of 0x2A8FA0]: the nearest of the players' monsters (gWorld
-  +0x40, the count 0x4D7E28) by squared 3D distance, starting at 1000: none farther than about 31.6, so the lead
-  car's isNearMonster (60) is in fact 31.6, and a tanker's blast throws no monster beyond it.
+  +0x40, the count 0x4D7E28) by 3D distance (0x2B27E8 is `sqrt.s`), starting at 1000: none farther than 1000, so
+  in a block any; the lead car's isNearMonster then tests 60.
 - **The freighter's sway:** setFacing(x, y, z) is Rz(z) × Rx(x) × Ry(y) (0x277E78 → 0x101330(m, z, x, y)) [R].
 - **The freighter's flag** [R]: every object's setup (0x28FD70 -> 0x29C490) makes a cloth for each of its template's
   first four `ClothBit|` groups (`ClothRef|Name`, the `ClothOffset` matrix at +0x10 of the 0x54-byte record, identity

@@ -272,8 +272,8 @@ static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx */
 }
 
 /* getNearestMonster [R: the Actor binding 0x42 (0x2A8FA0 -> 0x2B26F0) and the RScriptObject / AttackObject one 0x37
- * (0x2AA080 -> 0x2B2CC0) are the same code]: the nearest player monster by squared 3D distance, starting at 1000: none
- * farther than sqrt(1000), about 31.6; -1 with none [G: the game then hands the script gWorld +0x3C (0x4D17DC, the
+ * (0x2AA080 -> 0x2B2CC0) are the same code]: the nearest player monster by 3D distance (0x2B27E8 is sqrt.s), starting at
+ * 1000: none farther than 1000, so in a block any; -1 with none [G: the game then hands the script gWorld +0x3C (0x4D17DC, the
  * monsters' count to 0x2BD940) as the monster, read by the result's setter 0x27C8D0; what the script sees is not
  * followed] */
 static int nearest_monster(const Army *a, const float pos[3])
@@ -282,7 +282,7 @@ static int nearest_monster(const Army *a, const float pos[3])
     float bd = 1000;
     for (int i = 0; i < a->nm; i++) {
         float e[3] = { a->m[i].pos[0] - pos[0], a->m[i].pos[1] - pos[1], a->m[i].pos[2] - pos[2] };
-        float d = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+        float d = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
         if (d < bd) {
             bd = d;
             best = i;

@@ -331,15 +331,15 @@ static void monster_knock(Rail *r, RailObj *o, int m, const float vel[3], float 
 }
 
 /* getNearestMonster (0x2B26F0, the script object's binding 0x42 in 0x2A8FA0) [R]: the nearest of the players' monsters
- * (gWorld +0x40, the count at 0x4D7E28) by squared 3D distance from the object's place, starting at 1000: none
- * farther than sqrt(1000), about 31.6; -1 with none */
+ * (gWorld +0x40, the count at 0x4D7E28) by 3D distance from the object's place (0x2B27E8 is sqrt.s), starting at
+ * 1000: none farther than 1000, so in a block any; -1 with none */
 static int nearest_monster(const Rail *r, const float p[3])
 {
     int best = -1;
     float bd = 1000;
     for (int i = 0; i < r->nm; i++) {
         float e[3] = { r->m[i].pos[0] - p[0], r->m[i].pos[1] - p[1], r->m[i].pos[2] - p[2] };
-        float d = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+        float d = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
         if (d < bd) {
             bd = d;
             best = i;
@@ -779,8 +779,7 @@ static int et_damage(Rail *r, RailObj *o, int dmg, int chain)   /* eventDamage [
     return 0;
 }
 
-static int et_near_monster(Rail *r, RailObj *o)      /* isNearMonster [R]: the nearest monster within 60 (one there
-                                                      * is within 31.6 already: getNearestMonster's own limit) */
+static int et_near_monster(Rail *r, RailObj *o)      /* isNearMonster [R]: the nearest monster within 60 */
 {
     int m = nearest_monster(r, o->pos);
     return m >= 0 && dist3(o->pos, r->m[m].pos) < 60;
