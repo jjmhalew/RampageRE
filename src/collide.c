@@ -793,7 +793,7 @@ void collide_monster(const CollideWorld *w, CollideMonster *m, CollideMonsterOut
         }
     }
     if (m->mode == 0) {                              /* standing over a building: on its roof */
-        int b = collide_building_below(w, m);
+        int b = m->below_set ? m->below : collide_building_below(w, m);
         out->below = b;
         float q[3];
         probe_point(m, q);

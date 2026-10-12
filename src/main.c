@@ -153,6 +153,7 @@ typedef struct Mon {
     float ev16, ev16x;                               /* the kept type-16 event record's +0x10 and +0xC (+0xBAA0),
                                                       * 0 none */
     const Water *water_in; int water_tested;         /* 0x2D5F00's answer this frame (+0xC700), asked (+0xC704) */
+    int under, under_tested;                         /* 0x2D6150's answer this frame (+0xC6F8), asked (+0xC6FC) */
     int landed; float landed_z;                      /* it landed this frame from the air at landed_z: the box test
                                                       * (0x2E2C50, in its update) came before the landing (0x2E2770,
                                                       * the world's pass after, 0x2B6D20) and saw it in the air */
@@ -650,6 +651,7 @@ static int people_visible(void *ctx, const float p[3], float radius)
 
 static int edible_cell_state(void *ctx, int building, int storey, int column);
 static int edible_cell_where(void *ctx, int building, int storey, int column, float out[3]);
+static int edible_cell_follow(void *ctx, int building, int storey, int column, float out[3]);
 static int edible_call(Mon *mo, const char *call, const float *xyz);
 static void monster_stats(Mon *mo, float health, float energy);
 static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g);
@@ -1109,6 +1111,7 @@ static void build(Viewer *v)
         eh.find = army_find;
         eh.cell_state = edible_cell_state;
         eh.cell_place = edible_cell_where;
+        eh.cell_follow = edible_cell_follow;
         eh.ctx = v;
         v->edibles = edible_new(&eh);
         if (v->edibles) {
@@ -2007,19 +2010,34 @@ static int mon_water(Mon *mo)
  * its top, +0x1F0, is no more than 5 above the feet, 0x2D6200; the ground its box's top +0xD4, a gone one's flat),
  * else in a water (0x2E859C, +0xA48 = 0x337E00) the water's floor under its body centre, else the street.
  * *under: that building, -1 none */
+static int mon_under(Mon *mo);
 static float ground_under(Mon *mo, int *under)
 {
     Viewer *v = mo->v;
     float c[3];
     mon_body_centre(mo, c);
-    *under = -1;
-    int b = mo->defeated || mo->hp <= 0 ? -1 : collide_building_at(&v->cw, c, 0, 0, NULL);
-    if (b >= 0 && (uint32_t)b < v->scene.nbuildings && v->cw.b[b].max[2] - mo->mz <= 5) {
-        *under = b;
-        return v->cw.b[b].max[2];
-    }
+    *under = mon_under(mo);
+    if (*under >= 0)
+        return v->cw.b[*under].max[2];
     int wk = mon_water(mo);
     return wk >= 0 ? water_floor(v->scene.water[wk], c[0], c[1]) : 0;
+}
+/* 0x2D6150 itself: the building under the monster, once a frame (+0xC6F8; asked, +0xC6FC, cleared at the top of the
+ * update 0x2DE5A4) [R]. Asked from the place the monster has then: the game's move (0x2E03A8) goes through a copy of
+ * its matrix, which the box test (0x2E2C50) moves and only then sets (0x2DCCE0), so the frame's answer is from the
+ * place before the move, and the box test keeps the moved probe on that roof (0x2A49C0) rather than losing the
+ * building once the probe is past the edge */
+static int mon_under(Mon *mo)
+{
+    Viewer *v = mo->v;
+    if (mo->under_tested)
+        return mo->under;
+    mo->under_tested = 1;
+    float c[3];
+    mon_body_centre(mo, c);
+    int b = mo->defeated || mo->hp <= 0 ? -1 : collide_building_at(&v->cw, c, 0, 0, NULL);
+    mo->under = b >= 0 && (uint32_t)b < v->scene.nbuildings && v->cw.b[b].max[2] - mo->mz <= 5 ? b : -1;
+    return mo->under;
 }
 static float ground_at(Mon *mo)
 {
@@ -2153,6 +2171,8 @@ static void push_out(Mon *mo)
                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
                          { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, mo->is_ai, 0,
                          { mo->vel[0], mo->vel[1], mo->vel[2] }, { mo->air[0], mo->air[1], mo->air[2] } };
+    m.below = mon_under(mo);                         /* the frame's building under it, from before the move */
+    m.below_set = 1;
     CollideMonsterOut o;
     collide_monster(&v->cw, &m, &o);
     for (int k = 0; k < o.ntouch; k++) {             /* 0x335BF0: the trigger's FireFunc, by its owner */
@@ -3427,7 +3447,18 @@ static int edible_cell_where(void *ctx, int building, int storey, int column, fl
     int ls = storey >= 0 && storey < b->storeys ? building_live_of(b, storey) : -1;
     if (ls < 0)
         return 0;
-    edible_cell_place(b->min, column, ls, out);
+    float bottom, height;
+    building_storey(b, ls, &bottom, &height);
+    edible_cell_place(b->min, column, bottom, out);
+    return 1;
+}
+static int edible_cell_follow(void *ctx, int building, int storey, int column, float out[3])
+{
+    const Viewer *v = ctx;
+    if (building < 0 || (uint32_t)building >= v->scene.nbuildings ||
+        v->scene.buildings[building].b.shake_time <= 0 || !edible_cell_where(ctx, building, storey, column, out))
+        return 0;
+    out[0] += building_shake(&v->scene.buildings[building].b);   /* 0x2BAD50: along the world's x */
     return 1;
 }
 
@@ -4501,6 +4532,7 @@ static void mon_step(Mon *mo, float dt)
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
         int ev = -1, was_mode = mo->mode;            /* the mode 0x2E2770 switches on (the landing sets 4) */
         mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
+        mo->under_tested = 0;                        /* 0x2DE5A4: and the building under it */
         if (mo->mode == MODE_AIRBORNE) {             /* the air (0x2DEBD8, mode 1 of 0x2DEBB0's switch) */
             float pos[3] = { mo->mx, mo->my, mo->mz };  /* 0x2DEBD8: drag, the move, gravity */
             monster_air_velocity(mo->vel, pos, dt, mo->no_gravity);

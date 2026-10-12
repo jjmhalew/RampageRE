@@ -12,6 +12,7 @@
 #define MAX_CELLS 0x12C                              /* [R] 0x3196F0 asks 0x2BE750 for at most 300 cells */
 #define NOT_FOUND "StringNotFound"
 #define EPS 0.001f                                   /* [R] 0x3A83126F, the clocks' "out" */
+#define LIFT 1.5f                                    /* [R] 0x317D38: +0xF4, its height above its storey's floor */
 
 /* building states (+0x14C, building.h's BUILDING_*): from 4 on the building is being destroyed */
 enum { BSTATE_DESTROYED = 4 };
@@ -139,11 +140,11 @@ static void place_world(Edible *d)                   /* translation x Rz(spin) x
     m[12] = d->pos[0]; m[13] = d->pos[1]; m[14] = d->pos[2]; m[15] = 1;
 }
 
-void edible_cell_place(const float building_min[3], int column, int live_storey, float out[3])
+void edible_cell_place(const float building_min[3], int column, float bottom, float out[3])
 {
     out[0] = building_min[0] + 5.0f * (float)column + 2.5f;        /* [R] 0x317BC0: grid +0x24 + 5 x column + 2.5 */
     out[1] = building_min[1] + 2.5f;                               /* [R] grid +0x28 + 2.5: half a cell inside */
-    out[2] = building_min[2] + 6.0f + 3.0f * (float)live_storey;   /* [R] 0x2CD010: 6 + 3 x storey (less the sinking) */
+    out[2] = building_min[2] + bottom;                             /* [R] 0x2CD010: 6 + 3 x storey (less the sinking) */
 }
 
 /* ---------------------------------------------------------------- setup */
@@ -626,6 +627,17 @@ void edible_update(Edibles *e, float dt)
         if (d->phase == EP_GONE)
             continue;
         d->age += dt;
+        /* [R 0x30CD20 .. 0x30D1F8] an actor its slot still holds (+0x10), while its building shakes (0x2BABC0): at
+         * its cell's place with the shaker's offset (0x2BB7A0 + 2.5, 0x2BAD50), z its storey's floor now (0x2CD010)
+         * + its +0xF4. A cell's break shakes the building, so the edible rises to the middle of its storey at once
+         * and, with its floor, comes down with the storeys below it */
+        float now[3];
+        if (d->slot >= 0 && e->slot[d->slot].item == i && e->host.cell_follow &&
+            e->host.cell_follow(e->host.ctx, e->slot[d->slot].building, e->slot[d->slot].storey,
+                                e->slot[d->slot].column, now)) {
+            memcpy(d->pos, now, sizeof d->pos);
+            d->pos[2] += LIFT;
+        }
         if (d->rotate)                               /* [R 0x31C540] the RotationMover: its rate x the world's step
                                                       * added to the facing (0x101220 / 0x101330): radians a second */
             d->spin = fmodf(d->spin + PI * dt, 2 * PI);

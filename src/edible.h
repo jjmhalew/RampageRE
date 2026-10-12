@@ -41,6 +41,9 @@ typedef struct {
     int (*cell_state)(void *ctx, int building, int storey, int column);
     /* where the edible of that cell appears (0x317BC0; edible_cell_place says how); 0 if the storey has fallen */
     int (*cell_place)(void *ctx, int building, int storey, int column, float out[3]);
+    /* optional: while the building shakes (0x2BABC0), where that cell's actors stand now (0x30CD20: the cell's place
+     * with the shaker's offset, z its storey's floor now); 0 when it does not shake (they stay where they are) */
+    int (*cell_follow)(void *ctx, int building, int storey, int column, float out[3]);
     /* optional: the building's place (getPosition) and storeys (getSizeZ), for an ExtraEffectCentered; 0 = unknown
      * (the front's middle, at the street, stands in) */
     int (*building_place)(void *ctx, int building, float pos[3], int *size_z);
@@ -48,8 +51,9 @@ typedef struct {
 } EdibleHost;
 
 /* [R] 0x317BC0: an edible stands in its cell, half a cell in from the front: x = the grid's min x + 5 x column + 2.5,
- * y = the front (min y) + 2.5, z = (the building's foot) + 6 + 3 x the storey's place now (0x2CD010) */
-void edible_cell_place(const float building_min[3], int column, int live_storey, float out[3]);
+ * y = the front (min y) + 2.5, z = (the building's foot) + bottom, its storey's floor now (0x2CD010: 6 + 3 x the
+ * storey's place, less the storeys coming down); its height above that floor (+0xF4, 1.5) comes with the shake */
+void edible_cell_place(const float building_min[3], int column, float bottom, float out[3]);
 
 /* ---- the kinds and the slots */
 typedef struct {

@@ -144,6 +144,9 @@ typedef struct {
                                                       * not push it */
     int dead;                                        /* +0xA4C <= 0: no building below */
     float vel[3], stick[3];                          /* +0xBD30, +0xA68: zeroed against a building it is pushed off */
+    int below_set, below;                            /* set: the building under it, 0x2D6150's answer this frame
+                                                      * (from its place before the move), as collide_monster takes it;
+                                                      * else collide_building_below at pos */
 } CollideMonster;
 #define COLLIDE_MAX_TOUCH 16
 typedef struct {

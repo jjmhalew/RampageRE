@@ -55,7 +55,10 @@ of 0x3196F0 works like this:
 - **Where it stands** (0x317BC0):
   - x = the grid's min x + 5 × column + 2.5;
   - y = the front (min y) + 2.5, half a cell inside;
-  - z = 6 + 3 × the storey's place now (0x2CD010);
+  - z = 6 + 3 × the storey's place now (0x2CD010): its floor;
+  - while the building shakes (0x2BABC0), the actor update (0x30CD20 .. 0x30D1F8) puts it each frame at its cell's
+    place with the shaker's offset, z its storey's floor now + its `+0xF4`. A cell's break shakes the building, so
+    the edible stands in the middle of its storey (floor + 1.5) from its first frame, and comes down with its floor;
   - `+0xF4` = 1.5.
 - **Its look:** nearly every edible uses `InvisShape`. The look is its `Effect`, attached with no offset.
 - **Gone for good:** once an edible is deleted (eaten, expired or lost with its floor), the slot forgets it
