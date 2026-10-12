@@ -76,6 +76,8 @@ Addresses are in `RAMPAGE.ELF`.
 - The video states play `midway`, `pipeworks`, `digital` and `intro` (.pss) through the full-screen `Video` quad.
 - Start or Cross skips a video when save files exist; the intro can always be skipped. In state 2, Start leaves for
   the main menu (`exitAttractMode`: state 3, the "Oingo" music).
+  *Port extra:* in the boot each press skips one video (Midway, Pipeworks, Digital Eclipse, the intro, then the main
+  menu), save files or not.
 - PlayRandomGame:
   - In the boot it sets "boot completed" and goes to the main menu.
   - In state 2 it calls `gShell.startAttractGame` (0x308460: a random demo game, below). The attract state stays 7.

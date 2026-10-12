@@ -3115,7 +3115,8 @@ static void am_video(Shell *s, int ev, const char *name)
     } else if (ev == EV_START) {
         if (s->state == 2)
             am_exit(s);
-        else if (s->prof.nprofiles > 0)                  /* gCommon.getSaveFilesExist() */
+        else                                             /* the game: only when gCommon.getSaveFilesExist(); PORT
+                                                          * EXTRA: each press skips one movie, profile or not */
             am_next(s);
     }
 }

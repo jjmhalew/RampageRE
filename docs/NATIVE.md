@@ -84,7 +84,7 @@ are computer-driven (below, "Several monsters"); the front end (`--shell`) hands
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
 upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
-autosave notice, the movies (the logos and the intro, Start or Enter skips them once a profile exists; the
+autosave notice, the movies (the logos and the intro, each press of Enter, Space, P or the pad's A / Start skips one; the
 Victory movie and the credits after the campaign), the profile popup (one profile, its file; letters and digits type
 the name, Enter is DONE; it opens from Back on the main menu, "Profiles", and autosave is on once a profile is
 loaded from it or the Results' Save is pressed), the main menu, players, monster select, city select, the loading screen, then the game it chose; the popup shows the
