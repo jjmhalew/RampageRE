@@ -3113,8 +3113,10 @@ static void game_step(Viewer *v, float dt)
                         mo->heading = e->f * 57.2957795f;
                 }
                 break;
-            case GE_MOVE:                            /* playMove: a goal of the AI; without one, done at once */
-                if (mo->is_ai && mo->have_ag && mo->have_graph)
+            case GE_MOVE:                            /* playMove: a goal of the AI, queued whether the monster is AI
+                                                      * yet or not (Levels::playMove sets it after: setIsAI(1));
+                                                      * without a goal graph, done at once */
+                if (mo->have_ag && mo->have_graph)
                     dir_ai_play_move(&mo->ai, e->name ? moves_find(&mo->graph, e->name) : -1, e->a);
                 else if (e->a == 1)
                     game_move_done(v->game, e->slot);
