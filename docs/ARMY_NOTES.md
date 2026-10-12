@@ -245,16 +245,20 @@ This is `AE_HIT`, and `army_reaction_slot` is the monster side:
 - **Ignored entirely** while the monster is not interruptible, is in a grab, or has 0 HP. The interruptible byte
   (+0xAA2: set to 1 by every clip's start, 0x2E7F70; cleared only by a clip event no monster has, 0x2E7CC0, or the
   binding `setInterruptabe` (id 88, 0x2AB258), which no script calls [R]: always set in play).
-- **Level 4 starts no reaction** (pistols, rifles, the pulse cannon). The damage still counts.
+- **The knock comes first, at any level** (0x2D7928, skipped only for a null knock): per axis the knock's value
+  replaces the velocity's when larger in size, friction 50.
+- **Level 4 starts no reaction** (pistols, rifles, the pulse cannon). The damage and the knock still count.
 - **In the air:** mode 2 starts slot 42 (44 from behind) and mode 1 starts slot 43 (45).
-- **On the ground or a building** (modes 0 and 5), by the knock made 1 long:
+- **Just landed or down** (mode 4): slot 54, and the velocity is halved (0x2D8AA8). Mode 3 starts none.
+- **On the ground or a building** (modes 0 and 5), by the velocity after the knock made 1 long (0x2D7A2C ..
+  0x2D7B14; under 1e-6 long the hit keeps kind 1, the wrappers' 0x2D9650 / 0x2D9680 argument):
 
-| Knock | Slot | From behind |
+| Velocity | Slot | From behind |
 |---|---|---|
 | z > 0.707 | 24 + level | 27 + level |
 | z < −0.707 | 18 + level | 21 + level |
 | otherwise | 0 + level | 3 + level |
-| otherwise, level 2 with knock z ≤ 0.001 | 71 | 72 |
+| otherwise, level 2 with velocity z ≤ 0.001 | 71 | 72 |
 
 - **After the slot:** the column override applies; then HP −= damage (0x2D9364); at 0 HP, slot 67 (React_Defeated).
 - **Examples:** the tank shell (30, 35 up; level 2) starts George's slot 26 `React_Ground_Knockdowns`, and a bomber's

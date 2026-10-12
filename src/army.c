@@ -3998,7 +3998,7 @@ void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], flo
 }
 
 /* [R] the monster's weapon hit 0x2D6A50 (from 0x2D9650): the slot it starts, see army.h */
-int army_reaction_slot(int level, const float knock[3], int mode, int behind)
+int army_reaction_slot(int level, float vel[3], int mode, int behind)
 {
     if (level < 0 || level == 4)
         return -1;
@@ -4006,14 +4006,19 @@ int army_reaction_slot(int level, const float knock[3], int mode, int behind)
         return behind ? 44 : 42;
     if (mode == 1)
         return behind ? 45 : 43;
+    if (mode == 4) {
+        for (int i = 0; i < 3; i++)
+            vel[i] *= 0.5f;
+        return 54;
+    }
     if (mode != 0 && mode != 5)
         return -1;
-    float l = len3(knock), z = l > 0 ? knock[2] / l : 0;
+    float l = len3(vel), z = l * l >= 1e-6f ? vel[2] / l : 0;
     if (z > 0.707f)
         return (behind ? 27 : 24) + level;
     if (z < -0.707f)
         return (behind ? 21 : 18) + level;
-    if (level == 2 && knock[2] <= 0.001f)
+    if (level == 2 && vel[2] <= 0.001f)
         return behind ? 72 : 71;
     return (behind ? 3 : 0) + level;
 }

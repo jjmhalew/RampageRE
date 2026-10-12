@@ -367,7 +367,7 @@ free edge the box test's roof clamp, 0x2A49C0, holds the body centre on the roof
 Landing (0x2DC450) sets mode 4 and fires slot 56, or 57 when the ground's normal points against the monster's up
 axis: for George `Jump_Finish` by default, `Jump_Butt_Slam_impact` in the butt slam's column, `Jump_Fall_Finish2`
 when knocked down. Hits pick their slot by the victim's mode (the table 0x431270, from 0x2D8078), the blow's kind
-(+0x20, or a shot's knock by its z), its ReactionLevel and the side it came from (look.c `monster_blow`, army.c
+(+0x20, or for a shot the velocity's z after its knock), its ReactionLevel and the side it came from (look.c `monster_blow`, army.c
 `army_reaction_slot`). That is why
 `Jump_Air_Borne_Descend` has no landing transition: the landing comes from the slot.
 

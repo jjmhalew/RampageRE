@@ -307,12 +307,14 @@ void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], flo
 
 /* [R] 0x2D6A50: the slot an AE_HIT starts. ReactionLevel 4 (pistols, rifles, the pulse cannon) and < 0 start none
  * (-1; the damage still counts; an AE_HIT of level -1 goes through TakeDamage, whose level by the amount the host
- * gives: main.c take_damage_level). In the air: mode 2 42 / 44 (from behind), mode 1 43 / 45. On the ground or a
- * building (mode 0, 5): by the knock's direction made 1 long, z > 0.707 24 + level (27 + level from behind),
- * z < -0.707 18 + level (21 +), otherwise 0 + level (3 +), and level 2 with a knock of z <= 0.001 71 (72). The
+ * gives: main.c take_damage_level). vel is the monster's velocity with the knock already in (0x2D7928, at any
+ * level). In the air: mode 2 42 / 44 (from behind), mode 1 43 / 45. On the ground or a building (mode 0, 5): by
+ * that velocity's direction made 1 long (0x2D7A2C .. 0x2D7B14; under 1e-6 long the kind stays 1), z > 0.707
+ * 24 + level (27 + level from behind), z < -0.707 18 + level (21 +), otherwise 0 + level (3 +), and level 2 with a
+ * velocity of z <= 0.001 71 (72). Just landed or down (mode 4): 54, the velocity halved (0x2D8AA8); mode 3 none. The
  * column override applies after; the hit is ignored while the monster is not interruptible (+0xAA2), held in a
  * grab, or at 0 HP; the HP falls by the damage after the slot is chosen, and at 0 slot 67 (React_Defeated) */
-int army_reaction_slot(int level, const float knock[3], int mode, int behind);
+int army_reaction_slot(int level, float vel[3], int mode, int behind);
 int army_hit_behind(const float monster_pos[3], float monster_heading, const float at[3]);   /* the hit came from behind */
 /* a monster's shape, its WCISpheres (+0x68C): the bounding sphere of its collision spheres merged in their order
  * (0x29A880 -> 0x103770) [R]; radius -1 without spheres */

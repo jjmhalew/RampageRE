@@ -3466,15 +3466,15 @@ static void monster_take(Mon *mo, const char *name, float amount, int level, int
         printf("  hit by %s: %.1f, HP %.0f, slot %d\n", name ? name : "?", amount, mo->hp, slot);
 }
 
-/* 0x2D6A50 without an attack record (a shot, the roar, TakeDamage): the reaction by its level and the knock */
+/* 0x2D6A50 without an attack record (a shot, the roar, TakeDamage): the knock at any level (0x2D7928: per axis the
+ * larger of knock and velocity), then the reaction by its level and the velocity it gave */
 static void monster_hit(Mon *mo, const char *name, float amount, int level, const float knock[3], const float from[3])
 {
     if (!monster_hittable(mo))
         return;
     float heading = mo->heading / 57.2957795f, at[3] = { mo->mx, mo->my, mo->mz };
-    int slot = army_reaction_slot(level, knock, mo->mode, army_hit_behind(at, heading, from));
-    if (slot >= 0)
-        mo->friction = monster_knock_shot(mo->vel, knock);   /* 0x2D9650: per axis the larger of knock and velocity */
+    mo->friction = monster_knock_shot(mo->vel, knock);
+    int slot = army_reaction_slot(level, mo->vel, mo->mode, army_hit_behind(at, heading, from));
     monster_take(mo, name, amount, level, slot);
 }
 
