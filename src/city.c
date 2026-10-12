@@ -509,7 +509,7 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     }
     if (id >= 0 && script && (s->placing_block || s->placing_building >= 0) && s->nstreet < SCENE_STREET_MAX &&
         (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") ||
-         !_stricmp(script, "MerryGoRound.bsf"))) {
+         !_stricmp(script, "MerryGoRound.bsf") || !_stricmp(script, "Sign.bsf"))) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
         so->t = t;
         so->inst = inst;
@@ -585,6 +585,12 @@ void scene_street_place(Scene *s, int k, const float world[16], int hidden)
     in->dynamic = 1;
     in->base = w;
     in->hidden = hidden;
+    for (uint32_t j = 0; s->obstacles && j < s->nobstacles; j++)   /* a sign come loose: no longer IsObstacle */
+        if (s->obstacle_of[j] == so->first)
+            for (int k = 0; k < 3; k++) {
+                s->obstacles[j][k] = 1e30f;
+                s->obstacles[j][3 + k] = -1e30f;
+            }
     if (so->model != so->first)                      /* the model it had before its DamageShape */
         s->instances[so->first].hidden = 1;
     for (int i = 0; i < so->nrel; i++) {
@@ -1265,6 +1271,41 @@ static float spawn_rand(void)                        /* the LCG of the stand-ins
     return (float)(spawn_seed >> 8) / 16777216.0f;
 }
 
+/* the soldier a window slot put out, while it is there (the army reuses its ids: still a window soldier, at the slot's
+ * cell), -1 none */
+static int slot_soldier(const Scene *s, const struct WindowSlot *ws)
+{
+    if (!s->army || ws->unit < 0 || ws->unit >= army_count(s->army))
+        return -1;
+    const ArmyUnit *u = army_unit(s->army, ws->unit);
+    const Building *b = &s->buildings[ws->building].b;
+    float x0 = b->min[0] + CELL * (float)ws->column;
+    if (u->phase != AU_ALIVE || u->kind != AK_WINDOW || u->pos[0] < x0 - 1 || u->pos[0] > x0 + CELL + 1 ||
+        fabsf(u->pos[1] - b->min[1]) > 2)
+        return -1;
+    return ws->unit;
+}
+
+int scene_window_soldier(const Scene *s, int building, int storey, int column)
+{
+    for (int i = 0; i < s->nslots; i++) {
+        const struct WindowSlot *ws = &s->slots[i];
+        if (ws->military && ws->building == building && ws->storey == storey && ws->column == column &&
+            slot_soldier(s, ws) >= 0)
+            return ws->unit;
+    }
+    return -1;
+}
+
+void scene_window_soldier_take(Scene *s, int unit)
+{
+    for (int i = 0; unit >= 0 && i < s->nslots; i++)
+        if (s->slots[i].military && s->slots[i].unit == unit && slot_soldier(s, &s->slots[i]) >= 0) {
+            s->slots[i].retired = 1;
+            s->slots[i].unit = -1;
+        }
+}
+
 void scene_people_spawn(Scene *s, float dt)
 {
     if (!s->folk || (!s->noccupants && !s->nmilitary))
@@ -1356,13 +1397,14 @@ void scene_people_spawn(Scene *s, float dt)
     int start = (int)(spawn_rand() * (float)s->nslots);
     for (int i = 0; i < s->nslots; i++) {            /* the first free slot of that sort from a random one */
         struct WindowSlot *ws = &s->slots[(start + i) % s->nslots];
-        if (ws->military != want_mil)
+        if (ws->military != want_mil || ws->retired)
             continue;
         SceneBuilding *sb = &s->buildings[ws->building];
         const Building *b = &sb->b;
         int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
         if (b->state != BUILDING_STANDING || ls <= 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
             people_window_at(s->folk, ws->building, ws->storey, ws->column) >= 0 ||
+            scene_window_soldier(s, ws->building, ws->storey, ws->column) >= 0 ||
             people_window_retired(s->folk, ws->building, ws->storey, ws->column))   /* its occupant grabbed: retired */
             continue;                                /* [R 0x31AD00] the ground storey (its record +0x10 is 0) none */
         {                                            /* [R 0x31AD00] 10 out in front of the cell, the last building
@@ -1385,11 +1427,6 @@ void scene_people_spawn(Scene *s, float dt)
             continue;
         float at[3] = { b->min[0] + CELL * (float)ws->column + (ol[0] + ol[2]) / 2, b->min[1],
                         b->min[2] + GROUND_FLOOR + STOREY * (float)ls + ol[1] };
-        if (ws->unit >= 0 && ws->unit < army_count(s->army)) {   /* its soldier still there (the army reuses ids) */
-            const ArmyUnit *u = army_unit(s->army, ws->unit);
-            if (u->phase != AU_GONE && fabsf(u->pos[0] - at[0]) < 1 && fabsf(u->pos[2] - at[2]) < 2)
-                continue;
-        }
         if (ws->military) {
             ws->unit = army_spawn_window(s->army, s->military[ws->occupant], at);
             if (getenv("RAMPAGE_TRACE"))

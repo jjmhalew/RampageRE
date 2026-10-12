@@ -554,7 +554,9 @@ The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then it
 - **The shaker** (+0x8AC, from `ShakerDef`: `MasterAmp` 0.05, `ShakeLength` 0.5, and (period, phase, amp) triples
   (0.05, 1, 3), (0.25, 2, 0.25), (0.33, 3, 0.25), (0.61, 4, 0.25)) sways the building along x: MasterAmp × the sum
   of amp × a parabolic sine of (t + phase) / period (0x2CC450), fading over the last fifth. Every cell hit and every
-  frame of a falling storey adds ShakeLength × (1 + a random share) to it (0x2CC5E0). A monster climbing it
+  frame of a falling storey makes it shake on for ShakeLength × (1 + a random share) from now (0x2CC5E0: a shake
+  still going has its length, +0x44, cut to the time it has shaken, clock − +0x40, before that is added; the hits do
+  not add up, so a charge punch's many cells leave 0.5 .. 1 s of it, as any one hit). A monster climbing it
   (+0xC640) or, on the ground (+0xAD8 0), standing on it (0x2D6150) is drawn moved by the same offset while it
   shakes (0x2D6680, from the monster's draw 0x2FEFA0): added to the place of the matrix its render instance is drawn
   with and given to its hair as the draw offset (ClothInstance +0x90, 0x1D6780; 0 otherwise); its own matrix, its

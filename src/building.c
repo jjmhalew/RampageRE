@@ -54,15 +54,16 @@ static uint32_t rnd(Building *b)                     /* Park-Miller, seed x 1680
 
 static float rnd01(Building *b) { return (float)rnd(b) / 2147483648.0f; }
 
-/* 0x2CC5E0: shake longer, by ShakeLength x (1 + a random share) */
+/* 0x2CC5E0: shake on, ShakeLength x (1 + a random share) from now [R]: a shake that is over starts again (+0x40 the
+ * clock, +0x44 0); one still going has its length (+0x44) cut to the time it has shaken (clock - +0x40), so each hit
+ * leaves 0.5 .. 1 s of it, not the sum of them all */
 static void shake_more(Building *b)
 {
-    if (b->shake_time <= 0) {
+    if (b->shake_time <= 0)
         b->shake_t = 0;
-        b->shake_total = 0;
-    }
+    b->shake_total = b->shake_t;
     float more = b->shake_length * (1 + rnd01(b));
-    b->shake_time += more;
+    b->shake_time = more;
     b->shake_total += more;
 }
 

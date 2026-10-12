@@ -134,7 +134,9 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   `MilitaryInstance|` / `OccupantInstance|` records: each one's name, `Frequency` and `DropRate`, the sort's total
   `Frequency` at +0x24): weighed by `Frequency` (0x319D50 .. 0x319DF4: a random 0 .. 1 times the total, the first
   kind whose running sum reaches it) [R]. A military occupant
-  is the army's window soldier (`army_spawn_window`, Military_Window.bsf).
+  is the army's window soldier (`army_spawn_window`, Military_Window.bsf). It is the slot's occupant actor as a
+  civilian is: `getBuildingOccupant` answers 1 for it, `grabBuildingOccupant` holds it (its `onPickup`, state 8)
+  and retires the slot, and `throwObject` eats or smashes it (`onThrow`). Here city.c's `scene_window_soldier`.
 - **Placement** (`getWindowPosition` 0x2BE660, with the slot's `LRPos`): the actor stands at its window's bottom middle:
   - x: the grid's min x + 5 × column + the middle of the column's `Openable` (0x2CFF30; not the `Outline`);
   - y: the front's y;
@@ -209,7 +211,9 @@ The script's `onThrow(monster, eat)` always runs. After that:
     - A 1 in 5 chance of `Monsters::timedDoFart` 2 s later.
   - If not eaten, the script calls `smash` → `smashObject` (0x2B2F50).
 - **Any let-go is a throw**: the many `throwObject(0, 0, 2, −2)` at the start of jumps and reactions smash a held
-  person.
+  person. A hit that asks a reaction does it too, whatever the clip: TakeDamage (0x2D6A50, each `+0x110` it sets)
+  calls 0x2DA570(monster, 0), which throws what is held, not eaten, at (0, 10, 10) in the monster's frame [R]
+  (`throw_held` in main.c's `monster_take`).
 - **The face**: the eating clips set the expression themselves (`faceAnim` 13 Chomp, then 10 Chew, with a belch 5 s
   later).
 

@@ -176,8 +176,8 @@ typedef struct {                                     /* a shot in the air, or a 
 
 /* ---- what happened */
 enum {
-    AE_EFFECT,        /* start effect `name` at pos along dir; id its handle; unit >= 0: it follows that unit (offset
-                       * pos - the unit's place); shot >= 0: it is that shot's look and follows the shot */
+    AE_EFFECT,        /* start effect `name` at pos along dir; id its handle; unit >= 0: it follows that unit at
+                       * offset v from its place; shot >= 0: it is that shot's look and follows the shot */
     AE_EFFECT_STOP,   /* the effect with handle id stops */
     AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads) */
     AE_HIT,           /* a weapon reached monster `monster`: amount damage, id the DamageType, level the ReactionLevel

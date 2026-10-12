@@ -72,7 +72,7 @@ typedef struct {
 } StreetBuilding;
 
 /* ---- the objects */
-enum { SK_STREET, SK_ROOF, SK_MERRY };              /* StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf */
+enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN };     /* StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf, Sign.bsf */
 /* object flags (+0x4C) [R]: the template's Flags names (the table 0x3F5F20), StreetObject's Construct (0x8000 unless
  * OnlyHitWithEffNodes is 0 or IsSwaying), onPickup / onThrow clearing 0x4000 / 0x10000, 0x20000 while held,
  * 0x4000000 attached to a building (0x309E20) */

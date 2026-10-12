@@ -1604,3 +1604,23 @@ void dircam_update(CamDirector *d, float dt, const DirObject *objs, int nobjs, C
     if (out)
         *out = d->out;
 }
+
+/* the world moved by dy along y under the cameras (the game's next block: the scene rebuilt 41 back): what they keep
+ * as world places moves with it - the camera shown, the blend's, Follow's, and the script camera's followers and the
+ * world points it was given (ResultsNI's, set in the new block's frame: activateNextBlock 0x325924 comes before state
+ * 7's NI 0x324500 [R]); an offset from an object stays, the object carries it */
+void dircam_shift_y(CamDirector *d, float dy)
+{
+    ScriptCam *s = &d->script;
+    d->out.pos[1] += dy;
+    d->snap.pos[1] += dy;
+    d->follow.pos[1] += dy;
+    d->p1[1] += dy;
+    s->goal[1] += dy;
+    s->cur[1] += dy;
+    s->last_pos[1] += dy;
+    if (s->loc_obj < 0)
+        s->loc_off[1] += dy;
+    if (s->tgt_obj < 0)
+        s->tgt_off[1] += dy;
+}

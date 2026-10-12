@@ -262,6 +262,12 @@ static int effect_on(Army *a, ArmyUnit *u, const char *name, const float offset[
     ArmyEvent *e = emit(a, AE_EFFECT, who(a, u), name, p);
     e->id = a->next_fx++;
     e->dir[1] = 1;
+    /* v: the offset it follows the unit at (createAndStartAttachedWithOffset: the offset in an identity matrix,
+     * 0x27A990 -> 0x291ED0 [R]), not worked out from pos later: the unit may have moved on by the time the host reads
+     * the event (CombatTruck's Construct starts the police lights before onInit puts the car at x +-100) */
+    memset(e->v, 0, sizeof e->v);
+    if (offset)
+        memcpy(e->v, offset, sizeof e->v);
     return e->id;
 }
 static void effect_stop(Army *a, int id)

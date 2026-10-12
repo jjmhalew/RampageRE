@@ -135,7 +135,9 @@ block left behind only gets its rubble (0x303C90(mgr + 0x18, block, 1)): each Bu
 −50 … 50 its template's RubbleShape at y −36 (5 − 41), and its GroundShape at (0, −41, 0) (0x303BB0). There is no
 coordinate shift: the game's places stay block-relative. The port keeps the old scene and moves the game's places
 by `block_shift`, which looks the same, but buildings left standing after a time-up stay standing here, where the
-game shows only rubble.
+game shows only rubble. When the scene is rebuilt (`game_next_block`) every place the cameras keep goes back 41 with
+it, the script camera's too (`dircam_shift_y`): ResultsNI puts it at (20, −75, 2) looking at (5, −33, 8), in the
+new block's frame; left at +41 it stood 8 in front of the winner, looking away from it.
 
 ## When a block is won
 

@@ -1,4 +1,4 @@
-# Street and roof objects (StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf)
+# Street and roof objects (StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf, Sign.bsf)
 
 The lamps, benches, mailboxes, trees, fences and parked cars along the street, the gongs of the Hong Kong shrines,
 and everything that stands on a roof: chimneys, smoke stacks, antennas, fans, the London and Las Vegas trims, the
@@ -18,6 +18,7 @@ scripts (`build/scripts/StreetObject.scr`, `RoofItem.scr`, `MerryGoRound.scr`) o
 | findBuildingByPosition | 0x2A3D20 (with no direction) |
 | Building.isFalling | 0x2ADE10 (Building binding 0x45 in 0x2AD610) |
 | MerryGoRound.bsf | Construct, TakeDamage, onPulse (no onInit, onPickup, onThrow, TakeImpact or OnHitGround) |
+| Sign.bsf | Construct, TakeDamage, TakeImpact, onPulse, onBuildingDestruction |
 | RotationMover | its step 0x31C540; the angles from a matrix 0x101220, the matrix from them 0x101330 |
 | Monster queueFacingZRequest / queuePushRequest | the junction's cases 0x2AB370 / 0x2AB350 → 0x2E97D0 / 0x2E9860; taken by the monster's update at 0x2DEB04 |
 
@@ -236,6 +237,26 @@ with foot IK (+0x258C), let both feet go (0x33BE90(+0xC81C), as the push-out). T
 0x2DEBAC) takes them into the matrix it starts its frame from: the place replaced (x, y and z), the turn replaced,
 the flags cleared. Only MerryGoRound.bsf calls queueFacingZRequest; queuePushRequest also the freighter and the army's
 pushMonster (rail.c, army.c).
+
+## Sign.bsf [R]
+The signs hung on the buildings' fronts: 65 templates (CasinoVerticalSign, CasinoHorizontalSign, SignParking1,
+GoldrushSign, LuckysSign, OasisSign, ...; parents DefSignProps, DefElectricSideSignProps with
+`OnlyHitWithEffNodes+IsObstacle`, DefFaceSignProps, DefLogoSign*Props with `Hits` 4). Made by their building's
+instance, so attached to it (0x4000000) and swayed and sunk with it until they come loose.
+- **Construct**: flags 0, no hits; one `gWorld.frand()` for a `fallRot` that onPulse never reads. No pulse.
+- **TakeDamage**: only from a monster, any type. The hits count up; when it is not loose yet, `TakeDamage` (1) is set
+  and the count reaches `Hits` (0): loose (flags 1, a pulse every step), its `HitEffect` attached, IsObstacle and
+  OnlyHitWithEffNodes cleared (0x40000 | 0x8000), `addStats(object, slot, 0)`.
+- **TakeImpact**: loose, its HitEffect attached; no score, the flags kept.
+- **onBuildingDestruction** (0x309AC0: the first storey of its building to fall): loose, its `DetachEffect` (the
+  electric signs' sparks) where it is, the two flags cleared.
+- **onPulse**: z − 10 and y − 3 a second (towards the street), turned (π / 10, 3π / 20, 0) a second about its own
+  axes; at z ≤ −0.25 its `GroundEffect` there, and it returns 4 | 8 | 16: deleted.
+- A loose sign's IsObstacle climbing box goes (city.c `scene_street_place`). Not ported yet: Billboard.bsf (32
+  templates, the Las Vegas marquees `Sign_Keno`, `Sign_PrimeRib`: knocked over in 4 blows) and AnimatedSign.bsf
+  (VegasCowboySign: no building ActorInstance is placed).
+- The templates' `CollisionBox` is keyed `CollisionBox|CollisionBox` in the books; `book_box` reads that first (it
+  read only `CollisionBox`, so every street, roof and sign object fell back on its model's sphere).
 
 ## The port (src/streetobj.c)
 - `streetobj_add(tmpl, inst, world, building, attack)` for each object the city placed (city.c records them in

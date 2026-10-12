@@ -206,7 +206,9 @@ typedef struct {
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
     /* a slot: its front cell (template storey, column), the Openable it opens (LRPos, +0xC), its occupant's kind */
-    struct WindowSlot { int building, storey, column, occupant, military, unit, lr; } *slots; int nslots, slots_made;
+    struct WindowSlot { int building, storey, column, occupant, military, unit, lr, retired; } *slots;   /* retired:
+     * its soldier grabbed (0x318140 with 1: +0xD = 0xFF), never filled again */
+    int nslots, slots_made;
     /* the Occupants group's soldiers (MilitaryInstance|: Military_Window.bsf templates, the army's window soldiers)
      * and its rates (0x31A540: +0x48 MilitaryStartRate 0.1, +0x4C MilitaryEndRate 0.9, +0x50 MilitaryTimeRange 240) */
     const char *military[16]; float military_freq[16]; int nmilitary;
@@ -324,6 +326,11 @@ void scene_people_spawn(Scene *s, float dt);
  * (leaveBuilding), is grabbed or is smashed: those leave the window open, as the game does. 1 if one was shut. */
 int scene_window_close(Scene *s, int building, int storey, int column);
 int scene_window_close_at(Scene *s, const float pos[3]);
+/* getBuildingOccupant's actor when it is a soldier (0x2B37C0: the slot's occupant, Military_Window.bsf's as well as
+ * the people's): the army unit in that window of the building (storey as built), -1 none; _take: grabBuildingOccupant
+ * (0x2B3350 -> 0x318140(.., 1)) takes it out, the slot retired */
+int scene_window_soldier(const Scene *s, int building, int storey, int column);
+void scene_window_soldier_take(Scene *s, int unit);
 /* the playable buildings as people.c sees them */
 int scene_people_boxes(const Scene *s, PeopleBox *out, int max);
 /* the buildings' next dt seconds (collapses, destruction, shaking: building_update), and their facades, interiors,

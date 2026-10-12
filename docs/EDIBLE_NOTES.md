@@ -60,7 +60,9 @@ of 0x3196F0 works like this:
     place with the shaker's offset, z its storey's floor now + its `+0xF4`. A cell's break shakes the building, so
     the edible stands in the middle of its storey (floor + 1.5) from its first frame, and comes down with its floor;
   - `+0xF4` = 1.5.
-- **Its look:** nearly every edible uses `InvisShape`. The look is its `Effect`, attached with no offset.
+- **Its look:** nearly every edible uses `InvisShape`. The look is its `Effect`, attached with no offset: on the
+  edible where it is now (main.c starts it there, not where the edible was made, as the shake has lifted it 1.5 by
+  the time the event is read).
 - **Gone for good:** once an edible is deleted (eaten, expired or lost with its floor), the slot forgets it
   (0x318140: `+0x10 = 0`, `+0xE = 0xFF`).
 

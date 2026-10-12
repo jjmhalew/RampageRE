@@ -210,5 +210,7 @@ void dircam_game_event(CamDirector *d, const char *name, float blend, const floa
 void dircam_rage(CamDirector *d, int obj);
 /* a frame (0x167690): the modes' cameras and their blend. objs: the objects the script camera may follow */
 void dircam_update(CamDirector *d, float dt, const DirObject *objs, int nobjs, CamView *out);
+/* the world moved dy along y (the game's next block): the cameras' world places with it */
+void dircam_shift_y(CamDirector *d, float dy);
 
 #endif

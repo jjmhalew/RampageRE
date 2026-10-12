@@ -93,8 +93,8 @@ typedef struct {
 
 /* ---- what happened */
 enum {
-    EE_EFFECT,        /* start effect `name` at pos; id its handle; edible >= 0: it follows that edible (offset pos -
-                       * the edible's place; FollowEffect.createAndStartAttachedWithOffset, turned off when it dies) */
+    EE_EFFECT,        /* start effect `name` at pos; id its handle; edible >= 0: it follows that edible, on it
+                       * (FollowEffect.createAndStartAttachedWithOffset(actor, name, 0), turned off when it dies) */
     EE_EFFECT_STOP,   /* the effect with handle id stops */
     EE_SOUND,         /* the 3D sound `name` at pos */
     EE_REACTION,      /* monster.playReaction(name): the state of that name ("React_Front_Yum", "React_Side_L_Zap"),

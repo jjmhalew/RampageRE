@@ -1208,6 +1208,11 @@ static void build(Viewer *v)
             v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
+                /* [R] SinglePlayer's load (0x2B7F50) sets +0x610, so its first frame (0x2B7BC0) brings the music
+                 * back to the profile's volume over 250 ms: the loading screen took it to 0 (showLoading), and
+                 * BeginBlock's music only starts at 0.05 or more (0x323CE0) */
+                v->music_now = v->music_vol = profile_music_volume(&v->prof) / 0.75f;
+                sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 250);
             } else {
                 game_free(v->game);
                 v->game = NULL;
@@ -1293,6 +1298,7 @@ static int open_city(Viewer *v, int index, uint32_t block)
  * test against here, so only the monster's own abilities say yes) */
 static int attach_world(Mon *mo, const char *name, Mat4 *out);
 static int window_person(Mon *mo, const float *xyz);
+static int window_soldier(Mon *mo, const float *xyz);
 
 /* the middle of the players' x (0x336360, kept at gp - 0x6C70): the camera's reach is measured from it */
 static float players_mid_x(const Viewer *v)
@@ -1419,10 +1425,10 @@ static int answer(void *ctx, const char *call, const float *a)
     if (!strcmp(call, "Monsters::canRespawn"))       /* 0x2D3D80: lives left, become human, its streaker not held */
         return v->game ? game_can_respawn(v->game, mo->slot, mo->streaker >= 0 && v->scene.folk &&
                                           people_get(v->scene.folk, mo->streaker)->phase == PP_HELD) : mo->defeated;
-    if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(mo, a + 1) >= 0;
+    if (!strcmp(call, "Monsters::canGrabPerson")) return window_person(mo, a + 1) >= 0 || window_soldier(mo, a + 1) >= 0;
     if (!strcmp(call, "Monsters::canDoPunch")) {     /* not at a person's or a power-up's window */
         int e = edible_call(mo, call, a + 1);
-        return e >= 0 ? e : window_person(mo, a + 1) < 0;
+        return e >= 0 ? e : window_person(mo, a + 1) < 0 && window_soldier(mo, a + 1) < 0;
     }
     if (strstr(call, "::canGrabPowerup") || strstr(call, "::checkForHazard"))
         return edible_call(mo, call, a + 1) > 0;
@@ -1554,6 +1560,62 @@ static void hit_building_roof(Mon *mo, const char *bone)
         printf("  hitBuildingRoof %s at %.1f %.1f %.1f: building %d roof %d -> %d, top storey %d column %d %s "
                "(state %d, %d storeys, HP %d)\n", bone, at[0], at[1], at[2], bi, roof, sb->b.roof, sb->b.n - 1, col,
                hit ? "hit" : "no damage", sb->b.state, sb->b.n, sb->b.hp);
+}
+
+/* throwObject(eat, x, y, z) (0x2D9DC0): what the monster holds eaten, or smashed away with (x, y, z) in its frame */
+static void throw_held(Mon *mo, int eat, float x, float y, float z)
+{
+    Viewer *v = mo->v;
+    /* [R 0x2D9DC0] throwObject(vel, 0, eat): the velocity in the monster's frame, turned by its matrix (x
+     * mirrored with it) and by its +0x2560 angle, always 0: the head animator's +0x68 (the animator at +0x24F8,
+     * the animation player's +0x1A10, set by 0x3022DC), zeroed by 0x2FB734 and written only with one head bone
+     * (0x2FC2D4); all 30 monsters have two (MONSTER_DATA +0xA14) [R] */
+    float h = mo->heading / 57.2957795f, lx = mo->mirror ? -x : x;
+    float vel[3] = { cosf(h) * lx - sinf(h) * y, sinf(h) * lx + cosf(h) * y, z };
+    if (mo->held_unit >= 0 && v->army) {
+        army_throw(v->army, mo->held_unit, mo->slot, eat, vel, mo->heading / 57.2957795f);
+        mo->held_unit = -1;
+        return;
+    }
+    if (mo->held_vehicle >= 0 && v->veh) {
+        vehicle_throw(v->veh, mo->held_vehicle, mo->slot, eat, vel, mo->heading / 57.2957795f);
+        mo->held_vehicle = -1;
+        return;
+    }
+    if (mo->held_parade >= 0 && v->parade) {
+        parade_throw(v->parade, mo->held_parade, mo->slot, eat, mo->heading / 57.2957795f);
+        mo->held_parade = -1;
+        return;
+    }
+    if (mo->held_rail >= 0 && v->rail) {
+        rail_throw(v->rail, mo->held_rail, mo->slot, eat, vel);
+        mo->held_rail = -1;
+        return;
+    }
+    if (mo->held_sobj >= 0 && v->sobj) {
+        streetobj_fly(v->sobj, mo->held_sobj, mo->slot, eat, vel);
+        mo->held_sobj = -1;
+        return;
+    }
+    if (mo->held < 0 || !v->scene.folk)
+        return;
+    if (eat) {
+        const Person *pp = people_get(v->scene.folk, mo->held);
+        int first = pp && !(pp->flags & 0x40000000u);    /* addStats once per object */
+        const char *name = pp ? pp->name : NULL;
+        PeopleEaten got = people_eat(v->scene.folk, mo->held);
+        monster_stats(mo, got.health, got.energy);
+        if (first) {                                 /* gCommon.addStats(actor, slot, 1): civilian points */
+            if (v->game && got.points != 0)
+                game_add_points(v->game, mo->slot, GPT_CIVILIAN, (int)got.points);
+            challenge_stats(v, name, (int)got.points);
+        }
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  ate: health %+.0f -> %.0f, energy %+.0f -> %.0f\n", got.health, mo->hp, got.energy, mo->energy);
+    } else {
+        people_throw(v->scene.folk, mo->held, mo->heading);
+    }
+    mo->held = -1;
 }
 
 /* the monster as its foot object reads it (footstep.c): the feet's bones, its velocity, its ground, the water */
@@ -1783,10 +1845,15 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::doGrabPerson")) { /* grabBuildingOccupant(loc, 1) (0x2B3350): 0.25 s blend */
-        int who = mo->held < 0 ? window_person(mo, e->p + 1) : -1;
+        int free = mo->held < 0 && mo->held_unit < 0, who = free ? window_person(mo, e->p + 1) : -1;
         if (who >= 0) {
             people_grab(v->scene.folk, who, 0.25f);
             mo->held = who;
+        } else if (free && v->army && (who = window_soldier(mo, e->p + 1)) >= 0) {   /* a window soldier or cop:
+                                                      * held, its onPickup; eaten or smashed by throwObject */
+            scene_window_soldier_take(&v->scene, who);
+            army_grab(v->army, who, mo->slot, 0.25f);
+            mo->held_unit = who;
         }
         return;
     }
@@ -1829,56 +1896,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::throwObject")) {  /* (eat, x, y, z) (0x2D9DC0): eaten, or smashed away */
-        /* [R 0x2D9DC0] throwObject(vel, 0, eat): the velocity in the monster's frame, turned by its matrix (x
-         * mirrored with it) and by its +0x2560 angle, always 0: the head animator's +0x68 (the animator at +0x24F8,
-         * the animation player's +0x1A10, set by 0x3022DC), zeroed by 0x2FB734 and written only with one head bone
-         * (0x2FC2D4); all 30 monsters have two (MONSTER_DATA +0xA14) [R] */
-        float h = mo->heading / 57.2957795f, lx = mo->mirror ? -e->p[1] : e->p[1];
-        float vel[3] = { cosf(h) * lx - sinf(h) * e->p[2], sinf(h) * lx + cosf(h) * e->p[2], e->p[3] };
-        if (mo->held_unit >= 0 && v->army) {
-            army_throw(v->army, mo->held_unit, mo->slot, e->p[0] != 0, vel, mo->heading / 57.2957795f);
-            mo->held_unit = -1;
-            return;
-        }
-        if (mo->held_vehicle >= 0 && v->veh) {
-            vehicle_throw(v->veh, mo->held_vehicle, mo->slot, e->p[0] != 0, vel, mo->heading / 57.2957795f);
-            mo->held_vehicle = -1;
-            return;
-        }
-        if (mo->held_parade >= 0 && v->parade) {
-            parade_throw(v->parade, mo->held_parade, mo->slot, e->p[0] != 0, mo->heading / 57.2957795f);
-            mo->held_parade = -1;
-            return;
-        }
-        if (mo->held_rail >= 0 && v->rail) {
-            rail_throw(v->rail, mo->held_rail, mo->slot, e->p[0] != 0, vel);
-            mo->held_rail = -1;
-            return;
-        }
-        if (mo->held_sobj >= 0 && v->sobj) {
-            streetobj_fly(v->sobj, mo->held_sobj, mo->slot, e->p[0] != 0, vel);
-            mo->held_sobj = -1;
-            return;
-        }
-        if (mo->held < 0 || !v->scene.folk)
-            return;
-        if (e->p[0] != 0) {
-            const Person *pp = people_get(v->scene.folk, mo->held);
-            int first = pp && !(pp->flags & 0x40000000u);    /* addStats once per object */
-            const char *name = pp ? pp->name : NULL;
-            PeopleEaten got = people_eat(v->scene.folk, mo->held);
-            monster_stats(mo, got.health, got.energy);
-            if (first) {                                 /* gCommon.addStats(actor, slot, 1): civilian points */
-                if (v->game && got.points != 0)
-                    game_add_points(v->game, mo->slot, GPT_CIVILIAN, (int)got.points);
-                challenge_stats(v, name, (int)got.points);
-            }
-            if (getenv("RAMPAGE_TRACE"))
-                printf("  ate: health %+.0f -> %.0f, energy %+.0f -> %.0f\n", got.health, mo->hp, got.energy, mo->energy);
-        } else {
-            people_throw(v->scene.folk, mo->held, mo->heading);
-        }
-        mo->held = -1;
+        throw_held(mo, e->p[0] != 0, e->p[1], e->p[2], e->p[3]);
         return;
     }
     else if (strstr(n, "::doGrabPowerup") || strstr(n, "::destroyPowerup") || strstr(n, "::checkForHazard")) {
@@ -3092,7 +3110,9 @@ static void game_step(Viewer *v, float dt)
                 if (rng)
                     *rng = v->rubble.seed;
                 if (found) {
-                    float at[3] = { loc[0], loc[1] + v->block_shift, loc[2] + 1.5f };
+                    /* (the new block's frame already when the scene is rebuilt at this frame's end: the effects
+                     * are not carried with it) */
+                    float at[3] = { loc[0], loc[1] + (v->game_block >= 0 ? 0 : v->block_shift), loc[2] + 1.5f };
                     int fx = (int)(2.0f * game_frand(v->game));   /* Levels.scr: drawn after the point is found */
                     const char *name = fx < 1 && loc[1] > -23 ? "Rubble_Smolder" : "Fire_Loop";
                     if (v->rubble_fx[e->a] >= 0)
@@ -3345,7 +3365,8 @@ static int edible_call(Mon *mo, const char *call, const float *xyz)
     float at[3] = { mo->mx, mo->my, mo->mz };
     int found = people_probe(boxes, nb, at, xyz, mo->mirror, &b, &ls, &col);
     int o = found && b >= 0 && ls >= 0 && ls < v->scene.buildings[b].b.n ? v->scene.buildings[b].b.live[ls] : -1;
-    int person = o >= 0 && v->scene.folk && people_window_at(v->scene.folk, b, o, col) >= 0;
+    int person = o >= 0 && ((v->scene.folk && people_window_at(v->scene.folk, b, o, col) >= 0) ||
+                            scene_window_soldier(&v->scene, b, o, col) >= 0);   /* an occupant actor, either sort */
     return edible_monster_call(v->edibles, call, o >= 0 ? b : -1, o, col, person, mo->slot,
                                mo->have_graph ? mo->graph.states[mo->run.state].name : NULL);
 }
@@ -3371,14 +3392,16 @@ static void edible_step(Viewer *v, float dt)
             switch (e->type) {
             case EE_EFFECT:
                 if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
-                    if (id >= 0 && e->edible >= 0 && v->nefx < 64) {
-                        const Edible *it = edible_get(v->edibles, e->edible);
+                    /* one that follows its edible is on it, offset 0 (createAndStartAttachedWithOffset(actor,
+                     * name, 0)): where the edible is now, not where it was made (the shake lifts it 1.5 the frame
+                     * after, before this event is read) */
+                    const Edible *it = e->edible >= 0 ? edible_get(v->edibles, e->edible) : NULL;
+                    int id = fx_spawn(v->fxw, e->name, it ? it->pos : e->pos, NULL, 1);
+                    if (id >= 0 && it && v->nefx < 64) {
                         v->efx[v->nefx].fx = id;
                         v->efx[v->nefx].edible = e->edible;
                         v->efx[v->nefx].id = e->id;
-                        for (int k = 0; k < 3; k++)
-                            v->efx[v->nefx].off[k] = it ? e->pos[k] - it->pos[k] : 0;
+                        memset(v->efx[v->nefx].off, 0, sizeof v->efx[v->nefx].off);
                         v->nefx++;
                     }
                 }
@@ -3502,8 +3525,12 @@ static int monster_hittable(const Mon *mo)
  * monster is out of the air (mon_step, 0x2E68D0) [R] */
 static void monster_take(Mon *mo, const char *name, float amount, int level, int slot)
 {
-    if (slot >= 0)
+    if (slot >= 0) {
         set_reaction(mo, slot);
+        /* [R] with the reaction asked (+0x110) 0x2DA570(monster, 0): what it holds is let go of, throwObject(vel
+         * (0, 10, 10), not eaten): a person or a soldier smashed away, not left in a hand that no longer holds it */
+        throw_held(mo, 0, 0, 10, 10);
+    }
     if (level == 1 || level == 2)
         mon_rumble(mo, level == 1 ? 400 : 800);
     mo->hp = fmaxf(0, mo->hp - amount);
@@ -3573,8 +3600,10 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
                         v->vfx[v->nvfx].id = e->id;
                         v->vfx[v->nvfx].fx = id;
                         v->vfx[v->nvfx].obj = o ? e->obj : -1;
-                        for (int k = 0; k < 3; k++)
-                            v->vfx[v->nvfx].off[k] = o ? e->pos[k] - o->pos[k] : 0;
+                        for (int k = 0; k < 3; k++)   /* createAndStartAttached: on the object, offset 0 [R 0x277100
+                                                       * -> 0x291ED0] (the place it was emitted at may be stale: a car
+                                                       * constructed before it is put on its line); the beam its nozzle's */
+                            v->vfx[v->nvfx].off[k] = beam ? e->pos[k] - o->pos[k] : 0;
                         v->nvfx++;
                     }
                 }
@@ -4118,7 +4147,7 @@ static void army_step(Viewer *v, float dt)
                         v->fxa[v->nfxa].len = has_rod ? rod.length : 0;
                         const ArmyUnit *u = e->unit >= 0 ? army_unit(v->army, e->unit) : NULL;
                         for (int k = 0; k < 3; k++)
-                            v->fxa[v->nfxa].off[k] = u && e->shot < 0 ? e->pos[k] - u->pos[k] : 0;
+                            v->fxa[v->nfxa].off[k] = u && e->shot < 0 ? e->v[k] : 0;   /* (army.c's offset) */
                         v->nfxa++;
                     } else if (id >= 0 && v->nfxa < 128) {   /* a handle to stop it by */
                         v->fxa[v->nfxa].id = e->id;
@@ -4374,6 +4403,17 @@ static void mon_fx_stop_all(Mon *mo)
 }
 
 /* canGrabPerson's / doGrabPerson's window person (getBuildingOccupant 0x2B37C0), -1 none */
+static int window_soldier(Mon *mo, const float *xyz)   /* the army unit at that window, -1 none */
+{
+    Viewer *v = mo->v;
+    PeopleBox boxes[64];
+    int nb = scene_people_boxes(&v->scene, boxes, 64), b, st, col;
+    float at[3] = { mo->mx, mo->my, mo->mz };
+    if (!v->army || !people_probe(boxes, nb, at, xyz, mo->mirror, &b, &st, &col) || !boxes[b].live || st >= boxes[b].n)
+        return -1;
+    return scene_window_soldier(&v->scene, b, boxes[b].live[st], col);
+}
+
 static int window_person(Mon *mo, const float *xyz)
 {
     Viewer *v = mo->v;
@@ -5307,8 +5347,7 @@ static void game_next_block(Viewer *v)
     for (int k = 0; k < v->nmon; k++)
         v->mon[k].my -= v->block_shift;
     v->cam.pos[1] -= v->block_shift;
-    v->cd.out.pos[1] -= v->block_shift;
-    v->cd.snap.pos[1] -= v->block_shift;
+    dircam_shift_y(&v->cd, -v->block_shift);       /* the script camera's places too (ResultsNI's) */
     v->view.pos[1] -= v->block_shift;
     v->block_shift = 0;
     v->block = (uint32_t)v->game_block;

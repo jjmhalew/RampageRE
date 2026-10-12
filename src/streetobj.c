@@ -826,6 +826,64 @@ static void merry_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonste
     }
 }
 
+/* ---------------------------------------------------------------- Sign.bsf */
+
+/* the signs hung on the buildings' fronts (65 templates: CasinoVerticalSign, SignParking1, CasinoHorizontalSign,
+ * GoldrushSign, LuckysSign, ...) [R Sign.scr]. Construct: flags 0, no hits, and a fallRot onPulse never reads (its x
+ * sign one draw of gWorld.frand); no pulse until it comes loose */
+static void sign_construct(StreetObjs *s, StreetObj *o)
+{
+    (void)o;
+    (void)frand(s);                                  /* gWorld.frand() < 0.5: fallRot.x's sign, unused */
+}
+
+/* it comes loose: flags 1, a pulse every frame (setPulseDelay(gWorld.getTimeStep())) */
+static void sign_loose(StreetObj *o)
+{
+    o->flags |= 1;
+    set_pulse(o, TIMESTEP);
+}
+
+/* onPulse [R]: down 10 and towards the street (-y) 3 a second, turned (pi/10, 3pi/20, 0) a second about its own
+ * axes; at z <= -0.25 its GroundEffect there, and it returns 4|8|16: deleted */
+static void sign_pulse(StreetObjs *s, StreetObj *o)
+{
+    o->world[14] -= 10 * o->pulse_delay;
+    o->world[13] += -3 * o->pulse_delay;
+    float rot[3] = { PI * 0.1f * TIMESTEP, PI * 0.15f * TIMESTEP, 0 };
+    rotate_local(o, rot);
+    if (o->world[14] <= -0.25f) {
+        effect(s, o, gstr(o->tmpl, "GroundEffect"), pos_of(o), 0, NULL, NULL, 0, 0);
+        request_delete(s, o);
+    }
+}
+
+/* onBuildingDestruction [R]: still up, it comes loose in its DetachEffect (the electric signs' sparks), where it is,
+ * no longer IsObstacle nor OnlyHitWithEffNodes */
+static void sign_building_gone(StreetObjs *s, StreetObj *o)
+{
+    if (o->flags & 1)
+        return;
+    sign_loose(o);
+    effect(s, o, gstr(o->tmpl, "DetachEffect"), pos_of(o), 0, NULL, NULL, 0, 0);
+    o->oflags &= ~(uint32_t)(SF_OBSTACLE | SF_EFF_NODES);
+}
+
+/* TakeDamage(who, amount, type, direction) [R]: from a monster, any type; at Hits (0; the logo signs 4) and with
+ * TakeDamage (1) it comes loose, its HitEffect on it, no longer IsObstacle nor OnlyHitWithEffNodes, and it counts */
+static void sign_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    if (!who || mi < 0)
+        return;                                      /* gWorld.coerceToMonster(who) not valid */
+    o->num_hits++;
+    if ((o->flags & 1) || (int)onum(o, "TakeDamage", 1) == 0 || o->num_hits < (int)onum(o, "Hits", 0))
+        return;
+    sign_loose(o);
+    effect(s, o, gstr(o->tmpl, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);
+    o->oflags &= ~(uint32_t)(SF_OBSTACLE | SF_EFF_NODES);
+    add_stats(s, o, mi);
+}
+
 /* ---------------------------------------------------------------- the module */
 
 StreetObjs *streetobj_new(const StreetHost *host)
@@ -846,13 +904,13 @@ int streetobj_kind_of(Group tmpl)
     if (gnum(tmpl, "IsMonsterUpgrade", &up) && up != 0)
         return -1;
     return same_text(sc, "StreetObject.bsf") ? SK_STREET : same_text(sc, "RoofItem.bsf") ? SK_ROOF :
-           same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : -1;
+           same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : same_text(sc, "Sign.bsf") ? SK_SIGN : -1;
 }
 
 /* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
 static const float *book_box(Group g, float b[6])
 {
-    return gpoint(g, "CollisionBox", b, 6) ? b : NULL;
+    return gpoint(g, "CollisionBox|CollisionBox", b, 6) || gpoint(g, "CollisionBox", b, 6) ? b : NULL;
 }
 
 /* its collision shape (0x28FD70, collide_shape_pick): the template's CollisionBox, CollisionRadius or AutoCollisionBox
@@ -919,8 +977,10 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
         street_construct(s, o);
     else if (kind == SK_ROOF)
         roof_construct(s, o);
-    else
+    else if (kind == SK_MERRY)
         merry_construct(o);
+    else
+        sign_construct(s, o);
     return i;
 }
 
@@ -936,7 +996,8 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
         if (getenv("RAMPAGE_STREET"))                /* the list, for finding one */
             printf("street object %d %s (%s) at %.2f %.2f %.2f, box %.1f %.1f %.1f .. %.1f %.1f %.1f, flags %#x, "
                    "building %d\n", i, o->name ? o->name : "?",
-                   o->kind == SK_ROOF ? "RoofItem" : o->kind == SK_MERRY ? "MerryGoRound" : "StreetObject",
+                   o->kind == SK_ROOF ? "RoofItem" : o->kind == SK_MERRY ? "MerryGoRound" :
+                   o->kind == SK_SIGN ? "Sign" : "StreetObject",
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
@@ -1012,8 +1073,10 @@ static void step(StreetObjs *s)
                     street_pulse(s, o);
                 else if (o->kind == SK_ROOF)
                     roof_pulse(s, o);
-                else
+                else if (o->kind == SK_MERRY)
                     merry_pulse(s, o);
+                else
+                    sign_pulse(s, o);
             }
         }
         /* 0x309AC0 [R]: attached (0x4000000) to a building whose collapsing storey is set: onBuildingDestruction,
@@ -1022,6 +1085,8 @@ static void step(StreetObjs *s)
             o->oflags &= ~(uint32_t)SF_ATTACHED;
             if (o->kind == SK_ROOF)
                 roof_building_gone(s, o);           /* StreetObject.bsf has none */
+            else if (o->kind == SK_SIGN)
+                sign_building_gone(s, o);
         }
         if (o->flying && !s->deleting[i])
             fly_step(s, o);
@@ -1090,8 +1155,10 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         street_damage(s, o, mi, who, type);
     else if (o->kind == SK_ROOF)
         roof_damage(s, o, mi, who);
-    else
+    else if (o->kind == SK_MERRY)
         merry_damage(s, o, mi, who);
+    else
+        sign_damage(s, o, mi, who);
     if (s->deleting[idx(s, o)])
         delete_now(s, o);
 }
@@ -1135,6 +1202,13 @@ int streetobj_take_impact(StreetObjs *s, int i)
     if (i < 0 || i >= s->n)
         return 0;
     StreetObj *o = &s->o[i];                         /* TakeImpact [R] */
+    if (o->alive && o->kind == SK_SIGN) {            /* Sign.bsf's: loose, its HitEffect on it; no score */
+        if (!(o->flags & 1)) {
+            sign_loose(o);
+            effect(s, o, gstr(o->tmpl, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);
+        }
+        return 1;
+    }
     if (!o->alive || o->kind != SK_STREET || (o->oflags & SF_HELD))
         return 0;
     if (getenv("RAMPAGE_TRACE"))
