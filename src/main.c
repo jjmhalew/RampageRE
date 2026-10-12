@@ -3345,7 +3345,7 @@ static int edible_call(Mon *mo, const char *call, const float *xyz)
     float at[3] = { mo->mx, mo->my, mo->mz };
     int found = people_probe(boxes, nb, at, xyz, mo->mirror, &b, &ls, &col);
     int o = found && b >= 0 && ls >= 0 && ls < v->scene.buildings[b].b.n ? v->scene.buildings[b].b.live[ls] : -1;
-    int person = o >= 0 && v->scene.folk && people_window_at(v->scene.folk, b, ls, col) >= 0;
+    int person = o >= 0 && v->scene.folk && people_window_at(v->scene.folk, b, o, col) >= 0;
     return edible_monster_call(v->edibles, call, o >= 0 ? b : -1, o, col, person, mo->slot,
                                mo->have_graph ? mo->graph.states[mo->run.state].name : NULL);
 }
@@ -7051,13 +7051,16 @@ static int viewer_main(int argc, char **argv)
 #endif
             pad_set_strength(v.vibrate ? 1.0f : 0.0f);
         }
-#ifdef __ANDROID__
-        if (w.pressed[VK_ESCAPE])                    /* the back button: Backspace (back) in the menus, else P (Start:
-                                                      * the Pause menu); an app is left with Home, not quit */
-            w.pressed[v.shell || (v.hud && (hud_results_showing(v.hud) || hud_pause_showing(v.hud))) ? VK_BACK : 'P'] = 1;
-#else
-        if (w.pressed[VK_ESCAPE]) w.quit = 1;
+        /* Esc (Android's back button): Backspace (back) in the menus, else P (Start: the Pause menu), as a game's;
+         * the game is left from its menus (an app with Home). Only the bare viewer, with neither, quits on it */
+        if (w.pressed[VK_ESCAPE]) {
+            if (v.shell || v.game)
+                w.pressed[v.shell || (v.hud && (hud_results_showing(v.hud) || hud_pause_showing(v.hud))) ? VK_BACK : 'P'] = 1;
+#ifndef __ANDROID__
+            else
+                w.quit = 1;
 #endif
+        }
         settings_keys(&gfx, &w);                     /* F5 .. F9 the graphics, F11 fullscreen */
         if (v.shell) {                               /* the front end has the screen and the pad */
             if (v.shell_go) {                        /* the loading screen was drawn: the game */

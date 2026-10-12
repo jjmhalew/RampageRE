@@ -1362,8 +1362,8 @@ void scene_people_spawn(Scene *s, float dt)
         const Building *b = &sb->b;
         int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
         if (b->state != BUILDING_STANDING || ls <= 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
-            people_window_at(s->folk, ws->building, ls, ws->column) >= 0 ||
-            people_window_retired(s->folk, ws->building, ls, ws->column))   /* its occupant grabbed: retired */
+            people_window_at(s->folk, ws->building, ws->storey, ws->column) >= 0 ||
+            people_window_retired(s->folk, ws->building, ws->storey, ws->column))   /* its occupant grabbed: retired */
             continue;                                /* [R 0x31AD00] the ground storey (its record +0x10 is 0) none */
         {                                            /* [R 0x31AD00] 10 out in front of the cell, the last building
                                                       * whose box holds it (0x2A3D20) must stand lower than it */
@@ -1396,7 +1396,7 @@ void scene_people_spawn(Scene *s, float dt)
                 printf("  a window soldier %s at %.1f %.1f %.1f (unit %d)\n", s->military[ws->occupant], at[0], at[1], at[2], ws->unit);
         }
         else
-            people_add_window(s->folk, s->occupant[ws->occupant], at, ws->building, ls, ws->column);
+            people_add_window(s->folk, s->occupant[ws->occupant], at, ws->building, ws->storey, ws->column);
         /* and its window opens over 0.5 s (0x318B04: openWindow(storey, column, LRPos, 1, 0.5)) */
         building_window_open(&sb->b, ws->storey, ws->column, ws->lr, 1, 0.5f, ol, sb->opens_h[tile][ws->lr]);
         return;
@@ -1442,6 +1442,8 @@ int scene_people_boxes(const Scene *s, PeopleBox *out, int max)
         memcpy(out[n].max, b->max, sizeof out[n].max);
         out[n].width = b->width;
         out[n].gone = b->state == BUILDING_GONE || b->state >= BUILDING_CRACKING;
+        out[n].live = b->live;
+        out[n].n = b->n;
     }
     return n;
 }
@@ -3574,7 +3576,8 @@ void scene_buildings_update(Scene *s, float dt)
                     continue;
                 sb->broke[o][ci] = 1;
                 if (s->folk)
-                    people_cell_broken(s->folk, (int)i, ls);
+                    people_cell_broken(s->folk, (int)i, ls > 0 ? sb->b.live[ls - 1] : -1, o,
+                                       ls + 1 < sb->b.n ? sb->b.live[ls + 1] : -1);
                 if (s->edibles)                      /* its edible comes out (0x317BC0) */
                     edible_cell_broken(s->edibles, (int)i, o, col, sb->b.cell[o][ci].state, sb->b.state);
             }

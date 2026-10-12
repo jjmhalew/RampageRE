@@ -1547,12 +1547,12 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
     }
 }
 
-void people_cell_broken(People *p, int building, int storey)
+void people_cell_broken(People *p, int building, int below, int storey, int above)
 {
     for (int i = 0; i < p->n; i++) {
         Person *q = &p->v[i];
         if (q->phase == PP_SCRIPT && q->kind == PK_WINDOW && q->building == building && q->building >= 0 &&
-            q->storey >= storey - 1 && q->storey <= storey + 1)
+            (q->storey == storey || (below >= 0 && q->storey == below) || (above >= 0 && q->storey == above)))
             window_fall(p, q);
     }
 }
@@ -1612,7 +1612,9 @@ int people_can_grab(const People *p, const PeopleBox *b, int nb, const float mon
                     int mirrored)
 {
     int bi, st, col;
-    return people_probe(b, nb, monster_pos, xyz, mirrored, &bi, &st, &col) ? people_window_at(p, bi, st, col) : -1;
+    if (!people_probe(b, nb, monster_pos, xyz, mirrored, &bi, &st, &col) || !b[bi].live || st >= b[bi].n)
+        return -1;
+    return people_window_at(p, bi, b[bi].live[st], col);   /* the probe's storey is a standing one: its id */
 }
 
 int people_nearest(const People *p, const float hand[3], const float root[3], const float forward[3], float radius)

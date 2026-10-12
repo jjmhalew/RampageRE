@@ -159,12 +159,14 @@ int people_count(const People *p);
 const Person *people_get(const People *p, int who);
 int people_events(People *p, PeopleEvent *out, int max);   /* takes the events since the last call */
 
-/* a front cell at (building, storey) of a building broke (state 2 or more; 0x317DC0): the window people of that
- * building within a storey of it fall (onFallFromWindow) */
-void people_cell_broken(People *p, int building, int storey);
+/* a front cell of a building broke (state 2 or more; 0x317DC0): the window people of that building within a storey
+ * of it fall (onFallFromWindow). The storeys are as built (the game's floor ids, +0x200), as a window person's is:
+ * the broken one and the standing ones below and above it (-1 none) */
+void people_cell_broken(People *p, int building, int below, int storey, int above);
 
 /* ---- the monster's grab */
-typedef struct { float min[3], max[3]; int width; int gone; } PeopleBox;   /* a building's box in the world */
+typedef struct { float min[3], max[3]; int width; int gone; const int *live; int n; } PeopleBox;   /* a building's
+                                                     * box in the world; its standing storeys' ids, bottom up */
 /* getBuildingOccupant's cell (0x2B37C0, 0x2A3D20, 0x2B3900): the script's (x, y, z) (x negated when the monster
  * plays mirrored) added to the monster's place, y less 1; the nearest building whose front lies at or ahead of that
  * point (+y) over its x; its column (x - min x) / 5 and storey (z - foot - 6) / 3. 0 = none */

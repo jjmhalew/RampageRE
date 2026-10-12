@@ -61,7 +61,7 @@ boots another ELF or another version, or the VOL's index is not that release's (
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
 the monster's clips, G play or the free camera, F5 .. F9 the graphics settings and F11 fullscreen ("Graphics
-settings"), F12 a screenshot, Esc quit. In play (the default with `--monster`)
+settings"), F12 a screenshot, Esc quit (in a game: the Pause menu; in the menus: back). In play (the default with `--monster`)
 the keys are a pad: W A S D the left stick, the arrows the right stick (the head), Space Cross (jump), J Square
 (punch), K Triangle (kick), L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter
 or Space take, Backspace back); player 2 (`--players 2`) plays on the numeric keypad, Num Lock on: 8 4 2 6 (or 5)
