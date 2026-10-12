@@ -199,7 +199,8 @@ typedef struct Viewer {
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
-    struct { int fx, edible; float off[3]; } efx[32]; int nefx;   /* the edibles' effects that follow them */
+    struct { int fx, edible, id; float off[3]; } efx[64]; int nefx;   /* the edibles' effects that follow them (id:
+                                                     * edible.c's handle of it) */
     struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
     StreetObjs *sobj;                                /* the street and roof objects (streetobj.c) */
     int sobj_of[SCENE_STREET_MAX];                   /* per Scene.street entry its streetobj index, -1 */
@@ -2078,6 +2079,12 @@ static void world_build(Viewer *v)
 {
     CollideWorld *w = &v->cw;
     collide_begin(w, -1);
+    /* [G] the street's y limits (-10 .. 21, 0x2A3638) left out while the block ends: Levels.scr's ResultsNI puts the
+     * winners on the block left (13, -42) and EndBlockNI walks them from there to (0.7 x, -13.2), then the street
+     * (x, -5.2); with the limits they would stand at the new street's front and walk at it until the 5 s are up. The
+     * game's 0x2E2C50 reaches 0x2A35A0 in every mode but on a building, and how it lets them by is not found */
+    int gs = v->game ? game_state(v->game) : -1;
+    w->street_open = gs == GS_BLOCK_WON || gs == GS_END_BLOCK;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
         if (v->scene.left) {                         /* the block left: rubble, flat (scene_block_left) */
@@ -3365,17 +3372,26 @@ static void edible_step(Viewer *v, float dt)
             case EE_EFFECT:
                 if (v->fxw) {
                     int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
-                    if (id >= 0 && e->edible >= 0 && v->nefx < 32) {
+                    if (id >= 0 && e->edible >= 0 && v->nefx < 64) {
                         const Edible *it = edible_get(v->edibles, e->edible);
                         v->efx[v->nefx].fx = id;
                         v->efx[v->nefx].edible = e->edible;
+                        v->efx[v->nefx].id = e->id;
                         for (int k = 0; k < 3; k++)
                             v->efx[v->nefx].off[k] = it ? e->pos[k] - it->pos[k] : 0;
                         v->nefx++;
                     }
                 }
                 break;
-            case EE_EFFECT_STOP: if (v->fxw) fx_stop(v->fxw, e->id); break;
+            case EE_EFFECT_STOP:                     /* e->id is edible.c's handle, not the effect world's */
+                for (int k = 0; k < v->nefx; k++)
+                    if (v->efx[k].id == e->id) {
+                        if (v->fxw)
+                            fx_stop(v->fxw, v->efx[k].fx);
+                        v->efx[k] = v->efx[--v->nefx];
+                        break;
+                    }
+                break;
             case EE_SOUND: sound_play(e->name, e->pos, 1); break;
             case EE_REACTION:                        /* playReaction: the state of that name, only while alive */
                 if (mo->hp > 0 && mo->have_graph && e->name)
@@ -4770,7 +4786,6 @@ static void mon_step(Mon *mo, float dt)
             if (mo->mx < -75) mo->mx = -75;
             if (mo->mx > 75) mo->mx = 75;
         }
-        if (mo->my < -30) mo->my = -30;
         push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
         if (!mo->is_ai && !mo->mount.mounted) {   /* the camera's reach (0x336290): a player off a face stays
                                                       * at most 70 up and 30 along x from the players' middle */

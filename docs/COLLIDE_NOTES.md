@@ -117,6 +117,11 @@ goes to rowY − r − 0.001 (×1.001); in a gap and still in front of the row, 
 alley, off its walls. Pushed by both rows: p.y ≤ BackRowOffset − r. Last, **the street's limits**: x within ±55, y
 within −10 .. 21 (the body's centre). `collide_buildings_push`, `collide_roof_clamp`, `collide_building_below`,
 `collide_monster`.
+The port leaves the y limits out while the block ends (states 7 and 9, `CollideWorld.street_open`) [G]: Levels.scr's
+ResultsNI puts the winners on the block left (13, −42) and EndBlockNI walks them from there to (0.7 x, −13.2) and on
+to (x, −5.2), places the limits would not let them reach (they would stand at the new street's front and walk at it
+until EndBlockNI's 5 s are up). How the game lets them by is not found: 0x2E2C50 reaches 0x2A35A0 from the update's
+common tail (0x2E0738) in every mode but on a building, and its only gates are the slot and the debug byte.
 
 ## The SpherePhysicsMover (vtable 0x449500) [R]
 

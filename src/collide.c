@@ -361,6 +361,7 @@ void collide_begin(CollideWorld *w, float back_row)
     w->no = w->nb = 0;
     w->nrow[0] = w->nrow[1] = 0;
     w->back_row = back_row;
+    w->street_open = 0;
 }
 
 int collide_add(CollideWorld *w, const CollideShape *s, const float m[12], uint32_t flags, int tag, int kind)
@@ -712,6 +713,8 @@ int collide_buildings_push(const CollideWorld *w, float p[3], float r, float r2)
         p[1] = fminf(p[1], (float)(int)w->back_row - r - 0.001f);
     if (p[0] > 55) { p[0] = 55; hit = 1; }           /* the street's limits [R 0x2A3638 ..] */
     else if (p[0] < -55) { p[0] = -55; hit = 1; }
+    if (w->street_open)
+        return hit;
     if (p[1] > 21) { p[1] = 21; hit = 1; }
     if (p[1] < -10) { p[1] = -10; hit = 1; }
     return hit;
