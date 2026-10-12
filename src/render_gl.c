@@ -1254,13 +1254,24 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         glLightfv(GL_LIGHT0 + i, GL_SPECULAR, zero);
         glEnable(GL_LIGHT0 + i);
     }
-    if (fog && s->fog_end > 0) {
+    /* FogStart / FogEnd are not distances but world y: the game's camera manager (RCameraMgr 0x2BFDA0, every frame;
+     * +0x210 set by its init 0x2BFF60) makes each the eye depth of the street point (camera x, FogStart, 0):
+     * forward.y x (y - camera y) - forward.z x camera z; those go to the VU1 program's F = 255 (far - w) / (far -
+     * near), w the eye-plane depth (0x25A510, 0x37A2A0), which is GL_LINEAR's. So the street, the monsters and the
+     * fronts are not fogged; the blocks behind and the backdrop are [R] */
+    float fwd[3] = { cosf(cam->pitch) * cosf(cam->yaw), cosf(cam->pitch) * sinf(cam->yaw), sinf(cam->pitch) };
+    if (cam->use_rows)
+        memcpy(fwd, cam->rows[1], sizeof fwd);
+    float fog_near = fwd[1] * (s->fog_start - cam->pos[1]) - fwd[2] * cam->pos[2];
+    float fog_far = fwd[1] * (s->fog_end - cam->pos[1]) - fwd[2] * cam->pos[2];
+    int fogged = fog && s->fog_end > 0 && fog_far > fog_near;   /* (a free camera facing -y: none) */
+    if (fogged) {
         float fc[4] = { s->fog_colour[0], s->fog_colour[1], s->fog_colour[2], 1 };
         glEnable(GL_FOG);
         glFogi(GL_FOG_MODE, GL_LINEAR);
         glFogfv(GL_FOG_COLOR, fc);
-        glFogf(GL_FOG_START, s->fog_start);
-        glFogf(GL_FOG_END, s->fog_end);
+        glFogf(GL_FOG_START, fog_near);
+        glFogf(GL_FOG_END, fog_far);
     } else {
         glDisable(GL_FOG);
     }
@@ -1285,7 +1296,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         }
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
-        if (fog && s->fog_end > 0)
+        if (fogged)
             glEnable(GL_FOG);
     }
     for (int pass = 0; pass < 2; pass++) {               /* the street, its building shadows, then the rest */
@@ -1314,8 +1325,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     if (r->hold) {                                         /* port extra: the ambient occlusion over the opaque world
                                                             * (gtao.c), faded out with the fog, then what it held back */
         float f = 1.0f / tanf(cam->fov_deg * 3.14159265f / 360.0f);
-        int fogged = fog && s->fog_end > s->fog_start;
-        gtao_frame(0.5f, 3000, f / aspect, f, fogged ? s->fog_start : 0, fogged ? s->fog_end : 0);
+        gtao_frame(0.5f, 3000, f / aspect, f, fogged ? fog_near : 0, fogged ? fog_far : 0);
         r->hold = 0;
         draw_held(r, t);
     }
@@ -1331,8 +1341,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_COLOR_ARRAY);
     glDisable(GL_CULL_FACE);
     if (s->nfx)                                            /* the effects' particles, over the world */
-        draw_fx(r, s->fx, s->nfx, cam, fog && s->fog_end > s->fog_start ? s->fog_start : 0,
-                fog && s->fog_end > s->fog_start ? s->fog_end : 0);
+        draw_fx(r, s->fx, s->nfx, cam, fogged ? fog_near : 0, fogged ? fog_far : 0);
     if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);

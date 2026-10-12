@@ -744,8 +744,12 @@ its light block should hold ambient 0.1, 0.1, 0.1 and the three colours 0.85 / (
 `tools/city.py` (and `--night`) writes the lights as `KHR_lights_punctual` directional lights (intensity × π, so
 that a surface facing a light gets colour × texture), the ambient colour and the fog as scene extras, and the cloud
 band's rate as material extras (`uvRate`). The rate is taken as texture widths per second (one drift across in
-about 110 s); the animator that applies it is not decoded, so per second is an assumption. The viewer can show
-the fog, but it is set for the game's close camera and greys out a block seen from further away.
+about 110 s); the animator that applies it is not decoded, so per second is an assumption. `FogStart` and
+`FogEnd` are not distances but world y [R]: each frame the camera manager (RCameraMgr 0x2BFDA0) makes each the eye
+depth of the street point (camera x, y, 0), forward.y × (y − camera y) − forward.z × camera z, and the VU1 programs
+fog linearly between those depths (0x25A510: F = 255 (far − w) / (far − near), w the eye-plane depth; 0x37A2A0). So
+the street, the monsters and the fronts get no fog, the blocks behind and the backdrop do (`render_gl.c` rnd_frame;
+a glTF viewer's distance fog from 5 to 200.5 is far too strong).
 
 Not reproduced yet: the facade layout is inferred (it looks right in all cities, not checked against the game),
 shadows and reflections, the timed and random spawns (attackers, window occupants, crowds), and the
