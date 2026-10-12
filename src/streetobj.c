@@ -1,6 +1,7 @@
-/* streetobj.c - the street and roof objects: StreetObject.bsf, RoofItem.bsf and MerryGoRound.bsf (streetobj.h,
- * docs/STREETOBJ_NOTES.md). [R] read in the scripts (build/scripts/StreetObject.scr, RoofItem.scr, MerryGoRound.scr)
- * or the ELF, [G] guessed. */
+/* streetobj.c - the street and roof objects: StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf, Sign.bsf, the
+ * billboards (Billboard.bsf, Billboard_2Part.bsf, Billboard_George.bsf) and AnimatedSign.bsf (streetobj.h,
+ * docs/STREETOBJ_NOTES.md). [R] read in the scripts (build/scripts/StreetObject.scr, RoofItem.scr, ...) or the ELF,
+ * [G] guessed. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -884,6 +885,462 @@ static void sign_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
     add_stats(s, o, mi);
 }
 
+/* ---------------------------------------------------------------- Billboard.bsf, Billboard_2Part.bsf */
+
+/* the billboards on the roofs and the Las Vegas marquees (32 templates: ScumSodaBillboard, BillboardBeans, the
+ * BillboardBreakaway* with their fronts, MidwayBillboard, BillboardKenoMarquee, BirdsOnlyInvisBillboard1, ...)
+ * [R Billboard.scr]. Construct: Type (getStringProp, "Generic"), requiredHits 3, no pulse */
+static int is_type(const StreetObj *o, const char *t) { return same_text(o->type, t); }
+
+static void billboard_construct(StreetObj *o, const char *type)
+{
+    o->type = type ? type : "Generic";
+    o->required = 3;
+    o->bird_fx = o->bubble_fx = -1;
+}
+
+/* getShapeBounds' top [G: the model's box in its own frame; the collision box's without one] */
+static float shape_top(StreetObjs *s, const StreetObj *o)
+{
+    float mn[3], mx[3];
+    if (o->shape && s->host.shape_box && s->host.shape_box(s->host.ctx, o->shape, mn, mx))
+        return mx[2];
+    return o->box_max[2];
+}
+
+static StreetObj *attachment(StreetObjs *s, const StreetObj *o, int i)   /* attachments[i], while isValid */
+{
+    int k = i < o->nattach ? o->attach[i] : -1;
+    return k >= 0 && k < s->n && s->o[k].alive && !s->deleting[k] ? &s->o[k] : NULL;
+}
+
+/* onInit [R]: the pigeons on its top (one gWorld.frand(), always above -0.33: with useBirdFx 1, any case of the key),
+ * 0.5 behind its place; the attachments were made by the caller (streetobj_add_attachment) */
+static void billboard_init(StreetObjs *s, StreetObj *o)
+{
+    float at[3] = { o->world[12], o->world[13] + 0.5f, o->world[14] + shape_top(s, o) };
+    if (frand(s) > -0.33f && (int)onum(o, "useBirdFx", 1) == 1) {
+        o->bird_fx = effect(s, o, "Pigeon_walk", at, 0, NULL, NULL, 0, 0);
+        memcpy(o->bird_at, at, sizeof at);
+    }
+}
+
+/* the birds fly off (birdEffect.stop(), Pigeon_fly where they sat, or [the hit] on its top now) */
+static void birds_fly(StreetObjs *s, StreetObj *o, int from_top)
+{
+    if (o->bird_fx < 0)
+        return;
+    float at[3] = { o->world[12], o->world[13], o->world[14] + shape_top(s, o) };
+    effect(s, o, "Pigeon_fly", from_top ? at : o->bird_at, 0, NULL, NULL, 0, 0);
+    effect_stop(s, o, o->bird_fx);
+    o->bird_fx = -1;
+}
+
+/* Billboard_2Part.bsf's onStartFall [R]: a pulse every frame and a SplineMover at 10 a second from where it is to 3
+ * out (-y) and 3 up, then down to z -3 [G: straight between the points]; deleted at its end (onMoverCallback 2) */
+static void part_start_fall(StreetObj *o)
+{
+    if (o->kind != SK_2PART || o->on_path)
+        return;
+    set_pulse(o, TIMESTEP);
+    memcpy(o->path[0], pos_of(o), sizeof o->path[0]);
+    memcpy(o->path[1], o->path[0], sizeof o->path[1]);
+    o->path[1][1] -= 3;
+    o->path[1][2] += 3;
+    memcpy(o->path[2], o->path[1], sizeof o->path[2]);
+    o->path[2][2] = -3;
+    o->path_at = 0;
+    o->on_path = 1;
+}
+static void part_move(StreetObjs *s, StreetObj *o)
+{
+    float d1[3], d2[3];
+    for (int k = 0; k < 3; k++) {
+        d1[k] = o->path[1][k] - o->path[0][k];
+        d2[k] = o->path[2][k] - o->path[1][k];
+    }
+    float l1 = len3(d1), l2 = len3(d2), t = (o->path_at += 10 * TIMESTEP);
+    for (int k = 0; k < 3; k++)
+        o->world[12 + k] = t < l1 ? o->path[0][k] + d1[k] * t / l1 :
+                           t < l1 + l2 ? o->path[1][k] + d2[k] * (t - l1) / l2 : o->path[2][k];
+    o->moved = 1;
+    if (t >= l1 + l2)
+        request_delete(s, o);
+}
+/* onPulse [R]: turning about its own y at 2 pi a second, fRotDir (+1 when Construct's gWorld.frand() < 0.5, else -1) */
+static void part_pulse(StreetObj *o)
+{
+    float f[3] = { o->facing[0], o->facing[1] + o->rot_dir * 2 * PI * TIMESTEP, o->facing[2] };
+    set_facing(o, f);
+}
+
+/* the attachments go: AtchDestFx where each is, then deleted, or for a 2Part its front falls (onStartFall) */
+static void billboard_drop(StreetObjs *s, StreetObj *o)
+{
+    const char *fx = gstr(o->tmpl, "AtchDestFx");
+    for (int i = 0; i < o->nattach; i++) {
+        StreetObj *a = attachment(s, o, i);
+        if (!a)
+            continue;
+        effect(s, a, fx, pos_of(a), 0, NULL, NULL, 0, 0);
+        if (!is_type(o, "2Part"))
+            request_delete(s, a);
+        else
+            part_start_fall(a);
+    }
+}
+static void billboard_atch_fx(StreetObjs *s, StreetObj *o, int which, int *any)   /* Atch<i>DestFx<which> */
+{
+    for (int i = 0; i < o->nattach; i++) {
+        char key[32];
+        snprintf(key, sizeof key, "Atch%dDestFx%d", i + 1, which);
+        const char *fx = gstr(o->tmpl, key);
+        if (!fx)
+            continue;
+        StreetObj *a = attachment(s, o, i);
+        if (a)
+            effect(s, a, fx, NULL, 1, NULL, NULL, 0, 0);
+        if (any)
+            *any = 1;
+    }
+}
+
+/* TakeDamage(who, ...) [R], from a monster only, any type (the templates are OnlyHitWithEffNodes: a blow, once an
+ * attack). The first: its SoundDestroy, DestShape, DestEffect on it (not BirdsOnly), each attachment's Atch<i>DestFx1
+ * on it (then state 2: the next blow takes them), else (and always for a 2Part) the attachments go; the birds fly.
+ * State 2: SoundDestroy, Atch<i>DestFx2, the attachments go, state 1. State 1: three more, each 0.5 s more shaking,
+ * a pulse every frame and addStats (counted once); at the third it starts to fall (fFalling 4) in
+ * Collapse_Floor_redbrick_comp (not BirdsOnly) */
+static void billboard_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    if (!who || mi < 0)
+        return;
+    if (o->state == 0) {
+        int kept = 0;
+        sound(s, o, ostr(o, "SoundDestroy"), 1);
+        o->state = 1;
+        set_shape(s, o, gstr(o->tmpl, "DestShape"));
+        if (!is_type(o, "BirdsOnly"))
+            effect(s, o, gstr(o->tmpl, "DestEffect"), NULL, 1, NULL, NULL, 0, 0);
+        billboard_atch_fx(s, o, 1, &kept);
+        if (kept)
+            o->state = 2;
+        if (!kept || is_type(o, "2Part"))
+            billboard_drop(s, o);
+        birds_fly(s, o, 1);
+    } else if (o->state == 2) {
+        o->state = 1;
+        sound(s, o, ostr(o, "SoundDestroy"), 1);
+        billboard_atch_fx(s, o, 2, NULL);
+        billboard_drop(s, o);
+    } else if (o->state == 1 && o->required > 0) {
+        set_pulse(o, TIMESTEP);
+        o->required--;
+        o->shake += 0.5f;
+        add_stats(s, o, mi);
+        if (o->required == 0) {
+            o->falling = 4;
+            if (!is_type(o, "BirdsOnly"))
+                effect(s, o, "Collapse_Floor_redbrick_comp", pos_of(o), 0, NULL, NULL, 0, 0);
+        }
+    }
+}
+
+/* onBuildingDestruction [R]: (before it has fallen) the attachments go when it is still whole or a Midway one, the
+ * birds fly from where they sat, and it falls (fFalling 4, every frame) */
+static void billboard_building_gone(StreetObjs *s, StreetObj *o)
+{
+    if (o->state >= 4)
+        return;
+    if (o->state < 1 || is_type(o, "Midway")) {
+        const char *fx = gstr(o->tmpl, "AtchDestFx");
+        for (int i = 0; i < o->nattach; i++) {
+            StreetObj *a = attachment(s, o, i);
+            if (a) {
+                effect(s, a, fx, pos_of(a), 0, NULL, NULL, 0, 0);
+                request_delete(s, a);
+            }
+        }
+    }
+    birds_fly(s, o, 0);
+    o->state = 1;
+    o->required = 0;
+    set_pulse(o, TIMESTEP);
+    o->falling = 4;
+}
+
+/* the fall (Billboard.bsf's onPulse with no hits left, Billboard_George.bsf's processDestroy) [R]: over about x at
+ * DestFallDir x pi a second; at +-pi/2 (George's then set to pi x DestFallDir) its DestFallEffect on it, and it goes
+ * (4|8|16), unless fFalling still runs: then it sits at its building's top (it goes down with it) until that is
+ * out, 4 s from the start. Returns whether it goes */
+static int billboard_fall(StreetObjs *s, StreetObj *o, int george)
+{
+    int go = 0;
+    if (!o->fall_done) {
+        float fdr = onum(o, "DestFallDir", 1), f[3] = { o->facing[0] + fdr * TIMESTEP * PI, o->facing[1],
+                                                       o->facing[2] };
+        if (f[0] >= PI / 2 || f[0] <= -PI / 2) {
+            go = 1;
+            o->fall_done = 1;
+            effect(s, o, gstr(o->tmpl, "DestFallEffect"), NULL, 1, NULL, NULL, 0, 0);
+            if (george)
+                f[0] = PI * fdr;
+            else
+                o->state = 5;
+            set_pulse(o, 0);
+        }
+        set_facing(o, f);
+    }
+    if (o->falling > 0) {
+        o->falling -= TIMESTEP;
+        o->world[14] = building_height(s, o);
+        o->moved = 1;
+        go = o->falling <= 0;
+        if (!go)
+            set_pulse(o, TIMESTEP);
+        else if (george)
+            o->state = 4;
+    }
+    return go;
+}
+/* the shaking: each frame a step of -1/16 .. 1/16 in x and the same in z, not undone (it wanders) [R] */
+static float billboard_shake(StreetObjs *s, StreetObj *o)
+{
+    o->shake -= TIMESTEP;
+    if (o->shake < 0)
+        o->shake = 0;
+    float sk = frand(s) * 0.125f - 0.125f / 2;
+    o->world[12] += sk;
+    o->world[14] += sk;
+    o->moved = 1;
+    return sk;
+}
+
+/* onPulse [R] */
+static void billboard_pulse(StreetObjs *s, StreetObj *o)
+{
+    if (o->required <= 0) {
+        if (billboard_fall(s, o, 0))
+            request_delete(s, o);
+    } else if (o->shake > 0)
+        billboard_shake(s, o);
+}
+
+/* ---------------------------------------------------------------- Billboard_George.bsf */
+
+/* GeorgeBillboard (New York): George pours Scum Soda into his mouth, his hand (the bottle, Attachment2) and jaw
+ * (Attachment1) turned every frame (Process) [R Billboard_George.scr]. Construct: Type (the template's), requiredHits
+ * 3, setFlags(0x8000): OnlyHitWithEffNodes alone */
+static void george_construct(StreetObj *o)
+{
+    billboard_construct(o, gstr(o->tmpl, "Type"));
+    o->dir = 1;
+    o->oflags = SF_EFF_NODES | (o->oflags & SF_ATTACHED);   /* the building's hold is set apart (0x309E20) */
+}
+/* onInit [R]: the pigeons on its top when gWorld.frand() > 0.33; the jaw and the bottle where the caller made them */
+static void george_init(StreetObjs *s, StreetObj *o)
+{
+    float at[3] = { o->world[12], o->world[13], o->world[14] + shape_top(s, o) };
+    if (frand(s) > 0.33f) {
+        o->bird_fx = effect(s, o, "Pigeon_walk", at, 0, NULL, NULL, 0, 0);
+        memcpy(o->bird_at, at, sizeof at);
+    }
+    for (int i = 0; i < 2; i++) {
+        StreetObj *a = attachment(s, o, i);
+        if (a)
+            memcpy(i ? o->hand_loc : o->jaw_loc, pos_of(a), sizeof o->jaw_loc);
+    }
+}
+static void turn_y(StreetObj *a, float y)            /* setFacing((0, y, 0)) */
+{
+    float f[3] = { 0, y, 0 };
+    if (a)
+        set_facing(a, f);
+}
+static void put(StreetObj *a, const float p[3])     /* setPoint */
+{
+    if (a) {
+        memcpy(a->world + 12, p, 3 * sizeof(float));
+        a->moved = 1;
+    }
+}
+static const float SODA_POUR[3] = { 22.25f, 18.75f, 42.95f }, SODA_MOUTH[3] = { 21.5f, 18.35f, 39.75f };
+
+/* processUndamaged [R]: the hand up to pi/3.5 at that a second (soda_pour at its top, then 1 s still), down again
+ * (0.75 s still at the bottom); the jaw with it to pi/4, turned pi/10 back */
+static void george_undamaged(StreetObjs *s, StreetObj *o)
+{
+    if (o->delay > 0) {
+        o->delay -= TIMESTEP;
+        return;
+    }
+    o->hand += TIMESTEP * (PI / 3.5f) * o->dir;
+    if (o->hand >= PI / 3.5f) {
+        o->hand = PI / 3.5f;
+        o->dir = -1;
+        o->delay = 1;
+        effect(s, o, "soda_pour", SODA_POUR, 0, NULL, NULL, 0, 0);
+    } else if (o->hand <= 0) {
+        o->hand = 0;
+        o->dir = 1;
+        o->delay = 0.75f;
+    }
+    turn_y(attachment(s, o, 1), -o->hand);
+    o->jaw += TIMESTEP * (PI / 4) * o->dir;
+    if (o->jaw >= PI / 4)
+        o->jaw = PI / 4;
+    else if (o->jaw <= 0)
+        o->jaw = 0;
+    turn_y(attachment(s, o, 0), o->jaw - PI / 10);
+}
+/* processDamaged [R]: the hand up to 0.62 pi at 2 pi a second (soda_pour while it is there), 3 out and 1 down over
+ * 0.25 s, the jaw 1.85 down at 5.5 a second; all three there, the bubbles at George's mouth, once */
+static void george_damaged(StreetObjs *s, StreetObj *o)
+{
+    if (o->delay >= 3)
+        return;
+    o->delay = 0;
+    o->hand += TIMESTEP * PI * 2;
+    if (o->hand >= PI * 0.62f) {
+        o->hand = PI * 0.62f;
+        o->delay += 1;
+        effect(s, o, "soda_pour", SODA_POUR, 0, NULL, NULL, 0, 0);
+    }
+    StreetObj *hand = attachment(s, o, 1), *jaw = attachment(s, o, 0);
+    turn_y(hand, -o->hand);
+    o->hand2 += TIMESTEP;
+    if (o->hand2 > 0.25f) {
+        o->hand2 = 0.25f;
+        o->delay += 1;
+    }
+    float f = o->hand2 / 0.25f, p[3] = { o->hand_loc[0] - 3 * f, o->hand_loc[1], o->hand_loc[2] - f };
+    put(hand, p);
+    o->jaw += TIMESTEP * 5.5f;
+    if (o->jaw > 1.85f) {
+        o->jaw = 1.85f;
+        o->delay += 1;
+    }
+    float q[3] = { o->jaw_loc[0], o->jaw_loc[1], o->jaw_loc[2] - o->jaw };
+    put(jaw, q);
+    if (o->delay >= 3)
+        o->bubble_fx = effect(s, o, "soda_george_mouth", SODA_MOUTH, 0, NULL, NULL, 0, 0);
+}
+/* processDestroy [R]: the fall with no hits left; else the shaking, the hand and jaw with it */
+static void george_destroy(StreetObjs *s, StreetObj *o)
+{
+    if (o->required <= 0) {
+        if (billboard_fall(s, o, 1))
+            request_delete(s, o);
+    } else if (o->shake > 0) {
+        float sk = billboard_shake(s, o);
+        for (int i = 0; i < 2; i++) {
+            StreetObj *a = attachment(s, o, i);
+            if (a) {
+                float p[3] = { a->world[12] + sk, a->world[13], a->world[14] + sk };
+                put(a, p);
+            }
+        }
+    }
+}
+static void george_process(StreetObjs *s, StreetObj *o)   /* Process, every frame */
+{
+    if (o->state == 0)
+        george_undamaged(s, o);
+    else if (o->state == 1)
+        george_damaged(s, o);
+    else if (o->state == 3)
+        george_destroy(s, o);
+}
+/* the hand and the jaw go (AtchDestFx where each is), the bubbles stop */
+static void george_drop(StreetObjs *s, StreetObj *o, int fx)
+{
+    const char *name = fx ? gstr(o->tmpl, "AtchDestFx") : NULL;
+    for (int i = 1; i >= 0; i--) {
+        StreetObj *a = attachment(s, o, i);
+        if (a) {
+            effect(s, a, name, pos_of(a), 0, NULL, NULL, 0, 0);
+            request_delete(s, a);
+        }
+    }
+    if (o->bubble_fx >= 0)
+        effect_stop(s, o, o->bubble_fx);
+    o->bubble_fx = -1;
+}
+/* TakeDamage [R]: from anything (the score only from a monster), not once its building has gone. The first blow:
+ * DestShape, DestEffect on it, the birds fly, state 1 (processDamaged). Then state 3: two more shake it 0.5 s each,
+ * the third counts, and the hand and the jaw go: it falls */
+static void george_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    if (o->fallen)
+        return;
+    if (o->state == 0) {
+        o->state = 1;
+        o->delay = 0;
+        o->hand = 0;
+        set_shape(s, o, gstr(o->tmpl, "DestShape"));
+        effect(s, o, gstr(o->tmpl, "DestEffect"), NULL, 1, NULL, NULL, 0, 0);
+        birds_fly(s, o, 1);
+    } else if (o->state == 1 || o->state == 3) {
+        o->state = 3;
+        if (o->required > 1) {
+            o->required--;
+            o->shake += 0.5f;
+        } else {
+            if (who && mi >= 0)
+                add_stats(s, o, mi);
+            o->required--;
+            george_drop(s, o, 1);
+        }
+    }
+}
+/* onBuildingDestruction [R]: it falls with its building (fFalling 4); the hand and the jaw go (their AtchDestFx only
+ * while it was whole), the birds fly from where they sat */
+static void george_building_gone(StreetObjs *s, StreetObj *o)
+{
+    if (o->state < 4) {
+        o->required = 0;
+        o->falling = 4;
+        george_drop(s, o, o->state < 1);
+        birds_fly(s, o, 0);
+        o->state = 3;
+    }
+    o->fallen = 1;
+}
+
+/* ---------------------------------------------------------------- AnimatedSign.bsf */
+
+/* VegasCowboySign: an Actor on its building's front, its own clip (Sign_Cowboy's arm) on a loop [R AnimatedSign.scr].
+ * Construct: flags 0 and a fallRot onPulse never reads (one gWorld.frand: its x sign). A monster's blow (it is
+ * OnlyHitWithEffNodes), a thrown object or its building coming down sets it loose: its HitEffect on it (the blow
+ * counts too), or the DetachEffect where it is; then it falls 10 a second, turning (pi/10, 3pi/20, 0) a second about
+ * its own axes, its GroundEffect at z <= -0.25 and gone. Unlike Sign.bsf no drift towards the street, and its flags
+ * stay */
+static void animsign_loose(StreetObjs *s, StreetObj *o, const char *fx, int on_it)
+{
+    if (o->flags & 1)
+        return;
+    o->flags |= 1;
+    set_pulse(o, TIMESTEP);
+    effect(s, o, gstr(o->tmpl, fx), on_it ? NULL : pos_of(o), on_it, NULL, NULL, 0, 0);
+}
+static void animsign_pulse(StreetObjs *s, StreetObj *o)
+{
+    o->world[14] -= 10 * TIMESTEP;
+    float rot[3] = { PI * 0.1f * TIMESTEP, PI * 0.15f * TIMESTEP, 0 };
+    rotate_local(o, rot);
+    if (o->world[14] <= -0.25f) {
+        effect(s, o, gstr(o->tmpl, "GroundEffect"), pos_of(o), 0, NULL, NULL, 0, 0);
+        request_delete(s, o);
+    }
+}
+static void animsign_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    if (!who || mi < 0 || (o->flags & 1))
+        return;
+    animsign_loose(s, o, "HitEffect", 1);
+    add_stats(s, o, mi);
+}
+
 /* ---------------------------------------------------------------- the module */
 
 StreetObjs *streetobj_new(const StreetHost *host)
@@ -904,7 +1361,9 @@ int streetobj_kind_of(Group tmpl)
     if (gnum(tmpl, "IsMonsterUpgrade", &up) && up != 0)
         return -1;
     return same_text(sc, "StreetObject.bsf") ? SK_STREET : same_text(sc, "RoofItem.bsf") ? SK_ROOF :
-           same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : same_text(sc, "Sign.bsf") ? SK_SIGN : -1;
+           same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : same_text(sc, "Sign.bsf") ? SK_SIGN :
+           same_text(sc, "Billboard.bsf") ? SK_BILLBOARD : same_text(sc, "Billboard_George.bsf") ? SK_GEORGE :
+           same_text(sc, "AnimatedSign.bsf") ? SK_ANIMSIGN : -1;
 }
 
 /* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
@@ -943,9 +1402,8 @@ static void object_box(StreetObjs *s, StreetObj *o)
     }
 }
 
-int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building, int attack)
+static int add_kind(StreetObjs *s, int kind, Group tmpl, Group inst, const float world[16], int building, int attack)
 {
-    int kind = tmpl.at ? streetobj_kind_of(tmpl) : -1;
     if (kind < 0 || s->n >= MAX_OBJS)
         return -1;
     int i = s->n++;
@@ -979,8 +1437,34 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
         roof_construct(s, o);
     else if (kind == SK_MERRY)
         merry_construct(o);
-    else
+    else if (kind == SK_SIGN)
         sign_construct(s, o);
+    else if (kind == SK_BILLBOARD)
+        billboard_construct(o, ostr(o, "Type"));
+    else if (kind == SK_GEORGE)
+        george_construct(o);
+    else if (kind == SK_2PART)
+        o->rot_dir = frand(s) < 0.5f ? 1.0f : -1.0f;
+    else if (kind == SK_ANIMSIGN)
+        (void)frand(s);                              /* fallRot.x's sign, unused */
+    return i;
+}
+
+int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building, int attack)
+{
+    return add_kind(s, tmpl.at ? streetobj_kind_of(tmpl) : -1, tmpl, inst, world, building, attack);
+}
+
+int streetobj_add_attachment(StreetObjs *s, int parent, Group tmpl, const float world[16])
+{
+    if (parent < 0 || parent >= s->n || s->o[parent].nattach >= 5)
+        return -1;
+    int kind = same_text(gstr(tmpl, "ScriptName"), "Billboard_2Part.bsf") ? SK_2PART : SK_ATTACH;
+    int i = add_kind(s, kind, tmpl, (Group){ 0 }, world, -1, 0);
+    if (i >= 0) {
+        s->o[i].building = -2;                       /* a script's object: no building's (0x309E20 is the block's) */
+        s->o[parent].attach[s->o[parent].nattach++] = i;
+    }
     return i;
 }
 
@@ -991,16 +1475,25 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
         memcpy(s->b, b, sizeof *s->b * (size_t)s->nb);
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
-        if (o->building < 0 && (o->building = building_at(s, pos_of(o))) >= 0)
+        if (o->building == -2)                      /* a billboard's attachment */
+            o->building = -1;
+        else if (o->building < 0 && (o->building = building_at(s, pos_of(o))) >= 0)
             o->oflags |= SF_ATTACHED;
         if (getenv("RAMPAGE_STREET"))                /* the list, for finding one */
             printf("street object %d %s (%s) at %.2f %.2f %.2f, box %.1f %.1f %.1f .. %.1f %.1f %.1f, flags %#x, "
                    "building %d\n", i, o->name ? o->name : "?",
                    o->kind == SK_ROOF ? "RoofItem" : o->kind == SK_MERRY ? "MerryGoRound" :
-                   o->kind == SK_SIGN ? "Sign" : "StreetObject",
+                   o->kind == SK_SIGN ? "Sign" : o->kind == SK_BILLBOARD ? "Billboard" :
+                   o->kind == SK_GEORGE ? "Billboard_George" : o->kind == SK_2PART ? "Billboard_2Part" :
+                   o->kind == SK_ATTACH ? "attachment" : o->kind == SK_ANIMSIGN ? "AnimatedSign" : "StreetObject",
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
+    for (int i = 0; i < s->n; i++)                   /* onInit, the block begun */
+        if (s->o[i].kind == SK_BILLBOARD)
+            billboard_init(s, &s->o[i]);
+        else if (s->o[i].kind == SK_GEORGE)
+            george_init(s, &s->o[i]);
 }
 
 /* the flight's contacts (collide_mover_step): the street, and the objects of the frame's world its shape reaches */
@@ -1075,10 +1568,20 @@ static void step(StreetObjs *s)
                     roof_pulse(s, o);
                 else if (o->kind == SK_MERRY)
                     merry_pulse(s, o);
-                else
+                else if (o->kind == SK_SIGN)
                     sign_pulse(s, o);
+                else if (o->kind == SK_BILLBOARD)
+                    billboard_pulse(s, o);
+                else if (o->kind == SK_2PART)
+                    part_pulse(o);
+                else if (o->kind == SK_ANIMSIGN)
+                    animsign_pulse(s, o);
             }
         }
+        if (o->kind == SK_GEORGE)                    /* Process: every frame */
+            george_process(s, o);
+        if (o->kind == SK_2PART && o->on_path && !s->deleting[i])   /* its SplineMover */
+            part_move(s, o);
         /* 0x309AC0 [R]: attached (0x4000000) to a building whose collapsing storey is set: onBuildingDestruction,
          * once (the flag goes, and with it the building's sway on the object, 0x3098E0) */
         if ((o->oflags & SF_ATTACHED) && o->building >= 0 && o->building < s->nb && s->b[o->building].falling) {
@@ -1087,6 +1590,12 @@ static void step(StreetObjs *s)
                 roof_building_gone(s, o);           /* StreetObject.bsf has none */
             else if (o->kind == SK_SIGN)
                 sign_building_gone(s, o);
+            else if (o->kind == SK_BILLBOARD)
+                billboard_building_gone(s, o);
+            else if (o->kind == SK_GEORGE)
+                george_building_gone(s, o);
+            else if (o->kind == SK_ANIMSIGN)
+                animsign_loose(s, o, "DetachEffect", 0);
         }
         if (o->flying && !s->deleting[i])
             fly_step(s, o);
@@ -1157,8 +1666,14 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         roof_damage(s, o, mi, who);
     else if (o->kind == SK_MERRY)
         merry_damage(s, o, mi, who);
-    else
+    else if (o->kind == SK_SIGN)
         sign_damage(s, o, mi, who);
+    else if (o->kind == SK_BILLBOARD)
+        billboard_damage(s, o, mi, who);
+    else if (o->kind == SK_GEORGE)
+        george_damage(s, o, mi, who);
+    else if (o->kind == SK_ANIMSIGN)
+        animsign_damage(s, o, mi, who);              /* a billboard's front or attachment: no TakeDamage */
     if (s->deleting[idx(s, o)])
         delete_now(s, o);
 }
@@ -1170,8 +1685,9 @@ int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const fl
     int n = 0;
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
-        if (!o->alive || o->frame == s->frame || !sphere_meets(o, centre, radius))
-            continue;
+        if (!o->alive || o->frame == s->frame || o->kind == SK_ATTACH || o->kind == SK_2PART ||
+            !sphere_meets(o, centre, radius))
+            continue;                                /* (an object without a TakeDamage is not hit) */
         if ((o->oflags & SF_EFF_NODES) && !collide_hit_once(&o->hits, monster, record))
             continue;                                /* [R] 0x2E33A0: on the record's hit list */
         if (getenv("RAMPAGE_TRACE"))
@@ -1187,7 +1703,8 @@ int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const 
     int n = 0;
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
-        if (!o->alive || (o->oflags & SF_EFF_NODES) || o->frame == s->frame || !sphere_meets(o, centre, radius))
+        if (!o->alive || (o->oflags & SF_EFF_NODES) || o->frame == s->frame || o->kind == SK_ATTACH ||
+            o->kind == SK_2PART || !sphere_meets(o, centre, radius))
             continue;
         if (getenv("RAMPAGE_TRACE"))
             printf("  street object %d (%s) touched\n", i, o->name ? o->name : "?");
@@ -1207,6 +1724,10 @@ int streetobj_take_impact(StreetObjs *s, int i)
             sign_loose(o);
             effect(s, o, gstr(o->tmpl, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);
         }
+        return 1;
+    }
+    if (o->alive && o->kind == SK_ANIMSIGN) {        /* AnimatedSign.bsf's: the same, its HitEffect on it */
+        animsign_loose(s, o, "HitEffect", 1);
         return 1;
     }
     if (!o->alive || o->kind != SK_STREET || (o->oflags & SF_HELD))

@@ -452,6 +452,51 @@ static void place_flags(City *c, Scene *s, Group t, Mat4 base)
 
 static Mat4 rigid_inverse(Mat4 m);
 
+/* node k of an instance's tree at its rest pose, in the world (getNodePosition); -1 none */
+static int rest_node(const Instance *in, int k, float out[3])
+{
+    if (k < 0 || (uint32_t)k >= in->tree.n)
+        return -1;
+    Mat4 w = mat_identity();
+    for (int i = k; i >= 0 && (uint32_t)i < in->tree.n; i = in->tree.nodes[i].parent)
+        w = mat_mul(mat_tq(in->tree.nodes[i].t, in->tree.nodes[i].q), w);
+    w = mat_mul(in->base, w);
+    memcpy(out, w.m + 12, 3 * sizeof(float));
+    return 0;
+}
+
+/* a billboard's attachments [R Billboard.scr onInit]: for N = 1 .. 5 while it has an AttachmentN (getStringProp: the
+ * instance, then the template) and its model a node N, gWorld.createScriptObject(AttachmentN) put (setPoint alone:
+ * unturned) at the node, 0.5 nearer the street; Billboard_George.scr: the jaw (1) 0.5, the bottle (2) 0.25. Made
+ * here with its billboard (streetobj.c is told by parent), so it sways and sinks with the building until it moves */
+static void place_attachments(City *c, Scene *s, Group inst, Group t, int id, int parent, int george)
+{
+    for (int n = 1; n <= (george ? 2 : 5) && s->nstreet < SCENE_STREET_MAX; n++) {
+        char key[32];
+        float p[3];
+        snprintf(key, sizeof key, "OTRef|Attachment%d", n);
+        const char *name = group_str(inst, key) ? group_str(inst, key) : group_str(t, key);
+        if (!name || rest_node(&s->instances[id], n, p) != 0)
+            break;
+        p[1] -= george && n == 2 ? 0.25f : 0.5f;
+        Group at = template_of(c, name);
+        const char *shape = at.at ? group_str(at, "Shape|Shape") : NULL;
+        Mat4 m = mat_trs_z(p[0], p[1], p[2], 0);
+        int a = shape ? place_model(c, s, shape, m, -1) : -1;
+        if (a < 0)
+            continue;
+        struct SceneStreetObj *so = &s->street[s->nstreet++];
+        memset(so, 0, sizeof *so);
+        so->t = at;
+        so->first = so->model = a;
+        so->last = (int)s->ninstances;
+        so->building = s->placing_building;
+        so->nrel = -1;
+        so->parent = parent;
+        memcpy(so->world, m.m, sizeof so->world);
+    }
+}
+
 static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
 {
     Group t = template_of(c, group_str(inst, "Name"));
@@ -507,9 +552,11 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         for (int i = id + 1; i < s->army_obj[k].last && i - id - 1 < 4; i++)
             s->army_obj[k].rel[i - id - 1] = mat_mul(inv, s->instances[i].base);
     }
+    int billboard = script && (!_stricmp(script, "Billboard.bsf") || !_stricmp(script, "Billboard_George.bsf"));
     if (id >= 0 && script && (s->placing_block || s->placing_building >= 0) && s->nstreet < SCENE_STREET_MAX &&
-        (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") ||
-         !_stricmp(script, "MerryGoRound.bsf") || !_stricmp(script, "Sign.bsf"))) {
+        (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") || billboard ||
+         !_stricmp(script, "MerryGoRound.bsf") || !_stricmp(script, "Sign.bsf") ||
+         !_stricmp(script, "AnimatedSign.bsf"))) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
         so->t = t;
         so->inst = inst;
@@ -518,7 +565,10 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         so->building = s->placing_building;
         so->nrel = -1;                               /* the cloths' places: taken at its first move */
         so->attack = s->placing_block && s->placing_attack;
+        so->parent = -1;
         memcpy(so->world, at.m, sizeof so->world);
+        if (billboard)
+            place_attachments(c, s, inst, t, id, s->nstreet - 1, !_stricmp(script, "Billboard_George.bsf"));
     }
     const char *flags = group_str(t, "Flags");
     if (id >= 0 && flags && strstr(flags, "IsObstacle")) {   /* 0x335ED0: IsObstacle sets object flag 0x40000 */
@@ -637,7 +687,7 @@ int scene_instance_node(const Scene *s, int inst, const char *name, int id, floa
 }
 
 /* the people: one look (instance) per person and ActorAnimShape|<anim> it has shown */
-struct PersonLook { int who; char anim[32]; int inst; };
+struct PersonLook { int who; char anim[96]; int inst; };
 
 Group city_book_group(City *c, const char *book, const char *name)
 {
@@ -888,8 +938,9 @@ static int person_look(City *c, Scene *s, int who, const Person *p)
 /* an army unit's look: its shape, its clip (NULL: the shape's own RawAnim, which place_model takes), keyed by both */
 static int unit_look(City *c, Scene *s, int who, const ArmyUnit *u)
 {
-    char key[32];
-    snprintf(key, sizeof key, "%.15s|%.15s", u->shape ? u->shape : "-", u->clip ? u->clip : "");
+    char key[96];                                    /* in full: cut short, Police_US_Window_Emerge with its Look
+                                                      * clip and Police_US_Window_Firing_D with Firing_DL were one */
+    snprintf(key, sizeof key, "%.47s|%.47s", u->shape ? u->shape : "-", u->clip ? u->clip : "");
     for (int i = 0; i < s->nlooks; i++)
         if (s->looks[i].who == who && strcmp(s->looks[i].anim, key) == 0)
             return s->looks[i].inst;
@@ -2145,6 +2196,14 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
     s->placing_building = !scenery && *count > had ? (int)(*count - 1) : -1;
     for (uint32_t i = 0; i < no; i++)
         place_object(c, s, record_group(where, obj[i]), node);
+    no = group_values(inst, "ActorInstance|", &where, obj, MAX_REC);   /* its actors: the one there is, Las Vegas'
+                                                                         * VegasCowboySign (AnimatedSign.bsf) */
+    for (uint32_t i = 0; i < no; i++) {
+        Group ai = record_group(where, obj[i]), at = template_of(c, group_str(ai, "Name"));
+        const char *sc = at.at ? group_str(at, "Script|ScriptName") : NULL;
+        if (sc && !_stricmp(sc, "AnimatedSign.bsf"))
+            place_object(c, s, ai, node);
+    }
     s->placing_building = -1;
     if (*count > had) {                              /* its pieces, to move */
         SceneBuilding *sb = &(*list)[*count - 1];

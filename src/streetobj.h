@@ -1,5 +1,6 @@
-/* streetobj.h - the street and roof objects: StreetObject.bsf, RoofItem.bsf and the playground's MerryGoRound.bsf
- * (docs/STREETOBJ_NOTES.md).
+/* streetobj.h - the street and roof objects: StreetObject.bsf, RoofItem.bsf, the playground's MerryGoRound.bsf, the
+ * fronts' signs (Sign.bsf, AnimatedSign.bsf) and the billboards (Billboard.bsf, Billboard_2Part.bsf,
+ * Billboard_George.bsf) (docs/STREETOBJ_NOTES.md).
  *
  * [R] What the game has, and what this is the port of:
  *   - StreetObject.bsf: 75 templates of Objects1_Props (StreetLamp2, the parked cars, benches, trees, mailboxes,
@@ -27,6 +28,10 @@
  *     flung off along the turn (setVel, React_Ground_Slip_Heavy) and turned round; the ride slows by 30% a second
  *     down to its quarter turn, 2 s of touches (at 0.2 s each) before the next ride. No score, no damage, no sound
  *     of its own.
+ *   - Sign.bsf, AnimatedSign.bsf: a sign on a front (the cowboy on the Gold Rush) comes loose at a blow, a thrown
+ *     object or its building coming down, and falls to the street. Billboard.bsf: a billboard on a roof (or a Las
+ *     Vegas marquee) loses its pigeons, front panel and attachments at the first blows, shakes at three more and
+ *     tips over, or tips over and goes down with its building. Billboard_George.bsf: George's soda-pouring arm.
  *   - the engine around them: the monster's collision with the world's objects (0x2E22B0: TakeDamage(type 0, its
  *     attack's damage) from an armed sphere, once per attack for an OnlyHitWithEffNodes object (the attack's hit
  *     list, 0x2E33A0); every frame type 1 from any other sphere touching an object without that flag; skipped
@@ -72,7 +77,10 @@ typedef struct {
 } StreetBuilding;
 
 /* ---- the objects */
-enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN };     /* StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf, Sign.bsf */
+/* StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf, Sign.bsf, Billboard.bsf, Billboard_2Part.bsf (a breakaway's
+ * front), a billboard's attachment without a script (the Midway logo and name, George's jaw and bottle),
+ * AnimatedSign.bsf (VegasCowboySign), Billboard_George.bsf (GeorgeBillboard) */
+enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN, SK_BILLBOARD, SK_2PART, SK_ATTACH, SK_ANIMSIGN, SK_GEORGE };
 /* object flags (+0x4C) [R]: the template's Flags names (the table 0x3F5F20), StreetObject's Construct (0x8000 unless
  * OnlyHitWithEffNodes is 0 or IsSwaying), onPickup / onThrow clearing 0x4000 / 0x10000, 0x20000 while held,
  * 0x4000000 attached to a building (0x309E20) */
@@ -113,6 +121,15 @@ typedef struct {
      * durationGrab, and grabbedMonster (the caller's monster index, -1 none) */
     float spin, spin_step, no_hit, grab;
     int grabbed;
+    /* Billboard.bsf / Billboard_George.bsf: its attachments (objects of this module, -1 gone), Type, requiredHits,
+     * shakeTime, fFalling, bFallCompleted, the pigeons' effect (birdEffect) and George's soda bubbles; George's
+     * hand and jaw (direction, handVal, handVal2, jawVal, delay, their places as made, buildingHasFallen) */
+    int attach[5], nattach, required, fall_done, bird_fx, bubble_fx, fallen;
+    const char *type;
+    float shake, falling, dir, hand, hand2, jaw, delay, jaw_loc[3], hand_loc[3], bird_at[3];
+    /* Billboard_2Part.bsf: fRotDir, and its SplineMover's path (start, peek, end) and how far along it is */
+    float rot_dir, path[3][3], path_at;
+    int on_path;
 } StreetObj;
 
 /* ---- what happened */
@@ -159,6 +176,10 @@ int streetobj_kind_of(Group tmpl);
  * AttackObject, 0x3050F0 -> 0x315330: the trees' and palms' OscillationScale wobble, army.h ArmyOsc). The index, or -1
  * if the template is not ours or the list is full */
 int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], int building, int attack);
+/* a billboard's attachment (Billboard.bsf's onInit: gWorld.createScriptObject(AttachmentN) at its node N, 0.5 out
+ * from it in -y; Billboard_George.bsf's jaw 0.5, bottle 0.25): object `parent`'s, made by the caller where the game
+ * puts it; its kind from its script (Billboard_2Part.bsf, else none: SK_ATTACH). Before streetobj_start */
+int streetobj_add_attachment(StreetObjs *s, int parent, Group tmpl, const float world[16]);
 /* the block's start (0x2B6580 -> 0x309E20): each object without a building is attached to the building whose
  * footprint holds it (inclusive, the last such one: 0x2A3D20 with no direction) */
 void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb);

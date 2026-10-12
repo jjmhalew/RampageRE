@@ -3634,7 +3634,10 @@ int army_spawn(Army *a, const char *tmpl_name, const float pos[3], float facing)
 
 int army_spawn_window(Army *a, const char *tmpl_name, const float pos[3])
 {
-    return army_spawn(a, tmpl_name, pos, PI);        /* facing the street (-y) */
+    /* [R 0x318A44 .. 0x318B14] the occupant's spawner, soldiers as people, sets only the place: no turn (the identity:
+     * the person shapes face -y, the street, as they are made), so its WindowFiring<RM ..> clip points the gun +x for
+     * R, the way getMonsterDirection counts */
+    return army_spawn(a, tmpl_name, pos, 0);
 }
 
 int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b,

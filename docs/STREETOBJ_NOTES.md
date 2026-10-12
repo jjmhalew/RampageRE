@@ -252,9 +252,7 @@ instance, so attached to it (0x4000000) and swayed and sunk with it until they c
   electric signs' sparks) where it is, the two flags cleared.
 - **onPulse**: z − 10 and y − 3 a second (towards the street), turned (π / 10, 3π / 20, 0) a second about its own
   axes; at z ≤ −0.25 its `GroundEffect` there, and it returns 4 | 8 | 16: deleted.
-- A loose sign's IsObstacle climbing box goes (city.c `scene_street_place`). Not ported yet: Billboard.bsf (32
-  templates, the Las Vegas marquees `Sign_Keno`, `Sign_PrimeRib`: knocked over in 4 blows) and AnimatedSign.bsf
-  (VegasCowboySign: no building ActorInstance is placed).
+- A loose sign's IsObstacle climbing box goes (city.c `scene_street_place`).
 - The templates' `CollisionBox` is keyed `CollisionBox|CollisionBox` in the books; `book_box` reads that first (it
   read only `CollisionBox`, so every street, roof and sign object fell back on its model's sphere).
 
@@ -325,3 +323,66 @@ React_Ground_Slip_Heavy, his heading turned round; the same in GB04_BakerSt.
   a flying object's TakeImpact reaches them, and a thrown one flies in it (`streetobj_nearest_pickup`, `_grab`,
   `_hold`, `_fly`, main.c's doGrabObject and throwObject). The hold blends in from where it was over doGrabObject's
   0.1 s (0x310B50, army.c's `army_hold_blend`, ARMY_NOTES "The hold") [R]; the throw's +0x2560 angle is taken as 0.
+
+## Billboard.bsf, Billboard_2Part.bsf [R]
+The billboards on the roofs and the Las Vegas marquees: 32 templates (ScumSodaBillboard, BillboardBeans and its
+Back, the BillboardBreakaway* with their fronts, MidwayBillboard, BillboardHotel, StompBillboard1, WesternBackdrop,
+BillboardKenoMarquee, BillboardPrimeRibMarquee, the invisible BirdsOnlyInvisBillboard1, ...), in every city.
+- **Construct**: `Type` (getStringProp, "Generic"), `useBirdFx` (getIntProp, 1; the books write `useBirdFX`: the
+  key is found in any case, 0x1B4490), requiredHits 3. No pulse.
+- **onInit**: one `gWorld.frand()` (always above −0.33): with useBirdFx 1 the `Pigeon_walk` effect on its top, 0.5
+  behind its place (z + getShapeBounds' max z [G: the model's box]). Then for N = 1 .. 5, while the object has an
+  `AttachmentN` (an `OTRef|`) and its model a node N (`getNodePosition`: the tree's node N), an object of that template
+  (`gWorld.createScriptObject`) put at the node, 0.5 nearer the street (setPoint alone: unturned). Here city.c makes
+  them with the billboard (`place_attachments`, the node at the tree's rest pose); they are drawn with the building
+  until they move.
+- **TakeDamage**, only from a monster (the templates are `OnlyHitWithEffNodes`: a blow, once an attack):
+  - state 0: its `SoundDestroy`, `DestShape`, `DestEffect` on it (not `BirdsOnly`); each attachment's
+    `Atch<i>DestFx1` on it, and then state 2 (the next blow takes them); otherwise, and always for a `2Part`, the
+    attachments go (`AtchDestFx` where each is; deleted, or a 2Part's front gets `onStartFall`). The birds fly
+    (`Pigeon_fly` on its top, birdEffect stopped). State 1.
+  - state 2: SoundDestroy again, `Atch<i>DestFx2` on them, they go; state 1.
+  - state 1: three more blows, each 0.5 s more shaking, a pulse every frame, `addStats` (counted once: 0x2C51A0);
+    the third starts the fall (fFalling 4) in `Collapse_Floor_redbrick_comp` (not BirdsOnly).
+- **onPulse**: no hits left, it turns over about its x at `DestFallDir` × π a second (1: its top to the street); at
+  ±π/2 its `DestFallEffect` (`building_collapse_comp`) on it, state 5, and it goes (4|8|16) unless fFalling still
+  runs: then it sits at its building's top (getBuildingHeight, going down with it) until 4 s from the start.
+  While shaking, each frame a step of −1/16 .. 1/16 added to x and the same to z, not undone (it wanders).
+- **onBuildingDestruction**: before it has fallen: the attachments go when it is still whole or a `Midway` one; the
+  birds fly from where they sat; it falls (fFalling 4). The marquees stand on the street in no building's
+  footprint, so their buildings never take them.
+- **Billboard_2Part.bsf** (the breakaway fronts): Construct picks fRotDir ±1 (+1 when `gWorld.frand() < 0.5`).
+  `onStartFall`: a pulse every frame and a SplineMover at 10 a second from where it is to 3 out (−y) and 3 up, then
+  down to z −3 [G: straight between the points], deleted at its end (`onMoverCallback(2)`). onPulse: turning about
+  its own y at 2π a second.
+- The attachments without a script (the Midway logo and name) have no TakeDamage: blows pass them.
+- Here streetobj.c `SK_BILLBOARD`, `SK_2PART`, `SK_ATTACH`; `--do "strike k"` is a blow on street object k.
+
+## Billboard_George.bsf [R]
+GeorgeBillboard (New York, NY09): George pours Scum Soda into his mouth. Its jaw (`Attachment1`, node 1, 0.5 out) and
+the bottle in its hand (`Attachment2`, node 2, 0.25 out) turn every frame (Process):
+- **Construct**: `Type` (the template's), requiredHits 3, `setFlags(0x8000)`: OnlyHitWithEffNodes alone.
+- **onInit**: the pigeons when `gWorld.frand() > 0.33`, on its top.
+- **Undamaged**: the hand up to π/3.5 at that a second (`soda_pour` at its top, 1 s still), back down (0.75 s still);
+  the jaw with it to π/4, set at that − π/10.
+- **TakeDamage** (from anything; the score only from a monster; nothing once its building has gone): the first blow
+  `DestShape`, `DestEffect` on it, the birds fly, state 1: the hand up to 0.62π at 2π a second, 3 out and 1 down over
+  0.25 s, the jaw 1.85 down at 5.5 a second, `soda_pour` while the hand is up; all three there, the bubbles
+  (`soda_george_mouth`). Then two blows shake it, the third counts and the hand and jaw go (`AtchDestFx`): it falls as
+  a billboard does (at ±π/2 set to π × DestFallDir).
+- **onBuildingDestruction**: it falls (fFalling 4), the hand and jaw go (their effect only while it was whole), the
+  birds fly.
+- `soda_pour` and the bubbles are at fixed places, (22.25, 18.75, 42.95) and (21.5, 18.35, 39.75), 54 to the right of
+  where NY09 puts the billboard (−32.3, 9.7, 25.5): as the game has them.
+
+## AnimatedSign.bsf [R]
+VegasCowboySign (Las Vegas block 1, on the Gold Rush building's roof): an `ActorInstance|` of its building, the only
+actor any building places; city.c places it with the building's objects. Its own clip (Sign_Cowboy's arm, the
+`Sign` ActorAnimShape with no Anim) loops.
+- **Construct**: flags 0, a fallRot onPulse never reads (one `gWorld.frand()`).
+- **TakeDamage** (a monster's blow: it is `IsObstacle+OnlyHitWithEffNodes`), **TakeImpact** (a thrown object) or
+  **onBuildingDestruction** set it loose once: its `HitEffect` (sparks) on it (a blow counts too, `Points` 100), or
+  its `DetachEffect` where it is; a pulse every frame.
+- **onPulse**: down 10 a second, turned (π/10, 3π/20, 0) a second about its own axes; at z ≤ −0.25 its
+  `GroundEffect` (Debris_Generic) there and it goes. Unlike Sign.bsf no drift to the street, and its flags stay.
+- Here streetobj.c `SK_ANIMSIGN`.

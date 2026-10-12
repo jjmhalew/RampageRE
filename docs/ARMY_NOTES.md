@@ -430,6 +430,14 @@ scripts' addStats as from a blow (CHALLENGE_NOTES.md); `RoarAttack` is the upgra
   `WindowFiring<RM|RU|MU|LU|LM|LD|MD|RD>`. Each firing reloads the weapon, with a 2 … 4 s gap between reloads.
   After 5 s, a 50 % chance makes them go back in.
 - **Hits:** they have no TakeDamage, so attacks pass them by.
+- **Turn:** the occupants' spawner (0x318A44 .. 0x318B14) sets only the place, soldiers as people: no turn, the
+  identity. The person shapes face −y (the street) as made, so a `WindowFiringR*` clip points the gun to +x, where
+  getMonsterDirection's R is. (The port had them turned by π: the gun on the wrong side, the shots from it.)
+- **The gun:** the WeaponNode (`MuzzleFlash_Small`) is a node of the firing shape (`Police_US_Window_Firing_D`), not of
+  the emerge shape the look clips use, so the shot leaves from the gun only while a firing clip shows. city.c keys a
+  unit's look by its shape and clip in full: cut to 15 characters each, `Police_US_Window_Emerge` with its Look clip
+  and `Police_US_Window_Firing_D` with `Firing_DL` were one key, so the cop fired showing his look model and clip, and
+  the shots left from 1.5 above his feet.
 - `getMonsterDirection` (Actor id 0x3F → 0x2B2850) [R]: of the player monsters, the nearest (d² < 1e5); the eighth of
   the way to it 3 above its feet, in the front's plane (atan2(dz, dx), dy unused).
 
@@ -599,7 +607,9 @@ Floating = 100
      node's own x, before the node's own pose (once per node; city.c `army_sync`), and give `node_world` the nodes
      as drawn;
    - draw each live shot by its `effect` at `pos` along `dir` (a beam spans `length`);
-   - apply the events: start and stop effects by name (attached ones follow `unit` / `shot`), play sounds, route
+   - apply the events: start and stop effects by name (attached ones follow `unit` / `shot`; one on a unit is in its
+     whole frame, the offset `v` in it, as createAndStartAttachedWithOffset 0x27A990 → 0x291440 has it: the police
+     trucks' lights at their y / z offset, a flyer's shadow, turned with the unit), play sounds, route
      `AE_HIT` through `army_reaction_slot` to the monster's slots and HP, `AE_REACTION` straight to the slot,
      `AE_STATS_*` to HP and energy, `AE_PUSH` to the monster's place, and `AE_IMPACT` (a flight met another
      module's object, `id` its collision tag) to that object's TakeImpact (a building: `building_hit` with radius

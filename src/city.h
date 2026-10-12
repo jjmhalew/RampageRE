@@ -222,13 +222,15 @@ typedef struct {
     struct { Group t; float pos[3]; int instance, hut, hut_id; float vel[3]; CollideMover cm; float cm_m[12];
              int cm_on, cobj; } scripted[8]; int nscripted;
     CollideWorld *hut_cw;
-    /* the StreetObject.bsf and RoofItem.bsf objects of the block and its buildings as placed, for streetobj.c (main
-     * adds them): the template, its ObjectInstance| group, its instances first .. last - 1 (the model, then its
-     * flags' cloths), where it stands, the building whose ObjectInstance| it is (-1 the block's own); model: the
-     * instance of its model now (scene_street_shape), rel: its cloths' places relative to it (scene_street_place);
-     * attack: an AttackObjectInstance| of the block (an AttackObject, 0x3050F0) */
+    /* the street objects (StreetObject.bsf, RoofItem.bsf, Sign.bsf, the billboards, ...) of the block and its
+     * buildings as placed, for streetobj.c (main adds them): the template, its ObjectInstance| group, its instances
+     * first .. last - 1 (the model, then its flags' cloths), where it stands, the building whose ObjectInstance| it
+     * is (-1 the block's own); model: the instance of its model now (scene_street_shape), rel: its cloths' places
+     * relative to it (scene_street_place); attack: an AttackObjectInstance| of the block (an AttackObject,
+     * 0x3050F0); parent: for a billboard's attachment (made where its onInit makes it), the billboard's index here,
+     * else -1 */
 #define SCENE_STREET_MAX 256
-    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel, attack; float world[16];
+    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel, attack, parent; float world[16];
                             Mat4 rel[4]; } street[SCENE_STREET_MAX];
     int nstreet;
     /* the block's AttackObjectInstance|s that army.c makes units of (the PirateShip, StationaryAttackObject.bsf,

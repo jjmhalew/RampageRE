@@ -226,7 +226,8 @@ reports every award with its template name, so the viewer can count challenge go
   names find `Effect|DamageEffect` and the like; getStringProp reads the instance book first (0x27C230), which the
   traffic (made from its template, 0x332D90) and the rockets (ObjectInstances of Location and Name only) do not have.
 - **Effects on an object** (createAndStartAttached, id 0x2C): an identity offset, no node (0x277100 → 0x291ED0): at
-  its origin, following it [R].
+  its origin in its whole frame, following it and turning with it [R] (main.c spawns them with the car's axes,
+  fx_spawn_frame, and places them so every frame, fx_place: the police cars' lights turn with the car).
 - **The hold:** the HeldObjectMover's `MajorAxis` frame (0x310ED0) [R]: the cars and the fire truck have MajorAxis 1
   (x = −hand x, y = hand z, z = hand y). A thrown object keeps the held turn and does not spin (0x2D9DC0) [R].
 - **The fire truck:**

@@ -726,7 +726,8 @@ static int army_node_world(void *ctx, const ArmyUnit *u, const char *node, float
     Viewer *v = ctx;                                 /* the weapon's node on the unit's look as drawn */
     int ok = v->army && scene_unit_node(&v->scene, (int)(u - army_unit(v->army, 0)), node, out) == 0;
     if (getenv("RAMPAGE_NODES"))
-        printf("  %s node %s: %s\n", u->name ? u->name : "?", node, ok ? "found" : "not found");
+        printf("  %s node %s: %s (%s, %s)\n", u->name ? u->name : "?", node, ok ? "found" : "not found", u->anim,
+               u->shape ? u->shape : "-");
     return ok;
 }
 static int boss_node_world(void *ctx, const BossPart *p, const char *node, float out[16])
@@ -1022,7 +1023,9 @@ static void build(Viewer *v)
         }
         for (int k = 0; k < v->scene.nstreet; k++) {
             const struct SceneStreetObj *so = &v->scene.street[k];
-            v->sobj_of[k] = v->sobj ? streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack) : -1;
+            v->sobj_of[k] = !v->sobj ? -1 : so->parent >= 0 ?   /* a billboard's attachment, after it */
+                            streetobj_add_attachment(v->sobj, v->sobj_of[so->parent], so->t, so->world) :
+                            streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack);
             if (v->sobj_of[k] >= 0)
                 v->street_of[v->sobj_of[k]] = k;
         }
@@ -3594,8 +3597,14 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
                 if (v->fxw) {
                     const VehObj *o = e->obj >= 0 ? vehicle_obj(v->veh, e->obj) : NULL;
                     int beam = o && o->beam_fx == e->id;     /* the stream: in the nozzle's firing frame */
+                    float R[3][3];                   /* one on the car: in its whole frame, at its origin [R 0x277100
+                                                      * -> 0x291ED0: the identity offset x its matrix] */
+                    for (int a = 0; a < 3 && o; a++)
+                        for (int k = 0; k < 3; k++)
+                            R[a][k] = o->world[4 * a + k];
                     int id = beam ? fx_spawn_frame(v->fxw, e->name, e->pos, o->beam.R, 1) :
-                                    fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                             o ? fx_spawn_frame(v->fxw, e->name, o->pos, (const float (*)[3])R, 1) :
+                                 fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
                     if (id >= 0 && v->nvfx < 64) {   /* to follow its object, or to stop by its handle */
                         v->vfx[v->nvfx].id = e->id;
                         v->vfx[v->nvfx].fx = id;
@@ -3652,8 +3661,13 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
         float at[3] = { o->pos[0] + v->vfx[k].off[0], o->pos[1] + v->vfx[k].off[1], o->pos[2] + v->vfx[k].off[2] };
         if (o->beam_fx == v->vfx[k].id)
             fx_place(v->fxw, v->vfx[k].fx, at, o->beam.R);
-        else
-            fx_move(v->fxw, v->vfx[k].fx, at);
+        else {                                       /* in the car's frame as it turns */
+            float R[3][3];
+            for (int a = 0; a < 3; a++)
+                for (int c = 0; c < 3; c++)
+                    R[a][c] = o->world[4 * a + c];
+            fx_place(v->fxw, v->vfx[k].fx, at, (const float (*)[3])R);
+        }
     }
     for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand */
         Mon *mo = &v->mon[k];
@@ -4094,6 +4108,16 @@ static int army_monsters(Viewer *v, ArmyMonster *m)
     return nm;
 }
 
+/* an effect on a unit: its axes (the unit's matrix) and where the offset in that frame puts it */
+static void unit_fx_frame(const ArmyUnit *u, const float off[3], float R[3][3], float at[3])
+{
+    for (int a = 0; a < 3; a++)
+        for (int c = 0; c < 3; c++)
+            R[a][c] = u->world[4 * a + c];
+    for (int c = 0; c < 3; c++)
+        at[c] = u->pos[c] + off[0] * R[0][c] + off[1] * R[1][c] + off[2] * R[2][c];
+}
+
 static void army_step(Viewer *v, float dt)
 {
     if (!v->army || !have_monster(v) || !v->mon[0].have_graph || !mon_in(&v->mon[0]))
@@ -4133,7 +4157,13 @@ static void army_step(Viewer *v, float dt)
                     for (int j = 0, n = e->shot >= 0 ? army_shots(v->army) : 0; j < n && !bs; j++)
                         if (army_shot(v->army, j)->id == e->shot && army_shot(v->army, j)->beam)
                             bs = army_shot(v->army, j);
+                    const ArmyUnit *on = e->unit >= 0 && e->shot < 0 ? army_unit(v->army, e->unit) : NULL;
+                    float R[3][3], at[3];            /* one on a unit: in its whole frame, the offset in it [R 0x27A990
+                                                      * -> 0x291ED0, 0x291440: the offset x the unit's matrix] */
+                    if (on)
+                        unit_fx_frame(on, e->v, R, at);
                     int id = bs ? fx_spawn_frame(v->fxw, e->name, e->pos, bs->R, 1) :
+                             on ? fx_spawn_frame(v->fxw, e->name, at, (const float (*)[3])R, 1) :
                                   fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
                     if (id >= 0 && (e->unit >= 0 || e->shot >= 0) && v->nfxa < 128) {
                         v->fxa[v->nfxa].id = e->id;
@@ -4228,8 +4258,10 @@ static void army_step(Viewer *v, float dt)
                 v->fxa[k--] = v->fxa[--v->nfxa];
                 continue;
             }
-            for (int j = 0; j < 3; j++)
-                at[j] = u->pos[j] + v->fxa[k].off[j];
+            float R[3][3];
+            unit_fx_frame(u, v->fxa[k].off, R, at);
+            fx_place(v->fxw, v->fxa[k].fx, at, (const float (*)[3])R);
+            continue;
         } else {
             if (!fx_alive(v->fxw, v->fxa[k].fx))
                 v->fxa[k--] = v->fxa[--v->nfxa];
@@ -5364,10 +5396,10 @@ static void game_next_block(Viewer *v)
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
  * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
- * object of that template (the FireTruck); "p2" (p1 .. p4): the words
- * after it play
- * that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back to
- * the shell the words stop: the ones left are returned (NULL none), for the shell */
+ * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "strike k" a blow on
+ * street object k; "p2" (p1 .. p4): the words after it play that player's monster (the others' keys idle meanwhile,
+ * the computer's monsters go on). Once the game goes back to the shell the words stop: the ones left are returned
+ * (NULL none), for the shell */
 static void attract_press(Viewer *v);
 static const char *play_script(Viewer *v, const char *script, float aspect)
 {
@@ -5450,6 +5482,43 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             float h = mo->heading / 57.2957795f, at[3] = { mo->mx - sinf(h) * 6, mo->my + cosf(h) * 6, 0 };
             if (!v->veh || vehicle_spawn(v->veh, name, at, h, -1) < 0)
                 printf("no vehicle %s\n", name);
+            continue;
+        }
+        if (_stricmp(word, "strike") == 0) {         /* strike k: a blow (an attack record of its own) on street
+                                                      * object k (RAMPAGE_STREET lists them), from the monster */
+            const StreetObj *o = v->sobj ? streetobj_get(v->sobj, (int)seconds) : NULL;
+            static unsigned rec = 0x7F000000;
+            if (o) {
+                StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f,
+                                     mo->graph.states[mo->run.state].name };
+                float c[3];
+                for (int k = 0; k < 3; k++)
+                    c[k] = o->world[12 + k] + (o->box_min[k] + o->box_max[k]) / 2;
+                streetobj_hit(v->sobj, mo->slot, &me, c, 0.5f, 20, rec++);
+            } else
+                printf("no street object %d\n", (int)seconds);
+            continue;
+        }
+        if (_stricmp(word, "soldier") == 0) {        /* soldier name: a window soldier of that template on the front
+                                                      * of the nearest building ahead of the monster, 9 up */
+            static char name[64];                    /* the unit keeps the name */
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
+            name[k] = 0;
+            const Building *front = NULL;
+            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+                const Building *b = &v->scene.buildings[i].b;
+                if (mo->mx >= b->min[0] && mo->mx <= b->max[0] && mo->my < b->min[1] &&
+                    (!front || b->min[1] < front->min[1]))
+                    front = b;
+            }
+            float at[3] = { mo->mx, front ? front->min[1] : 0, 9 };
+            int u = front && v->army ? army_spawn_window(v->army, name, at) : -1;
+            if (u < 0)
+                printf("no soldier %s\n", name);
+            else if (getenv("RAMPAGE_TRACE"))
+                printf("soldier %s (unit %d) at %.1f %.1f %.1f\n", name, u, at[0], at[1], at[2]);
             continue;
         }
         if (_stricmp(word, "pause") == 0) {          /* Start: the Pause menu (the demo: its end) */
