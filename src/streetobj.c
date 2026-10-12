@@ -175,7 +175,7 @@ static void set_pulse(StreetObj *o, float delay)
 
 /* getStringProp / getFloatProp / getIntProp: the instance book (obj +0x7C) first, then the template [R 0x2C51A0, as
  * army.c]. The books keep a record's type before a '|' ("Effect|HitEffect"); the scripts ask by the bare name */
-static const char *const TYPED[] = { "", "Effect|", "Sound|", "Shape|", "Color|", "Script|" };
+static const char *const TYPED[] = { "", "Effect|", "Sound|", "Shape|", "Color|", "Script|", "OTRef|" };
 
 static int find_rec(Group g, const char *key, Record *out, Group *where)
 {
@@ -1341,6 +1341,103 @@ static void animsign_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMon
     add_stats(s, o, mi);
 }
 
+/* ---------------------------------------------------------------- DamagingEffect.bsf */
+
+/* the geysers (Fountain2, Fountain2_silent in Las Vegas; Fountain3, which a broken fountain or hydrant leaves) and
+ * the puddles (PukePuddle, SoapPuddle, ChocolatePuddle) [R DamagingEffect.scr]. Construct: a pulse after the
+ * template's DeleteSelfTime (0: none, so it stays), which deletes it; its Effect (getStringProp) on it, turned off
+ * when it goes */
+static void damaging_construct(StreetObjs *s, StreetObj *o)
+{
+    set_pulse(o, onum(o, "DeleteSelfTime", 0));
+    effect(s, o, ostr(o, "Effect"), NULL, 1, NULL, NULL, 0, 1);
+}
+/* TakeDamage [R], from a monster within HitDistance (1.5) of it along x and along y, any type (a touch every frame):
+ * its PlayReaction while the monster's move is a Ground one (React_Geyser; else SetReaction, which none of the books
+ * sets: not here); its ReactionSound on
+ * the monster; with SetMonsterVelocity, the monster thrown at (10 away from it along x, -5 x frand, the
+ * MonsterZVelocity: 20, the books' MonsterZVel not being that key) */
+static void damaging_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    if (!who || mi < 0)
+        return;
+    float hit = onum(o, "HitDistance", 1.5f);
+    if (fabsf(o->world[12] - who->pos[0]) > hit || fabsf(o->world[13] - who->pos[1]) > hit)
+        return;
+    const char *react = ostr(o, "PlayReaction");
+    if (react && who->move && strncmp(who->move, "Ground", 6) == 0)
+        monster_call(s, o, SE_MONSTER_REACTION, mi)->name = react;
+    const char *snd = ostr(o, "ReactionSound");
+    if (snd)
+        emit(s, SE_SOUND, o, snd, who->pos)->level = 0;
+    if ((int)onum(o, "SetMonsterVelocity", 0)) {
+        StreetEvent *e = monster_call(s, o, SE_MONSTER_VEL, mi);
+        e->v[0] = who->pos[0] < o->world[12] ? -10 : 10;
+        e->v[1] = -5 * frand(s);
+        e->v[2] = onum(o, "MonsterZVelocity", 20);
+    }
+}
+
+/* ---------------------------------------------------------------- Fountain.bsf */
+
+static int add_kind(StreetObjs *s, int kind, Group tmpl, Group inst, const float world[16], int building, int attack);
+
+/* the fountains' sculptures (Fountain1) and the fire hydrants (FireHydrant1) [R Fountain.scr]. Construct: state 0,
+ * setFlags(0x8000): only an armed blow, once an attack. onInit: with AttachFountainFX its "fountain" effect at its
+ * model's nodes 1 .. 4, turned off when it goes */
+static void fountain_construct(StreetObj *o)
+{
+    o->oflags = SF_EFF_NODES | (o->oflags & SF_ATTACHED);
+}
+static void fountain_init(StreetObjs *s, StreetObj *o)
+{
+    for (int n = 1; n <= 4 && (int)onum(o, "AttachFountainFX", 0); n++)
+        effect(s, o, "fountain", NULL, 1, NULL, NULL, n, 1);
+}
+/* broken, once (TakeDamage from anything, or TakeImpact): its Geyser (an OTRef: Fountain3, a DamagingEffect.bsf
+ * object of 15 s) made where it stood; it is put 3 up and off on a SphereMover at the blow's way x 10 along x and y
+ * and 25 up (a thrown object's: straight up), a pulse a second, and a monster's blow counts */
+static void fountain_break(StreetObjs *s, StreetObj *o, int mi, const float dir[3])
+{
+    if (o->state != 0)
+        return;
+    o->state = 1;
+    const char *g = ostr(o, "Geyser");
+    Group gt = g && s->host.find ? s->host.find(s->host.ctx, g) : (Group){ 0 };
+    if (gt.at) {
+        float w[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, o->world[12], o->world[13], o->world[14], 1 };
+        int k = add_kind(s, streetobj_kind_of(gt), gt, (Group){ 0 }, w, -1, 0);
+        if (k >= 0)
+            s->o[k].made = 1;                        /* no building's: made after the block's start */
+    }
+    o->world[14] = 3;
+    float r = collide_mover_radius(&o->cshape);
+    if (r < 0.05f)
+        r = o->cshape.radius > 0.05f ? o->cshape.radius : 1;
+    collide_mover_init(&o->cm, r, onum(o, "Gravity", 9.81f), onum(o, "Mass", 1), onum(o, "Restitution", 0.8f),
+                       onum(o, "SlidingFriction", 0.4f), onum(o, "InertiaSolidity", 1));
+    static const float none[3] = { 0, 0, 0 };
+    collide_mover_spin(&o->cm, none);
+    o->cm.vel[0] = dir[0] * 10;
+    o->cm.vel[1] = dir[1] * 10;
+    o->cm.vel[2] = 25;
+    collide_matrix_from16(o->cmat, o->world);
+    o->flying = 1;
+    o->moved = 1;
+    set_pulse(o, 1);
+    if (mi >= 0)
+        add_stats(s, o, mi);
+}
+/* onPulse [R]: at the fourth, Impact_concrete_Big where it is, and it goes */
+static void fountain_pulse(StreetObjs *s, StreetObj *o)
+{
+    o->elapsed += 1;
+    if (o->elapsed >= 4) {
+        effect(s, o, "Impact_concrete_Big", pos_of(o), 0, NULL, NULL, 0, 0);
+        request_delete(s, o);
+    }
+}
+
 /* ---------------------------------------------------------------- the module */
 
 StreetObjs *streetobj_new(const StreetHost *host)
@@ -1363,7 +1460,8 @@ int streetobj_kind_of(Group tmpl)
     return same_text(sc, "StreetObject.bsf") ? SK_STREET : same_text(sc, "RoofItem.bsf") ? SK_ROOF :
            same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : same_text(sc, "Sign.bsf") ? SK_SIGN :
            same_text(sc, "Billboard.bsf") ? SK_BILLBOARD : same_text(sc, "Billboard_George.bsf") ? SK_GEORGE :
-           same_text(sc, "AnimatedSign.bsf") ? SK_ANIMSIGN : -1;
+           same_text(sc, "AnimatedSign.bsf") ? SK_ANIMSIGN : same_text(sc, "Fountain.bsf") ? SK_FOUNTAIN :
+           same_text(sc, "DamagingEffect.bsf") ? SK_DAMAGING : -1;
 }
 
 /* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
@@ -1447,6 +1545,10 @@ static int add_kind(StreetObjs *s, int kind, Group tmpl, Group inst, const float
         o->rot_dir = frand(s) < 0.5f ? 1.0f : -1.0f;
     else if (kind == SK_ANIMSIGN)
         (void)frand(s);                              /* fallRot.x's sign, unused */
+    else if (kind == SK_FOUNTAIN)
+        fountain_construct(o);
+    else if (kind == SK_DAMAGING)
+        damaging_construct(s, o);
     return i;
 }
 
@@ -1485,7 +1587,8 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
                    o->kind == SK_ROOF ? "RoofItem" : o->kind == SK_MERRY ? "MerryGoRound" :
                    o->kind == SK_SIGN ? "Sign" : o->kind == SK_BILLBOARD ? "Billboard" :
                    o->kind == SK_GEORGE ? "Billboard_George" : o->kind == SK_2PART ? "Billboard_2Part" :
-                   o->kind == SK_ATTACH ? "attachment" : o->kind == SK_ANIMSIGN ? "AnimatedSign" : "StreetObject",
+                   o->kind == SK_ATTACH ? "attachment" : o->kind == SK_ANIMSIGN ? "AnimatedSign" :
+                   o->kind == SK_FOUNTAIN ? "Fountain" : o->kind == SK_DAMAGING ? "DamagingEffect" : "StreetObject",
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
@@ -1494,6 +1597,8 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
             billboard_init(s, &s->o[i]);
         else if (s->o[i].kind == SK_GEORGE)
             george_init(s, &s->o[i]);
+        else if (s->o[i].kind == SK_FOUNTAIN)
+            fountain_init(s, &s->o[i]);
 }
 
 /* the flight's contacts (collide_mover_step): the street, and the objects of the frame's world its shape reaches */
@@ -1576,6 +1681,10 @@ static void step(StreetObjs *s)
                     part_pulse(o);
                 else if (o->kind == SK_ANIMSIGN)
                     animsign_pulse(s, o);
+                else if (o->kind == SK_FOUNTAIN)
+                    fountain_pulse(s, o);
+                else if (o->kind == SK_DAMAGING)
+                    request_delete(s, o);            /* DamagingEffect's onPulse: its DeleteSelfTime is up */
             }
         }
         if (o->kind == SK_GEORGE)                    /* Process: every frame */
@@ -1674,6 +1783,12 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         george_damage(s, o, mi, who);
     else if (o->kind == SK_ANIMSIGN)
         animsign_damage(s, o, mi, who);              /* a billboard's front or attachment: no TakeDamage */
+    else if (o->kind == SK_DAMAGING)
+        damaging_damage(s, o, mi, who);
+    else if (o->kind == SK_FOUNTAIN) {               /* the blow's way [G: the monster's facing] */
+        float d[3] = { who ? -sinf(who->facing) : 0, who ? cosf(who->facing) : 0, 0 };
+        fountain_break(s, o, who ? mi : -1, d);
+    }
     if (s->deleting[idx(s, o)])
         delete_now(s, o);
 }
@@ -1724,6 +1839,11 @@ int streetobj_take_impact(StreetObjs *s, int i)
             sign_loose(o);
             effect(s, o, gstr(o->tmpl, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);
         }
+        return 1;
+    }
+    if (o->alive && o->kind == SK_FOUNTAIN) {        /* Fountain.bsf's: broken, straight up, no score */
+        static const float up[3] = { 0, 0, 0 };
+        fountain_break(s, o, -1, up);
         return 1;
     }
     if (o->alive && o->kind == SK_ANIMSIGN) {        /* AnimatedSign.bsf's: the same, its HitEffect on it */
@@ -1908,6 +2028,9 @@ void streetobj_fly(StreetObjs *s, int i, int monster, int eat, const float vel[3
         return;
     StreetObj *o = &s->o[i];
     o->oflags &= ~(uint32_t)SF_HELD;
+    if (!eat)                                        /* [R 0x2DA088] a sphere at its origin: a parked car meets the
+                                                      * buildings (collide_shape_flight) */
+        collide_shape_flight(&o->cshape);
     /* [R] 0x28DE70 / 0x28F220: the template's Gravity (DefObjectProps 35), Mass 1, Restitution 0.8, SlidingFriction
      * 0.4, InertiaSolidity 1 unless set; its radius sqrt(+0x34) of its shape; no spin */
     float r = collide_mover_radius(&o->cshape);

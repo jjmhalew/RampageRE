@@ -422,8 +422,10 @@ scripts' addStats as from a blow (CHALLENGE_NOTES.md); `RoarAttack` is the upgra
 - **Fleeing:** grabbing or hitting one makes its whole `GroupIndex` fall back. The last one of a group re-enables
   its truck's respawn.
 - **Eating:** an eaten troop gives addStats type 1 (its Health, Points 100) and a fart one time in five.
-- **Smashing:** a smashed troop flies off (smashObject 0x2B2F50). The script's TakeDamage then calls onPickup, so a
-  punched troop is never deleted. This quirk is kept.
+- **Smashing:** a smashed troop flies off (smashObject 0x2B2F50), state 512, deleted by its pulse 3 s later. The
+  script's TakeDamage then calls `this.actor.onPickup()`: the Actor binding (id 0x44 → 0x30C5E0), which only stops
+  the actor's AmbientEffect and ChallengeEffect, not the script's onPickup; then `PickedUp`, the arms-up look it flies
+  in. (The port took it for the script's onPickup, state 32: a kicked troop bounced on across the city for good.)
 
 **Window soldiers** (`Military_Window.bsf`) [R]:
 - **Firing:** they emerge, look, and while the monster's y is within 6 of the building's front they play

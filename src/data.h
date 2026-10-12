@@ -51,9 +51,15 @@ typedef struct {
     float *pos, *nrm, *uv, *col;                         /* 3, 3, 2, 4 floats per vertex (nrm / uv / col may be NULL) */
     uint8_t (*bones)[2]; float *weight;                  /* skinned: skeleton node indices and the first one's weight */
     uint32_t *tris;                                      /* 3 indices per triangle */
-    int blend;                                           /* drawn over what is behind it by its alpha (cracks) */
+    int blend;                                           /* drawn over what is behind it by its alpha (1: the cracks;
+                                                          * 2: depth still written, the facade sheets: GS state 2) */
 } MeshPart;
-typedef struct { MeshPart *parts; uint32_t nparts; } Mesh;
+typedef struct {
+    MeshPart *parts;
+    uint32_t nparts;
+    uint32_t lead;                                       /* the part drawn first (0: in order); a facade's glass, so
+                                                          * the sheet over it does not hide it by its depth */
+} Mesh;
 int mesh_read(const BdpEntry *e, Mesh *m);               /* 0 = ok */
 void mesh_free(Mesh *m);
 uint32_t material_texture(const Bundle *b, uint32_t material);   /* texture name index of a part's material, 0 = none */

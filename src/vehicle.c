@@ -411,6 +411,14 @@ static void obj_shape(const Vehicles *v, VehObj *o, CollideShape *s)   /* read o
     *s = o->cshape;
 }
 
+/* thrown or smashed: its shape a sphere at its origin, before its flight [R 0x2B1EC0, 0x2DA088] */
+static void flight_shape(const Vehicles *v, VehObj *o)
+{
+    CollideShape sh;
+    obj_shape(v, o, &sh);
+    collide_shape_flight(&o->cshape);
+}
+
 static void car_hit_ground(Vehicles *v, VehObj *o);
 typedef struct { Vehicles *v; VehObj *o; } FlightCtx;
 
@@ -484,6 +492,7 @@ static void sphere_step(Vehicles *v, VehObj *o, float dt)
  * faces) and 15 x (0.8 .. 1.3) up, spinning +-(2 pi + pi/6 r) about x and +-(pi/16 + pi/16 r) about y and z */
 static void smash_object(Vehicles *v, VehObj *o, float monster_heading)
 {
+    flight_shape(v, o);
     const float c = 3 * PI / 2, lo = 20 * PI / 180, wd = 120 * PI / 180;
     float A = sinf(c), B = cosf(c), A2 = sinf(monster_heading + PI / 2), B2 = cosf(monster_heading + PI / 2);
     float d = -(B2 * B + A2 * A), cross = B2 * A - A2 * B;
@@ -1590,6 +1599,8 @@ void vehicle_throw(Vehicles *v, int obj, int monster, int eat, const float vel[3
     VehObj *o = &v->o[obj];
     o->oflags &= ~(uint32_t)VF_HELD;
     o->phase = VP_ALIVE;
+    if (!eat)
+        flight_shape(v, o);
     if (vel)
         memcpy(o->sphere.vel, vel, sizeof o->sphere.vel);
     o->sphere.on = 1;

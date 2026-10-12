@@ -620,7 +620,7 @@ static int part_blended(const SceneMesh *sm, const MeshPart *p)
 {
     float mc[4];
     material_color(sm->b, p->material, mc);
-    return p->blend || mc[3] < 0.98f;
+    return p->blend == 1 || (!p->blend && mc[3] < 0.98f);   /* blend 2 writes its depth: drawn in its turn */
 }
 
 static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32_t i, uint32_t first, double t);
@@ -670,13 +670,23 @@ static void sphere_coords(int on)
     glMatrixMode(GL_MODELVIEW);
 }
 
-/* the mesh's parts in order; while r->hold (the ambient occlusion is on: rnd_frame) the blended ones are held back
- * and drawn after it, so it does not darken what shows through them */
+/* the mesh's parts in order (its lead part first); while r->hold (the ambient occlusion is on: rnd_frame) the
+ * blended ones are held back and drawn after it, so it does not darken what shows through them */
 static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double t)
 {
     const Mesh *m = &sm->mesh;
-    uint32_t first = 0;                                    /* the part's first vertex in the skin buffers */
-    for (uint32_t i = 0; i < m->nparts; first += m->parts[i].nverts, i++) {
+    uint32_t lead = m->lead < m->nparts ? m->lead : 0, lead_first = 0;
+    for (uint32_t i = 0; i < lead; i++)
+        lead_first += m->parts[i].nverts;
+    for (uint32_t k = 0, first = 0; k <= m->nparts; k++) {
+        uint32_t i = k == 0 ? lead : k - 1;              /* the lead, then the others in order */
+        if (k > 0 && i == lead) {
+            first += m->parts[i].nverts;
+            continue;
+        }
+        uint32_t at = k == 0 ? lead_first : first;       /* the part's first vertex in the skin buffers */
+        if (k > 0)
+            first += m->parts[i].nverts;
         const MeshPart *p = &m->parts[i];
         if (!p->ntris)
             continue;
@@ -685,7 +695,7 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
                 int n = r->cheld ? 2 * r->cheld : 256;
                 HeldPart *h = realloc(r->held, sizeof *h * (size_t)n);
                 if (!h) {
-                    draw_part(r, sm, skin, i, first, t);
+                    draw_part(r, sm, skin, i, at, t);
                     continue;
                 }
                 r->held = h;
@@ -693,10 +703,10 @@ static void draw_mesh(Renderer *r, const SceneMesh *sm, const Skin *skin, double
             }
             HeldPart *h = &r->held[r->nheld++];
             glGetFloatv(GL_MODELVIEW_MATRIX, h->mv);
-            h->sm = sm; h->skin = skin; h->part = i; h->first = first;
+            h->sm = sm; h->skin = skin; h->part = i; h->first = at;
             continue;
         }
-        draw_part(r, sm, skin, i, first, t);
+        draw_part(r, sm, skin, i, at, t);
     }
 }
 
@@ -781,8 +791,9 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     if (p->blend || see_through) {                       /* over what is behind, by its alpha */
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glAlphaFunc(GL_GREATER, 0.01f);
-        glDepthMask(GL_FALSE);
+        glAlphaFunc(GL_GREATER, p->blend == 2 ? 0.0f : 0.01f);
+        if (p->blend != 2)                               /* a facade sheet keeps writing its depth [R GS state 2: */
+            glDepthMask(GL_FALSE);                       /* ALPHA 0x44, TEST 0x5000D (alpha > 0), Z written] */
     }
     /* a reflective material (kind 5: shader 0x1A, record 26 at 0x3B5C10; 0x19 with flag 2, set on none) [R]: its first
      * pass is GS state 1, TEST 0x50002, no alpha test: the texture's alpha is not a cut-out but the share of the

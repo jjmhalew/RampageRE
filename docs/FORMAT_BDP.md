@@ -609,7 +609,10 @@ the `ColumnDef|` entries (G+0xEC + column × 0x38, 0x2D0FB0).
 - **Inner corner walls** (0x2C63A0, before the front): while the first or the last front cell is damaged, a piece 5 deep
   just inside the side wall (0.3 in), textured from column `InnerWallColumn` at the side cell's state, grey.
 - **Pass 0, window glass** (front 0x2C92F0): only for cells in state 0 whose column has an `Outline`; it goes once the
-  cell is damaged. A mirrored cell's outline is at 5 − x (x0' = 5 − x1, x1' = 5 − x0: 0x2C9470 and the other faces'
+  cell is damaged. It is drawn before the facade, and the facade sheet over it is blended by its alpha with its depth
+  written (GS state 2, below): the sheets' panes are about 0.6 opaque (alpha 0x4D), so 0.4 of each window's room
+  shows through, warm, dark or teal by its tile. (The port drew the sheet first and opaque by an alpha test: every
+  window came out the pane's dark colour, the rooms hidden; `Mesh.lead`, `MeshPart.blend` 2.) A mirrored cell's outline is at 5 − x (x0' = 5 − x1, x1' = 5 − x0: 0x2C9470 and the other faces'
   0x2C9910, 0x2C9DB4, 0x2CA278, 0x2CA960, 0x2CAD48); the cracks' pass (0x2C7A90) reads no flag, so their window
   hole stays where the column has it.
   - The quad is the outline grown by 0.3 on each side, 0.03 inside the face, tinted `CubeTint`.

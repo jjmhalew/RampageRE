@@ -1824,6 +1824,9 @@ static void attack_step(Army *a, ArmyUnit *u, float dt);
  * cone towards the camera (narrowed on the side the monster faces) and 15 x (0.8 .. 1.3) up [R] */
 static void smash_object(Army *a, ArmyUnit *u, float monster_heading)
 {
+    CollideShape sh;                                 /* [R 0x2B1EC0] a sphere at its origin (collide_shape_flight) */
+    unit_shape(a, u, &sh);
+    collide_shape_flight(&u->cshape);
     const float c = 3 * PI / 2, lo = 20 * PI / 180, wd = 120 * PI / 180;
     float A = sinf(c), B = cosf(c), A2 = sinf(monster_heading + PI / 2), B2 = cosf(monster_heading + PI / 2);
     float d = -(B2 * B + A2 * A), cross = B2 * A - A2 * B;
@@ -2768,9 +2771,9 @@ static void troop_damage(Army *a, ArmyUnit *u, int monster)
     weapons_enable(u, 0);
     u->flags &= ~1024;
     troop_smash(a, u, monster);
-    /* [R] then onPickup() and PickedUp: the state goes to 32, so a punched troop flies on and its 3 s pulse never
-     * deletes it (people.c keeps the same quirk of the window people) */
-    troop_pickup(a, u);
+    /* [R] then this.actor.onPickup(), the Actor binding (id 0x44 -> 0x30C5E0): it only stops the actor's AmbientEffect
+     * and ChallengeEffect (a troop has neither here), not the script's onPickup; so the state stays 512 and the 3 s
+     * pulse deletes the troop (as people.c's actor_on_pickup). Then PickedUp: the arms-up look it flies in */
     start_anim(a, u, "PickedUp", 1);
 }
 
@@ -3997,6 +4000,9 @@ void army_throw(Army *a, int unit, int monster, int eat, const float vel[3], flo
         (void)monster_heading;
         return;
     }
+    CollideShape sh;                                 /* [R 0x2DA088] throwObject's sphere (collide_shape_flight) */
+    unit_shape(a, u, &sh);
+    collide_shape_flight(&u->cshape);
     if (u->kind == AK_TRUCK)
         truck_thrown(a, u, monster);
     if (vel)

@@ -59,6 +59,19 @@ void collide_shape_sphere(CollideShape *s, const float centre[3], float r)
     s->raw[3] = r * r;
 }
 
+void collide_shape_flight(CollideShape *s)
+{
+    if (s->type == COLLIDE_SPHERE && dot3(s->centre, s->centre) == 0)
+        return;
+    float hi[3], lo[3], zero[3] = { 0, 0, 0 };
+    for (int k = 0; k < 3; k++) {
+        hi[k] = s->centre[k] + s->half[k];
+        lo[k] = s->centre[k] - s->half[k];
+    }
+    float a = sqrtf(dot3(hi, hi)), b = sqrtf(dot3(lo, lo));
+    collide_shape_sphere(s, zero, (a < b ? a : b) / 2);
+}
+
 void collide_shape_box(CollideShape *s, const float min[3], const float max[3])
 {
     memset(s, 0, sizeof *s);                         /* 0x281170: type 1, half sizes (0x103970), centre (0x1039C0) */

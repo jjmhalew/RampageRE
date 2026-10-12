@@ -59,6 +59,7 @@ typedef struct {
     /* optional: a model's bounds in its own frame (AutoCollisionBox); nonzero = found (army_shape_box's convention) */
     int (*shape_box)(void *ctx, const char *shape, float min[3], float max[3]);
     int (*shape_sphere)(void *ctx, const char *shape, float centre[3], float *radius);   /* the sphere the model keeps (0x184CB0); nonzero = found */
+    Group (*find)(void *ctx, const char *name);      /* optional: a template by name (gWorld.createScriptObject) */
     void *ctx;
 } StreetHost;
 
@@ -79,8 +80,10 @@ typedef struct {
 /* ---- the objects */
 /* StreetObject.bsf, RoofItem.bsf, MerryGoRound.bsf, Sign.bsf, Billboard.bsf, Billboard_2Part.bsf (a breakaway's
  * front), a billboard's attachment without a script (the Midway logo and name, George's jaw and bottle),
- * AnimatedSign.bsf (VegasCowboySign), Billboard_George.bsf (GeorgeBillboard) */
-enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN, SK_BILLBOARD, SK_2PART, SK_ATTACH, SK_ANIMSIGN, SK_GEORGE };
+ * AnimatedSign.bsf (VegasCowboySign), Billboard_George.bsf (GeorgeBillboard), Fountain.bsf (the fountains'
+ * sculptures, the fire hydrants), DamagingEffect.bsf (the geysers, the puddles) */
+enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN, SK_BILLBOARD, SK_2PART, SK_ATTACH, SK_ANIMSIGN, SK_GEORGE, SK_FOUNTAIN,
+       SK_DAMAGING };
 /* object flags (+0x4C) [R]: the template's Flags names (the table 0x3F5F20), StreetObject's Construct (0x8000 unless
  * OnlyHitWithEffNodes is 0 or IsSwaying), onPickup / onThrow clearing 0x4000 / 0x10000, 0x20000 while held,
  * 0x4000000 attached to a building (0x309E20) */
@@ -130,6 +133,8 @@ typedef struct {
     /* Billboard_2Part.bsf: fRotDir, and its SplineMover's path (start, peek, end) and how far along it is */
     float rot_dir, path[3][3], path_at;
     int on_path;
+    int made;                                        /* made by a script (gWorld.createScriptObject): no model of the
+                                                      * caller's (the geysers), streetobj_count grew */
 } StreetObj;
 
 /* ---- what happened */

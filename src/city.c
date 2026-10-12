@@ -534,7 +534,12 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
             s->missing++;
         return;
     }
+    /* a DamagingEffect.bsf object (the Las Vegas geysers) is an InvisShape: no model, its effect alone */
+    int invisible = script && !_stricmp(script, "DamagingEffect.bsf") && !_stricmp(shape, "InvisShape");
+    int missing = s->missing;
     int id = place_model(c, s, shape, at, -1);
+    if (invisible)
+        s->missing = missing;
     if (id >= 0 && t.at)
         s->instances[id].shadow = group_sub(t, "ShadowData");
     if (scripted >= 0)
@@ -553,15 +558,18 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
             s->army_obj[k].rel[i - id - 1] = mat_mul(inv, s->instances[i].base);
     }
     int billboard = script && (!_stricmp(script, "Billboard.bsf") || !_stricmp(script, "Billboard_George.bsf"));
-    if (id >= 0 && script && (s->placing_block || s->placing_building >= 0) && s->nstreet < SCENE_STREET_MAX &&
+    if ((id >= 0 || invisible) && script && (s->placing_block || s->placing_building >= 0) &&
+        s->nstreet < SCENE_STREET_MAX &&
         (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") || billboard ||
          !_stricmp(script, "MerryGoRound.bsf") || !_stricmp(script, "Sign.bsf") ||
-         !_stricmp(script, "AnimatedSign.bsf"))) {
+         !_stricmp(script, "AnimatedSign.bsf") || !_stricmp(script, "Fountain.bsf") || invisible)) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
         so->t = t;
         so->inst = inst;
         so->first = so->model = id;
         so->last = (int)s->ninstances;
+        if (id < 0)                                  /* no instances */
+            so->first = so->last;
         so->building = s->placing_building;
         so->nrel = -1;                               /* the cloths' places: taken at its first move */
         so->attack = s->placing_block && s->placing_attack;
@@ -2092,6 +2100,9 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         fm.parts[2].blend = 1;
         fm.parts[3].material = (uint32_t)sheet_name;
         fm.parts[4].material = 0xFFFFFFFFu;              /* no material: untextured, its vertex colours */
+        fm.lead = 1;                                     /* [R 0x2C92F0 before 0x2C81A0] the glass, then the sheet */
+        fm.parts[0].blend = 2;                           /* the sheet over it by its alpha, its depth written (GS state
+                                                          * 2: ALPHA 0x44): its panes (alpha 0x4D) let the rooms show */
         mesh = (int)scene_add_mesh(s, fm, s->city);
         facade_inst = new_instance(s, node, -1);
         push_item(s, (uint32_t)mesh, facade_inst, -1, NULL);

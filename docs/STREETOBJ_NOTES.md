@@ -386,3 +386,27 @@ actor any building places; city.c places it with the building's objects. Its own
 - **onPulse**: down 10 a second, turned (π/10, 3π/20, 0) a second about its own axes; at z ≤ −0.25 its
   `GroundEffect` (Debris_Generic) there and it goes. Unlike Sign.bsf no drift to the street, and its flags stay.
 - Here streetobj.c `SK_ANIMSIGN`.
+
+## Fountain.bsf, DamagingEffect.bsf [R]
+- **Fountain.bsf** (`Fountain1`, the fountains' sculptures, in six cities; `FireHydrant1`, the hydrants of Chicago,
+  New York and Los Angeles): Construct `setFlags(0x8000)` (only an armed blow, once an attack); onInit with
+  `AttachFountainFX` its `fountain` effect at its model's nodes 1 .. 4. The first TakeDamage (from anything) or
+  TakeImpact: its `Geyser` (`OTRef|`, `Fountain3`) made where it stood (`gWorld.createScriptObject`); it is put 3 up
+  and off on a SphereMover at the blow's way × 10 along x and y (a thrown object's: none) and 25 up, a pulse a second;
+  a monster's blow counts. At the fourth pulse `Impact_concrete_Big` where it is, and it goes. The blow's way is the
+  monster's facing here [G].
+- **DamagingEffect.bsf** (the geysers: Las Vegas' `Fountain2`, `Fountain2_silent` in Nero's pool, and `Fountain3`;
+  the puddles `PukePuddle`, `SoapPuddle`, `ChocolatePuddle`): Construct a pulse after `DeleteSelfTime` (none: it
+  stays), which deletes it, and its `Effect` (the `Geyser` jet) on it. TakeDamage, any type (the touch every frame),
+  from a monster within `HitDistance` (1.5) along x and along y: its `PlayReaction` (`React_Geyser`) while the
+  monster's move is a Ground one, its `ReactionSound` (`Monster_slip`), and with `SetMonsterVelocity` setVel(10 away
+  along x, −5 × frand, `MonsterZVelocity` 20: the books' `MonsterZVel` is not that key). `React_Geyser`'s own events at
+  0 (mode 1, `addVelocity(0, 0, 18)`) throw the monster up.
+- A reaction a module plays (playReaction: the geyser, the merry-go-round, the bosses) starts at the monster's next
+  step as a slot's start does, so the state's events at its time 0 fire (main.c `force_state`, `Mon.force_to`);
+  started between the steps they were passed over and `React_Geyser` left the monster on the ground.
+- The geysers are InvisShape objects: city.c lists them with no instances; streetobj.c makes `Fountain3` itself (the
+  host's `find`), `StreetObj.made`.
+- The bridges: the Las Vegas lagoon's wooden `Bridge` (StreetObject.bsf, its blow's `Building_Collapse_parts`, then
+  gone) and Chicago's `ChicagoBridgeSupport` (StreetObject.bsf, OnlyHitWithEffNodes) break at a blow; the elevated
+  train's `TrainBridge1`, `TrainBridge2` are ScriptObject.bsf: they stand.

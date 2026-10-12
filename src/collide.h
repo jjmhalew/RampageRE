@@ -35,6 +35,11 @@ typedef struct {                                     /* WCollisionInfo (vtable 0
 
 void collide_shape_sphere(CollideShape *s, const float centre[3], float r);   /* setSphere 0x281110 */
 void collide_shape_box(CollideShape *s, const float min[3], const float max[3]);   /* setBox 0x281170 */
+/* a thrown or smashed object's shape (throwObject 0x2DA088 .. 0x2DA1E8, smashObject's 0x2B1EC0), set before its
+ * SpherePhysicsMover: a box, or a sphere off its object's origin, becomes a sphere at the origin of radius
+ * min(|centre + half|, |centre - half|) / 2; a sphere at the origin stays. So a thrown car (AutoCollisionBox) meets
+ * the buildings, which two boxes never do */
+void collide_shape_flight(CollideShape *s);
 /* WSimpleObject's shape (0x28FD70): the template's book, then the instance's, each one's CollisionBox (min, max),
  * else its CollisionRadius (about the model's bounding sphere's centre), else AutoCollisionBox and the model's box;
  * none: the model's bounding sphere (no model: radius 1 at the origin). Pass NULL / a negative radius for what a

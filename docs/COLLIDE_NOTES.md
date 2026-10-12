@@ -224,6 +224,11 @@ a thrown object rests r above the street [R].
   AttackMover's 0x313D90; the others' write elsewhere or nothing) write it, and the one caller of a mover's +0x18
   found, 0x2B71A8, is the world's unused debug ball (COVERAGE.md). collide.c `collide_mover_kinematic`; vehicle.c,
   rail.c and parade.c give one to an object on a LineMover, a SplineMover (rail.c) or held.
+- A thrown or smashed object becomes a sphere [R]: throwObject (0x2DA088 .. 0x2DA1E8, unless the object has flag
+  0x80000) and smashObject (0x2B1EC0) set its shape, before its SpherePhysicsMover, to a sphere at its origin of radius
+  min(|centre + half|, |centre − half|) / 2 (a sphere at its origin stays). So a thrown car (`AutoCollisionBox`)
+  meets the buildings' boxes and hits them. `collide_shape_flight` (vehicle.c, streetobj.c, army.c, parade.c); the
+  port had kept the box, and a thrown car flew through the buildings.
 - Two boxes never meet [R]: 0x27F620 passes the higher type first and 0x27FF14 returns 0 for a box against a box
   (0x27FFC0); collide_pair the same.
 - A gone building keeps its box [R]: the game never removes a building's object (removeObject's only callers are

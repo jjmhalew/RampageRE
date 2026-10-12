@@ -283,8 +283,13 @@ static int line_step(ParadeObj *o, float dt)
 /* [R] smashObject (0x2B2F50, as people.c / vehicle.c): off on a SpherePhysicsMover, 15 along a yaw in the 120 degree
  * cone towards the camera (narrowed on the side the monster faces) and 15 x (0.8 .. 1.3) up, spinning
  * +-(2 pi + pi/6 r) about x and +-(pi/16 + pi/16 r) about y and z */
+static void obj_shape(const Parade *p, ParadeObj *o, CollideShape *s);
+
 static void smash_object(Parade *p, ParadeObj *o, float monster_heading)
 {
+    CollideShape sh;                                 /* [R 0x2B1EC0] a sphere at its origin (collide_shape_flight) */
+    obj_shape(p, o, &sh);
+    collide_shape_flight(&o->cshape);
     const float c = 3 * PI / 2, lo = 20 * PI / 180, wd = 120 * PI / 180;
     float A = sinf(c), B = cosf(c), A2 = sinf(monster_heading + PI / 2), B2 = cosf(monster_heading + PI / 2);
     float d = -(B2 * B + A2 * A), cross = B2 * A - A2 * B;
@@ -1257,8 +1262,14 @@ void parade_throw(Parade *p, int obj, int monster_i, int eat, float monster_head
             sound(p, o, tstr(o, "Sound|FlyingSound"), 1);
             o->state = 5;
         }
-    } else if (o->kind == PAK_CART)
+    } else if (o->kind == PAK_CART) {
+        if (!eat) {                                  /* [R 0x2DA088] throwObject's sphere (collide_shape_flight) */
+            CollideShape sh;
+            obj_shape(p, o, &sh);
+            collide_shape_flight(&o->cshape);
+        }
         cart_throw(p, o, m, eat, monster_heading);
+    }
 }
 
 int parade_is_edible(const Parade *p, int obj) { return alive(p, obj) && (p->o[obj].oflags & PAF_EDIBLE) != 0; }

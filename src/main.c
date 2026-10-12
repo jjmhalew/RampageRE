@@ -107,6 +107,8 @@ typedef struct Mon {
     Hand hand[2];                                    /* its hands on the wall (0 left, 1 right, as seen) */
     int held;                                        /* the person in its hand (people.c), -1 none */
     int held_unit;                                   /* or the army unit (army.c), -1 none */
+    int force_to;                                    /* a state played from outside (playReaction), + 1, taken in at
+                                                      * its next step as the slots' starts are; 0 none */
     int held_vehicle;                                /* or a vehicle (vehicle.c), -1 none */
     int held_parade;                                 /* or a biker or a cart's food (parade.c), -1 none */
     int held_rail, rail_knock;                       /* or a rail object (rail.c), -1 none; a knock taken */
@@ -567,6 +569,7 @@ static void start_moves(Mon *mo)
     memset(mo->hand, 0, sizeof mo->hand);
     mo->held = -1;
     mo->held_unit = -1;
+    mo->force_to = 0;
     mo->held_vehicle = -1;
     mo->held_rail = -1;
     mo->held_parade = -1;
@@ -1012,8 +1015,11 @@ static void build(Viewer *v)
         static StreetHost sh;
         sh.shape_box = army_shape_box;
         sh.shape_sphere = model_sphere;
+        sh.find = rubble_tmpl;                       /* a template by name: the geysers the fountains leave */
         sh.ctx = v;
         v->sobj = streetobj_new(&sh);
+        for (int k = 0; k < SCENE_STREET_MAX; k++)   /* one a script makes has no scene entry */
+            v->street_of[k] = -1;
         static StreetBuilding sbs[64];
         int nb = 0;
         for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
@@ -2806,11 +2812,14 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
 
 /* the army each frame (army.c): the monster as it sees it, the buildings, then what it makes happen */
 /* a move state of the monster by name, now (playReaction) */
+/* playReaction(name) from a module (a geyser, the merry-go-round, a boss): the state, started at the monster's next
+ * step as a slot's start is (0x2C0DC0 .. 0x2C0E78), so the new state's events from its start fire (React_Geyser's
+ * mode 1 and addVelocity(0, 0, 18) at 0); started here, between the steps, they were passed over */
 static void force_state(Mon *mo, const char *name)
 {
     for (int k = 0; name && mo->have_graph && k < mo->graph.n; k++)
         if (!_stricmp(mo->graph.states[k].name, name)) {
-            moves_force(&mo->run, k);
+            mo->force_to = k + 1;
             return;
         }
 }
@@ -4620,6 +4629,11 @@ static void mon_step(Mon *mo, float dt)
         float cdt = dt * mo->power.speed;             /* the clips run at the speed scale x their rate (0x2EBFE0:
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
         int ev = -1, was_mode = mo->mode;            /* the mode 0x2E2770 switches on (the landing sets 4) */
+        if (mo->force_to > 0 && mo->force_to <= mo->graph.n) {   /* a played reaction (force_state) */
+            moves_force(&mo->run, mo->force_to - 1);
+            ev = 0;
+        }
+        mo->force_to = 0;
         mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
         mo->under_tested = 0;                        /* 0x2DE5A4: and the building under it */
         if (mo->mode == MODE_AIRBORNE) {             /* the air (0x2DEBD8, mode 1 of 0x2DEBB0's switch) */
@@ -5396,10 +5410,10 @@ static void game_next_block(Viewer *v)
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
  * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
- * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "strike k" a blow on
- * street object k; "p2" (p1 .. p4): the words after it play that player's monster (the others' keys idle meanwhile,
- * the computer's monsters go on). Once the game goes back to the shell the words stop: the ones left are returned
- * (NULL none), for the shell */
+ * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
+ * of that template 2.5 ahead on the street; "strike k" a blow on street object k; "p2" (p1 .. p4): the words after it
+ * play that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back
+ * to the shell the words stop: the ones left are returned (NULL none), for the shell */
 static void attract_press(Viewer *v);
 static const char *play_script(Viewer *v, const char *script, float aspect)
 {
@@ -5497,6 +5511,18 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
                 streetobj_hit(v->sobj, mo->slot, &me, c, 0.5f, 20, rec++);
             } else
                 printf("no street object %d\n", (int)seconds);
+            continue;
+        }
+        if (_stricmp(word, "unit") == 0) {           /* unit name: an army unit of that template 2.5 in front of the
+                                                      * monster, on the street, facing it */
+            static char uname[64];                   /* the unit keeps the name */
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) uname[k++] = *p++;
+            uname[k] = 0;
+            float h = mo->heading / 57.2957795f, at[3] = { mo->mx - sinf(h) * 2.5f, mo->my + cosf(h) * 2.5f, 0 };
+            if (!v->army || army_spawn(v->army, uname, at, h + 3.14159265f) < 0)
+                printf("no unit %s\n", uname);
             continue;
         }
         if (_stricmp(word, "soldier") == 0) {        /* soldier name: a window soldier of that template on the front
