@@ -113,7 +113,12 @@ followers keep per-frame steps (× the frame's dt at load: gWorld +4, the world'
 (0x2B7800) +8 = 30 (25) and the step +4 = 1/30 (1/25); nothing else writes it. The game's tick (0x288340) and the
 camera manager (0x27EFA0) pass that step as their dt, and `gWorld.getTimeStep()` (0x2AEFB8) answers it: the game
 runs at 30 steps a second. The port's script modules (army, parade, people, rail, streetobj, vehicle) use 1/30 for
-it, and the camera's smoothing is per 1/30 s step (`frame_hz` 30).
+it, and the camera's smoothing is per 1/30 s step (`frame_hz` 30). Rail, streetobj and vehicle run whole steps
+from the frame's time, so with a faster screen their objects moved every other frame while the monster and the camera
+moved every frame: a car one walks beside stuttered. They are drawn between their last two steps
+(`*_draw_world`, `collide_matrix_between`: the place along the line, the axes turned and made square again), at most
+one step behind. A held object (moved by the frame), one just made, or one that jumped more than 8 is drawn where it
+is. The game draws at its step and needs none of this.
 
 - **setTarget / setLocation(obj, local, x, y, z, cut)**: with an object, its place plus the offset (local: through its
   matrix) each frame; with `nul`, the offset is a world point. The sixth argument cuts.

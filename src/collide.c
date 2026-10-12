@@ -72,6 +72,44 @@ void collide_shape_flight(CollideShape *s)
     collide_shape_sphere(s, zero, (a < b ? a : b) / 2);
 }
 
+void collide_matrix_between(float out[16], const float a[16], const float b[16], float t)
+{
+    float ax[3][3], len[3];
+    for (int c = 0; c < 3; c++) {
+        for (int r = 0; r < 3; r++)
+            ax[c][r] = a[4 * c + r] + (b[4 * c + r] - a[4 * c + r]) * t;
+        len[c] = sqrtf(dot3(a + 4 * c, a + 4 * c)) * (1 - t) + sqrtf(dot3(b + 4 * c, b + 4 * c)) * t;
+    }
+    float bz[3], nx = sqrtf(dot3(ax[0], ax[0]));
+    cross3(b, b + 4, bz);
+    float hand = dot3(bz, b + 8) < 0 ? -1.0f : 1.0f;
+    if (nx < 1e-6f) {
+        memcpy(out, b, 16 * sizeof *out);
+        return;
+    }
+    for (int r = 0; r < 3; r++)
+        ax[0][r] /= nx;
+    float d = dot3(ax[1], ax[0]);
+    for (int r = 0; r < 3; r++)
+        ax[1][r] -= ax[0][r] * d;
+    float ny = sqrtf(dot3(ax[1], ax[1]));
+    if (ny < 1e-6f) {
+        memcpy(out, b, 16 * sizeof *out);
+        return;
+    }
+    for (int r = 0; r < 3; r++)
+        ax[1][r] /= ny;
+    cross3(ax[0], ax[1], ax[2]);
+    for (int c = 0; c < 3; c++) {
+        for (int r = 0; r < 3; r++)
+            out[4 * c + r] = ax[c][r] * len[c] * (c == 2 ? hand : 1);
+        out[4 * c + 3] = 0;
+    }
+    for (int r = 0; r < 3; r++)
+        out[12 + r] = a[12 + r] + (b[12 + r] - a[12 + r]) * t;
+    out[15] = 1;
+}
+
 void collide_shape_box(CollideShape *s, const float min[3], const float max[3])
 {
     memset(s, 0, sizeof *s);                         /* 0x281170: type 1, half sizes (0x103970), centre (0x1039C0) */

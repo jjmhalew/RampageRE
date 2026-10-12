@@ -2170,6 +2170,10 @@ void rail_update(Rail *r, float dt, const ArmyMonster *m, int nm, const RailBox 
     while (r->acc >= TIMESTEP) {                     /* the scripts count in frames: run them at the game's step */
         r->acc -= TIMESTEP;
         r->time += TIMESTEP;
+        for (int i = 0; i < r->n; i++) {             /* (for the drawing between the steps) */
+            memcpy(r->o[i].prev, r->o[i].world, sizeof r->o[i].prev);
+            r->o[i].prev_ok = 1;
+        }
         spawner_update(r, TIMESTEP);
         for (int i = 0; i < r->n; i++)
             obj_step(r, &r->o[i]);
@@ -2302,6 +2306,7 @@ void rail_hold(Rail *r, int obj, const float hand_world[16], int mirrored, float
         o->pos[k] = hand_world[12 + k] + hand_world[k] * off[0] + hand_world[4 + k] * off[1] + hand_world[8 + k] * off[2];
     army_hold_blend(&o->hold, o->rot, o->pos, dt);
     update_world(o);
+    memcpy(o->prev, o->world, sizeof o->prev);       /* moved by the frame, not the step: drawn where it is */
 }
 
 /* throwObject (0x2D9DC0): [R] the object gets a SpherePhysicsMover with the throw's velocity, then onThrow(monster,
@@ -2355,6 +2360,17 @@ void rail_clear(Rail *r)
 
 int rail_count(const Rail *r) { return r->n; }
 const RailObj *rail_obj(const Rail *r, int i) { return i >= 0 && i < r->n ? &r->o[i] : NULL; }
+
+void rail_draw_world(const Rail *r, int i, float out[16])
+{
+    const RailObj *o = &r->o[i];
+    const float *a = o->prev, *b = o->world;
+    float d[3] = { b[12] - a[12], b[13] - a[13], b[14] - a[14] };
+    if (!o->prev_ok || o->phase == RP_HELD || d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 8 * 8)
+        memcpy(out, b, 16 * sizeof *out);
+    else
+        collide_matrix_between(out, a, b, r->acc / TIMESTEP);
+}
 
 int rail_events(Rail *r, RailEvent *out, int max)
 {

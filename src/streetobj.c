@@ -1736,6 +1736,10 @@ void streetobj_update(StreetObjs *s, float dt, const StreetMonster *m, int nm, c
         s->acc = 0.25f;
     while (s->acc >= TIMESTEP) {                     /* the scripts count in frames: run them at the game's step */
         s->acc -= TIMESTEP;
+        for (int i = 0; i < s->n; i++) {             /* (for the drawing between the steps) */
+            memcpy(s->o[i].prev, s->o[i].world, sizeof s->o[i].prev);
+            s->o[i].prev_ok = 1;
+        }
         step(s);
     }
     for (int i = 0; i < s->n; i++)                   /* a hit's requestDelete between the steps */
@@ -2020,6 +2024,7 @@ void streetobj_hold(StreetObjs *s, int i, const float hand[16], int mirrored, fl
         o->world[12 + k] = pos[k];
     o->world[15] = 1;
     o->moved = 1;
+    memcpy(o->prev, o->world, sizeof o->prev);       /* moved by the frame, not the step: drawn where it is */
 }
 
 void streetobj_fly(StreetObjs *s, int i, int monster, int eat, const float vel[3])
@@ -2059,12 +2064,24 @@ void streetobj_place(StreetObjs *s, int i, const float world[16])
         for (int r = 0; r < 3; r++)
             o->rot[c * 3 + r] = world[c * 4 + r];
     o->moved = 1;
+    memcpy(o->prev, o->world, sizeof o->prev);
 }
 
 /* ---------------------------------------------------------------- reading */
 
 int streetobj_count(const StreetObjs *s) { return s->n; }
 const StreetObj *streetobj_get(const StreetObjs *s, int i) { return i >= 0 && i < s->n ? &s->o[i] : NULL; }
+
+void streetobj_draw_world(const StreetObjs *s, int i, float out[16])
+{
+    const StreetObj *o = &s->o[i];
+    const float *a = o->prev, *b = o->world;
+    float d[3] = { b[12] - a[12], b[13] - a[13], b[14] - a[14] };
+    if (!o->prev_ok || (o->oflags & SF_HELD) || d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 8 * 8)
+        memcpy(out, b, 16 * sizeof *out);
+    else
+        collide_matrix_between(out, a, b, s->acc / TIMESTEP);
+}
 
 int streetobj_events(StreetObjs *s, StreetEvent *out, int max)
 {

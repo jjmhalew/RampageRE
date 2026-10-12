@@ -78,6 +78,8 @@ struct RailObj {
     float facing[3];                                 /* getFacing / setFacing: turns about x, y and z; [2] the heading */
     float rot[9];                                    /* its turn, column-major 3 x 3 */
     float world[16];                                 /* [rot | pos]; always kept up to date */
+    float prev[16];                                  /* world before the last step, prev_ok once it has had one */
+    int prev_ok;
     ArmyHoldBlend hold;                              /* held: its blend into the hand */
     const char *shape;                               /* the model to draw now: Shape|Shape, DamageShape once hit */
     int hidden;                                      /* not drawn: the controllers (InvisShape) */
@@ -165,6 +167,8 @@ void rail_collide_add(Rail *r, CollideWorld *w);
 
 int rail_count(const Rail *r);                       /* objects (skip RP_GONE and hidden) */
 const RailObj *rail_obj(const Rail *r, int i);
+/* where it is drawn this frame: between its last two steps (1/30 s) by the time since the last (vehicle.h's) */
+void rail_draw_world(const Rail *r, int i, float out[16]);
 int rail_events(Rail *r, RailEvent *out, int max);   /* takes the events since the last call */
 
 /* ---- the monster's side */

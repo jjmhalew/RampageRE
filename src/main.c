@@ -3667,14 +3667,16 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
             v->vfx[k].obj = -1;                      /* it stays where it is */
             continue;
         }
-        float at[3] = { o->pos[0] + v->vfx[k].off[0], o->pos[1] + v->vfx[k].off[1], o->pos[2] + v->vfx[k].off[2] };
+        float w[16];                                 /* where it is drawn (between its steps) */
+        vehicle_draw_world(v->veh, v->vfx[k].obj, w);
+        float at[3] = { w[12] + v->vfx[k].off[0], w[13] + v->vfx[k].off[1], w[14] + v->vfx[k].off[2] };
         if (o->beam_fx == v->vfx[k].id)
             fx_place(v->fxw, v->vfx[k].fx, at, o->beam.R);
         else {                                       /* in the car's frame as it turns */
             float R[3][3];
             for (int a = 0; a < 3; a++)
                 for (int c = 0; c < 3; c++)
-                    R[a][c] = o->world[4 * a + c];
+                    R[a][c] = w[4 * a + c];
             fx_place(v->fxw, v->vfx[k].fx, at, (const float (*)[3])R);
         }
     }
@@ -3799,12 +3801,14 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             v->rfx[k].obj = -1;
             continue;
         }
-        float R[3][3], at[3];                        /* [R 0x291ED0, 0x277100] the object's matrix x the offset */
+        float R[3][3], at[3], w[16];                 /* [R 0x291ED0, 0x277100] the object's matrix x the offset (as
+                                                      * drawn, between its steps) */
+        rail_draw_world(v->rail, v->rfx[k].obj, w);
         for (int a = 0; a < 3; a++)
             for (int c = 0; c < 3; c++)
-                R[a][c] = o->rot[3 * a + c];
+                R[a][c] = w[4 * a + c];
         for (int c = 0; c < 3; c++)
-            at[c] = o->pos[c] + v->rfx[k].off[0] * R[0][c] + v->rfx[k].off[1] * R[1][c] + v->rfx[k].off[2] * R[2][c];
+            at[c] = w[12 + c] + v->rfx[k].off[0] * R[0][c] + v->rfx[k].off[1] * R[1][c] + v->rfx[k].off[2] * R[2][c];
         fx_place(v->fxw, v->rfx[k].fx, at, (const float (*)[3])R);
     }
     for (int k = 0; k < v->nrsnd; k++) {             /* the sounds that follow theirs */
@@ -4046,8 +4050,11 @@ static void street_step(Viewer *v, float dt)
         }
     for (int i = 0, n = streetobj_count(v->sobj); i < n; i++) {   /* drawn where they are now */
         const StreetObj *o = streetobj_get(v->sobj, i);
-        if (o->moved)
-            scene_street_place(&v->scene, v->street_of[i], o->world, !o->alive);
+        float w[16];
+        if (o->moved) {                              /* (between its steps) */
+            streetobj_draw_world(v->sobj, i, w);
+            scene_street_place(&v->scene, v->street_of[i], w, !o->alive);
+        }
     }
     for (int j = 0; j < v->nsofx; j++) {             /* the effects that follow */
         float at[3];

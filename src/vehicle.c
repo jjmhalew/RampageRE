@@ -1441,6 +1441,10 @@ void vehicle_update(Vehicles *v, float dt, const ArmyMonster *m, int nm, const A
         v->acc = 0.25f;
     while (v->acc >= TIMESTEP) {                     /* the scripts count in frames: run them at the game's step */
         v->acc -= TIMESTEP;
+        for (int i = 0; i < v->n; i++) {             /* (for the drawing between the steps) */
+            memcpy(v->o[i].prev, v->o[i].world, sizeof v->o[i].prev);
+            v->o[i].prev_ok = 1;
+        }
         traffic_update(v, TIMESTEP);
         for (int i = 0; i < v->n; i++)
             obj_step(v, &v->o[i]);
@@ -1588,6 +1592,7 @@ void vehicle_hold(Vehicles *v, int obj, const float hand_world[16], int mirrored
         o->pos[k] = hand_world[12 + k] + hand_world[k] * off[0] + hand_world[4 + k] * off[1] + hand_world[8 + k] * off[2];
     army_hold_blend(&o->hold, o->rot, o->pos, dt);
     update_world(o);
+    memcpy(o->prev, o->world, sizeof o->prev);       /* moved by the frame, not the step: drawn where it is */
 }
 
 /* throwObject (0x2D9DC0): [R] the thrown object (a non-actor) gets a SpherePhysicsMover with the throw's velocity,
@@ -1642,6 +1647,17 @@ void vehicle_clear(Vehicles *v)
 
 int vehicle_count(const Vehicles *v) { return v->n; }
 const VehObj *vehicle_obj(const Vehicles *v, int i) { return i >= 0 && i < v->n ? &v->o[i] : NULL; }
+
+void vehicle_draw_world(const Vehicles *v, int i, float out[16])
+{
+    const VehObj *o = &v->o[i];
+    const float *a = o->prev, *b = o->world;
+    float d[3] = { b[12] - a[12], b[13] - a[13], b[14] - a[14] };
+    if (!o->prev_ok || o->phase == VP_HELD || d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 8 * 8)
+        memcpy(out, b, 16 * sizeof *out);
+    else
+        collide_matrix_between(out, a, b, v->acc / TIMESTEP);
+}
 
 int vehicle_events(Vehicles *v, VehicleEvent *out, int max)
 {

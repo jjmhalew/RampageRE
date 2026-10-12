@@ -40,6 +40,10 @@ void collide_shape_box(CollideShape *s, const float min[3], const float max[3]);
  * min(|centre + half|, |centre - half|) / 2; a sphere at the origin stays. So a thrown car (AutoCollisionBox) meets
  * the buildings, which two boxes never do */
 void collide_shape_flight(CollideShape *s);
+/* a frame between two of the scripts' steps (1/30 s; the screen runs faster): the matrix t of the way from a to b, its
+ * place along the line and each axis turned with it (made square again, its length and handedness kept). Only the
+ * drawing: the modules move at the game's step, as the game */
+void collide_matrix_between(float out[16], const float a[16], const float b[16], float t);
 /* WSimpleObject's shape (0x28FD70): the template's book, then the instance's, each one's CollisionBox (min, max),
  * else its CollisionRadius (about the model's bounding sphere's centre), else AutoCollisionBox and the model's box;
  * none: the model's bounding sphere (no model: radius 1 at the origin). Pass NULL / a negative radius for what a

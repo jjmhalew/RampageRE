@@ -72,6 +72,8 @@ struct VehObj {
     float pos[3], facing;
     float rot[9];                                    /* its turn, column-major 3 x 3 */
     float world[16];                                 /* [rot | pos]; always kept up to date */
+    float prev[16];                                  /* world before the last step, prev_ok once it has had one */
+    int prev_ok;
     ArmyHoldBlend hold;                              /* held: its blend into the hand */
     const char *shape;                               /* the model to draw now: Shape|Shape, DamageShape once hit */
     int hidden;                                      /* not drawn (IsHidden: the HiddenVehicle's InvisShape) */
@@ -162,6 +164,9 @@ void vehicle_collide_add(Vehicles *v, CollideWorld *w);
 
 int vehicle_count(const Vehicles *v);                /* objects (skip VP_GONE) */
 const VehObj *vehicle_obj(const Vehicles *v, int i);
+/* where it is drawn this frame: between its last two steps (1/30 s) by the time since the last, so it moves as
+ * smoothly as the screen runs; held, just made or jumped (a new line): where it is */
+void vehicle_draw_world(const Vehicles *v, int i, float out[16]);
 int vehicle_events(Vehicles *v, VehicleEvent *out, int max);   /* takes the events since the last call */
 
 /* ---- the monster's side */

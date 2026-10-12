@@ -98,6 +98,8 @@ typedef struct {
     int moved;                                       /* it has left where it was placed (fallen, swaying, rocking,
                                                       * deleted): draw it at world, or not at all */
     float world[16];                                 /* where it is now */
+    float prev[16];                                  /* world before the last step, prev_ok once it has had one */
+    int prev_ok;
     ArmyHoldBlend hold;                              /* held: its blend into the hand */
     float rest[16];                                  /* where the city placed it */
     const char *shape;                               /* its model now: Shape|Shape, DamageShape once set */
@@ -237,6 +239,8 @@ void streetobj_place(StreetObjs *s, int i, const float world[16]);
 
 int streetobj_count(const StreetObjs *s);
 const StreetObj *streetobj_get(const StreetObjs *s, int i);
+/* where it is drawn this frame: between its last two steps (1/30 s) by the time since the last (vehicle.h's) */
+void streetobj_draw_world(const StreetObjs *s, int i, float out[16]);
 /* the object's point off (in its own frame) in the world now */
 void streetobj_point(const StreetObjs *s, int i, const float off[3], float out[3]);
 int streetobj_events(StreetObjs *s, StreetEvent *out, int max);   /* takes the events since the last call */

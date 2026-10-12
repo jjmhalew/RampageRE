@@ -1153,7 +1153,7 @@ static void vehicle_sync(Scene *s)
                 s->instances[s->looks[k].inst].hidden = 1;
         if (show >= 0) {
             s->instances[show].hidden = 0;
-            memcpy(s->instances[show].base.m, o->world, sizeof o->world);
+            vehicle_draw_world(s->traffic, i, s->instances[show].base.m);   /* between its steps */
             instance_turns(&s->instances[show], &o->tc, o->kind == VK_FIRETRUCK);   /* the fire truck's cannon */
             if (o->tmpl.at && !s->instances[show].shadow.at)
                 s->instances[show].shadow = group_sub(o->tmpl, "ShadowData");
@@ -1186,7 +1186,7 @@ static void rail_flags(Scene *s, const RailObj *o, int show)
     }
     s->rail_flag[k].seen = 1;
     Mat4 w;
-    memcpy(w.m, o->world, sizeof w.m);
+    rail_draw_world(s->rail, (int)(o - rail_obj(s->rail, 0)), w.m);
     for (int i = s->rail_flag[k].first; i < s->rail_flag[k].last; i++) {
         Instance *c = &s->instances[i];
         int r = i - s->rail_flag[k].first;
@@ -1211,7 +1211,7 @@ static void rail_sync(Scene *s)
                 s->instances[s->looks[k].inst].hidden = 1;
         if (show >= 0) {
             s->instances[show].hidden = 0;
-            memcpy(s->instances[show].base.m, o->world, sizeof o->world);
+            rail_draw_world(s->rail, i, s->instances[show].base.m);   /* between its steps */
             if (o->tmpl.at && !s->instances[show].shadow.at)
                 s->instances[show].shadow = group_sub(o->tmpl, "ShadowData");
         }
