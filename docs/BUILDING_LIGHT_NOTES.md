@@ -155,4 +155,6 @@ and the inner corner walls (0xFF808080 halved, 0x2C63A0) have no normals, and ar
 ## Drawing it (OpenGL 1.1)
 
 The colours are GL scale (the GS's 0x80 = 1.0). A part with colours and no normals: `glDisable(GL_LIGHTING)`, the
-colour × the texture (`GL_MODULATE`), fogged as the world. The rest as before.
+colour × the texture (`GL_MODULATE`), fogged as the world. The rest as before. A part with neither normals nor colours (format 0x102: the
+Las Vegas signs and the billboards' marquees) is drawn unlit too, its texture × the material's colour at full strength
+[G]: there is nothing to light it by, and the game's night shows these signs untinted.

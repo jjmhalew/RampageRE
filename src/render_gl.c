@@ -765,8 +765,11 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
                                                           * helicopter's canopy: blended by the colour's alpha */
     /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
      * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
-     * 0x51), the facades and cracks the building light colours, the ground and top models lit with it */
-    int prelit = p->col && !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
+     * 0x51), the facades and cracks the building light colours, the ground and top models lit with it. No normals
+     * and no colours (format 0x102: the Las Vegas signs, CASINO, Gold Rush, the billboards' marquees) is unlit as
+     * well: the texture at full strength, by night as by day [G: nothing for the lights to work on; the game's own
+     * night shots show them so, not tinted by the night's light] */
+    int prelit = !p->nrm && !skin && glIsEnabled(GL_LIGHTING);
     if (prelit)
         glDisable(GL_LIGHTING);
     /* a damage layer (material_damage_layer, shader 0x7A): the vertex alpha is the layer's share, not see-through:
