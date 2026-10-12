@@ -3643,6 +3643,60 @@ void scene_monster_face_blend(Scene *s, int k, float seconds)
     in->face_blend_left = in->face_blend_time = seconds;
 }
 
+/* a pose (each node's local t, q) as the other side has it: 0x194BA0's rule [R], a pair swapped and each local
+ * L' = S(the parent's axis) L S(its own axis), the root's parent axis the model's x (reflect_axis: Bip01 Sx L Sy,
+ * Pelvis Sy L Sz, the others Sz L Sz), so that composed it is reflect_node's Sx M[mirror(n)] S_n */
+static void mirror_pose(const Instance *in, float (*p)[7])
+{
+    uint32_t n = in->tree.n;
+    float (*was)[7] = malloc(sizeof *was * (n ? n : 1));
+    if (!was)
+        return;
+    memcpy(was, p, sizeof *was * n);
+    for (uint32_t i = 0; i < n; i++) {
+        int m = in->tree.nodes[i].mirror, par = in->tree.nodes[i].parent;
+        const float *src = was[m >= 0 && (uint32_t)m < n ? (uint32_t)m : i];
+        int pa = par >= 0 && (uint32_t)par < n ? reflect_axis(in, par) : 0, a = reflect_axis(in, (int)i);
+        Mat4 r = mat_tq(src, src + 3);               /* R(row, col) = m[4 col + row] (column vectors) */
+        float R[3][3];
+        for (int row = 0; row < 3; row++)
+            for (int col = 0; col < 3; col++)
+                R[row][col] = r.m[4 * col + row] * (row == pa ? -1.0f : 1.0f) * (col == a ? -1.0f : 1.0f);
+        float x, y, z, w, tr = R[0][0] + R[1][1] + R[2][2];
+        if (tr > 0) {
+            float s = sqrtf(tr + 1) * 2;
+            w = s / 4; x = (R[2][1] - R[1][2]) / s; y = (R[0][2] - R[2][0]) / s; z = (R[1][0] - R[0][1]) / s;
+        } else if (R[0][0] > R[1][1] && R[0][0] > R[2][2]) {
+            float s = sqrtf(1 + R[0][0] - R[1][1] - R[2][2]) * 2;
+            w = (R[2][1] - R[1][2]) / s; x = s / 4; y = (R[0][1] + R[1][0]) / s; z = (R[0][2] + R[2][0]) / s;
+        } else if (R[1][1] > R[2][2]) {
+            float s = sqrtf(1 + R[1][1] - R[0][0] - R[2][2]) * 2;
+            w = (R[0][2] - R[2][0]) / s; x = (R[0][1] + R[1][0]) / s; y = s / 4; z = (R[1][2] + R[2][1]) / s;
+        } else {
+            float s = sqrtf(1 + R[2][2] - R[0][0] - R[1][1]) * 2;
+            w = (R[1][0] - R[0][1]) / s; x = (R[0][2] + R[2][0]) / s; y = (R[1][2] + R[2][1]) / s; z = s / 4;
+        }
+        for (int k = 0; k < 3; k++)
+            p[i][k] = src[k] * (k == pa ? -1.0f : 1.0f);
+        p[i][3] = -x; p[i][4] = -y; p[i][5] = -z; p[i][6] = w;   /* stored for row vectors (mat_tq) */
+    }
+    free(was);
+}
+
+/* a clip starting on the other side: the game mirrors the new pose (0x194BA0 in 0x2FFF10) before it blends towards
+ * the kept one, which stays as it was drawn; here the side is the drawing's, so the kept pose goes to the new side */
+void scene_monster_mirror(Scene *s, int k, int mirrored)
+{
+    Instance *in = mon_inst(s, k);
+    if (!in || !in->mirrored == !mirrored)
+        return;
+    in->mirrored = mirrored;
+    if (in->held && in->blend_left > 0)
+        mirror_pose(in, in->held);
+    if (in->face_held && in->face_blend_left > 0)
+        mirror_pose(in, in->face_held);
+}
+
 int scene_monster_root(const Scene *s, int k, double seconds, float t[3], float q[4])
 {
     const Instance *in = mon_inst(s, k);
@@ -3665,6 +3719,37 @@ int scene_monster_root(const Scene *s, int k, double seconds, float t[3], float 
     memcpy(t, in->tree.nodes[found].t, sizeof in->tree.nodes[found].t);
     memcpy(q, in->tree.nodes[found].q, sizeof in->tree.nodes[found].q);
     return 0;
+}
+
+/* 0x300FE0 [R] (only from the bake, 0x2E6580): the new clip's root where it starts goes into the root of both pose
+ * buffers, the one posed (+0x29C4) and the one kept for the blend (+0x29C0), so the root does not blend from where the
+ * old clip had it: the monster was moved so that the new root stands there */
+void scene_monster_hold_root(Scene *s, int k, const float t[3], const float q[4])
+{
+    Instance *in = mon_inst(s, k);
+    if (!in)
+        return;
+    int root = -1;
+    for (uint32_t i = 0; i < in->tree.n; i++) {      /* the root scene_monster_root reads */
+        const TreeNode *nd = &in->tree.nodes[i];
+        float tt[3], qq[4];
+        if (nd->parent >= 0)
+            continue;
+        if (root < 0)
+            root = (int)i;
+        if (in->has_clip && clip_pose(&in->clip, 0, i, tt, qq)) {
+            root = (int)i;
+            break;
+        }
+    }
+    if (root < 0)
+        return;
+    float *d[2] = { in->held ? in->held[root] : NULL, in->pose ? in->pose[root] : NULL };
+    for (int b = 0; b < 2; b++)
+        if (d[b]) {
+            memcpy(d[b], t, 3 * sizeof *t);
+            memcpy(d[b] + 3, q, 4 * sizeof *q);
+        }
 }
 
 void scene_monster_place(Scene *s, int k, float x, float y, float z, float deg)

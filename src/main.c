@@ -423,8 +423,7 @@ static void play_state(Mon *mo)
                                                         always the node's blend (0x2ECC08), cut or not */
     mo->mirror = mo->mirror_queued;                    /* 0x2E67E8: a clip starts in the queued mirror state */
     mo->input.mirrored = mo->mirror;
-    if (mon_in(mo))
-        mon_in(mo)->mirrored = mo->mirror;
+    scene_monster_mirror(&v->scene, mo->slot, mo->mirror);
     float q[4];
     if (root_at(mo, clip_at(mo, st, mo->run.time), mo->entry_root, q) != 0)
         memset(mo->entry_root, 0, sizeof mo->entry_root);
@@ -2169,8 +2168,10 @@ static void push_out(Mon *mo)
     mo->landed = 0;
     CollideMonster m = { { mo->mx, mo->my, landed ? mo->landed_z : mo->mz }, mo->heading, landed ? MODE_AIRBORNE : mo->mode,
                          (mo->graph.box[0] > 0 ? mo->graph.box[0] : 3) * s, (mo->graph.box[1] > 0 ? mo->graph.box[1] : 4.25f) * s,
-                         { mo->graph.probe[0] * s, mo->graph.probe[1] * s }, 0, mo->is_ai, 0,
+                         { (mo->graph.probe[0] + mo->ev16x) * s, (mo->graph.probe[1] + mo->ev16) * s }, 0, mo->is_ai, 0,
                          { mo->vel[0], mo->vel[1], mo->vel[2] }, { mo->air[0], mo->air[1], mo->air[2] } };
+    /* [R 0x2E4D30] its body centre with the kept type-16 record's offset: a Transition_Ground clip's (-5 .. -6.25)
+     * puts it off the wall the monster has just let go of, so it is not pushed out of the building */
     m.below = mon_under(mo);                         /* the frame's building under it, from before the move */
     m.below_set = 1;
     CollideMonsterOut o;
@@ -4685,10 +4686,14 @@ static void mon_step(Mon *mo, float dt)
         clip_events(mo, st, t0, t1);                  /* the old clip's events up to now */
         if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
             float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
-            climb_place(&mo->mount, &v->scene, st->flags, delta, dt, pos, &mo->heading);
-            mo->mx = pos[0];
-            mo->my = pos[1];
-            mo->mz = pos[2];
+            float h = mo->heading;
+            climb_place(&mo->mount, &v->scene, st->flags, delta, dt, pos, &h);
+            /* [R 0x2E0D44 .. 0x2E0EE4] the monster goes 0.4 of the way there each frame: its place by a lerp, its turn
+             * by a slerp (0x167DE0), so a new place (getting on, over the top, off the roof) is eased into */
+            mo->mx += (pos[0] - mo->mx) * 0.4f;
+            mo->my += (pos[1] - mo->my) * 0.4f;
+            mo->mz += (pos[2] - mo->mz) * 0.4f;
+            mo->heading += (fmodf(h - mo->heading + 540, 360) - 180) * 0.4f;
         }
         if (switched) {
             /* a clip that bakes: its root, as drawn where it ended (the axes it handed over were held at its start, a
@@ -4737,6 +4742,7 @@ static void mon_step(Mon *mo, float dt)
                 mo->my += s * d[0] + c * d[1];
                 mo->mz += d[2];
                 mo->heading += h * 57.2957795f;
+                scene_monster_hold_root(&v->scene, mo->slot, b, q);   /* 0x300FE0: the blend keeps the new root */
                 if (getenv("RAMPAGE_ROOT"))
                     printf("  bake: old root %.2f %.2f %.2f, new %.2f %.2f %.2f, turn %.0f\n", bake_p[0], bake_p[1],
                            bake_p[2], np[0], np[1], np[2], h * 57.2957795f);
@@ -5049,12 +5055,14 @@ static void play_step(Viewer *v, float dt, float aspect)
     int nat = 0;
     for (int k = 0; k < mon_world(v); k++) {
         Mon *mo = &v->mon[k];
-        if (mo->have_graph) {                         /* the pose keeps what the monster did not take over */
+        if (mo->have_graph) {                         /* the pose keeps what the monster did not take over (0x301080:
+                                                       * x with 0x40, y with 0x80, z with 0x80000 [R]) */
             const MoveState *st = &mo->graph.states[mo->run.state];
             float turn = st->flags & NODE_ROOT_TURN ?
                 root_turn(mo, mo->entry_t, clip_at(mo, st, mo->run.time)) : 0;
             scene_monster_root_motion(&v->scene, mo->slot, (st->flags & NODE_ROOT_X ? 1 : 0) |
-                                      (st->flags & NODE_ROOT_Y ? 2 : 0), mo->entry_root, turn);
+                                      (st->flags & NODE_ROOT_Y ? 2 : 0) | (st->flags & NODE_ROOT_Z ? 4 : 0), mo->entry_root,
+                                      turn);
         }
         if (k >= v->nmon)                            /* (the revealed monster: not the camera's) */
             continue;

@@ -292,8 +292,11 @@ in this clip, whether it is coming down from the top.
   root motion in z, flag 0x80000) kept between the building's foot and its top − 11.5; a clip that bakes is free
   (with 0x120000 at the point, 0x100000 at the top − 11.5), one with 0x400 too until its rail changes. Getting on, it
   is only lined up with the rail. The mount's height is the monster's + 7.5, taken before the clamp (0x2E14F0), so a
-  stroke past the limit lets canClimb answer 5. The place is re-checked every frame: failing it, the monster is
-  knocked off (slot 31, or 73 when the building falls).
+  stroke past the limit lets canClimb answer 5. The monster is not put there at once: each frame its matrix goes 0.4
+  of the way to the place 0x2D5870 gives (0x2E0D44 .. 0x2E0EE4: the translation by a lerp, the rotation by 0x167DE0),
+  so a new place (getting on, coming down off the roof once `transitionFromBuildingTop` puts it at the point) is
+  eased into over a few frames [R]. The place is re-checked every frame: failing it, the monster is knocked off (slot
+  31, or 73 when the building falls).
 - **canClimb(dv, dh)**: −4 not mounted. Sideways: −7 off the building, −5 a building close by, else the place 5 along
   is checked; 4 when it turns a corner (to or from a side), 3 a hop along the front. Up: 2 while the mount's height
   + 4 is not above the top, else 5 (mantle) if there is room on the roof. Down: −1 when the feet reach the foot, else 2.
@@ -392,8 +395,12 @@ A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next on
 0x2FFA00 starts a clip in the monster's animation player: with blend mode 0, or 1 while nothing plays yet, it cuts;
 otherwise the two pose buffers swap (+0x29C0 / +0x29C4), so the pose the monster had stays as it was, and the blend
 time (the new state's node +0x14) is set, with 1 / it (+0x4E58, +0x4E5C). Each frame (0x2FFF10) the time left falls
-by dt × the monster's speed; the root's motion is taken out of the new clip's pose first (0x301080, the root rewritten
-at 0x3003C8), so the kept pose has none either, and every bone of the new clip's pose goes towards the kept one by the share left
+by dt × the monster's speed; the root's motion is taken out of the new clip's pose first (0x301080: x with node flag
+0x40, y with 0x80, z with 0x80000, the turn with 0x100, against the clip's root where it started, +0x29E4 / +0x29F4;
+the root rewritten at 0x3003C8), so the kept pose has none either; the new pose is mirrored (0x194BA0) before the
+blend, so the kept one, as it was drawn, needs no turning when a clip starts on the other side; and a bake (0x2E6580)
+writes the new clip's root where it starts into the root of both buffers (0x300FE0), so the root does not blend from
+where the old clip had it (the monster was just moved so that the new root stands there). Every bone of the new clip's pose goes towards the kept one by the share left
 (time left / blend time, so from 1 to 0 linearly): the translation by a lerp, the rotation (turned to the kept one's
 side first) by 0x104590. A start the game forces through a slot takes no transition (0x2EBF50 clears the runner's
 +0x8); the slot's start (0x2C0DC0 .. 0x2C0E78) fills the request itself: the start list entry's state node, at 0

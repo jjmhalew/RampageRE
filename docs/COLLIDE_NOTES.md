@@ -98,7 +98,8 @@ along its y, × scale, plus the move's offset at +0xBAA0 +0xC / +0x10):
 - **On the ground** (mode 0) over a building (0x2D6150: the one at the body's centre, if its top is no more than 5
   above the feet; none once +0xA4C ≤ 0; cached for the frame) whose top is less than 1 above the centre, and the
   building's +0x38C clear (0x2E3020; the building's grid's +0x1D4: a gone building's, below): **the roof** (0x2A49C0): the centre kept within the roof's rectangle (+0x1DC .. +0x1EC),
-  0.1 × half width (0.3) in from an edge with a neighbour, half width (3) from one without; no limit on an edge
+  0.1 × half width (0.3) in from an edge whose value is not 0 (a free edge, 2: it walks to the brink), half width (3)
+  from a higher neighbour's wall (0) (0x2E30D8 passes f12 = 0.1 × f13, f13 = +0x198 × scale) [R]; no limit on an edge
   where the neighbour is flush and as high. The neighbours (0x2A4C70, built once): in a row, standing ones
   (+0x14C 1 .. 3, not falling) at most 2 apart: as high and touching → both 1 (walk across); the higher one's
   wall → 0 on the lower; front against back: touching (|back min y − front max y| < 0.001), the same x span and
