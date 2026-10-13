@@ -210,6 +210,10 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
   ALPHA 0x48, Cs × As + Cd) or 0x3B2700 (ALPHA 0x44), both TEST 0x51001 (depth test GEQUAL; the alpha test fails every
   pixel with AFAIL frame buffer only, so no depth is written whatever WriteZBuffer says), PRMODE 0x58 (Gouraud,
   textured, blended, no fog); -TestZBuffer switches the depth test off (0x25A900).
+  `render_gl.c` draws such a particle in the world tested at its depth pulled towards the eye by its size (+ 1):
+  90 of the 287 effects have one (Car_explode's flash and fire among them) and the game shows none of them through
+  the buildings [G: its effects drawn in the world's order; that draw is not traced], while what it starts in (the
+  car, the street) does not cut it. The front end's 3D effects keep the test off.
 - The VU1 program (0x3A75C8, `tools/vudis.py`) [R]: the CPU builds every corner (0x2214D0); the program only takes them
   through the matrix at VU1 0x89, divides by w, packs uv (ITOF12) and multiplies each vertex's alpha by the world's
   fog factor: alpha × min(127.5, F × 0.5) / 128, F = a + b w the 0 … 255 fog value the world's programs (0x37A2A0)

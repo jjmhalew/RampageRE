@@ -932,7 +932,7 @@ static void draw_water(Renderer *r, const Scene *s, const Camera *cam)
 
 /* the HUD's quads (hud.c): the GUI's 640 x 480 screen at the window's height, centred (its 4:3 kept), in order, no
  * depth, alpha blended */
-static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, float fog_start, float fog_end);
+static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, float fog_start, float fog_end, int world);
 
 static void hud_state(float aspect)
 {
@@ -1002,7 +1002,7 @@ static void draw_gui3d(Renderer *r, const SceneGui3D *l, float aspect, double t)
     }
     glDisable(GL_CULL_FACE);
     if (l->nfx)
-        draw_fx(r, l->fx, l->nfx, &cam, 0, 0);
+        draw_fx(r, l->fx, l->nfx, &cam, 0, 0, 0);
     hud_state(aspect);
 }
 
@@ -1117,8 +1117,12 @@ static void draw_shadows(Renderer *r, int pass)
  * 0x58: no FGE) [R]. So a fogged particle fades out rather than taking the fog colour: here the linear fog's factor at
  * each corner's eye-plane depth times its alpha, GL fog off. The GS state (0x3B26C0 additive, 0x3B2700 blended): ALPHA
  * 0x48 (Cs + Cd x As) or 0x44, TEST 0x51001 (depth test GEQUAL, the alpha test failing every pixel into the frame
- * buffer only: no depth written), the depth test switched off for -TestZBuffer (0x25A900) [R] */
-static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, float fog_start, float fog_end)
+ * buffer only: no depth written), the depth test switched off for -TestZBuffer (0x25A900) [R]. In the world such a
+ * particle is still hidden by what stands in front of it (a car's explosion behind a building), as the game's: 90 of
+ * the 287 effects have one, and none shows through the buildings there [G: the game's effects drawn in the world's
+ * order, the draw not traced]. Here it is tested at its depth pulled towards the eye by its size, so what it starts
+ * in (the car, the street under it) does not cut it */
+static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, float fog_start, float fog_end, int world)
 {
     float M[16];
     glGetFloatv(GL_MODELVIEW_MATRIX, M);
@@ -1139,7 +1143,7 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, f
         } else {
             glDisable(GL_TEXTURE_2D);
         }
-        if (q->ztest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        if (q->ztest || world) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         glBlendFunc(GL_SRC_ALPHA, q->additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
         float c[4][3];                                     /* top-left, top-right, bottom-right, bottom-left */
         if (q->kind == FXQ_BILLBOARD) {
@@ -1195,6 +1199,20 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, f
                 f = f < 0 ? 0 : f > 1 ? 1 : f;
             }
             a[k] = q->col[3] * f;
+        }
+        if (world && !q->ztest) {                          /* (above: tested in front of what it starts in) */
+            float pull = 0;
+            for (int k = 0; k < 4; k++) {
+                float e[3] = { c[k][0] - q->pos[0], c[k][1] - q->pos[1], c[k][2] - q->pos[2] };
+                pull = fmaxf(pull, sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]));
+            }
+            pull += 1;
+            for (int k = 0; k < 4; k++) {
+                float e[3] = { c[k][0] - cam->pos[0], c[k][1] - cam->pos[1], c[k][2] - cam->pos[2] };
+                float d = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]), f = d > 0 ? fmaxf(d - pull, 0.5f) / d : 1;
+                for (int j = 0; j < 3; j++)
+                    c[k][j] = cam->pos[j] + e[j] * f;
+            }
         }
         static const int UV[4][2] = { { 0, 1 }, { 2, 1 }, { 2, 3 }, { 0, 3 } };
         glBegin(GL_QUADS);
@@ -1352,7 +1370,7 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     glDisableClientState(GL_COLOR_ARRAY);
     glDisable(GL_CULL_FACE);
     if (s->nfx)                                            /* the effects' particles, over the world */
-        draw_fx(r, s->fx, s->nfx, cam, fogged ? fog_near : 0, fogged ? fog_far : 0);
+        draw_fx(r, s->fx, s->nfx, cam, fogged ? fog_near : 0, fogged ? fog_far : 0, 1);
     if (s->nspheres) {                                     /* the overlay: three great circles per sphere */
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);

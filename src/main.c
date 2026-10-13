@@ -3656,6 +3656,12 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
             if (getenv("RAMPAGE_TRACE") && e->type != VE_EFFECT && e->type != VE_EFFECT_STOP)
                 printf("  vehicle event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->obj);
         }
+    for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand (before what follows it) */
+        Mon *mo = &v->mon[k];
+        Mat4 h;
+        if (mo->held_vehicle >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            vehicle_hold(v->veh, mo->held_vehicle, h.m, mo->mirror, dt);
+    }
     for (int k = 0; k < v->nvfx; k++) {              /* the effects that follow their vehicle, while it is there */
         if (v->vfx[k].obj < 0) {
             if (!fx_alive(v->fxw, v->vfx[k].fx))
@@ -3679,14 +3685,6 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
                     R[a][c] = w[4 * a + c];
             fx_place(v->fxw, v->vfx[k].fx, at, (const float (*)[3])R);
         }
-    }
-    for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand */
-        Mon *mo = &v->mon[k];
-        Mat4 h;
-        if (mo->held_vehicle >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            vehicle_hold(v->veh, mo->held_vehicle, h.m, mo->mirror, dt);
-        if (v->sobj && mo->held_sobj >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            streetobj_hold(v->sobj, mo->held_sobj, h.m, mo->mirror, dt);   /* a parked car in its hand */
     }
 }
 
@@ -3790,6 +3788,12 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                 printf("  rail event %d (%s) from %d (%s) at %.1f %.1f %.1f\n", e->type, e->name ? e->name : "-", e->obj,
                        o && o->name ? o->name : "-", e->pos[0], e->pos[1], e->pos[2]);
         }
+    for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand (before what follows it) */
+        Mon *mo = &v->mon[k];
+        Mat4 h;
+        if (mo->held_rail >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            rail_hold(v->rail, mo->held_rail, h.m, mo->mirror, dt);
+    }
     for (int k = 0; k < v->nrfx; k++) {              /* the effects that follow their object, while it is there */
         if (v->rfx[k].obj < 0) {
             if (!fx_alive(v->fxw, v->rfx[k].fx))
@@ -3815,12 +3819,6 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
         const RailObj *o = rail_obj(v->rail, v->rsnd[k].obj);
         if (o && o->phase != RP_GONE)
             sound_move(v->rsnd[k].h, o->pos);
-    }
-    for (int k = 0; k < v->nmon; k++) {
-        Mon *mo = &v->mon[k];
-        Mat4 h;
-        if (mo->held_rail >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            rail_hold(v->rail, mo->held_rail, h.m, mo->mirror, dt);
     }
 }
 
@@ -3915,6 +3913,12 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
             if (getenv("RAMPAGE_TRACE"))
                 printf("  parade event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->obj);
         }
+    for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand (before what follows it) */
+        Mon *mo = &v->mon[k];
+        Mat4 h;
+        if (mo->held_parade >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            parade_hold(v->parade, mo->held_parade, h.m, mo->mirror, dt);
+    }
     for (int k = 0; k < v->npfx; k++) {              /* the effects that follow their object, while it is there */
         const ParadeObj *o = parade_obj(v->parade, v->pfx[k].obj);
         if (!o || o->phase == PAP_GONE || !fx_alive(v->fxw, v->pfx[k].fx)) {
@@ -3929,12 +3933,6 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
         const ParadeObj *o = parade_obj(v->parade, i);
         if (o->kind == PAK_BIKER && o->weapon_on)
             army_person_moved(v->army, 1000 + i, o->world, COLLIDE_TAG(COLLIDE_OWN_PARADE, i), o->anim_time, o->anim_len);
-    }
-    for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand */
-        Mon *mo = &v->mon[k];
-        Mat4 h;
-        if (mo->held_parade >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            parade_hold(v->parade, mo->held_parade, h.m, mo->mirror, dt);
     }
 }
 
@@ -4048,6 +4046,13 @@ static void street_step(Viewer *v, float dt)
             if (getenv("RAMPAGE_TRACE"))
                 printf("  street event %d (%s) from %d\n", e->type, e->name ? e->name : "-", e->obj);
         }
+    for (int k = 0; k < v->nmon; k++) {              /* a parked car in a monster's hand (before it is drawn and
+                                                      * what follows it) */
+        Mon *mo = &v->mon[k];
+        Mat4 h;
+        if (mo->held_sobj >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            streetobj_hold(v->sobj, mo->held_sobj, h.m, mo->mirror, dt);
+    }
     for (int i = 0, n = streetobj_count(v->sobj); i < n; i++) {   /* drawn where they are now */
         const StreetObj *o = streetobj_get(v->sobj, i);
         float w[16];
@@ -4242,6 +4247,12 @@ static void army_step(Viewer *v, float dt)
             default: break;
             }
         }
+    for (int k = 0; k < v->nmon; k++) {              /* a unit in a monster's hand (before what follows it) */
+        Mon *mo = &v->mon[k];
+        Mat4 h;
+        if (mo->held_unit >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            army_hold(v->army, mo->held_unit, h.m, mo->mirror, dt);
+    }
     for (int k = 0; k < v->nfxa; k++) {              /* the effects that follow their unit or shot */
         float at[3];
         if (v->fxa[k].shot >= 0) {
@@ -4284,12 +4295,6 @@ static void army_step(Viewer *v, float dt)
             continue;
         }
         fx_move(v->fxw, v->fxa[k].fx, at);
-    }
-    for (int k = 0; k < v->nmon; k++) {              /* a unit in a monster's hand */
-        Mon *mo = &v->mon[k];
-        Mat4 h;
-        if (mo->held_unit >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
-            army_hold(v->army, mo->held_unit, h.m, mo->mirror, dt);
     }
 }
 
@@ -5480,6 +5485,14 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
             name[k] = 0;
             float h = mo->heading / 57.2957795f, at[3] = { mo->mx - sinf(h) * 6, mo->my + cosf(h) * 6, mo->mz + 3 };
+            char *end;                               /* (fx name x y z: there) */
+            for (int c = 0; c < 3; c++) {
+                float f = strtof(p, &end);
+                if (end == p)
+                    break;
+                at[c] = f;
+                p = end;
+            }
             if (v->fxw && fx_spawn(v->fxw, name, at, NULL, 1) < 0)
                 printf("no effect %s\n", name);
             continue;
@@ -5495,7 +5508,7 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
         }
         if (_stricmp(word, "spawn") == 0) {          /* spawn name: vehicle.c's object of that template 6 in front of
                                                       * the monster (FireTruck, which no block spawns, places itself) */
-            char name[64];
+            static char name[64];                    /* the object keeps the name */
             int k = 0;
             while (*p == ' ') p++;
             while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;

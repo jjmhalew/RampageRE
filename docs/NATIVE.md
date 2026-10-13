@@ -554,7 +554,8 @@ and sinks, leaving its rubble (the camera shakes as each floor falls, and on the
 "Shake") ("Collapse"; `--do "collapse"` destroys the building in front of the monster, `--do "hitcell b floor col"` hits one
 front cell; `--do "bosshit n"` deals the block's boss one blow of n, BOSS_NOTES.md; `--do "strike k"` one blow on
 street object k, as `RAMPAGE_STREET=1` lists them; `--do "soldier PoliceUSWindow1"` puts a window soldier on the
-front ahead of the monster, `--do "unit PoliceUSFromTruckEasy"` an army unit 2.5 ahead on the street).
+front ahead of the monster, `--do "unit PoliceUSFromTruckEasy"` an army unit 2.5 ahead on the street, `--do "fx
+Car_explode -8 18 2"` an effect there (6 ahead of the monster without the place)).
 Monsters climb: the game's canMount, canClimb and the mount bindings run against the buildings' boxes, so a monster
 pushed at a building's front mounts it, climbs with the stick (each stroke flipping the clip), hops along the front,
 swings round a corner onto a side unless a neighbour is flush with it, climbs down and steps off at the foot, or
