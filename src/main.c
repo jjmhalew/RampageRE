@@ -1571,6 +1571,12 @@ static void hit_building_roof(Mon *mo, const char *bone)
                hit ? "hit" : "no damage", sb->b.state, sb->b.n, sb->b.hp);
 }
 
+static float dist_to(const float a[3], const float b[3])
+{
+    float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+    return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
 /* throwObject(eat, x, y, z) (0x2D9DC0): what the monster holds eaten, or smashed away with (x, y, z) in its frame */
 static void throw_held(Mon *mo, int eat, float x, float y, float z)
 {
@@ -1872,25 +1878,29 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             return;
         float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { mo->mx, mo->my, mo->mz };
         float fwd[3] = { -sinf(mo->heading / 57.2957795f), cosf(mo->heading / 57.2957795f), 0 };
-        int who = people_nearest(v->scene.folk, hand, root, fwd, 15);
-        if (who >= 0) {
-            people_grab(v->scene.folk, who, 0.1f);
-            mo->held = who;
-        } else if (v->army && (who = army_nearest_pickup(v->army, hand, root, fwd, 15)) >= 0) {
-            army_grab(v->army, who, mo->slot, 0.1f);
-            mo->held_unit = who;
-        } else if (v->parade && mo->held_parade < 0 && (who = parade_nearest_pickup(v->parade, hand, root, fwd, 15)) >= 0) {
-            parade_grab(v->parade, who, mo->slot, 0.1f);    /* on the sidewalk: before the street's vehicles */
-            mo->held_parade = who;
-        } else if (v->veh && mo->held_vehicle < 0 && (who = vehicle_nearest_pickup(v->veh, hand, root, fwd, 15)) >= 0) {
-            vehicle_grab(v->veh, who, mo->slot, 0.1f);
-            mo->held_vehicle = who;
-        } else if (v->rail && mo->held_rail < 0 && (who = rail_nearest_pickup(v->rail, hand, root, fwd, 15)) >= 0) {
-            rail_grab(v->rail, who, mo->slot, 0.1f);
-            mo->held_rail = who;
-        } else if (v->sobj && mo->held_sobj < 0 && (who = streetobj_nearest_pickup(v->sobj, hand, root, fwd, 15)) >= 0) {
-            streetobj_grab(v->sobj, who, 0.1f);      /* a parked car */
-            mo->held_sobj = who;
+        /* [R] one query of the object manager (0x4D0900's +0x20: within the reach, flags 0x20840, at most 64) and
+         * the nearest of them to the hand, of whatever kind: a cop beside a tourist is taken when he is nearer */
+        float r = 15;                                /* each kind asked within the nearest so far */
+        int kind = -1, who = -1, k;
+        if ((k = people_nearest(v->scene.folk, hand, root, fwd, r)) >= 0)
+            kind = 0, who = k, r = dist_to(people_get(v->scene.folk, k)->world + 12, hand);
+        if (v->army && (k = army_nearest_pickup(v->army, hand, root, fwd, r)) >= 0)
+            kind = 1, who = k, r = dist_to(army_unit(v->army, k)->pos, hand);
+        if (v->parade && mo->held_parade < 0 && (k = parade_nearest_pickup(v->parade, hand, root, fwd, r)) >= 0)
+            kind = 2, who = k, r = dist_to(parade_obj(v->parade, k)->world + 12, hand);
+        if (v->veh && mo->held_vehicle < 0 && (k = vehicle_nearest_pickup(v->veh, hand, root, fwd, r)) >= 0)
+            kind = 3, who = k, r = dist_to(vehicle_obj(v->veh, k)->pos, hand);
+        if (v->rail && mo->held_rail < 0 && (k = rail_nearest_pickup(v->rail, hand, root, fwd, r)) >= 0)
+            kind = 4, who = k, r = dist_to(rail_obj(v->rail, k)->pos, hand);
+        if (v->sobj && mo->held_sobj < 0 && (k = streetobj_nearest_pickup(v->sobj, hand, root, fwd, r)) >= 0)
+            kind = 5, who = k, r = dist_to(streetobj_get(v->sobj, k)->world + 12, hand);
+        switch (kind) {
+        case 0: people_grab(v->scene.folk, who, 0.1f); mo->held = who; break;
+        case 1: army_grab(v->army, who, mo->slot, 0.1f); mo->held_unit = who; break;
+        case 2: parade_grab(v->parade, who, mo->slot, 0.1f); mo->held_parade = who; break;
+        case 3: vehicle_grab(v->veh, who, mo->slot, 0.1f); mo->held_vehicle = who; break;
+        case 4: rail_grab(v->rail, who, mo->slot, 0.1f); mo->held_rail = who; break;
+        case 5: streetobj_grab(v->sobj, who, 0.1f); mo->held_sobj = who; break;   /* a parked car */
         }
         return;
     }
@@ -7249,6 +7259,7 @@ static int viewer_main(int argc, char **argv)
             win_swap(&w);
             continue;
         }
+        int menu_had_pad = v.hud && (hud_results_showing(v.hud) || hud_pause_showing(v.hud));
         if (v.hud && hud_results_showing(v.hud)) {   /* a results screen has the pad: Enter / Space go on,
                                                       * Backspace quits, the arrows choose, C changes monster, V
                                                       * saves */
@@ -7382,6 +7393,9 @@ static int viewer_main(int argc, char **argv)
                     keys_pad(&w, v.mon[k].drive, &v.mon[k].pad);
                     if (v.pads_live && k < PAD_SLOTS && (v.pads_on >> k & 1))
                         pad_to_pad(&v.pads[k], &v.pads_prev[k], &v.mon[k].pad);
+                    if (menu_had_pad)                /* the press that took the Pause menu's Continue was the
+                                                      * menu's: not a jump too (one on a wall lets go of it) */
+                        memset(v.mon[k].pad.pressed, 0, sizeof v.mon[k].pad.pressed);
                 }
             play_step(&v, shot && !v.ap ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
             pose_monsters(&v, shot && !v.ap ? shot_time : now - start);   /* the clips at the states' times (clip_at) */

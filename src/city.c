@@ -1071,11 +1071,21 @@ static void edible_sync(Scene *s)
     }
 }
 
+/* the looks keyed from base of objects past the end of their list (army.c and boss.c drop the gone ones at its end):
+ * hidden, as a gone one's is */
+static void looks_past_end(Scene *s, int base, int n)
+{
+    for (int k = 0; k < s->nlooks; k++)
+        if (s->looks[k].who >= base + n && s->looks[k].who < base + (1 << 20) && s->looks[k].inst >= 0)
+            s->instances[s->looks[k].inst].hidden = 1;
+}
+
 /* each frame: every boss part at its matrix x RenderScale, an actor's clip at its time (looks keyed from 4 << 20) */
 static void boss_sync(Scene *s, double t)
 {
     if (!s->boss || !s->owner)
         return;
+    looks_past_end(s, 4 << 20, boss_count(s->boss));
     for (int i = 0, n = boss_count(s->boss); i < n; i++) {
         const BossPart *p = boss_part(s->boss, i);
         int who = (4 << 20) + i;
@@ -1229,6 +1239,7 @@ static void army_sync(Scene *s, double t)
 {
     if (!s->army || !s->owner)
         return;
+    looks_past_end(s, 1 << 20, army_count(s->army));   /* an eaten soldier the last of them: not left hanging */
     for (int i = 0, n = army_count(s->army); i < n; i++) {
         const ArmyUnit *u = army_unit(s->army, i);
         int who = (1 << 20) + i;
