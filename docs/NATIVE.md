@@ -486,7 +486,8 @@ drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels b
 The game lights its city at run time: texture × (ambient + Σ colour × N·L) from the light file
 ([FORMAT_BDP.md](FORMAT_BDP.md) "Lighting"), which is OpenGL's fixed-function lighting, so the light file's ambient
 colour and directional lights become `GL_LIGHT_MODEL_AMBIENT` and `GL_LIGHT0..2`. Meshes are drawn from both sides
-with their normals as stored; texels with alpha below 0.5 are dropped, as in the glTF export. The cloud band
+with their normals as stored; texels with alpha below 0.5 are dropped, as in the glTF export, but for the
+materials with flag 0x100000, blended by their alpha ([FORMAT_BDP.md](FORMAT_BDP.md) "Flag 0x100000"). The cloud band
 scrolls by the `AnimatingSkyData` rate (per second, an assumption). Traffic drives the two lanes of the game's spawn
 code (0x332D90) at 15 units/s with a fixed pick from the block's vehicle mix.
 

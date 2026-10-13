@@ -771,7 +771,9 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     material_color(sm->b, p->material, mc);
     if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
     else { glDisableClientState(GL_COLOR_ARRAY); glColor4fv(mc); }
-    int see_through = !p->blend && mc[3] < 0.98f;        /* the glass of the saucer, the hover tank, the
+    /* the part's own blend (the facades'), else its material's: GS state 2 as the sheets' (material_blended) */
+    int blend = p->blend ? p->blend : material_blended(sm->b, p->material) ? 2 : 0;
+    int see_through = !blend && mc[3] < 0.98f;           /* the glass of the saucer, the hover tank, the
                                                           * helicopter's canopy: blended by the colour's alpha */
     /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
      * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
@@ -788,11 +790,11 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     GLboolean dmg_test = dmg ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
     if (dmg)
         glDisable(GL_ALPHA_TEST);
-    if (p->blend || see_through) {                       /* over what is behind, by its alpha */
+    if (blend || see_through) {                          /* over what is behind, by its alpha */
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glAlphaFunc(GL_GREATER, p->blend == 2 ? 0.0f : 0.01f);
-        if (p->blend != 2)                               /* a facade sheet keeps writing its depth [R GS state 2: */
+        glAlphaFunc(GL_GREATER, blend == 2 ? 0.0f : 0.01f);
+        if (blend != 2)                                  /* a facade sheet keeps writing its depth [R GS state 2: */
             glDepthMask(GL_FALSE);                       /* ALPHA 0x44, TEST 0x5000D (alpha > 0), Z written] */
     }
     /* a reflective material (kind 5: shader 0x1A, record 26 at 0x3B5C10; 0x19 with flag 2, set on none) [R]: its first
@@ -800,7 +802,7 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
      * reflection (written into the frame's alpha for the second pass; the blimp's envelope, not its lettering or
      * gondola). So it is drawn whole */
     uint32_t layer = p->nrm || skin ? material_env(sm->b, p->material) : 0;
-    GLboolean test_was = (layer || env_only) && !p->blend && !see_through ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
+    GLboolean test_was = (layer || env_only) && !blend && !see_through ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
     if (test_was)
         glDisable(GL_ALPHA_TEST);
     GLboolean lit_was = env_only ? glIsEnabled(GL_LIGHTING) : GL_FALSE;
@@ -825,7 +827,7 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
             glTranslatef(drift[0], drift[1], 0);
         glMatrixMode(GL_MODELVIEW);
     }
-    if (p->blend || see_through) {
+    if (blend || see_through) {
         glDisable(GL_BLEND);
         glAlphaFunc(GL_GREATER, 0.5f);
         glDepthMask(GL_TRUE);

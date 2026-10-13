@@ -364,6 +364,17 @@ and scales the UVs by the texture matrix (texture size / tile size): the same te
 are the tile's own [G: the GS's REGION_REPEAT on the smaller levels not followed; the viewer draws one level unless
 mips= is on].
 
+**Flag 0x100000: blended** [R]. 0x16F030's kind 2 table (0x3B1680) reads bit 0, bit 1, 0x100000, 0x200000, 0x2000000
+and 0x8000000 of the u32 at +0x4; with 0x100000 (and not 0x200000) it gives shader 2, 4, 8 or 11 (117, 119, 76, 83
+with 0x8000000), every one a pass in GS state 2 (ALPHA 0x44, TEST 0x5000D: alpha GREATER 0, Z test GEQUAL, Z
+written; PRMODE 0x78: blended, fogged); without it shaders 1, 3, 5, 10 (116, 118, 81, 88) in state 1 (TEST 0x50002,
+no alpha test; PRMODE 0x38, opaque). 0x100000 with 0x200000 would be state 23 (ALPHA 0x48, Cs × As + Cd), on no
+kind 2 material. About 110 kind 2 materials have it: the backdrops' fog masks (`San_Fran_FogMask_Day`, the
+`NewYork_FogMask` gradient: a curtain at y 153 … 242 whose alpha runs from 0 at its top to 1 at the street, the
+skyline fading into the fog), the skylines, cloud bands, signs, trees, some props. The viewer draws them as the facade
+sheets (src/mesh.c `material_blended`, render_gl.c `draw_part`); before, the 0.5 cut-out drew a fog mask's lower
+half as a flat opaque band (the results screen of San Francisco's The Park showed it beside the hedges).
+
 A mesh part's material name index does not always name a material: 3,768 of the 6,292 parts do, the other 2,524
 name a texture entry (type 9) directly (people, the city backdrops, many props).
 

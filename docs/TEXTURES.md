@@ -51,7 +51,7 @@ The scope is the bundle's (`Bundle.scope`, set where it is loaded):
   its own size (the same share of it), so the replacement must keep the atlas's layout.
 - All mip levels are made with a 2x2 box filter and sampled trilinearly (GL_LINEAR_MIPMAP_LINEAR); the originals stay
   one bilinear level.
-- Alpha is the PNG's as it is (`TP_ASIS`): the game drops texels below 0.5 and blends the see-through parts as with
-  the original.
+- Alpha is the PNG's as it is (`TP_ASIS`): the game drops texels below 0.5 and blends the see-through parts (the
+  materials with flag 0x100000: fog masks, skylines, signs, trees, by their alpha) as with the original.
 - Without a `mods/` folder (and without `--dumptex`) nothing is hashed or read and the game is drawn as before, so a
   `--shot` stays byte-identical.

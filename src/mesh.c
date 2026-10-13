@@ -162,6 +162,15 @@ uint32_t material_flags(const Bundle *b, uint32_t material)
     return e && e->size >= 6 ? rd16(e->data + 4) : 0;
 }
 
+/* 0x16F030's kind 2 table (0x3B1680) gives a material with flag 0x100000 (and not 0x200000) shader 2, 4, 8 or 11
+ * (with 0x8000000 117, 119, 76, 83), every one a pass in GS state 2 of 0x3B4240: ALPHA 0x44, TEST 0x5000D (alpha
+ * GREATER 0, Z test GEQUAL, Z written), PRMODE 0x78 (blended, fogged); without it they are state 1, opaque [R] */
+int material_blended(const Bundle *b, uint32_t material)
+{
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    return e && e->size >= 8 && e->data[2] == 2 && (rd32(e->data + 4) & 0x300000) == 0x100000;
+}
+
 /* 0x25F960 (its jump table 0x426940 by the kind at +0x2): kinds 0, 1 no texture, 2 one (the region at +0x3A), 3, 4,
  * 5, 7 two (+0x3C), 6 three and 8 two (+0x3E); with flag 0x100 it copies the 16 bytes there and, when the material has
  * a first texture, makes them its CLAMP_1 (material +0x80) */
