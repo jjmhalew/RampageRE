@@ -70,6 +70,7 @@ typedef struct {
     int running;                         /* +0x18: 1 until killed (a wait with byte 1 set ends then) */
     int is3d;                            /* +0x19 */
     int notify;                          /* +0x1A: remove the 3D object when done (cleared by a kill) */
+    int paused;                          /* +0x1D: pauseGame's (0x272780): its program waits, its voice is still */
     int steal;                           /* +0x1E: PROJ flags & 8 */
     int vol;                             /* +0x20: packed volume (byte << 7) */
     int group;                           /* +0x24 */
@@ -508,6 +509,7 @@ static void sfx_tick(void)
         }
         voice_3d_update(in);
         int done = 0, more, guard = 0;
+        if (!in->paused)                 /* [R 0x271754]: a paused one goes straight on to its fade */
         do {
             more = 0;
             if (!in->prog) {
@@ -995,7 +997,7 @@ static void mix_block(float *out, int frames)
     memset(out, 0, sizeof(float) * 2 * frames);
     for (int i = 0; i < MAX_INST; i++) {
         Voice *vc = &S.voice[i];
-        if (!vc->on)
+        if (!vc->on || S.inst[i].paused)
             continue;
         const Sample *s = vc->s;
         float g = S.sfx_gain * S.inst[i].gain, al = spu_amp(vc->l) * g, ar = spu_amp(vc->r) * g;
@@ -1349,6 +1351,16 @@ void sound_objects_clear(void)
     for (int i = 0; i < MAX_TRACKS; i++)
         if (S.track[i].id && S.track[i].obj)
             track_drop(&S.track[i]);
+}
+
+/* [R] gApp.pauseGame(on) (0x28BC90) -> SoundDevice 0x26B7F0(on, mask 3) -> the event player's 0x272780: every
+ * instance playing then is paused or let go (+0x1D, its voice paused, 0x26F050); mask 3 leaves the streams (bit 4,
+ * 0x26FB80): the music plays on. A sound started while paused (the menu's) plays */
+void sound_pause(int on)
+{
+    for (int i = 0; i < MAX_INST; i++)
+        if (S.inst[i].handle != -1)
+            S.inst[i].paused = on != 0;
 }
 
 void sound_kill_name(const char *name)  /* [R] 0x26B960 */

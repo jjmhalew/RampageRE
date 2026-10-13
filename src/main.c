@@ -5316,6 +5316,17 @@ static int pause_open(Viewer *v, int pad)
     return v->hud && hud_pause_open(v->hud, pad, &p);
 }
 
+/* gApp.pauseGame (0x28BC90) pauses the sound events with the world (the Pause menu's, Game Over's): the sounds
+ * playing then (the water's, a police car's siren) stop where they are until it lets go; the music plays on */
+static void sound_follow_pause(const Viewer *v)
+{
+    static int held;
+    int now = v->hud && hud_paused(v->hud);
+    if (now != held)
+        sound_pause(now);
+    held = now;
+}
+
 /* a pad's button went down in the attract mode's demo (RControllerMgr 0x2C1BF4): the game leaves at its next update */
 static void attract_press(Viewer *v)
 {
@@ -7259,6 +7270,7 @@ static int viewer_main(int argc, char **argv)
             win_swap(&w);
             continue;
         }
+        sound_follow_pause(&v);
         int menu_had_pad = v.hud && (hud_results_showing(v.hud) || hud_pause_showing(v.hud));
         if (v.hud && hud_results_showing(v.hud)) {   /* a results screen has the pad: Enter / Space go on,
                                                       * Backspace quits, the arrows choose, C changes monster, V

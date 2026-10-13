@@ -1735,7 +1735,8 @@ static void face_normal(int face, float n[3])
  *   game halves its vertex colours, 0x80 = 1). The tile is the cell's +6, rand() & 15 of a Park-Miller state of the
  *   grids' own (gp - 0x6CC0, 0x2CBAD8, after two draws per grid vertex for the reflection's normals), seeded once from
  *   the EE timer's count at the first grid made (0x2CBB80 -> 0x106C80) [G: hardware timing, not in the ELF: here a
- *   hash of the storey, the cell and the building];
+ *   hash of the storey, the cell and the building's number, set once with the cell's tile (taken from the building's
+ *   own Park-Miller state, which its damage draws on, every window changed at each blow)];
  * - the cracks on the front, faded in by the vertex rows' levels (level x 85, halved: level / 3), around the window
  *   below state 2, CrackTexture running on across the faces at 1 / CrackScale, coloured by the building light at its
  *   grid vertex times CrackTint (the vertex's +0x0, 0x2CE7B8), drawn unlit as the facade. Here just in front of the
@@ -1777,7 +1778,7 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
                 float gl[4];                         /* [R 0x2C9470]: a mirrored cell's glass at 5 - x (the cracks' */
                 cell_rect(cell, ol, gl);             /* pass 0x2C7A90 reads no flag: their hole stays) */
                 if (cell->state == 0 && ol[0] >= 0) {
-                    unsigned t = ((unsigned)o * 7u + (unsigned)ci * 13u + b->seed * 5u) & 15u;   /* cell +6 [G] */
+                    unsigned t = cell->room;           /* cell +6, drawn when the grid was made: not again */
                     float a0 = gl[0] - 0.3f, a1 = gl[2] + 0.3f, z0 = gl[1] - 0.3f, z1 = gl[3] + 0.3f;
                     float az[4][2] = { { a0, z0 }, { a1, z0 }, { a1, z1 }, { a0, z1 } }, pos[4][3], uv[4][2], col4[4][4];
                     for (int k = 0; k < 4; k++) {
@@ -2188,6 +2189,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
                 if (i >= 0) {
                     sb->quad[st][i] = v;
                     sb->b.cell[st][i].tile = (uint8_t)((int)record_num(tiles[st][k]) % 4);
+                    sb->b.cell[st][i].room = (uint8_t)((st * 7u + (unsigned)i * 13u + *count * 5u) & 15u);   /* [G] */
                     if (cell_flags(floors[st], k) & CELL_MIRRORED) {   /* [R 0x2C82AC]: its u0 and u1 swapped */
                         sb->b.cell[st][i].flags |= CELL_MIRRORED;
                         MeshPart *fp = mesh >= 0 ? &s->meshes[mesh].mesh.parts[0] : NULL;

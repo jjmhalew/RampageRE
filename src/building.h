@@ -26,6 +26,7 @@ enum { CELL_MIRRORED = 0x1, CELL_WINDOW_OPEN = 0x100 };
 
 typedef struct {
     uint8_t state, hp, tile;                         /* +0 damage state, +4 HP (10), +5 the sheet's column */
+    uint8_t room;                                    /* +6 its InnerWindow tile 0 .. 15, drawn once (city.c) */
     uint16_t flags;                                  /* +0xE: CELL_MIRRORED, CELL_WINDOW_OPEN << LRPos (only these) */
 } BuildingCell;
 
