@@ -328,7 +328,8 @@ jobs:
           name: RampageRE-switch
           path: ${{ env.PKG }}
 
-  # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start.
+  # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start;
+  # a v0.* tag is published as a pre-release.
   release:
     if: github.ref_type == 'tag'
     needs: [windows, linux, android, switch]
@@ -355,4 +356,5 @@ jobs:
           start="Windows: unzip and start RampageRE.exe; at the first start it asks for your own disc image (.iso) of the European PS2 disc (SLES-53800), or its RAMPAGE.VOL, reads it where it is and remembers it (rampage.exe is the same with a console and the command line of docs/NATIVE.md, e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1). Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
           if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
           ls -l dist
-          gh release create "$GITHUB_REF_NAME" dist/* --title "RampageRE $GITHUB_REF_NAME" --notes-file notes.md
+          pre=; case "$GITHUB_REF_NAME" in v0.*) pre=--prerelease;; esac   # 0.x: experimental, a pre-release
+          gh release create "$GITHUB_REF_NAME" dist/* --title "RampageRE $GITHUB_REF_NAME" --notes-file notes.md $pre
