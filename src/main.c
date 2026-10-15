@@ -576,6 +576,8 @@ static void start_moves(Mon *mo)
     mo->held_sobj = -1;
     mo->pending_slot = -1;
     mo->defeated = 0;
+    mo->human = mo->dropping = 0;                    /* (a game quit with its streaker running or dropping in: the
+                                                      * next one's camera framed no monster, its view never set) */
     mo->scale = mo->scale_to = 1;
     mo->scale_left = 0;
     mo->hp = mon_hp_max(mo);
