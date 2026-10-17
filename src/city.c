@@ -2920,6 +2920,10 @@ static void update(Scene *s, double t, int all)
     parade_sync(s, t);
     for (uint32_t i = 0; i < s->ninstances; i++) {
         Instance *in = &s->instances[i];
+        if (in->hidden && !all && scene_monster_slot(s, (int)i) < 0)
+            continue;                                /* not drawn: not posed (a gone person's, unit's or edible's look,
+                                                      * an animation's look no longer played: posed again when shown,
+                                                      * the syncs above having set that) */
         if (in->tree.n && (all || in->has_clip || in->dynamic)) {   /* a model made later is posed too */
             pose_instance(s, in, t);
             int mk = scene_monster_slot(s, (int)i);
@@ -2934,6 +2938,8 @@ static void update(Scene *s, double t, int all)
         Instance *in = &s->instances[it->instance];
         if (!all && !in->has_clip && in->vehicle < 0 && !in->dynamic && scene_monster_slot(s, it->instance) < 0)
             continue;
+        if (in->hidden && !all && scene_monster_slot(s, it->instance) < 0)
+            continue;                                /* (nor skinned) */
         if (it->skin) {
             skin_item(s, in, it);
             it->world = in->base;
