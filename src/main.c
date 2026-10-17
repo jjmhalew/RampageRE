@@ -5192,7 +5192,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         break;
     default: break;
     }
-    float at[MONSTERS][3];                           /* the camera's points: every monster's root */
+    float at[MONSTERS + 2][3];                       /* the camera's points: every monster's root (2 more: cam_interest) */
     DirObject me[MONSTERS];                          /* the script camera's objects: the monsters by slot */
     int nat = 0;
     for (int k = 0; k < mon_world(v); k++) {
@@ -5214,6 +5214,8 @@ static void play_step(Viewer *v, float dt, float aspect)
             nat++;
         }
     }
+    float interest[2][3];                            /* and the camera manager's interest objects: a tank on screen */
+    nat = cam_interest(at, nat, (const float (*)[3])interest, v->army ? army_interest(v->army, interest) : 0);
     cam_update(&v->cam, (const float (*)[3])at, nat, dt, aspect);
     dircam_update(&v->cd, dt, me, v->nmon, &v->view);   /* the modes (the script camera) and their blend */
 }

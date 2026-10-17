@@ -256,7 +256,8 @@ Stand-ins and gaps:
 - A thrown object hitting a building clears its hitter (Building::hit 0x2BC150 keeps only a monster attacker), so
   nobody is paid for what it fells [R].
 - The camera (0x2D69A0) frames no monster that is hidden, dropping in, or human without a running streaker, alone
-  too; framing none, TwoTilts (0x312B50) holds its last view [R]. (It also frames the 0x4D3100 tracked objects, not
-  passed here.)
+  too; framing none, TwoTilts (0x312B50) holds its last view [R]. (It also frames the 0x4D3100 tracked objects:
+  gCameraMgr +0x214's two interest slots, which only Vehicle_Attack.bsf fills, a tank once on screen until a
+  monster's blow; army.c `army_interest`, camera.c `cam_interest`.)
 - The respawn's lives, game over, the King blocks and the results' places and screens were game.c's and hud.c's
   already; they now get every player.

@@ -34,6 +34,10 @@ void cam_init(GameCamera *c, const CamSettings *s);
 void cam_activate(GameCamera *c);
 /* follow the monsters (root positions); aspect_hw = the view's height / width */
 void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw);
+/* [R 0x312B50, after the monsters' box] the camera manager's interest objects (army.h army_interest: a tank on screen)
+ * added to the points after the n monsters' (pts has room for 2 more): each place held to x within 30 of the monsters'
+ * middle, y -10 .. 21, z 0 .. 70. Returns the new count */
+int cam_interest(float (*pts)[3], int n, const float (*obj)[3], int nobj);
 
 /* camera shake (CameraShakeFx, vtable 0x446750; its definition 0x1E8C70): an effect whose yaw and pitch, summed over
  * the live shakes with a falloff by distance, turn the finished camera (CamShakeApplier 0x27F550, after the TwoTilts

@@ -39,6 +39,8 @@ typedef struct { float step, sum; int skip; } Chain; /* a building's +0x194, +0x
 struct Army {
     ArmyHost host;
     ArmyUnit *u; int n, cap;
+    int next_serial;                                 /* the units' handles */
+    struct { int unit, serial; } interest[2];        /* gCameraMgr +0x214 (army_interest) */
     ArmyShot shot[MAX_SHOTS]; int nshots, next_shot;
     ArmyEvent ev[MAX_EVENTS]; int nev, next_fx;
     Spawner sp[MAX_SPAWN]; int nsp, active;
@@ -282,6 +284,40 @@ static void goal_marker_off(Army *a, ArmyUnit *u)
     if (u->goal_fx >= 0)
         effect_stop(a, u->goal_fx);
     u->goal_fx = -1;
+}
+
+/* gCameraMgr's interest objects (army_interest) [R]: a slot holds while its object lives (its handle +0x4 is the one
+ * kept, 0x2BFEE0's test) */
+static int interest_held(const Army *a, int k)
+{
+    int i = a->interest[k].unit;
+    return i >= 0 && i < a->n && a->u[i].serial == a->interest[k].serial && a->u[i].phase != AU_GONE;
+}
+static void interest_add(Army *a, const ArmyUnit *u)    /* addInterestObject (0x2BFEE0): the first free slot, else none */
+{
+    for (int k = 0; k < 2; k++)
+        if (!interest_held(a, k)) {
+            a->interest[k].unit = (int)(u - a->u);
+            a->interest[k].serial = u->serial;
+            return;
+        }
+}
+static void interest_remove(Army *a, const ArmyUnit *u)   /* removeInterestObject (0x2BFE90) */
+{
+    for (int k = 0; k < 2; k++)
+        if (a->interest[k].unit == (int)(u - a->u) && a->interest[k].serial == u->serial) {
+            a->interest[k].unit = -1;
+            a->interest[k].serial = 0;
+            return;
+        }
+}
+int army_interest(const Army *a, float out[2][3])
+{
+    int n = 0;
+    for (int k = 0; a && k < 2; k++)
+        if (interest_held(a, k))
+            memcpy(out[n++], a->u[a->interest[k].unit].pos, sizeof out[0]);
+    return n;
 }
 static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx */
 {
@@ -1890,6 +1926,7 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     ArmyUnit *u = &a->u[k];
     memset(u, 0, sizeof *u);
     u->goal_fx = -1;
+    u->serial = ++a->next_serial;
     u->name = name;
     u->tmpl = tmpl;
     u->inst = inst;
@@ -2010,7 +2047,8 @@ static int tank_pulse(Army *a, ArmyUnit *u)
         if (a->host.visible ? a->host.visible(a->host.ctx, p, 1) : x >= a->view[0] && x <= a->view[1]) {
                                                      /* gWorld.isSphereVisible(pos, 1) */
             u->state = 1;
-            attack_init(a, u);                       /* createAttackMover; gCameraMgr.addInterestObject */
+            attack_init(a, u);                       /* createAttackMover */
+            interest_add(a, u);                      /* gCameraMgr.addInterestObject: the camera keeps it in view */
         }
         return 1;
     }
@@ -2055,6 +2093,7 @@ static void tank_damage(Army *a, ArmyUnit *u, int monster, float amount)
 {
     if (u->hp <= 0 || monster < 0)
         return;
+    interest_remove(a, u);                           /* gCameraMgr.removeInterestObject: no longer the camera's */
     const float *mp = a->m[monster].pos;
     u->hp -= amount;
     effect_stop(a, (int)u->aux[1]);

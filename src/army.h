@@ -136,6 +136,7 @@ struct ArmyUnit {
     /* the scripts' numbers (army.c says which is which per script) */
     float hp, hp_start, state_time, explode_time, pulse_delay, pulse_time, life, aux[8];
     int goal_fx;                                     /* its ChallengeEffect's handle (+0x110), -1 none */
+    int serial;                                      /* made n-th (1 on): its handle (+0x4), a reused slot's differs */
     int ihp, count, sub, side, life_state, bounce;
     float bounce_vel[3], vel[3], spin[3];
     int group_index, is_cop, is_grenadier, troops_left[4], troop_i;
@@ -279,6 +280,11 @@ void army_set_collide(Army *a, CollideWorld *w);
 void army_collide_add(Army *a, CollideWorld *w);
 void army_impact(Army *a, int unit);                 /* TakeImpact: another module's flying object met the unit */
 
+/* the camera's interest objects [R gCameraMgr +0x214, two {object, handle} slots: addInterestObject 0x2BFEE0 takes the
+ * first one empty or whose object is gone, none if both hold one; removeInterestObject 0x2BFE90]: a tank once on
+ * screen (Vehicle_Attack.bsf onPulse) until a monster's blow (TakeDamage) or its end. Their places, at most 2; the
+ * TwoTilts camera frames them with the monsters (camera.h cam_interest) */
+int army_interest(const Army *a, float out[2][3]);
 int army_count(const Army *a);                       /* units (some may be AU_GONE: skip those) */
 const ArmyUnit *army_unit(const Army *a, int i);
 int army_shots(const Army *a);                       /* shots (skip !alive) */

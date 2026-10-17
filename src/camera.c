@@ -179,6 +179,22 @@ static void rows_from_quat(const float q[4], float m[3][3])
     m[2][0] = 2 * (x * z + y * w); m[2][1] = 2 * (y * z - x * w); m[2][2] = 1 - 2 * (x * x + y * y);
 }
 
+int cam_interest(float (*pts)[3], int n, const float (*obj)[3], int nobj)
+{
+    float lo = 0, hi = 0;                            /* the monsters' x range: its middle [G with none: 0] */
+    for (int i = 0; i < n; i++) {
+        lo = i ? minf(lo, pts[i][0]) : pts[i][0];
+        hi = i ? maxf(hi, pts[i][0]) : pts[i][0];
+    }
+    float mid = 0.5f * (lo + hi);
+    for (int i = 0; i < nobj && i < 2; i++, n++) {   /* [R 0x312D48 .. 0x312EA8] */
+        pts[n][0] = maxf(mid - 30, minf(mid + 30, obj[i][0]));
+        pts[n][1] = maxf(-10, minf(21, obj[i][1]));
+        pts[n][2] = maxf(0, minf(70, obj[i][2]));
+    }
+    return n;
+}
+
 void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw)
 {
     if (n <= 0)
