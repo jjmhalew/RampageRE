@@ -45,8 +45,8 @@ jobs:
           foreach ($n in 'RampageRE.exe', 'rampage.exe', 'build/bundle_stub.exe', 'build/pack.exe', 'build/apkbundle.exe') {
             $f = Get-Item $n; "$n`: $($f.Length) bytes, $($f.VersionInfo.ProductName) $($f.VersionInfo.FileVersion)" }
           $v = (Get-Item RampageRE.exe).VersionInfo
-          # a release tag must match res/rampagere.rc (the exe's version): v1.2.3 = "1.2.3"
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$($v.ProductVersion)") {
+          # a release tag must match res/rampagere.rc (the exe's version): v1.2.3 (or v1.2.3-rc1, a pre-release) = "1.2.3"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and ($env:GITHUB_REF_NAME -replace '-.*$', '') -ne "v$($v.ProductVersion)") {
             "::error::tag $env:GITHUB_REF_NAME does not match the version in res/rampagere.rc ($($v.ProductVersion))"; exit 1 }
 
       # No disc in CI: both builds must find no RAMPAGE.VOL, say so on stderr (--shot: no message box, no window, no
@@ -329,7 +329,7 @@ jobs:
           path: ${{ env.PKG }}
 
   # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start;
-  # a v0.* tag is published as a pre-release.
+  # a tag with a suffix (v1.2.3-rc1) is published as a pre-release, a plain one (v1.2.3) as a release.
   release:
     if: github.ref_type == 'tag'
     needs: [windows, linux, android, switch]
@@ -356,5 +356,5 @@ jobs:
           start="Windows: unzip and start RampageRE.exe; at the first start it asks for your own disc image (.iso) of the European PS2 disc (SLES-53800), or its RAMPAGE.VOL, reads it where it is and remembers it (rampage.exe is the same with a console and the command line of docs/NATIVE.md, e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1). Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/RAMPAGE.VOL (needs SDL2). Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
           if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
           ls -l dist
-          pre=; case "$GITHUB_REF_NAME" in v0.*) pre=--prerelease;; esac   # 0.x: experimental, a pre-release
+          pre=; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease;; esac   # v1.2.3-rc1: a pre-release
           gh release create "$GITHUB_REF_NAME" dist/* --title "RampageRE $GITHUB_REF_NAME" --notes-file notes.md $pre
