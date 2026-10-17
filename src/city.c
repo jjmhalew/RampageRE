@@ -504,13 +504,21 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     float xyz[3];
     location(inst, xyz);
     Mat4 at = mat_mul(parent, mat_trs_z(xyz[0], xyz[1], xyz[2], group_num(inst, "ZRotation", 0)));
-    if (s->placing_building >= 0 && script && !_strnicmp(script, "Rocket.", 7)) {
+    if ((s->placing_building >= 0 || s->placing_block) && script && !_strnicmp(script, "Rocket.", 7)) {
         if (s->nrockets < 16) {                      /* a roof rocket: vehicle.c makes it, its Base and BasePipe */
+            int on = s->placing_building;            /* one of the block's own (HK01's two): the building it stands
+                                                      * on, whose fall launches it (onBuildingDestruction), by its
+                                                      * footprint; drawn as a bare prop it floated, with no tower */
+            for (uint32_t i = 0; on < 0 && i < s->nbuildings; i++) {
+                const Building *b = &s->buildings[i].b;
+                if (at.m[12] >= b->min[0] && at.m[12] <= b->max[0] && at.m[13] >= b->min[1] && at.m[13] <= b->max[1])
+                    on = (int)i;
+            }
             s->rockets[s->nrockets].name = group_str(inst, "Name");
             for (int k = 0; k < 3; k++)
                 s->rockets[s->nrockets].pos[k] = at.m[12 + k];
             s->rockets[s->nrockets].facing = group_num(inst, "ZRotation", 0) / 57.2957795f;
-            s->rockets[s->nrockets++].building = s->placing_building;
+            s->rockets[s->nrockets++].building = on;
         }
         return;
     }
