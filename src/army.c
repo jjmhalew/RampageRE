@@ -275,6 +275,14 @@ static void effect_stop(Army *a, int id)
     if (id >= 0)
         emit(a, AE_EFFECT_STOP, -1, NULL, NULL)->id = id;
 }
+/* the Actor binding onPickup (id 0x44 -> 0x30C5E0): its ChallengeEffect stops (unit_init; the AmbientEffect too: none
+ * here) */
+static void goal_marker_off(Army *a, ArmyUnit *u)
+{
+    if (u->goal_fx >= 0)
+        effect_stop(a, u->goal_fx);
+    u->goal_fx = -1;
+}
 static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx */
 {
     if (name && *name)
@@ -1881,6 +1889,7 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     }
     ArmyUnit *u = &a->u[k];
     memset(u, 0, sizeof *u);
+    u->goal_fx = -1;
     u->name = name;
     u->tmpl = tmpl;
     u->inst = inst;
@@ -2772,8 +2781,9 @@ static void troop_damage(Army *a, ArmyUnit *u, int monster)
     u->flags &= ~1024;
     troop_smash(a, u, monster);
     /* [R] then this.actor.onPickup(), the Actor binding (id 0x44 -> 0x30C5E0): it only stops the actor's AmbientEffect
-     * and ChallengeEffect (a troop has neither here), not the script's onPickup; so the state stays 512 and the 3 s
-     * pulse deletes the troop (as people.c's actor_on_pickup). Then PickedUp: the arms-up look it flies in */
+     * and ChallengeEffect (goal_marker_off), not the script's onPickup; so the state stays 512 and the 3 s pulse
+     * deletes the troop (as people.c's actor_on_pickup). Then PickedUp: the arms-up look it flies in */
+    goal_marker_off(a, u);
     start_anim(a, u, "PickedUp", 1);
 }
 
@@ -3372,6 +3382,17 @@ static void unit_init(Army *a, ArmyUnit *u)
     } break;
     }
     unit_matrix(u);
+    /* [R] the world object's init (0x30D280): its Effect|ChallengeEffect (the instance's, else the template's; only
+     * DefActorProps sets one, NPC_Target: the soldiers, SWAT and cops) on it, kept at +0x110, when its template is a
+     * goal of the block's challenge (0x3466A0): the host's check (AE_EFFECT level 1), as people.c's PFX_CHALLENGE */
+    const char *mark = ustr(u, "Effect|ChallengeEffect");
+    u->goal_fx = -1;
+    if (mark) {
+        int before = a->nev;
+        u->goal_fx = effect_on(a, u, mark, NULL);
+        if (a->nev > before)
+            a->ev[a->nev - 1].level = 1;
+    }
 }
 
 static int unit_spawn_actor(Army *a, const char *name, const float pos[3])   /* gWorld.createActor(name) */
@@ -3927,6 +3948,7 @@ void army_grab(Army *a, int unit, int monster, float blend)
     if (u->mv.kind != 1)
         u->mv.kind = 0;
     weapons_enable(u, 0);
+    goal_marker_off(a, u);
     if (u->kind == AK_TROOP)
         troop_pickup(a, u);
     else if (u->kind == AK_WINDOW)

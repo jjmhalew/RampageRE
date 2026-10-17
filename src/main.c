@@ -4193,6 +4193,10 @@ static void army_step(Viewer *v, float dt)
             Mon *mo = ev_mon(v, e->monster);
             switch (e->type) {
             case AE_EFFECT:
+                if (e->level == 1 && !(e->unit >= 0 && army_unit(v->army, e->unit) &&   /* a ChallengeEffect only on
+                                                      * a goal (as the people's PE_FX_ON) */
+                                       challenge_is_goal(&v->challenge, army_unit(v->army, e->unit)->name)))
+                    break;
                 if (v->fxw) {
                     const ArmyShot *bs = NULL;       /* a beam's look: in the weapon's firing frame (0x2975A4) */
                     for (int j = 0, n = e->shot >= 0 ? army_shots(v->army) : 0; j < n && !bs; j++)

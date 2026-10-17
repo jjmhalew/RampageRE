@@ -135,6 +135,7 @@ struct ArmyUnit {
     float anim_time, anim_len; int anim_loop, anim_done;   /* seconds into the play, one play's length */
     /* the scripts' numbers (army.c says which is which per script) */
     float hp, hp_start, state_time, explode_time, pulse_delay, pulse_time, life, aux[8];
+    int goal_fx;                                     /* its ChallengeEffect's handle (+0x110), -1 none */
     int ihp, count, sub, side, life_state, bounce;
     float bounce_vel[3], vel[3], spin[3];
     int group_index, is_cop, is_grenadier, troops_left[4], troop_i;
@@ -177,7 +178,9 @@ typedef struct {                                     /* a shot in the air, or a 
 /* ---- what happened */
 enum {
     AE_EFFECT,        /* start effect `name` at pos along dir; id its handle; unit >= 0: it follows that unit at
-                       * offset v from its place; shot >= 0: it is that shot's look and follows the shot */
+                       * offset v from its place; shot >= 0: it is that shot's look and follows the shot; level 1:
+                       * the unit's ChallengeEffect, only when its template is one of the block's challenge goals
+                       * (the host's to decide, challenge_is_goal: the world object's init 0x30D280 -> 0x3466A0) */
     AE_EFFECT_STOP,   /* the effect with handle id stops */
     AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads) */
     AE_HIT,           /* a weapon reached monster `monster`: amount damage, id the DamageType, level the ReactionLevel
