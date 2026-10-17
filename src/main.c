@@ -1814,6 +1814,10 @@ static void clip_event(Mon *mo, const MoveEvent *e)
                                                         or dropping in from the view */
         mo->hp = mon_hp_max(mo);
         mo->defeated = 0;
+        mo->scale = mo->scale_to = 1;                /* [R] scale 1: dropping in (Jump_Butt_Slam_fall) it leaves
+                                                      * Faceup_Idle_Respawn before that state's setScale(1) at 0.513,
+                                                      * and stayed the human's 0.2 */
+        mo->scale_left = 0;
         if (mon_in(mo))
             mon_in(mo)->hidden = 0;
         if (v->game) {
