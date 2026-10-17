@@ -7493,6 +7493,8 @@ static int viewer_main(int argc, char **argv)
             } else
                 v.hud_cam = cam;
             v.scene.hud = hq;
+            hud_set_aspect(w.height ? (float)w.width / w.height : 0);   /* (wider than 4:3: the play HUD to the
+                                                      * window's sides, the dimmers across it) */
             int nq = 0;                              /* the other players' HUDs, then player 1's (the screens) */
             for (int k = 1; k < v.nmon; k++)
                 if (v.mon[k].hud && v.mon[k].hud != v.hud)

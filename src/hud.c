@@ -4437,15 +4437,53 @@ int hud_sounds(Hud *h, HudSound *out, int max)
     return n;
 }
 
+static float g_side;                                  /* hud_set_aspect: the reference units the window shows past
+                                                       * each side of the 640 (0: none) */
+
+void hud_set_aspect(float aspect)
+{
+    float side = (HUD_SCREEN_H * aspect - HUD_SCREEN_W) / 2;
+    g_side = side > 0 ? side : 0;
+}
+
+static void shift_quads(HudQuad *q, int n, float dx)
+{
+    for (int i = 0; i < n; i++) {
+        q[i].x0 += dx;
+        q[i].x1 += dx;
+        for (int k = 0; k < 4; k++)
+            q[i].cx[k] += dx;
+    }
+}
+
+/* a play layout's quads to the window's side its box is nearest (its middle in the left or right third), or kept in the
+ * middle */
+static int to_side(HudQuad *q, int n)
+{
+    if (g_side <= 0 || n <= 0)
+        return n;
+    float lo = q[0].x0, hi = q[0].x1;
+    for (int i = 1; i < n; i++) {
+        lo = fminf(lo, fminf(q[i].x0, q[i].x1));
+        hi = fmaxf(hi, fmaxf(q[i].x0, q[i].x1));
+    }
+    float mid = (lo + hi) / 2;
+    if (mid < HUD_SCREEN_W / 3)
+        shift_quads(q, n, -g_side);
+    else if (mid > HUD_SCREEN_W * 2 / 3)
+        shift_quads(q, n, g_side);
+    return n;
+}
+
 int hud_quads(const Hud *h, HudQuad *out, int max)
 {
     if (!h || !out || max <= 0)
         return 0;
     int n = banners_emit(h, out, max);
-    n += emit_layout(out + n, max - n, &h->gui, h->hud);
-    n += emit_layout(out + n, max - n, &h->gui, h->clock);
-    n += emit_layout(out + n, max - n, &h->gui, h->attract);
-    n += emit_layout(out + n, max - n, &h->gui, h->cs.L);
+    n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->hud));
+    n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->clock));
+    n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->attract));
+    n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->cs.L));
     if (h->ct)
         n += emit_layout(out + n, max - n, &h->gui, h->ct->L);
     for (int i = 0; i < h->nrages; i++)
@@ -4455,5 +4493,10 @@ int hud_quads(const Hud *h, HudQuad *out, int max)
         n += emit_layout(out + n, max - n, &h->gui, h->scr->L);
     if (h->pause && h->pause->L)                         /* loaded last: over everything */
         n += emit_layout(out + n, max - n, &h->gui, h->pause->L);
+    for (int i = 0; g_side > 0 && i < n; i++)          /* a dimmer or fade over the whole width: the window's */
+        if (!out[i].b && !out[i].corners && out[i].x0 <= 0 && out[i].x1 >= HUD_SCREEN_W) {
+            out[i].x0 -= g_side;
+            out[i].x1 += g_side;
+        }
     return n;
 }

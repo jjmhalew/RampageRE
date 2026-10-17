@@ -294,4 +294,10 @@ typedef struct {
  * Pause menu);
  * returns the count (at most max) */
 int hud_quads(const Hud *h, HudQuad *out, int max);
+/* port extra: the window's width / height for hud_quads (the reference screen is drawn at the window's height, centred:
+ * a wider window shows more of it each side). Wider than 4:3, the play HUD (the players' panels, the clock,
+ * ChallengeStatus, the attract text) goes to the window's sides, each by the third of the screen its box is in (the
+ * middle one stays), and an untextured quad over the whole width (the Pause menu's dimmer, a fade) spans the window;
+ * the menus, the challenge card and the pictures stay in the 4:3 middle. 0 or 4:3 and narrower: as the game draws it */
+void hud_set_aspect(float aspect);
 #endif
