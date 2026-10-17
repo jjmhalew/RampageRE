@@ -41,7 +41,9 @@ The `ParadeBalloonHolder1` clowns are `StationaryPerson.bsf` people (people.c), 
 - **The chain** (the Actor destructor 0x30DF80): when an actor whose instance has `SpawnsItem0`, `SpawnsItem1`, ...
   goes (requestDelete, or eaten) while the world is in state 6 (a block in play), each named `ActorInstance|<name>`
   of the current block is made and sent `onWalkIn` (0x30E114). The street punks, mimes and rollerbladers of other
-  blocks use the same chains (people.c does not).
+  blocks use the same chains (people.c `gone` / `walk_in`: WalkingAroundPerson from x ±80 on its side, Mime from
+  x −80 to its place in `Anim8`, Tourist running in from 100 past its `Location`; NY01's 20 punks `SP_0` .. `SP_19`,
+  two at a time, for its "Eat 6 Street Punks").
 
 ## ParadeBalloon.bsf
 **Construct** [R]: `PushOutMonsters | OnlyHitWithEffNodes`; `HitPoints` from the template (5; the script's

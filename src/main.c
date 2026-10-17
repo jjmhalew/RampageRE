@@ -5010,6 +5010,7 @@ static void play_step(Viewer *v, float dt, float aspect)
                                      mo->have_graph ? mo->graph.states[mo->run.state].name : NULL };
         }
         scene_people_spawn(&v->scene, dt);
+        people_set_world_state(v->scene.folk, v->game ? game_state(v->game) : GS_PLAY);   /* (the chains in play) */
         people_update(v->scene.folk, dt, pm, v->nmon);
         for (int k = 0; k < v->nmon; k++) {         /* [R 0x2E22B0] a touch is a TakeDamage too: the huts fly */
             Mon *mo = &v->mon[k];
@@ -5423,9 +5424,11 @@ static void block_left(Viewer *v)
     v->scene.rail = NULL;
     edible_free(v->edibles);
     v->edibles = v->scene.edibles = NULL;
-    if (v->scene.folk)
+    if (v->scene.folk) {
+        people_set_world_state(v->scene.folk, -1);   /* (no chains from the teardown) */
         for (int i = 0; i < people_count(v->scene.folk); i++)
             people_remove(v->scene.folk, i);
+    }
     scene_block_left(&v->scene);
 }
 

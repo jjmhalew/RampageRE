@@ -42,6 +42,10 @@ struct People {
     /* the script objects that make people: Band.bsf (once, after 0.25 s) and RoyalGuardHut.bsf (pulsing each 1 s) */
     struct { int hut; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
     int nobj;
+    Group block;                                     /* people_set_block: its ActorInstance|s for the chains */
+    int not_in_play;                                 /* people_set_world_state: the world's state is not 6 */
+    Group spawn[16];                                 /* the chains' next ones, made after the frame's update */
+    int nspawn;
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -1496,7 +1500,97 @@ static void gone(People *p, Person *q)
     q->flags |= OF_DYING;                            /* requestDelete (vtable +0x58, 0x285DD0) */
     q->mv.active = 0;
     q->building = -1;
+    /* [R] the Actor destructor (0x30DF80): in play (0x4D6A80 is 6, a block current), each SpawnsItem<n> of its
+     * instance (n = 0, 1, ... while there is one) is made from the block and sent onWalkIn (0x30E114); made after this
+     * frame's update here (people_spawn_chain), the list of people being walked */
+    if (!q->inst.at || !p->block.at || p->not_in_play)
+        return;
+    for (int n = 0; n < 16 && p->nspawn < 16; n++) {
+        char key[24], name[96];
+        snprintf(key, sizeof key, "SpawnsItem%d", n);
+        const char *next = group_str(q->inst, key);
+        if (!next)
+            break;
+        snprintf(name, sizeof name, "ActorInstance|%s", next);
+        Group g = group_sub(p->block, name);
+        if (g.at)
+            p->spawn[p->nspawn++] = g;
+    }
+    q->inst = (Group){ 0 };                          /* (once) */
 }
+
+/* the script's onWalkIn [R WalkingAroundPerson.bsf, Mime.bsf, Tourist.bsf; the others have none] */
+static void walk_in(People *p, Person *q)
+{
+    float delayed = q->inst.at ? group_num(q->inst, "DelayedSpawn", tnum(q, "DelayedSpawn", 0)) : tnum(q, "DelayedSpawn", 0);
+    switch (q->kind) {
+    case PK_WALKER: {                                /* from x 80 off the side it is on, facing in; its walks keep to
+                                                      * its starting place, so it walks back there */
+        float pos[3] = { q->pos[0] > 0 ? 80.0f : -80.0f, q->pos[1], q->pos[2] };
+        memcpy(q->pos, pos, sizeof q->pos);
+        q->heading = pos[0] > 0 ? 90.0f : -90.0f;    /* FACE_LEFT, FACE_RIGHT */
+        if (delayed > 0)
+            q->pulse_delay = delayed;
+        q->state = 0;
+        break;
+    }
+    case PK_MIME: {                                  /* from x -80 to its place at 35 x the step, in Anim8 (state 5) */
+        float target[3], start[3];
+        memcpy(target, q->pos, sizeof target);
+        start[0] = -80;
+        start[1] = target[1];
+        start[2] = target[2];
+        q->cur_anim = 8;
+        q->reps = 0;
+        mime_anim(p, q, 1);
+        mover_init(q, start, target, 35 * TIMESTEP);
+        q->mv.flags = 0;
+        q->state = 5;
+        break;
+    }
+    case PK_TOURIST: {                               /* running in from 100 past its Location, at the street's edge */
+        float end[3], start[3] = { 0, -3, 0 };
+        memcpy(end, q->pos, sizeof end);
+        start[0] = end[0] < 0 ? -100 + end[0] : 100 + end[0];
+        float vel = q->inst.at ? group_num(q->inst, "Velocity", tnum(q, "Velocity", 6)) : tnum(q, "Velocity", 6);
+        mover_init(q, start, end, vel);
+        q->mv.flags = (q->mv.flags | 1 | 4) & ~8u;
+        start_anim(p, q, "Running", 1, 0);
+        q->state = 0;
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void people_spawn_chain(People *p)
+{
+    for (int i = 0; i < p->nspawn; i++) {
+        Group g = p->spawn[i];
+        const char *name = group_str(g, "Name");
+        Group t = name && p->find ? p->find(p->find_ctx, name) : (Group){ 0 };
+        if (!t.at)
+            continue;
+        Group loc = group_sub(g, "Location");
+        Record r[3];
+        uint32_t n = loc.at ? group_items(loc, r, 3) : 0;
+        float xyz[3];
+        for (uint32_t k = 0; k < 3; k++)
+            xyz[k] = k < n ? record_num(r[k]) : 0.0f;
+        int who = people_add(p, t, xyz, group_num(g, "ZRotation", 0));
+        if (who < 0)
+            continue;
+        p->v[who].inst = g;
+        walk_in(p, &p->v[who]);
+        place_matrix(p->v[who].world, p->v[who].pos, p->v[who].heading, NULL);
+    }
+    p->nspawn = 0;
+}
+
+void people_set_block(People *p, Group block) { if (p) p->block = block; }
+void people_set_instance(People *p, int who, Group inst) { if (p && who >= 0 && who < p->n) p->v[who].inst = inst; }
+void people_set_world_state(People *p, int state) { if (p) p->not_in_play = state != 6; }
 
 void people_remove(People *p, int who)
 {
@@ -1508,6 +1602,7 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
 {
     p->m = m;
     p->nm = nm;
+    people_spawn_chain(p);                           /* the ones eaten since the last frame (people_remove) */
     for (int i = 0; i < p->ntimers; i++)
         if ((p->timer[i].left -= dt) <= 0) {
             if (p->nev < MAX_EVENTS)
@@ -1562,6 +1657,7 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
         if (r == DELETE_ME)
             gone(p, q);
     }
+    people_spawn_chain(p);                           /* the chains of the ones gone this frame (or since the last) */
 }
 
 void people_cell_broken(People *p, int building, int below, int storey, int above)

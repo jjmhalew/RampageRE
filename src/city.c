@@ -3034,9 +3034,10 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
             continue;
         float xyz[3];
         location(a, xyz);
-        people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0));
+        people_set_instance(s->folk, people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0)), a);   /* (its chain) */
         s->people++;
     }
+    people_set_block(s->folk, block);                /* the SpawnedItem ones come by the chains (people.h) */
     Group occ = group_sub(block, "Occupants"), runners[16];
     s->music = group_str(block, "Music");
     s->block = block;

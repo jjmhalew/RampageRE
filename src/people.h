@@ -55,6 +55,7 @@ typedef struct {
     int anim_done;                                   /* a play that does not repeat has ended (onAnimComplete sent) */
     float world[16];                                 /* column-major; always kept: pos and heading, or the hand / the flight */
     int building, storey, column;                    /* a window occupant's cell (-1 none) */
+    Group inst;                                      /* the block's ActorInstance| it was made from (its SpawnsItem<n>) */
     float win_x, win_floor;                          /* its window's x and its storey's floor when it came out */
     uint32_t flags;                                  /* object flags: 0x10000 Pickupable, 0x20000 BeingHeld, 0x80000 actor */
     /* the script's variables */
@@ -124,6 +125,13 @@ void people_set_templates(People *p, PeopleFindTemplate find, void *ctx);
 typedef int (*PeopleVisible)(void *ctx, const float pos[3], float radius);
 void people_set_visible(People *p, PeopleVisible visible, void *ctx);
 void people_set_droppable_rate(People *p, float rate);   /* the block's DroppableDef rate (getDroppableRate) */
+/* the block's chains [R the Actor destructor 0x30DF80, docs/PARADE_NOTES.md "The chain"]: a person made from an
+ * ActorInstance| (people_set_instance) that goes (eaten, smashed and deleted) while the world is in state 6 makes each
+ * ActorInstance|<SpawnsItem<n>> of the block (people_set_block) and sends it onWalkIn: the street punks, mimes and
+ * rollerbladers that take the place of the ones gone (NY01's 20 punks, two at a time, for its "Eat 6 Street Punks") */
+void people_set_block(People *p, Group block);
+void people_set_instance(People *p, int who, Group inst);
+void people_set_world_state(People *p, int state);   /* game.h GS_*: the chains only at 6 (a block in play) */
 
 /* a person as the block or a script creates it (ActorInstance|, createActor): its script's Construct */
 int people_add(People *p, Group tmpl, const float pos[3], float heading_deg);
