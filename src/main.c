@@ -914,8 +914,13 @@ static void build(Viewer *v)
                                                       * with it (its fountains' sprays, its fires went on where they
                                                       * stood, in the new city's street) */
         fx_clear(v->fxw);
-    if (!v->game_built)                              /* a new world: its scripts' onInit (Traffic's crowds) */
+    if (!v->game_built) {                            /* a new world: its scripts' onInit (Traffic's crowds) */
+        /* RWorld's reset, before the block's edibles are dealt (their kinds and cells draw on it): gWorld +0x82C
+         * from GameStatus seed[1]. Seeded after them, the first world of a run dealt from the unseeded state, all
+         * zeros: every window the list's first kind (NY01: all Hazard_Rage) */
+        dir_ai_seed(v->prof.current.seed[1]);
         city_new_world(v->city);
+    }
     v->have_scene = city_build(v->city, v->blocks[v->block], v->night, &v->scene) == 0;
     if (v->have_scene && v->game_built && v->left_block >= 0)
         city_build_left(v->city, v->blocks[v->left_block], &v->scene);
@@ -1218,7 +1223,6 @@ static void build(Viewer *v)
                               v->prof.cheats, v->prof.current.seed[1], { 0 } };
             memcpy(gc.cities_won, v->cities_won, sizeof gc.cities_won);   /* King of the World's so far */
             v->game = game_new(&gh, &gc);
-            dir_ai_seed(v->prof.current.seed[1]);   /* RWorld's reset: gWorld +0x82C */
             building_set_one_hit((v->prof.cheats & PCH_40000000) != 0);
             v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
