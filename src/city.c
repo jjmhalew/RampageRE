@@ -1502,8 +1502,12 @@ void scene_people_spawn(Scene *s, float dt)
             if (getenv("RAMPAGE_TRACE"))
                 printf("  a window soldier %s at %.1f %.1f %.1f (unit %d)\n", s->military[ws->occupant], at[0], at[1], at[2], ws->unit);
         }
-        else
-            people_add_window(s->folk, s->occupant[ws->occupant], at, ws->building, ws->storey, ws->column);
+        else {
+            int who = people_add_window(s->folk, s->occupant[ws->occupant], at, ws->building, ws->storey, ws->column);
+            float bottom, height;
+            building_storey(b, ls, &bottom, &height);
+            people_window_move(s->folk, who, b->min[2] + bottom, 0);   /* its storey's floor now */
+        }
         /* and its window opens over 0.5 s (0x318B04: openWindow(storey, column, LRPos, 1, 0.5)) */
         building_window_open(&sb->b, ws->storey, ws->column, ws->lr, 1, 0.5f, ol, sb->opens_h[tile][ws->lr]);
         return;
@@ -3604,6 +3608,18 @@ void scene_buildings_update(Scene *s, float dt)
                      (sb->b.state != BUILDING_STANDING && sb->b.state != BUILDING_FLOOR_FALLING);
         if (moving || sb->moving || sb->b.dirty)
             building_place(s, sb);
+        for (int w = 0; s->folk && (moving || sb->moving) && w < people_count(s->folk); w++) {
+            /* [R 0x30CD20] its window people with their storeys, as its edibles (edible_update): the shaker's
+             * offset, their floor coming down with the storeys below it (a storey falling two or more below them
+             * left them standing in the air) */
+            const Person *q = people_get(s->folk, w);
+            int ls = q && q->kind == PK_WINDOW && q->building == (int)i ? building_live_of(&sb->b, q->storey) : -1;
+            if (ls < 0)
+                continue;
+            float bottom, height;
+            building_storey(&sb->b, ls, &bottom, &height);
+            people_window_move(s->folk, w, sb->b.min[2] + bottom, sb->b.shake_time > 0 ? building_shake(&sb->b) : 0);
+        }
         /* its light again (0x2BF180: when it changed, +0x154, kept until it is served, or a neighbour's top did,
          * 0x31C860, used up even when refused), through the work queue, before the passes that use it */
         if (moving || sb->moving || sb->b.dirty)

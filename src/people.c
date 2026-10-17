@@ -1252,8 +1252,25 @@ int people_add_window(People *p, Group tmpl, const float at[3], int building, in
         p->v[who].building = building;
         p->v[who].storey = storey;
         p->v[who].column = column;
+        p->v[who].win_x = at[0];
+        p->v[who].win_floor = NAN;                   /* the first people_window_move sets it */
     }
     return who;
+}
+
+void people_window_move(People *p, int who, float floor_z, float dx)
+{
+    if (who < 0 || who >= p->n)
+        return;
+    Person *q = &p->v[who];
+    if (q->kind != PK_WINDOW || q->phase != PP_SCRIPT || q->building < 0)
+        return;
+    if (isnan(q->win_floor))
+        q->win_floor = floor_z;
+    q->pos[2] += floor_z - q->win_floor;
+    q->win_floor = floor_z;
+    q->pos[0] = q->win_x + dx;
+    place_matrix(q->world, q->pos, q->heading, NULL);
 }
 
 int people_crowd(People *p, const Group *tmpls, int ntmpls, const float centre[3])

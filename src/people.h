@@ -55,6 +55,7 @@ typedef struct {
     int anim_done;                                   /* a play that does not repeat has ended (onAnimComplete sent) */
     float world[16];                                 /* column-major; always kept: pos and heading, or the hand / the flight */
     int building, storey, column;                    /* a window occupant's cell (-1 none) */
+    float win_x, win_floor;                          /* its window's x and its storey's floor when it came out */
     uint32_t flags;                                  /* object flags: 0x10000 Pickupable, 0x20000 BeingHeld, 0x80000 actor */
     /* the script's variables */
     int sub, has_idle, is_grenadier, thrown, is_child;
@@ -129,6 +130,9 @@ int people_add(People *p, Group tmpl, const float pos[3], float heading_deg);
 /* a window occupant (0x318650): at the window's bottom middle on the front (0x2BE660: the grid's min x + 5 x
  * column + the middle of its window's Openable, the front's y, the storey's height + the Openable's bottom) */
 int people_add_window(People *p, Group tmpl, const float at[3], int building, int storey, int column);
+/* while its building moves (0x30CD20, the actors of a cell as an edible is: edible.h cell_follow): the occupant `who`
+ * at its storey's floor now (floor_z, the world's) and the shaker's offset along x, its window's place kept above it */
+void people_window_move(People *p, int who, float floor_z, float dx);
 /* Traffic::createCrowd: 4 .. 8 people of the given templates (the block's occupants' "<Name>Runner") around centre,
  * running at 10 to 50 below it; Traffic.bsf makes two, at (-14, 0.5) and (8, -3), when the first block activates */
 int people_crowd(People *p, const Group *tmpls, int ntmpls, const float centre[3]);

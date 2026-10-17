@@ -910,6 +910,10 @@ static void build(Viewer *v)
 {
     if (v->have_scene)
         scene_free(&v->scene);
+    if (!v->game_built && v->fxw)                    /* a new world (a city, a game): the last one's effects gone
+                                                      * with it (its fountains' sprays, its fires went on where they
+                                                      * stood, in the new city's street) */
+        fx_clear(v->fxw);
     if (!v->game_built)                              /* a new world: its scripts' onInit (Traffic's crowds) */
         city_new_world(v->city);
     v->have_scene = city_build(v->city, v->blocks[v->block], v->night, &v->scene) == 0;
