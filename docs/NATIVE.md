@@ -424,8 +424,8 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 `key=value` per line, `#` starts a comment, unknown keys are reported. The keys change the running session and print
 the settings as `rampage.cfg` lines (`graphics: ao=1 ...`) and in the title, without writing the file.
 
-**The Graphics page** (shell.c `op_graphics_*`): the Options screen of the main menu has a third button, Triangle
-**Graphics** (key V), next to Cancel and Accept. It opens a page in the same frame,
+**The Graphics page** (shell.c `op_graphics_*`, hud.c `pause_graphics_*`): the Options screen of the main menu, and
+the Pause menu's Options, have a third button, Triangle **Graphics** (key V), next to Cancel and Accept. It opens a page in the same frame,
 widened and made taller, whose rows are copies of the Vibration row: Ambient Occlusion, SMAA (off, low, medium, high,
 ultra), MSAA (off, 2x, 4x, 8x), Texture Filter (anisotropy: off, 2x .. 16x), Mipmaps, Fullscreen and VSync. Up and
 down choose the row (its title pulses), left and right the value, which is applied at once. Accept keeps them and

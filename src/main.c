@@ -3667,6 +3667,21 @@ static void game_step(Viewer *v, float dt)
         }
 }
 
+/* a Graphics page's values (the front end's; the Pause menu's HudGraphics copied into one) into the
+ * settings, applied; keep: the page's Accept, written to rampage.cfg (not by --shot runs) */
+static void graphics_from_menu(Viewer *v, const ShellGraphics *g, int keep)
+{
+    if (!v->gfx || !v->win)
+        return;
+    Settings to = *v->gfx;
+    to.ao = g->ao; to.smaa = g->smaa; to.msaa = g->msaa; to.aniso = g->aniso; to.mips = g->mips;
+    to.fullscreen = g->fullscreen; to.vsync = g->vsync;
+    settings_graphics(v->gfx, v->win, &to);
+    if (keep && v->gfx_write)
+        settings_save(v->gfx, "rampage.cfg");
+}
+static void shell_give_graphics(Viewer *v);
+
 /* after the screens ran: a results screen's answer to the game, the sounds they start and stop */
 static void hud_frame(Viewer *v, int after)
 {
@@ -3703,8 +3718,15 @@ static void hud_frame(Viewer *v, int after)
     }
     HudCall calls[16];
     int nc = hud_calls(v->hud, calls, 16);
+    shell_give_graphics(v);                          /* the settings in use, for the Pause menu's Graphics page */
     for (int i = 0; i < nc; i++)                     /* gSndDev's volumes (no fades here) */
         switch (calls[i].call) {
+        case HUD_CALL_GRAPHICS: {                    /* the Pause menu's Graphics page: tried, put back or kept */
+            const HudGraphics *hg = hud_graphics(v->hud);
+            ShellGraphics g = { hg->ao, hg->smaa, hg->msaa, hg->aniso, hg->mips, hg->fullscreen, hg->vsync };
+            graphics_from_menu(v, &g, calls[i].arg);
+            break;
+        }
         case HUD_CALL_MUSIC_VOLUME: v->music_now = calls[i].value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
         case HUD_CALL_SFX_VOLUME: v->sfx_vol = calls[i].value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
         case HUD_CALL_SAVE_SETTINGS:
@@ -6956,15 +6978,8 @@ static int shell_answer(Viewer *v)
             case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
             case SHELL_EVT_START: start = 1; break;
             case SHELL_EVT_GRAPHICS:                 /* the Options' Graphics page: tried, put back or kept */
-                if (v->gfx && v->win) {
-                    const ShellGraphics *g = shell_graphics(v->shell);
-                    Settings to = *v->gfx;
-                    to.ao = g->ao; to.smaa = g->smaa; to.msaa = g->msaa; to.aniso = g->aniso; to.mips = g->mips;
-                    to.fullscreen = g->fullscreen; to.vsync = g->vsync;
-                    settings_graphics(v->gfx, v->win, &to);
-                    if (e->arg && v->gfx_write)
-                        settings_save(v->gfx, "rampage.cfg");
-                }
+                if (shell_graphics(v->shell))
+                    graphics_from_menu(v, shell_graphics(v->shell), e->arg);
                 break;
             case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
             case SHELL_EVT_ATTRACT_GAME:             /* the demo (shell_game(), play type 0): its loading screen,
@@ -7273,14 +7288,18 @@ static int pad0_held(const Viewer *v)
     return h;
 }
 
-/* the graphics settings in use, for the Options' Graphics page as it opens */
+/* the graphics settings in use, for the Options' Graphics page as it opens (the front end's, the Pause menu's) */
 static void shell_give_graphics(Viewer *v)
 {
     if (!v->gfx)
         return;
     ShellGraphics g = { v->gfx->ao, v->gfx->smaa, v->gfx->msaa, v->gfx->aniso, v->gfx->mips, v->gfx->fullscreen,
                         v->gfx->vsync };
-    shell_set_graphics(v->shell, &g);
+    if (v->shell)
+        shell_set_graphics(v->shell, &g);
+    HudGraphics hg = { g.ao, g.smaa, g.msaa, g.aniso, g.mips, g.fullscreen, g.vsync };
+    if (v->hud)
+        hud_set_graphics(v->hud, &hg);
 }
 
 /* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,

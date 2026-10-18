@@ -256,6 +256,12 @@ int hud_pause_result(Hud *h);            /* since the last call, HUD_PAUSE_NONE 
  * (default a new profile's 0.5, 0.25, on [R 0x33F630]); the Options page's Accept changes them */
 void hud_set_settings(Hud *h, float sound, float music, int rumble);
 void hud_settings(const Hud *h, float *sound, float *music, int *rumble);
+/* port extra (docs/NATIVE.md "Graphics settings"): the graphics settings the Pause menu's Options' Graphics page shows,
+ * in settings.h's values (as shell.h's ShellGraphics). The viewer gives the ones in use every frame (the page takes
+ * them as it opens); hud_graphics is the page's, after HUD_CALL_GRAPHICS */
+typedef struct { int ao, smaa, msaa, aniso, mips, fullscreen, vsync; } HudGraphics;
+void hud_set_graphics(Hud *h, const HudGraphics *g);
+const HudGraphics *hud_graphics(const Hud *h);
 /* what the Pause menu asks of gSndDev / gCommon since the last call (the same call twice in a row: the last kept) */
 enum {
     HUD_CALL_MUSIC_VOLUME,   /* gSndDev.setMusicVolume(value, arg ms) */
@@ -267,7 +273,9 @@ enum {
     HUD_CALL_CLEAR_CHEATS,   /* gCommon.clearCheatFlags(arg): 65536 when quitting (the cheat 082864's flag) */
     HUD_CALL_SAVE_PROFILE,   /* Results: gCommon.saveProfile() (it writes only with autosave on); arg 1: 1.5 s in,
                               * gCommon.updateProfile() first */
-    HUD_CALL_ALLOW_SAVE      /* Results' Save button: gCommon.setAllowSave(1) */
+    HUD_CALL_ALLOW_SAVE,     /* Results' Save button: gCommon.setAllowSave(1) */
+    HUD_CALL_GRAPHICS        /* port extra, the Options' Graphics page: hud_graphics() changed (arg 0: to try, or back
+                              * to what the page opened with; 1: the page's Accept, to keep) */
 };
 typedef struct { int call; float value; int arg; } HudCall;
 int hud_calls(Hud *h, HudCall *out, int max);

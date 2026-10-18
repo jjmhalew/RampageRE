@@ -28,7 +28,14 @@
 #include "hud.h"
 
 #define HUD_PI 3.14159265f
-#define MAX_NODES 128
+#define MAX_NODES 160                                    /* (Pause: 79, and its Graphics page's 39) */
+/* the Pause menu's Graphics page (pause_graphics_build) */
+#define GFX_ROWS 7
+#define GFX_EXTRA 86.0f                                  /* the frame's height added for the page */
+#define GFX_WIDER 60.0f                                  /* and its width, half each side */
+#define GFX_Y0 80.0f                                     /* the first row, in the Options group's frame */
+#define GFX_PITCH 30.0f
+#define GFX_TITLE_SCALE 0.65f
 #define MAX_FLOATS 64
 #define MAX_TEXT 256
 #define MAX_SORT 2048
@@ -1549,6 +1556,12 @@ typedef struct {
     int prev_rumble, b_rumble, mode, tweak_sound;        /* nMode: the Options row (0 sound, 1 music, 2 rumble) */
     float prev_music, f_music, f_sound, opt_pulse, tick;
     Node *pause_group, *options_group, *s_sound, *s_music, *l_rumble, *titles[3];
+    /* port extra: the Options' Graphics page (Triangle), in the Options' own frame made wider and taller */
+    Node *o_rect, *o_title, *o_line, *o_buttons, *g_button, *g_group, *g_titles[GFX_ROWS], *g_lists[GFX_ROWS];
+    int page, g_mode;
+    float rect_x, rect_y, rect_w, rect_h, buttons_x, buttons_y, title_x, line_x1;
+    char title_text[MAX_TEXT];
+    HudGraphics g_open;                                  /* the values the page opened with */
 } Screen;
 
 typedef struct {
@@ -1577,6 +1590,7 @@ struct Hud {
     HudConfig cfg;
     char monster[32];
     int save_active;                                     /* gCommon.isSaveGameActive() (hud_set_save_active) */
+    HudGraphics gfx, g_page;                             /* the viewer's (hud_set_graphics), the Graphics page's */
     Gui gui;
     Layout *hud, *clock, *attract;
     /* Hud.scr's objects and state */
@@ -3888,6 +3902,8 @@ static void pause_boss(Hud *h, Screen *s)
     show(layout_find(r, "controller_group"), 0);
 }
 
+static void pause_graphics_build(Hud *h, Screen *s);
+
 /* Pause::process 8192: the interface starts */
 static void pause_start(Hud *h, Screen *s, int pad, const HudPause *p)
 {
@@ -3920,6 +3936,7 @@ static void pause_start(Hud *h, Screen *s, int pad, const HudPause *p)
     s->options_group = layout_find(r, "options_group");  /* the outer one (there is a second inside it) */
     fader_init(&s->fd, s->pause_group, 1);
     fader_init(&s->fd, s->options_group, 0);
+    pause_graphics_build(h, s);
 }
 
 /* Continue: unloadInterface(this), the focus back, pauseGame(0), the music back in 1 s, the vibration back */
@@ -3975,12 +3992,199 @@ static void pause_options_setup(Hud *h, Screen *s)
     }
 }
 
+/* ---- port extra: the Graphics page (docs/NATIVE.md "Graphics settings"), shell.c's op_graphics_* on the Pause
+ * menu's Options: Triangle opens it in the same frame, made wider and taller; a row for each setting, its title and
+ * list copies of the Vibration row's, the button a copy of Cancel with CommonGUI's Controller_B1 (the triangle). Up /
+ * down choose the row (its title pulses), left / right the value, tried at once (HUD_CALL_GRAPHICS); Accept keeps them
+ * (the viewer writes rampage.cfg), Back puts back what the page opened with; either goes back to the Options */
+static const struct { const char *title; int n; const char *items[5]; int values[5]; } GFX_ROW[GFX_ROWS] = {
+    { "Ambient Occlusion:", 2, { "ON", "OFF" }, { 1, 0 } },
+    { "SMAA:", 5, { "OFF", "LOW", "MED", "HIGH", "ULTRA" }, { 0, 1, 2, 3, 4 } },
+    { "MSAA:", 4, { "OFF", "2X", "4X", "8X" }, { 0, 2, 4, 8 } },
+    { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 } },
+    { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 } },
+    { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 } },
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 } } };
+
+static int *gfx_field(HudGraphics *g, int row)
+{
+    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync };
+    return f[row];
+}
+
+static void pause_graphics_build(Hud *h, Screen *s)
+{
+    Layout *L = s->L;
+    Node *go = s->options_group, *og = go ? layout_find(go->child, "options_group") : NULL;
+    Node *back = go ? layout_find(go->child, "nb_back") : NULL, *boxes = go ? layout_find(go->child, "listboxes") : NULL;
+    Node *list = go ? layout_find(go->child, "rumble") : NULL, *title = go ? layout_find(go->child, "rumble_title") : NULL;
+    s->o_rect = go ? layout_find(go->child, "options_rect") : NULL;
+    s->o_title = go ? layout_find(go->child, "options_title") : NULL;
+    s->o_line = go ? layout_find(go->child, "line_horizontal") : NULL;
+    s->o_buttons = go ? layout_find(go->child, "buttonSizer") : NULL;
+    if (!s->o_rect || !s->o_buttons || !og || !back || !boxes || !list || !title || !list->child || !list->child->next)
+        return;
+    s->rect_x = s->o_rect->p[0];
+    s->rect_y = s->o_rect->p[1];
+    s->rect_w = s->o_rect->d[0];
+    s->rect_h = s->o_rect->d[1];
+    s->buttons_x = s->o_buttons->p[0];
+    s->buttons_y = s->o_buttons->p[1];
+    if (s->o_line && s->o_line->has_ep)
+        s->line_x1 = s->o_line->ep[2];
+    else
+        s->o_line = NULL;
+    if (s->o_title) {
+        s->title_x = s->o_title->p[0];
+        snprintf(s->title_text, sizeof s->title_text, "%s", s->o_title->text);
+    }
+    Node *b = node_copy(L, back, s->o_buttons);         /* the button, first in the row */
+    if (b) {
+        Node **pp = &s->o_buttons->child;
+        while (*pp != b) pp = &(*pp)->next;
+        *pp = b->next;
+        b->next = s->o_buttons->child;
+        s->o_buttons->child = b;
+        snprintf(b->name, sizeof b->name, "nb_graphics");
+        node_text(b, "Graphics");
+        if (b->child)
+            b->child->has_tex = tex_find(&h->gui, "Controller_B1", &b->child->tex);
+        col_set(b->tcol, 0, 240 / 255.0f, 156 / 255.0f, 1);   /* bs_fixButton's colour of button 1 (Triangle) */
+        b->has_tcol = 1;
+        s->g_button = b;
+    }
+    Node *g = node_copy(L, boxes, s->o_rect);           /* the page: a group in the Options group's place */
+    if (!g)
+        return;
+    g->child = NULL;
+    snprintf(g->name, sizeof g->name, "graphics_group");
+    memcpy(g->p, og->p, sizeof g->p);
+    g->p[0] += 40;                                       /* (in the wider frame: 10 right of the Options') */
+    show(g, 0);
+    s->g_group = g;
+    for (int i = 0; i < GFX_ROWS; i++) {
+        float y = GFX_Y0 + GFX_PITCH * (float)i;
+        Node *t = node_copy(L, title, g), *l = node_copy(L, list, g);
+        if (!t || !l || !l->child || !l->child->next)
+            continue;
+        snprintf(t->name, sizeof t->name, "graphics_title_%d", i);
+        snprintf(l->name, sizeof l->name, "graphics_list_%d", i);
+        node_text(t, GFX_ROW[i].title);
+        t->tscale = GFX_TITLE_SCALE;
+        t->p[0] = title->p[0] - 30;                      /* (the titles and lists 30 and 65 left of Vibration's) */
+        t->p[1] = y + 3;
+        l->p[0] = list->p[0] - 65;
+        l->p[1] = y;
+        int many = GFX_ROW[i].n > 2;                     /* more than ON / OFF: smaller, closer, growing less */
+        Node *second = l->child->next;
+        for (int k = 2; k < GFX_ROW[i].n; k++)
+            node_copy(L, second, l);
+        if (many) {
+            l->lsp = 18;
+            l->growth[0] = 1.0f + 0.5f * (l->growth[0] - 1.0f);
+        }
+        int k = 0;
+        for (Node *it = l->child; it; it = it->next, k++) {
+            node_text(it, GFX_ROW[i].items[k]);
+            if (many)
+                it->tscale = 0.6f;
+        }
+        s->g_titles[i] = t;
+        s->g_lists[i] = l;
+    }
+}
+
+/* the page's values from its lists */
+static void pause_graphics_read(Hud *h, Screen *s)
+{
+    for (int i = 0; i < GFX_ROWS; i++) {
+        int k = s->g_lists[i] ? s->g_lists[i]->sel : 0;
+        *gfx_field(&h->g_page, i) = GFX_ROW[i].values[k >= 0 && k < GFX_ROW[i].n ? k : 0];
+    }
+}
+
+/* the page shown (1) or the Options (0) */
+static void pause_graphics_page(Screen *s, int page)
+{
+    Node *og = s->options_group ? layout_find(s->options_group->child, "options_group") : NULL;
+    s->page = page && s->g_group;
+    show(og, !s->page);
+    show(s->g_group, s->page);
+    show(s->g_button, !s->page);
+    float w = s->page ? GFX_WIDER : 0, ht = s->page ? GFX_EXTRA : 0;
+    if (s->o_rect) {
+        s->o_rect->p[0] = s->rect_x - w / 2;
+        s->o_rect->p[1] = s->rect_y - ht / 2;
+        s->o_rect->d[0] = s->rect_w + w;
+        s->o_rect->d[1] = s->rect_h + ht;
+    }
+    if (s->o_buttons) {
+        s->o_buttons->p[0] = s->buttons_x + w;
+        s->o_buttons->p[1] = s->buttons_y + ht;
+    }
+    if (s->o_title) {
+        node_text(s->o_title, s->page ? "GRAPHICS" : s->title_text);
+        s->o_title->p[0] = s->title_x + w / 2;
+    }
+    if (s->o_line)
+        s->o_line->ep[2] = s->line_x1 + w;
+    for (int i = 0; i < 3; i++)
+        if (s->titles[i]) s->titles[i]->tscale = 1.0f;
+    for (int i = 0; i < GFX_ROWS; i++)
+        if (s->g_titles[i]) s->g_titles[i]->tscale = GFX_TITLE_SCALE;
+    s->opt_pulse = 0;
+}
+
+static void pause_graphics_open(Hud *h, Screen *s)
+{
+    s->g_open = h->g_page = h->gfx;
+    s->g_mode = 0;
+    for (int i = 0; i < GFX_ROWS; i++) {
+        int v = *gfx_field(&s->g_open, i), k = 0;
+        for (int j = 0; j < GFX_ROW[i].n; j++)
+            if (GFX_ROW[i].values[j] == v)
+                k = j;
+        list_select(s->g_lists[i], k);
+    }
+    pause_graphics_page(s, 1);
+}
+
+static void pause_graphics_input(Hud *h, Screen *s, int ev)
+{
+    if (ev == HUD_EV_ACCEPT) {
+        sound(h, "Click", 0);
+        pause_graphics_read(h, s);
+        hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 1);
+        pause_graphics_page(s, 0);
+    } else if (ev == HUD_EV_BACK) {
+        sound(h, "Cancel", 0);
+        h->g_page = s->g_open;
+        hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 0);
+        pause_graphics_page(s, 0);
+    } else if (ev == HUD_EV_UP || ev == HUD_EV_DOWN) {
+        if (s->g_titles[s->g_mode]) s->g_titles[s->g_mode]->tscale = GFX_TITLE_SCALE;
+        s->g_mode = (s->g_mode + (ev == HUD_EV_UP ? GFX_ROWS - 1 : 1)) % GFX_ROWS;
+        s->opt_pulse = 0;
+        sound(h, "Rollover", 0);
+    } else if (ev == HUD_EV_LEFT || ev == HUD_EV_RIGHT) {
+        Node *l = s->g_lists[s->g_mode];
+        int sel = l ? l->sel : 0;
+        list_increment(l, ev == HUD_EV_RIGHT ? 1 : -1);
+        if (l && l->sel != sel) {
+            pause_graphics_read(h, s);
+            hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 0);
+        }
+        sound(h, "Rollover", 0);
+    }
+}
+
 static void pause_options_open(Hud *h, Screen *s)       /* activateOptions */
 {
     s->pause_state = 1;
     fader_go(&s->fd, s->pause_group, -1);
     fader_go(&s->fd, s->options_group, 1);
     pause_options_setup(h, s);
+    pause_graphics_page(s, 0);
     hud_call(h, HUD_CALL_MUSIC_VOLUME, s->f_music, 1000);   /* the music comes back to be heard */
 }
 
@@ -4037,7 +4241,7 @@ static void pause_options_list(Hud *h, Screen *s, int dir)   /* updateLists: OFF
 static void pause_options_tick(Hud *h, Screen *s)
 {
     float sv = s->s_sound ? s->s_sound->val : 0, mv = s->s_music ? s->s_music->val : 0;
-    if (s->mode < 2) {
+    if (s->mode < 2 && !s->page) {
         Node *sl = s->mode == 1 ? s->s_music : s->s_sound;
         if (sl) {
             if (h->held_x >= 0.05f || h->held_r)
@@ -4072,7 +4276,9 @@ static void pause_frame(Hud *h, Screen *s, float dt)
     if (s->pause_state != 1)
         return;
     s->opt_pulse += dt;                                  /* pulseSelection: the row's title 1 + 0.1 sin(4t) */
-    if (s->titles[s->mode])
+    if (s->page && s->g_titles[s->g_mode])
+        s->g_titles[s->g_mode]->tscale = GFX_TITLE_SCALE * (1.0f + sinf(4.0f * s->opt_pulse) * 0.1f);
+    else if (!s->page && s->titles[s->mode])
         s->titles[s->mode]->tscale = 1.0f + sinf(4.0f * s->opt_pulse) * 0.1f;
     s->tick += dt;
     int n = 0;
@@ -4085,11 +4291,20 @@ static void pause_frame(Hud *h, Screen *s, float dt)
         s->tick = 0;
 }
 
-static void pause_options_input(Hud *h, Screen *s, int ev, int pad)   /* processOptions, the pad's events */
+static void pause_graphics_open(Hud *h, Screen *s);
+static void pause_graphics_input(Hud *h, Screen *s, int ev);
+
+static void pause_options_input(Hud *h, Screen *s, int ev, int button, int pad)   /* processOptions, the pad's
+                                                                                    * events */
 {
     if (pad != 0)                                        /* event.getController() != 0: not taken */
         return;
-    if (ev == HUD_EV_ACCEPT) {
+    if (s->page)
+        pause_graphics_input(h, s, ev);
+    else if (ev == HUD_EV_BUTTON && button == 1 && s->g_group) {   /* Triangle: the Graphics page */
+        sound(h, "Click", 0);
+        pause_graphics_open(h, s);
+    } else if (ev == HUD_EV_ACCEPT) {
         sound(h, "Click", 0);
         pause_options_save(h, s);
         pause_options_close(h, s);
@@ -4107,10 +4322,10 @@ static void pause_options_input(Hud *h, Screen *s, int ev, int pad)   /* process
     }
 }
 
-static void pause_input(Hud *h, Screen *s, int ev, int pad)   /* Pause::process, the pad's events */
+static void pause_input(Hud *h, Screen *s, int ev, int button, int pad)   /* Pause::process, the pad's events */
 {
     if (s->pause_state == 1) {
-        pause_options_input(h, s, ev, pad);
+        pause_options_input(h, s, ev, button, pad);
         return;
     }
     if (cq_process(h, s, ev)) {
@@ -4172,6 +4387,9 @@ int hud_pause_result(Hud *h)
     h->pause_result = HUD_PAUSE_NONE;
     return r;
 }
+
+void hud_set_graphics(Hud *h, const HudGraphics *g) { if (h && g) h->gfx = *g; }
+const HudGraphics *hud_graphics(const Hud *h) { return h ? &h->g_page : NULL; }
 
 void hud_set_settings(Hud *h, float sound_vol, float music_vol, int rumble)
 {
@@ -4321,7 +4539,7 @@ void hud_input_pad(Hud *h, int ev, int button, int pad)
         return;
     if (h->pause) {
         if (!h->pause->ended)
-            pause_input(h, h->pause, ev, pad);
+            pause_input(h, h->pause, ev, button, pad);
         return;
     }
     if (h->scr)
