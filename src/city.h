@@ -232,8 +232,9 @@ typedef struct {
      * 0x3050F0); parent: for a billboard's attachment (made where its onInit makes it), the billboard's index here,
      * else -1 */
 #define SCENE_STREET_MAX 256
-    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel, attack, parent; float world[16];
-                            Mat4 rel[4]; } street[SCENE_STREET_MAX];
+    /* node: its model's nodes 1 .. nnode in its own frame (the crane's, streetobj_nodes) */
+    struct SceneStreetObj { Group t, inst; int first, last, building, model, nrel, attack, parent, nnode; float world[16];
+                            Mat4 rel[4]; float node[2][3]; } street[SCENE_STREET_MAX];
     int nstreet;
     /* the block's AttackObjectInstance|s that army.c makes units of (the PirateShip, StationaryAttackObject.bsf,
      * army_load_block): their model as placed (instances first .. last - 1: the model, then its flags' cloths), shown

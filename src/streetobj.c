@@ -31,6 +31,7 @@ struct StreetObjs {
     int nm;
     float acc;
     int next_id, frame;
+    float amount;                                    /* the blow's damage, for a TakeDamage that reads it (Crane) */
     uint32_t seed;
     CollideWorld *cw;                                /* the frame's collision world (streetobj_collide_add) */
 };
@@ -1452,6 +1453,359 @@ StreetObjs *streetobj_new(const StreetHost *host)
 }
 void streetobj_free(StreetObjs *s) { free(s); }
 
+/* ---------------------------------------------------------------- WaterTower.bsf, Crane.bsf, KiteAnchor.bsf */
+
+/* getNodePosition(n): its model's node n (1 or 2) in the world now; 0 none */
+static int node_pos(const StreetObjs *s, const StreetObj *o, int n, float out[3])
+{
+    if (n < 1 || n > o->nnode)
+        return 0;
+    streetobj_point(s, idx(s, o), o->node[n - 1], out);
+    return 1;
+}
+static void set_point(StreetObj *o, const float p[3])   /* setPoint */
+{
+    memcpy(o->world + 12, p, 3 * sizeof(float));
+    o->moved = 1;
+}
+/* gWorld.createLineMover(): init(object, its place, to, speed, 0), setMover */
+static void line_mover(StreetObj *o, const float to[3], float speed)
+{
+    memcpy(o->lm_to, to, sizeof o->lm_to);
+    o->lm_speed = speed;
+    o->lm_on = 1;
+}
+/* the LineMover's step, straight at its speed [G: no easing]; 1 at its end (onMoverCallback) */
+static int line_step(StreetObj *o)
+{
+    float d[3], l = 0, p[3];
+    for (int k = 0; k < 3; k++) {
+        d[k] = o->lm_to[k] - o->world[12 + k];
+        l += d[k] * d[k];
+    }
+    l = sqrtf(l);
+    float step = o->lm_speed * TIMESTEP;
+    if (l <= step) {
+        set_point(o, o->lm_to);
+        o->lm_on = 0;
+        return 1;
+    }
+    for (int k = 0; k < 3; k++)
+        p[k] = o->world[12 + k] + d[k] / l * step;
+    set_point(o, p);
+    return 0;
+}
+
+/* WaterTower.bsf [R]: a water tower's legs on a roof, its tank (OTRef|Attachment WaterTowerTop1, a RoofItem) made by
+ * the caller at its node 1 (attachment 0). A monster's blow (it counts) or a thrown object: TankHitEffect1
+ * (WaterTower_Comp) where it stands and the tank goes; SudsDelay (3 s) later its SudsEffect (Suds,
+ * Chocolate_tower_hit) 7 towards the street (where no building holds that point, at it), SudsZOffset and
+ * SudsYOffset off, its SlipObject (SoapPuddle, ChocolatePuddle) made below it at y -2, and it goes. Its building
+ * coming down: DestFallEffect and TankHitEffect1 where it is, the suds stop, the tank goes, and it sinks 6 a second
+ * for 2 s and goes */
+static void tower_construct(StreetObj *o)
+{
+    o->oflags |= SF_PUSH_OUT | SF_EFF_NODES;
+    o->delay = onum(o, "SudsDelay", 3);
+    o->hit_fx = -1;
+}
+static void tower_hit(StreetObjs *s, StreetObj *o, int mi)   /* TakeDamage from a monster, TakeImpact */
+{
+    if (o->state != 0)
+        return;
+    o->state = 1;
+    effect(s, o, gstr(o->tmpl, "TankHitEffect1"), NULL, 0, NULL, NULL, 0, 0);
+    StreetObj *t = attachment(s, o, 0);
+    if (t)
+        request_delete(s, t);
+    set_pulse(o, o->delay);
+    add_stats(s, o, mi);
+}
+static void tower_pulse(StreetObjs *s, StreetObj *o)
+{
+    if (o->state == 1) {
+        const char *fx = gstr(o->tmpl, "SudsEffect");
+        if (fx) {
+            float p[3] = { o->world[12], o->world[13] - 7, o->world[14] + onum(o, "SudsZOffset", 0) };
+            if (building_at(s, p) < 0)
+                p[1] += 7;
+            p[1] += onum(o, "SudsYOffset", 0);
+            o->hit_fx = effect(s, o, fx, p, 0, NULL, NULL, 0, 0);
+            const char *slip = ostr(o, "SlipObject");
+            Group gt = slip && s->host.find ? s->host.find(s->host.ctx, slip) : (Group){ 0 };
+            if (gt.at) {
+                float w[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0], -2, 0, 1 };
+                int k = add_kind(s, streetobj_kind_of(gt), gt, (Group){ 0 }, w, -1, 0);
+                if (k >= 0)
+                    s->o[k].made = 1;
+            }
+        }
+        request_delete(s, o);                        /* 4 | 8 | 16 */
+    } else if (o->state == 2) {
+        o->elapsed -= TIMESTEP;
+        float p[3] = { o->world[12], o->world[13], o->world[14] - 6 * TIMESTEP };
+        set_point(o, p);
+        if (o->elapsed <= 0)
+            request_delete(s, o);
+    }
+}
+static void tower_building_gone(StreetObjs *s, StreetObj *o)
+{
+    o->state = 2;
+    if (o->hit_fx >= 0)
+        effect_stop(s, o, o->hit_fx);
+    effect(s, o, gstr(o->tmpl, "DestFallEffect"), NULL, 0, NULL, NULL, 0, 0);
+    effect(s, o, gstr(o->tmpl, "TankHitEffect1"), NULL, 0, NULL, NULL, 0, 0);
+    StreetObj *t = attachment(s, o, 0);
+    if (t)
+        request_delete(s, t);
+    o->elapsed = 2;
+    set_pulse(o, TIMESTEP);
+}
+
+/* Crane.bsf [R]: a construction crane on a roof turning its jib (RotationVel a second within MinRotation ..
+ * MaxRotation x pi; a pulse of 0.5 s starts a turn 1 time in 20, the other way) and running its cargo (OTRef|
+ * Attatchment Crane1_Cargo, made by the caller at node 1: attachment 0) between its nodes 1 and 2 (SlideVel a second;
+ * 1 time in 10). A monster's blow: HitSound, HitFX on node 1 and the blow's damage off its HitPoints; still standing
+ * it rocks away from the nearest monster (a quarter-wave of 0.09 / 4 cos(pi t / 2) a frame about the axis across,
+ * back to upright), else it counts and topples away from it (pi/4 a second, CrackingSound at once), and past pi/2
+ * falls, along fallDir (the way from the monster; at first a random one) 0.15 and down 0.4 a frame, still turning,
+ * its cargo gone after 2 s; node 1 below 1.5: CrashFX at node 1 9 nearer the street and at four points round it,
+ * and 1.3 s later it goes with its cargo. Its building coming down: DestFallEffect and it falls at once */
+static void crane_construct(StreetObjs *s, StreetObj *o)
+{
+    o->axis[0] = 1;
+    o->axis[1] = o->axis[2] = 0;
+    o->die_delay = 1.3f;
+    o->rot_dir = -1 + (float)(frand(s) < 0.5f) * 2;
+    o->cargo_dir = 1;
+    set_pulse(o, 0.5f);
+    o->oflags |= SF_PUSH_OUT | SF_EFF_NODES;
+    o->fall_dir[0] = frand(s) - 0.5f;
+    o->fall_dir[1] = frand(s) - 0.5f;
+    o->fall_dir[2] = 0;
+    float l = sqrtf(o->fall_dir[0] * o->fall_dir[0] + o->fall_dir[1] * o->fall_dir[1]);
+    if (l > 1e-6f) {
+        o->fall_dir[0] /= l;
+        o->fall_dir[1] /= l;
+    }
+    o->hp = onum(o, "HitPoints", 40);
+    float v;
+    o->rot_min = gnum(o->inst, "MinRotation", &v) ? v : gnum(o->tmpl, "MinRotation", &v) ? v : -1;
+    o->rot_max = gnum(o->inst, "MaxRotation", &v) ? v : gnum(o->tmpl, "MaxRotation", &v) ? v : 1;
+    o->rot_vel = gnum(o->tmpl, "RotationVel", &v) ? v : 1;
+    o->slide_vel = gnum(o->tmpl, "SlideVel", &v) ? v : 1;
+    o->cargo_rot = PI * (gnum(o->tmpl, "CargoZRotOffset", &v) ? v : 0);
+    o->rot_min *= PI;
+    o->rot_max *= PI;
+}
+static void crane_cargo(StreetObjs *s, StreetObj *o)   /* updateCargoLocation */
+{
+    StreetObj *c = attachment(s, o, 0);
+    float a[3], b[3];
+    if (!c || !node_pos(s, o, 1, a) || !node_pos(s, o, 2, b))
+        return;
+    float p[3];
+    for (int k = 0; k < 3; k++)
+        p[k] = a[k] + (b[k] - a[k]) * o->cargo_at;
+    set_point(c, p);
+}
+/* the axis across the way to the nearest monster (its way x z, in the crane's own frame); 0 none */
+static int crane_axis(StreetObjs *s, StreetObj *o)
+{
+    int m = nearest_monster(s, pos_of(o));
+    if (m < 0)
+        return 0;
+    float d[3] = { s->m[m].pos[0] - o->world[12], s->m[m].pos[1] - o->world[13], s->m[m].pos[2] - o->world[14] };
+    float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (l > 1e-6f)
+        for (int k = 0; k < 3; k++)
+            d[k] /= l;
+    float w[3] = { d[1], -d[0], 0 };                 /* d x (0, 0, 1) */
+    world_to_object(o, w, o->axis);
+    return 1;
+}
+static void crane_rebound(StreetObjs *s, StreetObj *o)   /* doRebound */
+{
+    if (o->state >= 4 || (o->flags & 2))
+        return;
+    if (o->total_angle != 0) {
+        rotate_aa(o, -o->total_angle, o->axis);
+        o->total_angle = 0;
+    }
+    crane_axis(s, o);
+    o->rb_time = 0;
+    o->flags |= 2;
+}
+static void crane_fall_start(StreetObj *o)
+{
+    float l = sqrtf(o->fall_dir[0] * o->fall_dir[0] + o->fall_dir[1] * o->fall_dir[1] + o->fall_dir[2] * o->fall_dir[2]);
+    for (int k = 0; k < 3; k++)
+        o->vel[k] = l > 1e-6f ? o->fall_dir[k] / l * 0.15f : 0;
+    o->vel[2] = -(6.0f * (1.0f / 15.0f));
+    o->state = 4;
+}
+static void crane_process(StreetObjs *s, StreetObj *o)   /* Process, every frame */
+{
+    if (o->state < 4 && (o->flags & 2)) {
+        if (o->total_angle >= 0) {
+            o->rb_time += TIMESTEP;
+            float da = 0.09f / (2 * 2) * cosf(PI * o->rb_time / 2);
+            o->total_angle += da;
+            rotate_aa(o, da, o->axis);
+        } else {
+            rotate_aa(o, -o->total_angle, o->axis);
+            o->total_angle = 0;
+            o->rb_time = 0;
+            o->flags &= ~2;
+        }
+        crane_cargo(s, o);
+    }
+    if (o->state == 5) {                             /* toppling */
+        if (!(o->flags & 1)) {
+            crane_axis(s, o);
+            o->flags |= 1;
+        }
+        rotate_aa(o, PI / 4 * TIMESTEP, o->axis);
+        o->total_angle += PI / 4 * TIMESTEP;
+        crane_cargo(s, o);
+        if (o->total_angle < PI / 8) {
+            o->crack_delay -= TIMESTEP;
+            if (o->crack_delay < 0) {
+                sound(s, o, ostr(o, "CrackingSound"), 0);
+                o->crack_delay = 99999;
+            }
+        } else if (o->total_angle > PI / 2)
+            crane_fall_start(o);
+        return;
+    }
+    if (o->state == 4) {                             /* falling */
+        o->elapsed -= 1.0f / 15.0f;
+        float p[3] = { o->world[12] + o->vel[0], o->world[13] + o->vel[1], o->world[14] + o->vel[2] };
+        set_point(o, p);
+        rotate_aa(o, 0.25f * PI / 4 * TIMESTEP, o->axis);
+        o->total_angle += 0.25f * PI / 4 * TIMESTEP;
+        crane_cargo(s, o);
+        StreetObj *c = attachment(s, o, 0);
+        if (c && o->elapsed <= 0)
+            request_delete(s, c);
+        float n[3];
+        if (node_pos(s, o, 1, n) && n[2] < 1.5f)
+            o->state = 6;
+        return;
+    }
+    if (o->state == 6) {                             /* down */
+        if (!(o->flags & 8)) {
+            const char *fx = ostr(o, "CrashFX");
+            float p[3];
+            if (fx && node_pos(s, o, 1, p)) {
+                p[1] -= 9;
+                float q[4][3] = { { p[0] - 3, p[1] + frand(s) / 4, p[2] + 2.5f },
+                                  { p[0] + 3, p[1] + frand(s) / 4, p[2] + 2.5f },
+                                  { p[0] + 3, p[1] + frand(s) / 4, p[2] - 2.5f },
+                                  { p[0] - 3, p[1] + frand(s) / 4, p[2] - 2.5f } };
+                effect(s, o, fx, p, 0, NULL, NULL, 0, 0);
+                for (int k = 0; k < 4; k++)
+                    effect(s, o, fx, q[k], 0, NULL, NULL, 0, 0);
+            }
+            o->die_delay = 1.3f;
+            o->flags |= 8;
+        } else if ((o->die_delay -= TIMESTEP) < 0) {
+            request_delete(s, o);
+            StreetObj *c = attachment(s, o, 0);
+            if (c)
+                request_delete(s, c);
+        }
+        return;
+    }
+    int cargo = 0;
+    if (o->state & 2) {                              /* the cargo running */
+        o->cargo_at += o->slide_vel * o->cargo_dir * TIMESTEP;
+        if (o->cargo_at >= 1) {
+            o->cargo_at = 1;
+            o->state &= ~2;
+        } else if (o->cargo_at <= 0) {
+            o->cargo_at = 0;
+            o->state &= ~2;
+        }
+        cargo = 1;
+    }
+    if (o->state & 1) {                              /* the jib turning */
+        float fc[3] = { o->facing[0], o->facing[1], o->facing[2] + o->rot_dir * TIMESTEP * o->rot_vel };
+        if (fc[2] >= o->rot_max) {
+            fc[2] = o->rot_max;
+            o->state &= ~1;
+        } else if (fc[2] <= o->rot_min) {
+            fc[2] = o->rot_min;
+            o->state &= ~1;
+        }
+        set_facing(o, fc);
+        StreetObj *c = attachment(s, o, 0);
+        if (c) {
+            float r[3] = { fc[0], fc[1], fc[2] + o->cargo_rot };
+            set_facing(c, r);
+            cargo = 1;
+        }
+    }
+    if (cargo)
+        crane_cargo(s, o);
+}
+static void crane_pulse(StreetObjs *s, StreetObj *o)
+{
+    if (o->state & 4)
+        return;
+    if (!(o->state & 1) && frand(s) < 0.05f) {
+        o->state |= 1;
+        o->rot_dir = -o->rot_dir;
+        return;
+    }
+    if (!(o->state & 2) && frand(s) < 0.1f) {
+        o->state |= 2;
+        o->cargo_dir = -o->cargo_dir;
+    }
+}
+static void crane_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who, float amount)
+{
+    if (!who || mi < 0)
+        return;
+    for (int k = 0; k < 3; k++)
+        o->fall_dir[k] = o->world[12 + k] - who->pos[k];
+    sound(s, o, ostr(o, "HitSound"), 1);
+    effect(s, o, ostr(o, "HitFX"), NULL, 1, NULL, NULL, 1, 0);
+    o->hp -= amount;
+    if (o->hp < 0) {
+        add_stats(s, o, mi);
+        o->elapsed = 2;
+        set_pulse(o, 1.0f / 15.0f);
+        o->state = 5;
+    } else
+        crane_rebound(s, o);
+}
+static void crane_building_gone(StreetObjs *s, StreetObj *o)
+{
+    effect(s, o, gstr(o->tmpl, "DestFallEffect"), NULL, 0, NULL, NULL, 0, 0);
+    o->elapsed = 2;
+    set_pulse(o, 1.0f / 15.0f);
+    crane_fall_start(o);
+}
+
+/* KiteAnchor.bsf [R]: an InvisShape on the street of SF04 flying its kite: onInit its KiteFX (kite, kite_yellow)
+ * on it at (xoffset, yoffset, zoffset); a monster's blow or its building coming down lets it go: up to z 80 at 4 a
+ * second (a LineMover), gone at the top (the kite, not turned off with it, stays up there) */
+static void kite_init(StreetObjs *s, StreetObj *o)
+{
+    float off[3] = { onum(o, "xoffset", 0), onum(o, "yoffset", 0), onum(o, "zoffset", 0) };
+    effect(s, o, ostr(o, "KiteFX"), NULL, 1, off, NULL, 0, 0);
+}
+static void kite_fly(StreetObj *o)
+{
+    if (o->flags & 1)
+        return;
+    float to[3] = { o->world[12], o->world[13], 80 };
+    line_mover(o, to, 4);
+    o->flags |= 1;
+}
+
 int streetobj_kind_of(Group tmpl)
 {
     const char *sc = gstr(tmpl, "ScriptName");
@@ -1462,7 +1816,8 @@ int streetobj_kind_of(Group tmpl)
            same_text(sc, "MerryGoRound.bsf") ? SK_MERRY : same_text(sc, "Sign.bsf") ? SK_SIGN :
            same_text(sc, "Billboard.bsf") ? SK_BILLBOARD : same_text(sc, "Billboard_George.bsf") ? SK_GEORGE :
            same_text(sc, "AnimatedSign.bsf") ? SK_ANIMSIGN : same_text(sc, "Fountain.bsf") ? SK_FOUNTAIN :
-           same_text(sc, "DamagingEffect.bsf") ? SK_DAMAGING : -1;
+           same_text(sc, "DamagingEffect.bsf") ? SK_DAMAGING : same_text(sc, "WaterTower.bsf") ? SK_TOWER :
+           same_text(sc, "Crane.bsf") ? SK_CRANE : same_text(sc, "KiteAnchor.bsf") ? SK_KITE : -1;
 }
 
 /* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
@@ -1550,6 +1905,12 @@ static int add_kind(StreetObjs *s, int kind, Group tmpl, Group inst, const float
         fountain_construct(o);
     else if (kind == SK_DAMAGING)
         damaging_construct(s, o);
+    else if (kind == SK_TOWER)
+        tower_construct(o);
+    else if (kind == SK_CRANE)
+        crane_construct(s, o);
+    else if (kind == SK_KITE)
+        o->oflags |= SF_EFF_NODES;
     return i;
 }
 
@@ -1558,11 +1919,21 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
     return add_kind(s, tmpl.at ? streetobj_kind_of(tmpl) : -1, tmpl, inst, world, building, attack);
 }
 
+void streetobj_nodes(StreetObjs *s, int i, const float node[][3], int n)
+{
+    if (i < 0 || i >= s->n)
+        return;
+    s->o[i].nnode = n < 2 ? n : 2;
+    for (int k = 0; k < s->o[i].nnode; k++)
+        memcpy(s->o[i].node[k], node[k], sizeof s->o[i].node[k]);
+}
+
 int streetobj_add_attachment(StreetObjs *s, int parent, Group tmpl, const float world[16])
 {
     if (parent < 0 || parent >= s->n || s->o[parent].nattach >= 5)
         return -1;
-    int kind = same_text(gstr(tmpl, "ScriptName"), "Billboard_2Part.bsf") ? SK_2PART : SK_ATTACH;
+    int kind = same_text(gstr(tmpl, "ScriptName"), "Billboard_2Part.bsf") ? SK_2PART :
+               same_text(gstr(tmpl, "ScriptName"), "RoofItem.bsf") ? SK_ROOF : SK_ATTACH;   /* a water tower's tank */
     int i = add_kind(s, kind, tmpl, (Group){ 0 }, world, -1, 0);
     if (i >= 0) {
         s->o[i].building = -2;                       /* a script's object: no building's (0x309E20 is the block's) */
@@ -1589,7 +1960,9 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
                    o->kind == SK_SIGN ? "Sign" : o->kind == SK_BILLBOARD ? "Billboard" :
                    o->kind == SK_GEORGE ? "Billboard_George" : o->kind == SK_2PART ? "Billboard_2Part" :
                    o->kind == SK_ATTACH ? "attachment" : o->kind == SK_ANIMSIGN ? "AnimatedSign" :
-                   o->kind == SK_FOUNTAIN ? "Fountain" : o->kind == SK_DAMAGING ? "DamagingEffect" : "StreetObject",
+                   o->kind == SK_FOUNTAIN ? "Fountain" : o->kind == SK_DAMAGING ? "DamagingEffect" :
+                   o->kind == SK_TOWER ? "WaterTower" : o->kind == SK_CRANE ? "Crane" :
+                   o->kind == SK_KITE ? "KiteAnchor" : "StreetObject",
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
@@ -1600,6 +1973,8 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
             george_init(s, &s->o[i]);
         else if (s->o[i].kind == SK_FOUNTAIN)
             fountain_init(s, &s->o[i]);
+        else if (s->o[i].kind == SK_KITE)
+            kite_init(s, &s->o[i]);
 }
 
 /* the flight's contacts (collide_mover_step): the street, and the objects of the frame's world its shape reaches */
@@ -1686,10 +2061,18 @@ static void step(StreetObjs *s)
                     fountain_pulse(s, o);
                 else if (o->kind == SK_DAMAGING)
                     request_delete(s, o);            /* DamagingEffect's onPulse: its DeleteSelfTime is up */
+                else if (o->kind == SK_TOWER)
+                    tower_pulse(s, o);
+                else if (o->kind == SK_CRANE)
+                    crane_pulse(s, o);
             }
         }
         if (o->kind == SK_GEORGE)                    /* Process: every frame */
             george_process(s, o);
+        else if (o->kind == SK_CRANE && !s->deleting[i])
+            crane_process(s, o);
+        if (o->lm_on && !s->deleting[i] && line_step(o) && o->kind == SK_KITE)
+            request_delete(s, o);                    /* KiteAnchor's onMoverCallback */
         if (o->kind == SK_2PART && o->on_path && !s->deleting[i])   /* its SplineMover */
             part_move(s, o);
         /* 0x309AC0 [R]: attached (0x4000000) to a building whose collapsing storey is set: onBuildingDestruction,
@@ -1706,6 +2089,12 @@ static void step(StreetObjs *s)
                 george_building_gone(s, o);
             else if (o->kind == SK_ANIMSIGN)
                 animsign_loose(s, o, "DetachEffect", 0);
+            else if (o->kind == SK_TOWER)
+                tower_building_gone(s, o);
+            else if (o->kind == SK_CRANE)
+                crane_building_gone(s, o);
+            else if (o->kind == SK_KITE)
+                kite_fly(o);
         }
         if (o->flying && !s->deleting[i])
             fly_step(s, o);
@@ -1790,6 +2179,12 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         animsign_damage(s, o, mi, who);              /* a billboard's front or attachment: no TakeDamage */
     else if (o->kind == SK_DAMAGING)
         damaging_damage(s, o, mi, who);
+    else if (o->kind == SK_TOWER && who && mi >= 0)  /* from a monster */
+        tower_hit(s, o, mi);
+    else if (o->kind == SK_CRANE)
+        crane_damage(s, o, mi, who, s->amount);
+    else if (o->kind == SK_KITE && who && mi >= 0)
+        kite_fly(o);
     else if (o->kind == SK_FOUNTAIN) {               /* the blow's way [G: the monster's facing] */
         float d[3] = { who ? -sinf(who->facing) : 0, who ? cosf(who->facing) : 0, 0 };
         fountain_break(s, o, who ? mi : -1, d);
@@ -1801,7 +2196,7 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
 int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const float centre[3], float radius,
                   float amount, unsigned record)
 {
-    (void)amount;                                    /* neither script looks at it */
+    s->amount = amount;                              /* (Crane.bsf's TakeDamage reads it) */
     int n = 0;
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
@@ -1849,6 +2244,10 @@ int streetobj_take_impact(StreetObjs *s, int i)
     if (o->alive && o->kind == SK_FOUNTAIN) {        /* Fountain.bsf's: broken, straight up, no score */
         static const float up[3] = { 0, 0, 0 };
         fountain_break(s, o, -1, up);
+        return 1;
+    }
+    if (o->alive && o->kind == SK_TOWER) {           /* WaterTower.bsf's: as a blow, no score */
+        tower_hit(s, o, -1);
         return 1;
     }
     if (o->alive && o->kind == SK_ANIMSIGN) {        /* AnimatedSign.bsf's: the same, its HitEffect on it */

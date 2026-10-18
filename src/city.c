@@ -497,6 +497,39 @@ static void place_attachments(City *c, Scene *s, Group inst, Group t, int id, in
     }
 }
 
+/* a script's object made in its Construct (gWorld.createScriptObject): WaterTower.bsf's tank (OTRef|Attachment, at
+ * its model's node 1, else 3.6 above it; setPoint alone), Crane.bsf's cargo (OTRef|Attatchment at node 1, only with
+ * one; setFacing(0, 0, CargoZRotOffset x pi)) [R], as the street object after it whose parent is street object
+ * `parent` */
+static void place_made(City *c, Scene *s, Group t, int id, int parent, const char *key, float turn, int need_node)
+{
+    const char *name = group_str(t, key);
+    float p[3];
+    if (!name || s->nstreet >= SCENE_STREET_MAX)
+        return;
+    if (rest_node(&s->instances[id], 1, p) != 0) {
+        if (need_node)
+            return;
+        memcpy(p, s->instances[id].base.m + 12, sizeof p);
+        p[2] += 3.6f;
+    }
+    Group at = template_of(c, name);
+    const char *shape = at.at ? group_str(at, "Shape|Shape") : NULL;
+    Mat4 m = mat_trs_z(p[0], p[1], p[2], turn);
+    int a = shape ? place_model(c, s, shape, m, -1) : -1;
+    if (a < 0)
+        return;
+    struct SceneStreetObj *so = &s->street[s->nstreet++];
+    memset(so, 0, sizeof *so);
+    so->t = at;
+    so->first = so->model = a;
+    so->last = (int)s->ninstances;
+    so->building = s->placing_building;
+    so->nrel = -1;
+    so->parent = parent;
+    memcpy(so->world, m.m, sizeof so->world);
+}
+
 static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
 {
     Group t = template_of(c, group_str(inst, "Name"));
@@ -552,7 +585,8 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         return;
     }
     /* a DamagingEffect.bsf object (the Las Vegas geysers) is an InvisShape: no model, its effect alone */
-    int invisible = script && !_stricmp(script, "DamagingEffect.bsf") && !_stricmp(shape, "InvisShape");
+    int invisible = script && (!_stricmp(script, "DamagingEffect.bsf") || !_stricmp(script, "KiteAnchor.bsf")) &&
+                    !_stricmp(shape, "InvisShape");
     int missing = s->missing;
     int id = place_model(c, s, shape, at, -1);
     if (invisible)
@@ -575,11 +609,12 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
             s->army_obj[k].rel[i - id - 1] = mat_mul(inv, s->instances[i].base);
     }
     int billboard = script && (!_stricmp(script, "Billboard.bsf") || !_stricmp(script, "Billboard_George.bsf"));
+    int tower = script && !_stricmp(script, "WaterTower.bsf"), crane = script && !_stricmp(script, "Crane.bsf");
     if ((id >= 0 || invisible) && script && (s->placing_block || s->placing_building >= 0) &&
         s->nstreet < SCENE_STREET_MAX &&
         (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") || billboard ||
          !_stricmp(script, "MerryGoRound.bsf") || !_stricmp(script, "Sign.bsf") ||
-         !_stricmp(script, "AnimatedSign.bsf") || !_stricmp(script, "Fountain.bsf") || invisible)) {
+         !_stricmp(script, "AnimatedSign.bsf") || !_stricmp(script, "Fountain.bsf") || invisible || tower || crane)) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
         so->t = t;
         so->inst = inst;
@@ -594,6 +629,18 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         memcpy(so->world, at.m, sizeof so->world);
         if (billboard)
             place_attachments(c, s, inst, t, id, s->nstreet - 1, !_stricmp(script, "Billboard_George.bsf"));
+        if (crane && id >= 0) {                      /* its nodes 1 and 2 in its own frame: the cargo's track */
+            for (int n = 1; n <= 2 && rest_node(&s->instances[id], n, so->node[n - 1]) == 0; n++) {
+                float d[3] = { so->node[n - 1][0] - at.m[12], so->node[n - 1][1] - at.m[13], so->node[n - 1][2] - at.m[14] };
+                for (int r = 0; r < 3; r++)
+                    so->node[n - 1][r] = at.m[4 * r] * d[0] + at.m[4 * r + 1] * d[1] + at.m[4 * r + 2] * d[2];
+                so->nnode = n;
+            }
+        }
+        if (tower && id >= 0)
+            place_made(c, s, t, id, s->nstreet - 1, "OTRef|Attachment", 0, 0);
+        if (crane && id >= 0)
+            place_made(c, s, t, id, s->nstreet - 1, "OTRef|Attatchment", 180 * group_num(t, "CargoZRotOffset", 0), 1);
     }
     const char *flags = group_str(t, "Flags");
     if (id >= 0 && flags && strstr(flags, "IsObstacle")) {   /* 0x335ED0: IsObstacle sets object flag 0x40000 */

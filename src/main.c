@@ -1072,6 +1072,8 @@ static void build(Viewer *v)
                             streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack);
             if (v->sobj_of[k] >= 0)
                 v->street_of[v->sobj_of[k]] = k;
+            if (v->sobj_of[k] >= 0 && so->nnode)     /* the crane's nodes */
+                streetobj_nodes(v->sobj, v->sobj_of[k], (const float (*)[3])so->node, so->nnode);
         }
         if (v->sobj)
             streetobj_start(v->sobj, sbs, nb);

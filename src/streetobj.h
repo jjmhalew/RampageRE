@@ -83,7 +83,7 @@ typedef struct {
  * AnimatedSign.bsf (VegasCowboySign), Billboard_George.bsf (GeorgeBillboard), Fountain.bsf (the fountains'
  * sculptures, the fire hydrants), DamagingEffect.bsf (the geysers, the puddles) */
 enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN, SK_BILLBOARD, SK_2PART, SK_ATTACH, SK_ANIMSIGN, SK_GEORGE, SK_FOUNTAIN,
-       SK_DAMAGING };
+       SK_DAMAGING, SK_TOWER, SK_CRANE, SK_KITE };   /* WaterTower.bsf, Crane.bsf, KiteAnchor.bsf */
 /* object flags (+0x4C) [R]: the template's Flags names (the table 0x3F5F20), StreetObject's Construct (0x8000 unless
  * OnlyHitWithEffNodes is 0 or IsSwaying), onPickup / onThrow clearing 0x4000 / 0x10000, 0x20000 while held,
  * 0x4000000 attached to a building (0x309E20) */
@@ -137,6 +137,16 @@ typedef struct {
     int on_path;
     int made;                                        /* made by a script (gWorld.createScriptObject): no model of the
                                                       * caller's (the geysers), streetobj_count grew */
+    /* its model's nodes 1 and 2 in its own frame (the caller's, streetobj_nodes: getNodePosition) */
+    float node[2][3];
+    int nnode;
+    /* a LineMover (0x31C0B0: from where it is to `to` at `speed` a second; onMoverCallback at its end) */
+    float lm_to[3], lm_speed;
+    int lm_on;
+    /* Crane.bsf: fallDir, vel, rbTime, hitPoints, crackingSfxDelay, dieDelay, cargoRotOffset.z, cargoProgress,
+     * cargoDir, slideVel, rotMin, rotMax, rotVel (rotDir is rot_dir, axisA axis, totalAngle total_angle) */
+    float fall_dir[3], vel[3], rb_time, hp, crack_delay, die_delay, cargo_rot, cargo_at, cargo_dir, slide_vel,
+          rot_min, rot_max, rot_vel;
 } StreetObj;
 
 /* ---- what happened */
@@ -186,6 +196,8 @@ int streetobj_add(StreetObjs *s, Group tmpl, Group inst, const float world[16], 
 /* a billboard's attachment (Billboard.bsf's onInit: gWorld.createScriptObject(AttachmentN) at its node N, 0.5 out
  * from it in -y; Billboard_George.bsf's jaw 0.5, bottle 0.25): object `parent`'s, made by the caller where the game
  * puts it; its kind from its script (Billboard_2Part.bsf, else none: SK_ATTACH). Before streetobj_start */
+/* object i's model nodes 1 .. n (n <= 2) in its own frame, for its script's getNodePosition (the crane's) */
+void streetobj_nodes(StreetObjs *s, int i, const float node[][3], int n);
 int streetobj_add_attachment(StreetObjs *s, int parent, Group tmpl, const float world[16]);
 /* the block's start (0x2B6580 -> 0x309E20): each object without a building is attached to the building whose
  * footprint holds it (inclusive, the last such one: 0x2A3D20 with no direction) */
