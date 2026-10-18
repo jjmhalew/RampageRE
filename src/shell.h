@@ -198,12 +198,20 @@ enum {
                                      * answer with shell_buddy_profile */
     SHELL_EVT_CHEATS,               /* gCommon.setCheatFlags / setCheatFlagsI / clearCheatFlags: arg the new flags,
                                      * value the parameter of flag 0x80000000 (the start block) or 16 (the video) */
-    SHELL_EVT_START                 /* gShell.startGame() (shell state 4): play shell_game() */
+    SHELL_EVT_START,                /* gShell.startGame() (shell state 4): play shell_game() */
+    SHELL_EVT_GRAPHICS              /* port extra, Options' Graphics page: shell_graphics() changed (arg 0: to try, or
+                                     * back to what the page opened with; 1: the page's Accept, to keep) */
 };
 typedef struct { int kind; int arg; float value; char name[32]; } ShellEvent;
 int shell_events(Shell *s, ShellEvent *out, int max);
 const ShellGame *shell_game(const Shell *s);
 void shell_settings(const Shell *s, float *sound, float *music, int *rumble);
+/* port extra (docs/NATIVE.md "Graphics settings"): the graphics settings the Options' Graphics page shows, in
+ * settings.h's values (smaa 0 .. 4, msaa 0 2 4 8, aniso 1 2 4 8 16, the rest 0 / 1). The viewer gives the ones in use
+ * every frame (the page takes them as it opens); shell_graphics is the page's, after SHELL_EVT_GRAPHICS */
+typedef struct { int ao, smaa, msaa, aniso, mips, fullscreen, vsync; } ShellGraphics;
+void shell_set_graphics(Shell *s, const ShellGraphics *g);
+const ShellGraphics *shell_graphics(const Shell *s);
 /* MonsterSelect::onGetBuddyProfileCallback(player): the buddy profile for player n was loaded (its monster flags in
  * the profile's monster_flags[n], set them with shell_set_profile first), or -1: none */
 void shell_buddy_profile(Shell *s, int player);

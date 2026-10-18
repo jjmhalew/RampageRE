@@ -282,6 +282,8 @@ typedef struct Viewer {
     uint32_t world_rng;                              /* gShell +0x1C: the state the world's seeds are drawn from */
     ShellStart kept;                                 /* what gShell keeps while the game plays (shell_keep) */
     const char *prof_path; int prof_write;           /* its file; written at the Results (not by --shot runs) */
+    Settings *gfx; Window *win; int gfx_write;       /* the graphics settings and the window (the Options' Graphics
+                                                      * page), rampage.cfg written (not by --shot runs) */
     int play_type;                                   /* --play: GP_CAMPAIGN (default), King of the City / World, Timed Run */
     int attract;                                     /* the game is the attract mode's demo (play type 0, all bots) */
     int attract_button;                              /* its end came from a button (GE_EXIT 2, b 1) */
@@ -6953,6 +6955,17 @@ static int shell_answer(Viewer *v)
             case SHELL_EVT_BUDDY_PROFILE: shell_buddy_profile(v->shell, -1); break;   /* no second profile here */
             case SHELL_EVT_CHEATS: v->prof.cheats = (uint32_t)e->arg; break;
             case SHELL_EVT_START: start = 1; break;
+            case SHELL_EVT_GRAPHICS:                 /* the Options' Graphics page: tried, put back or kept */
+                if (v->gfx && v->win) {
+                    const ShellGraphics *g = shell_graphics(v->shell);
+                    Settings to = *v->gfx;
+                    to.ao = g->ao; to.smaa = g->smaa; to.msaa = g->msaa; to.aniso = g->aniso; to.mips = g->mips;
+                    to.fullscreen = g->fullscreen; to.vsync = g->vsync;
+                    settings_graphics(v->gfx, v->win, &to);
+                    if (e->arg && v->gfx_write)
+                        settings_save(v->gfx, "rampage.cfg");
+                }
+                break;
             case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
             case SHELL_EVT_ATTRACT_GAME:             /* the demo (shell_game(), play type 0): its loading screen,
                                                       * then SHELL_EVT_START as any game */
@@ -7260,6 +7273,16 @@ static int pad0_held(const Viewer *v)
     return h;
 }
 
+/* the graphics settings in use, for the Options' Graphics page as it opens */
+static void shell_give_graphics(Viewer *v)
+{
+    if (!v->gfx)
+        return;
+    ShellGraphics g = { v->gfx->ao, v->gfx->smaa, v->gfx->msaa, v->gfx->aniso, v->gfx->mips, v->gfx->fullscreen,
+                        v->gfx->vsync };
+    shell_set_graphics(v->shell, &g);
+}
+
 /* the shell's frame: the pad (Enter / Space accept, Backspace back, the arrows, P start, C / V / R the buttons,
  * letters and digits into the name entry, F2 L2 + R2 held for the cheat entry; each controller as its own pad), its
  * time, its answers */
@@ -7303,6 +7326,7 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
     int held = (w->keys[VK_LEFT] ? SHELL_HELD_LEFT : 0) | (w->keys[VK_RIGHT] ? SHELL_HELD_RIGHT : 0) |
                (w->keys[VK_F2] ? SHELL_HELD_L2 | SHELL_HELD_R2 : 0) | pad0_held(v);
     shell_pad_held(v->shell, pad0_x(v), held);
+    shell_give_graphics(v);
     card_free(v, dt);
     shell_update(v->shell, dt);
     gui3d_step(v, v->shell, dt);
@@ -7322,6 +7346,7 @@ static const char *shell_script(Viewer *v, const char *script)
     char word[32], arg[32];
     int pad = 0;
     while (*p && v->shell && !v->shell_go) {
+        shell_give_graphics(v);
         while (*p == ' ' || *p == ',') p++;
         int n = 0, k = 0;
         while (*p && *p != ' ' && *p != ',' && n < 31) word[n++] = *p++;
@@ -7759,6 +7784,9 @@ static int viewer_main(int argc, char **argv)
         return 1;
     }
     settings_apply(&gfx, &w);
+    v.gfx = &gfx;
+    v.win = &w;
+    v.gfx_write = !shot;
     if (!shot) {                                     /* the controllers: never for a --shot run (no light, no motor,
                                                       * the --do words alone drive it) */
         v.pads_live = 1;

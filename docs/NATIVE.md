@@ -421,8 +421,17 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
 
 **rampage.cfg** is read from the current directory (next to `rampage_profile.bin`) before the window opens: one
-`key=value` per line, `#` starts a comment, unknown keys are reported. The viewer never writes it; the keys change the
-running session and print the settings as `rampage.cfg` lines (`graphics: ao=1 ...`) and in the title. Order: the
+`key=value` per line, `#` starts a comment, unknown keys are reported. The keys change the running session and print
+the settings as `rampage.cfg` lines (`graphics: ao=1 ...`) and in the title, without writing the file.
+
+**The Graphics page** (shell.c `op_graphics_*`): the Options screen of the main menu has a third button, Triangle
+**Graphics** (key V), next to Cancel and Accept. It opens a page in the same frame,
+widened and made taller, whose rows are copies of the Vibration row: Ambient Occlusion, SMAA (off, low, medium, high,
+ultra), MSAA (off, 2x, 4x, 8x), Texture Filter (anisotropy: off, 2x .. 16x), Mipmaps, Fullscreen and VSync. Up and
+down choose the row (its title pulses), left and right the value, which is applied at once. Accept keeps them and
+writes them to `rampage.cfg` (`settings_save`: each key's line changed in place with its comment, the missing keys
+added at the end, every other line left as it was; never in a `--shot` run). Back puts back what the page opened
+with. Either way it returns to the Options. The window size and the AO radius stay `rampage.cfg`'s alone. Order: the
 defaults, `rampage.cfg`, the environment, the flags. **A `--shot` run reads no `rampage.cfg`** (flags and environment
 only), so test pictures stay the same whatever the file says; there the window, fullscreen and vsync keys do nothing (the
 frame is the offscreen framebuffer object, F11 is a no-op for a hidden window), and the effects are drawn into the

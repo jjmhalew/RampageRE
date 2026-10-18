@@ -1924,10 +1924,17 @@ typedef struct {
     Faders fd;
 } CitySel;
 
+enum { GFX_ROWS = 7 };
 typedef struct {
     Node *group, *sound, *music, *rumble, *titles[3];
     int initialized, mode, exiting, rumble_on, tweak_sound;
     float f_music, f_sound, pulse, tick;
+    /* port extra: the Graphics page (Triangle), in the Options' own frame made taller (op_graphics_build) */
+    Node *rect, *title, *line, *buttons, *g_button, *g_group, *g_titles[GFX_ROWS], *g_lists[GFX_ROWS];
+    int page, g_mode;
+    float rect_x, rect_y, rect_w, rect_h, buttons_x, buttons_y, title_x, line_x1;
+    char title_text[MAX_TEXT];
+    ShellGraphics g_open, g_page;                        /* the values the page opened with, its own */
 } Options;
 
 /* the SaveGame popup's panels [R 0x341880: +0x2D0 1 the profile list, 2 the name entry, 3 the messages] */
@@ -2035,6 +2042,7 @@ struct Shell {
     ShellEvent ev[MAX_EVENTS];
     int nev;
     ShellQuad *quads;
+    ShellGraphics gfx;                                   /* the viewer's (shell_set_graphics) */
 };
 
 static void event(Shell *s, int kind, const char *name, int arg, float value)
@@ -3733,14 +3741,210 @@ static void op_save(Shell *s)
         save_profile(s);
 }
 
-static void op_event(Shell *s, int ev, int pad, float dt)
+/* ---- port extra: the Graphics page (docs/NATIVE.md "Graphics settings"). Triangle on the Options opens it in the
+ * same frame, made taller: a row for each setting, its title and list copies of the Vibration row's, the button a copy
+ * of Cancel with the main menu's Options icon. Up / down choose the row (its title pulses), left / right the value,
+ * tried at once (SHELL_EVT_GRAPHICS); Accept keeps them (the viewer writes rampage.cfg), Back puts back what the page
+ * opened with; either goes back to the Options */
+static const struct { const char *title; int n; const char *items[5]; int values[5]; } GFX_ROW[GFX_ROWS] = {
+    { "Ambient Occlusion:", 2, { "ON", "OFF" }, { 1, 0 } },
+    { "SMAA:", 5, { "OFF", "LOW", "MED", "HIGH", "ULTRA" }, { 0, 1, 2, 3, 4 } },
+    { "MSAA:", 4, { "OFF", "2X", "4X", "8X" }, { 0, 2, 4, 8 } },
+    { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 } },
+    { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 } },
+    { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 } },
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 } } };
+#define GFX_EXTRA 86.0f                                  /* the frame's height added for the page */
+#define GFX_WIDER 60.0f                                  /* and its width, half each side */
+#define GFX_Y0 80.0f                                     /* the first row, in the Options group's frame */
+#define GFX_PITCH 30.0f
+#define GFX_TITLE_SCALE 0.65f
+
+static int *gfx_field(ShellGraphics *g, int row)
+{
+    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync };
+    return f[row];
+}
+
+static void op_graphics_build(Shell *s, Node *r)
+{
+    Options *o = &s->op;
+    Layout *L = s->ifc[IF_OPTIONS];
+    Node *back = find(r, "nb_back"), *boxes = find(r, "listboxes");
+    Node *mm_opt = find(ifc_root(s, IF_MAINMENU), "btn_options");
+    o->rect = find(r, "options_rect");
+    o->title = find(r, "options_title");
+    o->line = find(r, "line_horizontal");                /* (under the title: its right end follows the width) */
+    o->buttons = find(r, "buttonSizer");
+    if (!o->rect || !o->buttons || !o->group || !back || !boxes || !o->rumble || !o->titles[2])
+        return;
+    o->rect_x = o->rect->p[0];
+    o->rect_y = o->rect->p[1];
+    o->rect_w = o->rect->d[0];
+    o->rect_h = o->rect->d[1];
+    o->buttons_x = o->buttons->p[0];
+    o->buttons_y = o->buttons->p[1];
+    if (o->line && o->line->has_ep)
+        o->line_x1 = o->line->ep[2];
+    else
+        o->line = NULL;
+    if (o->title) {
+        o->title_x = o->title->p[0];
+        snprintf(o->title_text, sizeof o->title_text, "%s", o->title->text);
+    }
+    Node *b = node_copy(L, back, o->buttons);            /* the button, first in the row */
+    if (b) {
+        Node **pp = &o->buttons->child;
+        while (*pp != b) pp = &(*pp)->next;
+        *pp = b->next;
+        b->next = o->buttons->child;
+        o->buttons->child = b;
+        snprintf(b->name, sizeof b->name, "nb_graphics");
+        set_text(b, "Graphics");
+        if (mm_opt && b->child && mm_opt->child) {
+            b->child->tex = mm_opt->child->tex;
+            b->child->has_tex = mm_opt->child->has_tex;
+        }
+        if (mm_opt) {
+            memcpy(b->tcol, mm_opt->tcol, sizeof b->tcol);
+            b->has_tcol = mm_opt->has_tcol;
+        }
+        fix_button(o->buttons, "nb_graphics", 3);
+        o->g_button = b;
+    }
+    Node *g = node_copy(L, boxes, o->rect);              /* the page: a group in the Options group's place */
+    if (!g)
+        return;
+    g->child = NULL;
+    snprintf(g->name, sizeof g->name, "graphics_group");
+    memcpy(g->p, o->group->p, sizeof g->p);
+    g->p[0] += 40;                                       /* (in the wider frame: 10 right of the Options') */
+    show(g, 0);
+    o->g_group = g;
+    for (int i = 0; i < GFX_ROWS; i++) {
+        float y = GFX_Y0 + GFX_PITCH * (float)i;
+        Node *t = node_copy(L, o->titles[2], g), *l = node_copy(L, o->rumble, g);
+        if (!t || !l || !l->child || !l->child->next)
+            continue;
+        snprintf(t->name, sizeof t->name, "graphics_title_%d", i);
+        snprintf(l->name, sizeof l->name, "graphics_list_%d", i);
+        set_text(t, GFX_ROW[i].title);
+        t->tscale = GFX_TITLE_SCALE;
+        set_pos(t, o->titles[2]->p[0] - 30, y + 3, 0);   /* (the titles and lists 30 and 65 left of Vibration's) */
+        set_pos(l, o->rumble->p[0] - 65, y, 0);
+        Node *first = l->child, *second = first->next;
+        int many = GFX_ROW[i].n > 2;                     /* more than ON / OFF: smaller, closer, growing less */
+        float x0 = many ? 0.0f : first->p[0], dx = many ? 52.0f : second->p[0] - first->p[0];
+        for (int k = 2; k < GFX_ROW[i].n; k++)
+            node_copy(L, second, l);
+        if (many)
+            l->growth[0] = 1.0f + 0.5f * (l->growth[0] - 1.0f);
+        int k = 0;
+        for (Node *it = l->child; it; it = it->next, k++) {
+            set_text(it, GFX_ROW[i].items[k]);
+            it->p[0] = x0 + dx * (float)k;
+            if (many)
+                it->tscale = 0.6f;
+        }
+        o->g_titles[i] = t;
+        o->g_lists[i] = l;
+    }
+}
+
+/* the page's values from its lists */
+static void op_graphics_read(Options *o)
+{
+    for (int i = 0; i < GFX_ROWS; i++) {
+        int k = o->g_lists[i] ? o->g_lists[i]->sel : 0;
+        *gfx_field(&o->g_page, i) = GFX_ROW[i].values[k >= 0 && k < GFX_ROW[i].n ? k : 0];
+    }
+}
+
+/* the page shown (1) or the Options (0) */
+static void op_page(Shell *s, int page)
+{
+    Options *o = &s->op;
+    o->page = page && o->g_group;
+    show(o->group, !o->page);
+    show(o->g_group, o->page);
+    show(o->g_button, !o->page);
+    float w = o->page ? GFX_WIDER : 0, h = o->page ? GFX_EXTRA : 0;
+    if (o->rect) {
+        set_pos(o->rect, o->rect_x - w / 2, o->rect_y - h / 2, o->rect->p[2]);
+        o->rect->d[0] = o->rect_w + w;
+        o->rect->d[1] = o->rect_h + h;
+    }
+    if (o->buttons)
+        set_pos(o->buttons, o->buttons_x + w, o->buttons_y + h, o->buttons->p[2]);
+    if (o->title) {
+        set_text(o->title, o->page ? "GRAPHICS" : o->title_text);
+        o->title->p[0] = o->title_x + w / 2;
+    }
+    if (o->line)
+        o->line->ep[2] = o->line_x1 + w;
+    for (int i = 0; i < 3; i++)
+        if (o->titles[i]) o->titles[i]->tscale = 1.0f;
+    for (int i = 0; i < GFX_ROWS; i++)
+        if (o->g_titles[i]) o->g_titles[i]->tscale = GFX_TITLE_SCALE;
+    o->pulse = 0;
+}
+
+static void op_graphics_open(Shell *s)
+{
+    Options *o = &s->op;
+    o->g_open = o->g_page = s->gfx;
+    o->g_mode = 0;
+    for (int i = 0; i < GFX_ROWS; i++) {
+        int v = *gfx_field(&o->g_open, i), k = 0;
+        for (int j = 0; j < GFX_ROW[i].n; j++)
+            if (GFX_ROW[i].values[j] == v)
+                k = j;
+        list_select(o->g_lists[i], k);
+    }
+    op_page(s, 1);
+}
+
+static void op_graphics_event(Shell *s, int ev)
+{
+    Options *o = &s->op;
+    if (ev == EV_ACCEPT) {
+        sound(s, "Click");
+        op_graphics_read(o);
+        event(s, SHELL_EVT_GRAPHICS, NULL, 1, 0);
+        op_page(s, 0);
+    } else if (ev == EV_BACK) {
+        sound(s, "Cancel");
+        o->g_page = o->g_open;
+        event(s, SHELL_EVT_GRAPHICS, NULL, 0, 0);
+        op_page(s, 0);
+    } else if (ev == EV_UP || ev == EV_DOWN) {
+        if (o->g_titles[o->g_mode]) o->g_titles[o->g_mode]->tscale = GFX_TITLE_SCALE;
+        o->g_mode = (o->g_mode + (ev == EV_UP ? GFX_ROWS - 1 : 1)) % GFX_ROWS;
+        o->pulse = 0;
+        sound(s, "Rollover");
+    } else if (ev == EV_LEFT || ev == EV_RIGHT) {
+        Node *l = o->g_lists[o->g_mode];
+        int sel = l ? l->sel : 0;
+        list_increment(l, ev == EV_RIGHT ? 1 : -1);
+        if (l && l->sel != sel) {
+            op_graphics_read(o);
+            event(s, SHELL_EVT_GRAPHICS, NULL, 0, 0);
+        }
+        sound(s, "Rollover");
+    }
+}
+
+static void op_event(Shell *s, int ev, int button, int pad, float dt)
 {
     Options *o = &s->op;
     Node *r = ifc_root(s, IF_OPTIONS);
     (void)pad;
     if (ev == EV_FRAME) {
         o->pulse += dt;                                  /* pulseSelection */
-        if (o->titles[o->mode]) o->titles[o->mode]->tscale = 1.0f + sinf(4.0f * o->pulse) * 0.1f;
+        if (o->page && o->g_titles[o->g_mode])
+            o->g_titles[o->g_mode]->tscale = GFX_TITLE_SCALE * (1.0f + sinf(4.0f * o->pulse) * 0.1f);
+        else if (!o->page && o->titles[o->mode])
+            o->titles[o->mode]->tscale = 1.0f + sinf(4.0f * o->pulse) * 0.1f;
         mm_update_faders(s, dt);
         if (o->exiting) {
             if (s->mc.mode == MC_OFF) {                  /* !gCommon.isSaveGameActive() */
@@ -3759,7 +3963,7 @@ static void op_event(Shell *s, int ev, int pad, float dt)
         while (o->tick >= TICK) {
             o->tick -= TICK;
             Node *sl = o->mode == 1 ? o->music : o->sound;
-            if (o->mode < 2 && sl) {
+            if (o->mode < 2 && sl && !o->page) {
                 if (s->held_x >= 0.05f || (s->held_buttons & SHELL_HELD_RIGHT)) sl->val = fminf(sl->val + 1, 100);
                 else if (s->held_x <= -0.05f || (s->held_buttons & SHELL_HELD_LEFT)) sl->val = fmaxf(sl->val - 1, 0);
             }
@@ -3793,10 +3997,17 @@ static void op_event(Shell *s, int ev, int pad, float dt)
             if (on) on->tscale = 0.6f;
             if (off) off->tscale = 0.6f;
         }
+        op_graphics_build(s, r);
         op_setup(s);
-    } else if (ev == EV_GAIN)
+    } else if (ev == EV_GAIN) {
         op_setup(s);
-    else if (ev == EV_ACCEPT) {
+        op_page(s, 0);
+    } else if (o->page)
+        op_graphics_event(s, ev);
+    else if (ev == EV_BUTTON && button == 1 && o->g_group) {   /* Triangle: the Graphics page */
+        sound(s, "Click");
+        op_graphics_open(s);
+    } else if (ev == EV_ACCEPT) {
         sound(s, "Click");
         op_save(s);                                      /* and gCommon.saveProfile() */
         o->exiting = 1;
@@ -4936,7 +5147,7 @@ static void ifc_event(Shell *s, int which, int ev, int button, int pad, float dt
     case IF_MONSTERSELECT: ms_event(s, ev, button, pad, dt); break;
     case IF_MONSTERSHEET: sheet_event(s, ev, button, pad, dt); break;
     case IF_CITYSELECT: cs_event(s, ev, button, pad, dt); break;
-    case IF_OPTIONS: op_event(s, ev, pad, dt); break;
+    case IF_OPTIONS: op_event(s, ev, button, pad, dt); break;
     }
 }
 
@@ -4978,7 +5189,8 @@ static void cr_open(Shell *s)
     for (int i = 0; i < IF_COUNT; i++) {
         char name[32];
         snprintf(name, sizeof name, "%s.ifc", IFC_NAMES[i]);
-        s->ifc[i] = layout_load(&s->gui, &s->b_shell, name, i == IF_MONSTERSHEET ? 30 * 24 : 16);
+        s->ifc[i] = layout_load(&s->gui, &s->b_shell, name, i == IF_MONSTERSHEET ? 30 * 24 : i == IF_OPTIONS ? 128 :
+                                16);                     /* (Options: its Graphics page, op_graphics_build) */
     }
     for (int i = 0; i < IF_COUNT; i++)
         ifc_event(s, i, EV_INIT, 0, 0, 0);
@@ -5509,6 +5721,9 @@ void shell_settings(const Shell *s, float *sound_vol, float *music_vol, int *rum
     if (music_vol) *music_vol = s->prof.music;
     if (rumble) *rumble = s->prof.rumble;
 }
+
+void shell_set_graphics(Shell *s, const ShellGraphics *g) { if (s && g) s->gfx = *g; }
+const ShellGraphics *shell_graphics(const Shell *s) { return s ? &s->op.g_page : NULL; }
 
 int shell_state(const Shell *s) { return s ? s->state : 0; }
 

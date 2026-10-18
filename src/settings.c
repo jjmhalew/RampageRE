@@ -228,3 +228,75 @@ void settings_describe(const Settings *s, char *buf, size_t cap)
     if (s->mips) ADD(", mips");
     #undef ADD
 }
+
+void settings_graphics(Settings *s, Window *w, const Settings *to)
+{
+    int mode = to->fullscreen != s->fullscreen, sync = to->vsync != s->vsync;
+    s->ao = to->ao;
+    s->smaa = to->smaa < 0 ? 0 : to->smaa > 4 ? 4 : to->smaa;
+    s->msaa = clamp_msaa(to->msaa);
+    s->aniso = clamp_aniso(to->aniso);
+    s->mips = to->mips;
+    s->fullscreen = to->fullscreen;
+    s->vsync = to->vsync;
+    apply_render(s);
+    if (!w->hidden && mode)
+        win_mode(w, s->width, s->height, s->fullscreen);
+    if (!w->hidden && sync)
+        win_vsync(w, s->vsync);
+    print(s);
+}
+
+int settings_save(const Settings *s, const char *path)
+{
+    static const char *const KEYS[] = { "fullscreen", "vsync", "ao", "smaa", "msaa", "aniso", "mips" };
+    enum { NK = sizeof KEYS / sizeof *KEYS, MAXL = 256 };
+    char val[NK][16], *lines[MAXL], line[512];
+    int n = 0, done[NK] = { 0 };
+    snprintf(val[0], sizeof val[0], "%d", s->fullscreen);
+    snprintf(val[1], sizeof val[1], "%d", s->vsync);
+    snprintf(val[2], sizeof val[2], "%d", s->ao);
+    snprintf(val[3], sizeof val[3], "%s", SMAA_NAMES[s->smaa < 0 ? 0 : s->smaa > 4 ? 4 : s->smaa]);
+    snprintf(val[4], sizeof val[4], "%d", s->msaa);
+    snprintf(val[5], sizeof val[5], "%d", s->aniso);
+    snprintf(val[6], sizeof val[6], "%d", s->mips);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        while (n < MAXL && fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!(lines[n] = strdup(line)))
+                break;
+            n++;
+        }
+        fclose(f);
+    }
+    f = fopen(path, "w");
+    for (int i = 0; i < n; i++) {
+        const char *k = lines[i];
+        while (isspace((unsigned char)*k)) k++;
+        size_t len = strcspn(k, " \t=#");
+        const char *after = k + len;
+        while (*after == ' ' || *after == '\t') after++;
+        int key = -1;
+        for (int j = 0; *after == '=' && j < NK; j++)
+            if (strlen(KEYS[j]) == len && !_strnicmp(k, KEYS[j], len))
+                key = j;
+        if (f && key < 0)
+            fprintf(f, "%s\n", lines[i]);
+        else if (f && !done[key]) {                  /* the key's line, its comment kept; a second one dropped */
+            const char *hash = strchr(lines[i], '#');
+            fprintf(f, "%s=%s%s%s\n", KEYS[key], val[key], hash ? " " : "", hash ? hash : "");
+            done[key] = 1;
+        }
+        free(lines[i]);
+    }
+    for (int j = 0; f && j < NK; j++)
+        if (!done[j])
+            fprintf(f, "%s=%s\n", KEYS[j], val[j]);
+    if (!f || fclose(f) != 0) {
+        printf("settings: could not write %s\n", path);
+        return -1;
+    }
+    printf("settings: %s written\n", path);
+    return 0;
+}
