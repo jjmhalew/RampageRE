@@ -1245,6 +1245,26 @@ static int weapon_aim(Army *a, ArmyUnit *u, ArmyWeapon *w, const float tp[3], in
     return on;
 }
 
+/* [R 0x295650] the beam weapon's hold (RBeamWeapon's vtable 0x4497B0 +0x7C, where the others have 0x297090): as
+ * theirs, the countdown at least ChargeTime + FiringOffset and the charge effect stopped, and then the stream itself:
+ * its fire effect (+0x1A4) stopped and let go, its time left (+0x1B4) 0. The actor's update (0x30EC10) holds its
+ * weapon every frame it may not fire, so a SWAT's Rifle stream (Duration 1.5) ends the frame he is smashed, picked
+ * up or falls back */
+static void beam_hold(Army *a, ArmyWeapon *w)
+{
+    if (w->type != 1 || !w->firing)
+        return;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  %.2f: %s held, %.2f s of its beam left\n", a->now, w->name ? w->name : "?", w->beam_left);
+    for (int i = 0; i < a->nshots; i++)
+        if (a->shot[i].alive && a->shot[i].id == w->shot)
+            a->shot[i].alive = 0;
+    w->shot = -1;
+    w->firing = w->charging = 0;
+    w->beam_left = 0;
+    w->timer = fmaxf(w->timer, w->charge_time + w->firing_offset);
+}
+
 /* every weapon of a unit this frame, at its target (u->target, or the point lock for StationaryAttackObject) */
 static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point)
 {
@@ -1266,6 +1286,9 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
             float at = u->anim_len > 0.001f ? u->anim_time / u->anim_len : 0;   /* AnimPosMin .. Max (0x30C020) */
             if (at < w->anim_min || at > w->anim_max)
                 may = 0;
+            /* [R 0x30EC10] not enabled, no ammo or out of the clip's span: the weapon's hold (vtable +0x7C) */
+            if (!u->weapons_on || !w->on || w->ammo <= 0 || at < w->anim_min || at > w->anim_max)
+                beam_hold(a, w);
         }
         weapon_tick(a, u, w, may, from, dir, (const float (*)[3])F, point ? -1 : u->target, dt);
     }
@@ -3806,6 +3829,9 @@ static void unit_update(Army *a, int i, float dt)
         unit_matrix(u);
     if (u->phase == AU_ALIVE && u->nw > 0)
         unit_weapons_tick(a, u, dt, (u->kind == AK_TURRET && u->count) || u->kind == AK_FINALBOMBER ? u->lock : NULL);
+    else if (u->kind == AK_TROOP || u->kind == AK_WINDOW)   /* held or flying off: its weapon disabled, held (0x30EC10) */
+        for (int i = 0; i < u->nw; i++)
+            beam_hold(a, &u->w[i]);
 }
 
 /* ---------------------------------------------------------------- the API */

@@ -106,7 +106,11 @@ else 0.
   [R]: it tries to fire (vtable +0x68, with the target) only while it is enabled, has ammo (+0xEC > 0) and its
   current clip's position (the record's time / its length, 0x30C020; 0 for a length under 0.001) is within
   AnimPosMin .. AnimPosMax; otherwise it holds (+0x7C, 0x297090: the countdown at least ChargeTime + FiringOffset,
-  the charge effect stopped). Only `SoldierGrenadierFromWindow` (0.5 .. 0.75 of its 1 s throw) and the `Biker`
+  the charge effect stopped; the beam weapon's own hold, 0x295650 at RBeamWeapon's vtable 0x4497B0 +0x7C, also
+  stops and lets go of the stream's fire effect (+0x1A4) and zeroes its time left (+0x1B4): a SWAT's or a window
+  soldier's `Rifle` (an RBeamWeapon, Duration 1.5) stops the frame he is smashed, picked up, falls back or loses his
+  target, where the port let the stream run its Duration out, from the flying or fleeing actor and, once he was no
+  longer ticked, where he had been). Only `SoldierGrenadierFromWindow` (0.5 .. 0.75 of its 1 s throw) and the `Biker`
   (0.4 .. 1) narrow it: the biker's bottle leaves 0.28 s into its 0.7 s `Throw`. Here `unit_weapons_tick` for
   Swat.bsf and Military_Window.bsf units, `persons_update` for the people and the bikers (their clip's time and
   length handed in by `army_person_moved`).
