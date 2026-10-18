@@ -39,8 +39,9 @@ struct People {
     int hitter;                                      /* the monster slot whose blow is being dealt (people_hit) */
     struct { int building, storey, column; } retired[64];   /* the windows grabbed from (0x318140(.., 1)) */
     int nretired;
-    /* the script objects that make people: Band.bsf (once, after 0.25 s) and RoyalGuardHut.bsf (pulsing each 1 s) */
-    struct { int hut; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
+    /* the script objects that make people: Band.bsf (once, after 0.25 s), RoyalGuardHut.bsf (pulsing each 1 s) and
+     * ActorSwarm.bsf (swarm 1: pulsing each 2 s; state 0 before its first, 1 after it, 2 deleted) */
+    struct { int hut, swarm; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
     int nobj;
     Group block;                                     /* people_set_block: its ActorInstance|s for the chains */
     int not_in_play;                                 /* people_set_world_state: the world's state is not 6 */
@@ -375,6 +376,27 @@ static int mover_step(People *p, Person *q, float dt)
     const PeopleMonster *m = mover_target(p, q->pos);
     if ((q->mv.flags & 8) && m)
         q->heading = heading_of(m->pos[0] - q->pos[0], m->pos[1] - q->pos[1]);
+    /* [R 0x316380 .. 0x3167B4] flag 4: past +0x68 of a segment (0.5, set by both inits, 0x3174E0 / 0x317770) the
+     * facing turns towards the next segment's way (the first's when it loops; none on a last one that does not), by
+     * smoothstep((t - 0.5) / 0.5), under 0.001 none and over 0.999 all of it: a slerp of the two facings (+0x70, the
+     * way's), the shorter way round (ActorSwarm's children round their corner). [G: a segment of no length (the
+     * tourists' mover) is left out] */
+    if ((q->mv.flags & 4) && q->mv.t > 0.5f && (b[0] != a[0] || b[1] != a[1])) {
+        const float *c = NULL, *e = NULL;
+        if (s < q->mv.n - 2) {
+            c = b;
+            e = q->mv.pts[s + 2];
+        } else if (q->mv.flags & 2) {
+            c = q->mv.pts[0];
+            e = q->mv.pts[1];
+        }
+        if (c && (e[0] != c[0] || e[1] != c[1])) {
+            float u = (q->mv.t - 0.5f) / 0.5f, w = (3 - 2 * u) * u * u;
+            float h0 = heading_of(b[0] - a[0], b[1] - a[1]), dh = heading_of(e[0] - c[0], e[1] - c[1]) - h0;
+            dh -= 360.0f * floorf((dh + 180.0f) / 360.0f);
+            q->heading = h0 + dh * (w < 0.001f ? 0 : w > 0.999f ? 1 : w);
+        }
+    }
     if (r == 1 && q->mv.resp2 > 0)
         for (int i = 0; i < p->nm; i++) {
             float dx = q->pos[0] - p->m[i].pos[0], dy = q->pos[1] - p->m[i].pos[1], dz = q->pos[2] - p->m[i].pos[2];
@@ -1389,11 +1411,105 @@ static void create_guard(People *p, int o)
     p->obj[o].guard = who;
 }
 
+/* ActorSwarm.bsf's getStringProp: the ScriptObject's template (ChildSwarm sets the keys typed) */
+static const char *swarm_str(People *p, int o, const char *type, const char *key)
+{
+    char typed[64];
+    snprintf(typed, sizeof typed, "%s%s", type, key);
+    const char *s = group_str(p->obj[o].t, typed);
+    return s ? s : group_str(p->obj[o].t, key);
+}
+
+static void swarm_sound(People *p, int o, const char *key)   /* add3DSfx(getStringProp(key), 0) at its place */
+{
+    const char *s = swarm_str(p, o, "Sound|", key);
+    if (s)
+        emit(p, PE_SOUND, -1, s, NULL, p->obj[o].pos, 0, 1);
+}
+
+/* ActorSwarm::onPulse in its state 0 [R ActorSwarm.scr]: the Message in MessageColor (default set255(220, 0, 0, 255);
+ * getColorProp as edible.c's), RecessSound, SwarmSound; then 12 + frand x 8 actors, each of a random one of its
+ * Actor0 .. n, at its place +- 5 in x and y, running (startAnimAtRandomOffset("Running", 0)) on a LineMover at 11.5
+ * (MonsterResponseDist 0) to a middle point (x pushed 0 .. 5 further from the world's x = 0, y - 8 - 0 .. 5), then to
+ * (its x - 45 + 90 frand, its y - 50), flags 1 | 4, facing that way. Person_Child deletes each at its mover's end */
+static void swarm_out(People *p, int o)
+{
+    const float *pos = p->obj[o].pos;
+    const char *message = swarm_str(p, o, "", "Message");
+    if (message) {
+        float c[4] = { 220.0f / 255, 0, 0, 1 };
+        Group col = group_sub(p->obj[o].t, "Color|MessageColor");
+        if (!col.at)
+            col = group_sub(p->obj[o].t, "MessageColor");
+        Record r[4];
+        uint32_t nc = col.at ? group_items(col, r, 4) : 0;
+        for (uint32_t i = 0; nc >= 3 && i < nc && i < 4; i++)
+            c[i] = (float)((int)record_num(r[i]) & 0xFF) / 255.0f;
+        emit(p, PE_MESSAGE, -1, message, NULL, c, c[3], 1);
+    }
+    swarm_sound(p, o, "RecessSound");
+    swarm_sound(p, o, "SwarmSound");
+    const char *names[32];
+    int n = 0;
+    for (int i = 0; n < 32; i++) {
+        char key[32];
+        snprintf(key, sizeof key, "Actor%d", i);
+        const char *name = swarm_str(p, o, "OTRef|", key);
+        if (!name)
+            break;
+        names[n++] = name;
+    }
+    if (n == 0)
+        return;
+    int people = 12 + (int)(frand(p) * 8.0f);
+    for (int i = 0; i < people; i++) {
+        float s[3] = { pos[0], pos[1], pos[2] };
+        s[0] += -5.0f + frand(p) * 10.0f;
+        s[1] += -5.0f + frand(p) * 10.0f;
+        float m[3] = { s[0], s[1], s[2] };
+        if (m[0] < 0)
+            m[0] -= frand(p) * 5.0f;
+        else
+            m[0] += frand(p) * 5.0f;
+        m[1] = m[1] - 8.0f + frand(p) * -5.0f;
+        float d[3] = { pos[0], pos[1], pos[2] };
+        d[0] += -45.0f + frand(p) * 90.0f;
+        d[1] -= 50.0f;
+        int pick = (int)(frand(p) * (float)n);
+        Group t = p->find ? p->find(p->find_ctx, names[pick < n ? pick : n - 1]) : (Group){ NULL, 0 };
+        if (!t.at)
+            continue;
+        int who = people_add(p, t, s, 0);
+        if (who < 0)
+            continue;
+        Person *q = &p->v[who];
+        start_anim(p, q, "Running", 1, 0);
+        mover_init(q, s, m, 11.5f);
+        mover_add(q, d);
+        q->mv.flags = 1 | 4;
+        q->mv.resp2 = 0;
+        q->heading = heading_of(m[0] - s[0], m[1] - s[1]);   /* getMovementFacing, its z only */
+        place_matrix(q->world, q->pos, q->heading, NULL);
+    }
+}
+
 static void objects_update(People *p, float dt)
 {
     for (int o = 0; o < p->nobj; o++) {
         if (p->obj[o].state == 2)
             continue;
+        if (p->obj[o].swarm) {                       /* ActorSwarm: onInit set a 2 s pulse */
+            if ((p->obj[o].timer -= dt) <= 0) {
+                p->obj[o].timer = 2;
+                if (p->obj[o].state == 0) {
+                    swarm_out(p, o);
+                    p->obj[o].state = 1;
+                } else {
+                    p->obj[o].state = 2;             /* its next returns 4 | 8 | 16: deleted */
+                }
+            }
+            continue;
+        }
         if (!p->obj[o].hut) {                        /* Band: onInit sets a 0.25 s pulse, which makes the band */
             if ((p->obj[o].timer -= dt) <= 0) {
                 create_band(p, o);
@@ -1430,6 +1546,25 @@ void people_add_band(People *p, Group band, const float dest[3])
     memcpy(p->obj[o].pos, dest, sizeof p->obj[o].pos);
     p->obj[o].timer = 0.25f;
     p->obj[o].guard = -1;
+}
+
+void people_add_swarm(People *p, Group swarm, const float pos[3])
+{
+    int o = 0;
+    while (o < p->nobj && !(p->obj[o].swarm && p->obj[o].state == 2))   /* a deleted swarm's place, else a new one */
+        o++;
+    if (o == p->nobj) {
+        if (p->nobj >= MAX_OBJECTS)
+            return;
+        p->nobj++;
+    }
+    memset(&p->obj[o], 0, sizeof p->obj[o]);
+    p->obj[o].swarm = 1;
+    p->obj[o].t = swarm;
+    memcpy(p->obj[o].pos, pos, sizeof p->obj[o].pos);   /* setPoint */
+    p->obj[o].timer = 2;                             /* onInit: BellSound, state 0, setPulseDelay(2.0) */
+    p->obj[o].guard = -1;
+    swarm_sound(p, o, "BellSound");
 }
 
 int people_add_hut(People *p, Group hut, const float pos[3])

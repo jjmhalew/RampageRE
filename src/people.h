@@ -98,7 +98,9 @@ enum {
     PE_FX_ON,                                        /* an effect of the person's own that can be stopped: name at v;
                                                       * on: its slot (PFX_*); amount 1: it follows the person
                                                       * (FollowEffect attached), 0: it stays at v */
-    PE_FX_OFF                                        /* that slot's effect stops (on: the slot) */
+    PE_FX_OFF,                                       /* that slot's effect stops (on: the slot) */
+    PE_MESSAGE                                       /* PointsBanner.createAndStartText(name, colour, 0.5, ""): v
+                                                      * the colour's red, green, blue and amount its alpha (0 .. 1) */
 };
 enum {                                               /* PE_FX_ON's slots */
     PFX_AMBIENT,                                     /* the Actor's AmbientEffect (+0x108; the priests' halo) */
@@ -156,6 +158,10 @@ void people_add_band(People *p, Group band, const float dest[3]);
  * whenever none is out, every 15 s (6 s re-checks); it marches 3 out, 5 along MarchDir, performs, waits 2 s, marches
  * back and in. Returns the hut's id */
 int people_add_hut(People *p, Group hut, const float pos[3]);
+/* ActorSwarm.bsf (ChildSwarm, made by SchoolBuilding.bsf at the school's place): onInit its BellSound; 2 s later its
+ * Message (PE_MESSAGE in MessageColor), RecessSound and SwarmSound, and 12 .. 19 of its OTRef|Actor0 .. n running
+ * out at 11.5 (people_swarm in people.c); 2 s after that it is deleted */
+void people_add_swarm(People *p, Group swarm, const float pos[3]);
 /* the hut's TakeDamage (a monster hit it): it flies at -25 x the hit's direction in x and y (vel, the viewer's to
  * apply), is deleted at its next pulse, and its guard marches 80 off instead of going back in. addStats(hut, 0) */
 PeopleEaten people_hut_hit(People *p, int hut, const float direction[3], float vel[3]);

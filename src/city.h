@@ -115,6 +115,10 @@ typedef struct {                                      /* a building's cells and 
      * PlayOnlyOnce; when it last sounded (the viewer's play time; alarm_played 0 never: prevTimeStamp 0, flags & 2)
      * and that 3D sound (main.c building_alarm) */
     const char *alarm_sound; float alarm_duration, alarm_at; int alarm_once, alarm_played, alarm_h;
+    /* SchoolBuilding.bsf's (school 1): its Swarm (getStringProp: the BuildingInstance's OTRef|Swarm, else the
+     * template's; NULL none) and when its fStateTime of 20 s runs out (the viewer's play time); ChickenRestaurant.bsf's
+     * (chicken 1): bChickenRunnersCreated (main.c building_script) */
+    int school, chicken, chickens_made; const char *swarm; float swarm_next;
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
     Group inst;                                       /* its BuildingInstance| (EdibleInstance| rows, ...) */

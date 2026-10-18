@@ -2245,6 +2245,16 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         }
         sb->alarm_at = 0;
         sb->alarm_played = sb->alarm_h = 0;
+        sb->school = bsc && !_stricmp(bsc, "SchoolBuilding.bsf");     /* NY01's school_back, SF04's SF04_3x6 */
+        sb->chicken = bsc && !_stricmp(bsc, "ChickenRestaurant.bsf"); /* CG5_2x9a, HK05_3x9, LA5_3x3 */
+        sb->chickens_made = 0;
+        sb->swarm_next = 0;
+        sb->swarm = NULL;
+        if (sb->school) {                            /* getStringProp: the instance's book first, then the template */
+            static const char *const SWARM[] = { "OTRef|Swarm", "Swarm" };
+            for (int k = 0; k < 4 && !sb->swarm; k++)
+                sb->swarm = group_str(k < 2 ? inst : t, SWARM[k & 1]);
+        }
         sb->fx_wall_small = group_str(t, "Wall_Small");
         sb->fx_wall_large = group_str(t, "Wall_Large");
         sb->fx_floor = group_str(t, "Floor_Large");

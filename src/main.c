@@ -1578,6 +1578,41 @@ static void building_alarm(Viewer *v, SceneBuilding *sb)
                sb->alarm_h ? "" : " (refused)");
 }
 
+/* a monster's hit on a building, its script's DamageCell (Building::hit 0x2BC150 -> slot 0xC at 0x2BC8C0 with the
+ * hit's amount, its own f12 kept in f22 (0x2BC194), as famount: 2 for a punch or a roof hit (hitBuildingPt,
+ * hitBuildingRoof), the roar's burst its weapon's DamagePerSec (RoarWeapon 10, 0x31BB84 -> 0x31BDC0)):
+ * - AlarmBuilding.bsf: building_alarm;
+ * - SchoolBuilding.bsf [R SchoolBuilding.scr]: an amount of 2.5 or more once its fStateTime (Process: less the step
+ *   each frame) is out: 20 s again, and its Swarm (the BuildingInstance's OTRef|Swarm: ChildSwarm at NY01's
+ *   school_back and SF04's SF04_3x6) made at its place (getPosition, +0x2C: the middle of its foot) and sent onInit
+ *   (people_add_swarm: the bell, the recess, the children running out);
+ * - ChickenRestaurant.bsf [R ChickenRestaurant.scr]: an amount of 2.5 or more, once a building: FollowEffect
+ *   createAndStart Chickens_Run at (its x, -10, 0).
+ * Only the roar reaches 2.5 (and "hitcell b floor col amount") */
+static void building_script(Viewer *v, SceneBuilding *sb, float amount)
+{
+    building_alarm(v, sb);
+    if (amount < 2.5f)
+        return;
+    const float *at = &sb->node.m[12];
+    if (sb->school && v->play_now >= sb->swarm_next) {
+        sb->swarm_next = v->play_now + 20.0f;
+        Group t = sb->swarm ? city_template(v->city, sb->swarm) : (Group){ 0 };
+        if (t.at && v->scene.folk)
+            people_add_swarm(v->scene.folk, t, at);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  building %d school: swarm %s at %.1f %.1f %.1f%s\n", (int)(sb - v->scene.buildings),
+                   sb->swarm ? sb->swarm : "-", at[0], at[1], at[2], t.at ? "" : " (none)");
+    }
+    if (sb->chicken && !sb->chickens_made) {
+        float pos[3] = { at[0], -10.0f, 0.0f }, up[3] = { 0, 1, 0 };
+        scene_fx(&v->scene, "Chickens_Run", pos, up);
+        sb->chickens_made = 1;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  building %d chickens at %.1f %.1f %.1f\n", (int)(sb - v->scene.buildings), pos[0], pos[1], pos[2]);
+    }
+}
+
 static void hit_building_front(Mon *mo, const float *p)
 {
     Viewer *v = mo->v;
@@ -1611,7 +1646,7 @@ static void hit_building_front(Mon *mo, const float *p)
         building_hit(&best->b, bq, 2.0f);
     int hit = best && building_hit(&best->b, bq, 2.0f);
     if (best)
-        building_alarm(v, best);
+        building_script(v, best, 2.0f);
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
         edible_power_hit_building(&mo->power, 1, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF, others_full(mo))) {
         edible_power_start_rage(&mo->power, others_full(mo));
@@ -1664,7 +1699,7 @@ static void hit_building_roof(Mon *mo, const char *bone)
         sb->hitter = mo->slot;
     int col, roof = sb->b.roof, hit = building_hit_roof(&sb->b, at, 2.0f, &col);
     if (col >= 0)                                    /* (0x2BBE80 went on to Building::hit) */
-        building_alarm(v, sb);
+        building_script(v, sb, 2.0f);
     if (getenv("RAMPAGE_TRACE"))
         printf("  hitBuildingRoof %s at %.1f %.1f %.1f: building %d roof %d -> %d, top storey %d column %d %s "
                "(state %d, %d storeys, HP %d)\n", bone, at[0], at[1], at[2], bi, roof, sb->b.roof, sb->b.n - 1, col,
@@ -2720,7 +2755,7 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
         float at[3] = { b->min[0] + 2.5f + 5 * (float)col, b->min[1], b->min[2] + 6 + 3 * (float)s + 1.5f };
         sb->hitter = mo->slot;
         hit += building_hit(b, at, amount);
-        building_alarm(v, sb);
+        building_script(v, sb, amount);
     }
     unsigned rec = ++mo->atk_seq;                    /* the rest: TakeDamage(monster, amount, type 0, the way) */
     if (v->army)
@@ -5488,6 +5523,10 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
             if (ev[i].type == PE_WINDOW_CLOSE)       /* back in: its window shuts */
                 scene_window_close_at(&v->scene, ev[i].v);
+            if (ev[i].type == PE_MESSAGE && v->hud && ev[i].name) {   /* ActorSwarm's RECESS (createAndStartText) */
+                float rgba[4] = { ev[i].v[0], ev[i].v[1], ev[i].v[2], ev[i].amount };
+                hud_banner_text(v->hud, ev[i].name, rgba, 0.5f, "");
+            }
             if (ev[i].type == PE_FX_ON && v->fxw && ev[i].name &&   /* the ChallengeEffect only on a goal */
                 (ev[i].on != PFX_CHALLENGE || challenge_is_goal(&v->challenge, people_get(v->scene.folk, ev[i].who)->name))) {
                 int id = fx_spawn(v->fxw, ev[i].name, ev[i].v, NULL, 1);
@@ -5870,9 +5909,9 @@ static void game_next_block(Viewer *v)
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "rage" fills its energy (the rage starts);
  * "airstrike" starts the time-up airstrike;
- * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col" hits that front cell of
- * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
- * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
+ * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col [amount]" hits that front cell of
+ * building b as an attack of that amount would (2, the roar's 10); "bosshit n" is one blow of n on the block's boss;
+ * "spawn name" makes vehicle.c's object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
  * of that template 2.5 ahead on the street; "strike k" a blow on street object k; "p2" (p1 .. p4): the words after it
  * play that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back
  * to the shell the words stop: the ones left are returned (NULL none), for the shell */
@@ -6080,6 +6119,11 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             p = end;
             int col = (int)strtol(p, &end, 10);
             p = end;
+            float amount = strtof(p, &end);          /* an amount after them (the roar's 10), else 2 */
+            if (end != p)
+                p = end;
+            else
+                amount = 2.0f;
             if (bi >= 0 && (uint32_t)bi < v->scene.nbuildings) {
                 SceneBuilding *sb = &v->scene.buildings[bi];
                 float w = (sb->b.max[0] - sb->b.min[0]) / (sb->b.width > 0 ? sb->b.width : 1);
@@ -6087,8 +6131,8 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
                 float at[3] = { sb->b.min[0] + w * ((float)col + 0.5f), sb->b.min[1], 6.0f + 3.0f * ((float)o + 0.5f) };
                 if (sb->b.state == BUILDING_STANDING)
                     sb->hitter = 0;
-                int hit = building_hit(&sb->b, at, 2.0f);   /* (a monster attack's radius) */
-                building_alarm(v, sb);
+                int hit = building_hit(&sb->b, at, amount);   /* (a monster attack's radius) */
+                building_script(v, sb, amount);
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  hitcell %d %d %d at %.1f %.1f %.1f: %s (%d storeys, %.1f .. %.1f)\n", bi, o, col, at[0],
                            at[1], at[2], hit ? "hit" : "no damage", sb->b.n, sb->b.min[2], sb->b.max[2]);

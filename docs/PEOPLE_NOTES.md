@@ -54,6 +54,11 @@ for a valid handle) [R].
 - **Facing**: flag 1 faces the way it moves (0x316E60), and flag 8 faces its target, the nearest monster with no limit (0x316060: from FLT_MAX; the scripts'
   getNearestMonster, 0x2B26F0, none beyond 1000 by the distance itself, 0x2B27E8 being `sqrt.s`). The window
   occupants get no facing (0x318A44 … 0x318B14 sets the place, the `DefaultAnim` and +0xEC / +0xF4 only).
+- **Flag 4** [R 0x316380 … 0x3167B4]: past +0x68 of a segment (0.5, set by both inits, 0x3174E0 and 0x317770) the
+  facing turns towards the next segment's way (the first's when it loops; none on a last segment that does not), by
+  smoothstep((t − 0.5) / 0.5) of the way, under 0.001 none and over 0.999 all of it: a slerp from the facing (+0x70) to
+  the next way's, the shorter way round. ActorSwarm's children round their corner with it. The tourists set it on a
+  mover of no length, which the port leaves out [G].
 - **Monster response**: while it simply moves, a monster closer than `MonsterResponseDist` gives callback 4
   (+0x5C holds the distance squared).
 - **Callback return**: a script's `onMoverCallback` that returns 4|8|16 deletes the actor.
@@ -239,12 +244,32 @@ crowds, a streaker), `Biker` 74 (parade.c), `StationaryPerson` 73, `Military_Win
   looping `Sign` that falls (z − 10 a second, turning (π/10, 3π/20) a second, `GroundEffect` at z ≤ −0.25, then
   deleted) when a monster hits it (`HitEffect`, addStats), something thrown meets it or its building comes down
   (`DetachEffect`). Ported in streetobj.c (SK_ANIMSIGN, docs/STREETOBJ_NOTES.md).
-- **ActorSwarm.bsf** (`ChildSwarm`, the school's recess: a bell, "RECESS", then 12 … 19 `ChildRunner0` … `2`
-  (Person_Child) running out at 11.5): only SchoolBuilding.bsf's `DamageCell` makes one, for a monster's hit of 2.5 or
-  more, at most every 20 s. Building::hit (0x2BC150) passes its own amount (f12) as `famount` (0x2BC8C0, script slot
-  0xC), and every hit the scripts make is `hitBuildingPt(…, 2.0)`, but the roar's burst (main.c roar_burst, 0x2BC150
-  of type 0 with no point, 0x2BC328) passes its weapon's amount, 10: a roar beside a school starts it (and
-  ChickenRestaurant.bsf's `Chickens_Run`, the same gate). [G: not seen in play] Not ported.
+- **ActorSwarm.bsf** (`ChildSwarm`, the school's recess; people.c `people_add_swarm`) [R ActorSwarm.scr]: made by
+  SchoolBuilding.bsf at the school's place. Its `onInit` plays `BellSound` (`Alarm_Bell`) and sets a 2 s pulse. The
+  first pulse shows its `Message` ("RECESS", a PointsBanner text in `MessageColor`, (0, 200, 0), scale 0.5), plays
+  `RecessSound` and `SwarmSound`, and makes 12 + frand × 8 actors, each a random one of `Actor0` … `2`
+  (`ChildRunner0` … `2`, Person_Child). Each starts at the place ± 5 in x and y, `Running` at a random offset, on a
+  LineMover at 11.5 (no MonsterResponseDist) with flags 1 | 4: first to a middle point (x pushed 0 … 5 further from
+  the world's x = 0, y − 8 − 0 … 5), then to (its x − 45 + 90 frand, its y − 50), where Person_Child deletes it. The
+  next pulse deletes the swarm (4 | 8 | 16). Its sounds are one-shot 3D sounds at its place, as the people's
+  add3DSfx are here [G: whether the swarm's deletion stops them is not followed].
+- **SchoolBuilding.bsf** (a building template's script; main.c `building_script`) [R SchoolBuilding.scr]: a
+  monster's hit of 2.5 or more, once its `fStateTime` is out (Process takes the step off it each frame), sets it to
+  20 and makes the building's `Swarm` at its place (getPosition, +0x2C: the middle of its foot) and calls its
+  `onInit`. `Swarm` is read with getStringProp, the BuildingInstance's book first: only two instances set it,
+  `OTRef|Swarm = "ChildSwarm"` on NY01_School's `school_back` and SF04_HaightSt's `SF04_3x6`; the other
+  SchoolBuilding templates (TK10_8x10, ZGreyBlock_8x04 / 8x07 / 8x10) have none and make nothing.
+- **ChickenRestaurant.bsf** (main.c `building_script`) [R ChickenRestaurant.scr]: a monster's hit of 2.5 or more,
+  the first only (`bChickenRunnersCreated`), starts the effect `Chickens_Run` (FollowEffect.createAndStart) at (its
+  x, −10, 0): Chicago CG5_2x9a (CG05_Block5, CG12_BufferBlock02), Hong Kong HK05_3x9 (HK05_Apartments), Los Angeles
+  LA5_3x3 (LA05_Burbank, LA09_BufferBlock01).
+- **The 2.5 gate**: Building::hit (0x2BC150) keeps its amount (f12) in f22 (0x2BC194, not written again) and passes
+  it as `famount` to its script's DamageCell (slot 0xC, `mov.s $f14, $f22` at 0x2BC8C4). A punch and a roof hit are
+  2 (`hitBuildingPt(…, 2.0)`, `hitBuildingRoof`); the roar's burst (main.c roar_burst, 0x31BAD0) gives a building
+  its TakeDamage (0x31BDDC) with the Shockwave's `DamagePerSec` (+0x40, loaded at 0x31BB84): `RoarWeapon`'s 10
+  (Weapons.bdp; no monster's `Weapon|Roar` sets another). So only a roar whose burst reaches the building starts the
+  recess or the chickens; the burst reaches NY01's back-row school from the street in front of it (checked: George
+  roaring at (25, −3)). `--do "hitcell b floor col 10"` does the same.
 - **AlarmBuilding.bsf** (a building template's script, not a person; main.c building_alarm): a monster's hit sounds
   the building's `AlarmSound` (add3DSfx, the last one stopped first) when `AlarmDuration` (4) has gone by since the
   last or at the first, only the first with `PlayOnlyOnce`: the banks' `Bank_Alarm` (3, once; Chicago CG2_2x7,
@@ -266,8 +291,6 @@ PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAni
   sets no 0x8000, so in the game a mere touch (type 1) reaches it too; here only blows do.
 - **The hold blend** [R 0x310ED0 / 0x310B50]: the start kept in the hold's frame, w = 1 − left / blend, its turn w of
   the way to none and its place scaled by 1 − w; the port takes the hand of the first held frame for the grab's.
-- **The LineMover's flag 4** (the tourists' and ActorSwarm's; +0x68, 0x316380) is not ported: the tourists' mover has
-  no length, and nothing else that is ported sets it.
 - **The occupant spawning** is city.c's (`scene_people_spawn`): its timing and rates (+0x44 … +0x50), the view check
   (0x318390) and the cell check (0x31AD00 [R]: not on the ground storey (its record +0x10 is 0), the cell not hidden
   (0x400 by 0x2BE580), then the last building whose box holds the point 10 out in front of the cell (y − 10;
