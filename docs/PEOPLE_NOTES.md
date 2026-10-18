@@ -124,21 +124,28 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
 - **Spawning** (0x318650, from the world update 0x2B6CE0): the manager at 0x4D5F00 counts up to its interval and
   then places one occupant. Its fields come from the block's `Occupants` group (0x31A540): +0x44 `SpawnRate`
   (the interval, 0.75 s by default), +0x48 `MilitaryStartRate` (0.1), +0x4C `MilitaryEndRate` (0.9) and +0x50
-  `MilitaryTimeRange` (240 s); `FillRate`, `NonMilitaryRate` and `DropRate` are read too. On the interval, with the
-  chance MilitaryStartRate + min(1, t / MilitaryTimeRange) × (End − Start) (t from 0x347DC0 on 0x4D5190, a game
-  clock) it looks among the military slots (count +0x40), otherwise among the civilian ones (+0x3C, after them);
-  from a random slot on, the first free one (+0x14 empty, +0xD an occupant) whose building's x lies in the view
-  (0x318390) and that 0x31AD00 allows. The slots (0x31A540 calls 0x3196F0 per building with the
-  Occupants' `FillRate` and `NonMilitaryRate` and the Edibles' `FillRate`): of the building's n windows (its list
+  `MilitaryTimeRange` (240 s); `FillRate`, `NonMilitaryRate` and `DropRate` are read too (no block sets the three
+  military rates). On the interval, when rand() × 2⁻³² (0x106950, gWorld +0x82C) is at most MilitaryStartRate +
+  min(1, t / MilitaryTimeRange) × (End − Start), t the clock's time **left** (0x347DC0 on 0x4D5190: the limit
+  0x4D7E48 less the time run; in the campaign it counts down from the largest bonus time, 480, so the chance is 0.9
+  for the first 240 s and falls to 0.1 at 480; in a Timed Run from 180, 0.7 falling), it looks among the military
+  slots (count +0x40), otherwise among the civilian ones (+0x3C, after them); a block with no military slots then
+  puts out no one. From the slot at rand() % the count on, the first free one (+0x14 empty, +0xD an occupant) whose
+  building's x (+0x2C, its middle) lies in the monsters' range (0x318390: the lowest to the highest x of the players'
+  monsters (gWorld +0x40, 0x4D7E28 of them), widened to 30 about their middle when less than 20 apart, then 10 more
+  on each side: a lone monster's buildings within 25) and that 0x31AD00 allows [R]. The slots (0x31A540 calls
+  0x3196F0 per building, only when the block has both an `Occupants` and an `Edibles` group, with the
+  Occupants' `FillRate` and `NonMilitaryRate` and the Edibles' `FillRate`; the building's edibles follow its slots
+  there, on the same rand()): of the building's n windows (its list
   from 0x2BE750 / 0x2D01F0: the intact front cells on live storeys 1 and up, never the first storey above the ground
   floor, whose column has an `Openable` window; of a column's two, `LRPos` 0 or 1 at random (Park–Miller < 0.5: 0
   first), else the other: the slot's +0xC), round(n × FillRate) in a shuffled order, the
   first total − int(total × NonMilitaryRate) of them military (+0x40), the rest civilian (+0x3C). The building's
   `NumNonMilitaryOccupants` (then all n windows, that many civilians) and `NumMilitaryOccupants` override the
-  counts, each capped at n. A slot's kind is a random one of the sort's list (0x318B40 makes it from the
-  `MilitaryInstance|` / `OccupantInstance|` records: each one's name, `Frequency` and `DropRate`, the sort's total
-  `Frequency` at +0x24): weighed by `Frequency` (0x319D50 .. 0x319DF4: a random 0 .. 1 times the total, the first
-  kind whose running sum reaches it) [R]. A military occupant
+  counts, each capped at n; the shuffle swaps each with the one at rand() % n. A slot's kind is rand() % the sort's
+  count (0x319994 soldiers, 0x319A9C civilians: the lists 0x318B40 makes from the `MilitaryInstance|` /
+  `OccupantInstance|` records, +0x38 and +0x39 of them): each kind as likely as the next, whatever its `Frequency`
+  (0x318B40 keeps it, with `DropRate`, but only the edibles' pick, 0x319D50, weighs by it) [R]. A military occupant
   is the army's window soldier (`army_spawn_window`, Military_Window.bsf). It is the slot's occupant actor as a
   civilian is: `getBuildingOccupant` answers 1 for it, `grabBuildingOccupant` holds it (its `onPickup`, state 8)
   and retires the slot, and `throwObject` eats or smashes it (`onThrow`). Here city.c's `scene_window_soldier`.
@@ -291,10 +298,14 @@ PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAni
   sets no 0x8000, so in the game a mere touch (type 1) reaches it too; here only blows do.
 - **The hold blend** [R 0x310ED0 / 0x310B50]: the start kept in the hold's frame, w = 1 − left / blend, its turn w of
   the way to none and its place scaled by 1 − w; the port takes the hand of the first held frame for the grab's.
-- **The occupant spawning** is city.c's (`scene_people_spawn`): its timing and rates (+0x44 … +0x50), the view check
-  (0x318390) and the cell check (0x31AD00 [R]: not on the ground storey (its record +0x10 is 0), the cell not hidden
-  (0x400 by 0x2BE580), then the last building whose box holds the point 10 out in front of the cell (y − 10;
-  0x2A3D20) must have fewer standing storeys than the cell's live storey: a building in front does not hide it).
+- **The occupant spawning** is city.c's (`scene_occupant_slots`, made building by building before the building's
+  edibles; `scene_people_spawn`, given the clock's time left and the monsters' range by main.c each frame): its timing
+  and rates (+0x44 … +0x50), the range (0x318390) and the cell check (0x31AD00 [R]: not on the ground storey (its
+  record +0x10 is 0), the cell not hidden (0x400 by 0x2BE580), then the last building whose box holds the point 10 out
+  in front of the cell (y − 10; 0x2A3D20) must have fewer standing storeys than the cell's live storey: a building in
+  front does not hide it). [G: the order within each sort's list is the order the slots were made (0x319570's insert
+  not traced); a block with soldier slots and no `MilitaryInstance` (the buffer blocks LV11, LA10) would take
+  rand() % 0 in the game, here those are civilians' slots; the bots count among the monsters for the range]
 - **The flying hut**: a script's `SphereMover` is the SpherePhysicsMover [R: createSphereMover (World binding 0x23,
   0x2AE7C0) makes the one sphere mover class there is, vtable 0x449500], so the hut flies at −25 × the hit's
   direction in x and y under its `Gravity` (DefObjectProps 35) until its next pulse (at most 1 s) deletes it. That

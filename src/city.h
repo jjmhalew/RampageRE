@@ -222,7 +222,11 @@ typedef struct {
     /* the Occupants group's soldiers (MilitaryInstance|: Military_Window.bsf templates, the army's window soldiers)
      * and its rates (0x31A540: +0x48 MilitaryStartRate 0.1, +0x4C MilitaryEndRate 0.9, +0x50 MilitaryTimeRange 240) */
     const char *military[16]; float military_freq[16]; int nmilitary;
-    float nonmilitary_rate, military_start, military_end, military_range, spawn_clock;
+    float nonmilitary_rate, military_start, military_end, military_range;
+    /* the host's each frame before scene_people_spawn: the clock's time left (0x347DC0) and the x range of the
+     * buildings that may take an occupant (0x318390: the players' monsters' x, at least 30 wide, and 10 on each side);
+     * occ_setup: the block has an Occupants and an Edibles group (0x31A540 makes no slots without both) */
+    float spawn_left, view_lo, view_hi; int occ_setup;
     /* the objects whose template Flags have IsObstacle (object flag 0x40000: the electric side signs): their boxes
      * in the world (min, max: AutoCollisionBox, the model's bounds), for the climbing's -2 (0x2801A0, mask 0x40040) */
     int *obstacle_of; float (*obstacles)[6]; uint32_t nobstacles;
@@ -331,6 +335,9 @@ void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]
 int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world);
 /* the window occupants (0x318650): every SpawnRate seconds (0.75) one comes to a random free slot of a building in
  * view; the slots are the block's windows, a FillRate share of them, each with an occupant picked by Frequency */
+/* building bi's window slots (0x3196F0's first half): the host makes them building by building just before the
+ * building's edibles (edible_add_building), as the game's draws come; any left are made at the first spawn */
+void scene_occupant_slots(Scene *s, int bi);
 void scene_people_spawn(Scene *s, float dt);
 /* closeWindow (Actor binding, 0x30C3F0): the window an occupant came out of shuts over 0.5 s (openWindow(.., 0,
  * 0.5)), the slot's Openable; building and storey as people_add_window got them (the live storey then), or, _at, the

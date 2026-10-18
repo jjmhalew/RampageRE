@@ -1167,9 +1167,18 @@ static void build(Viewer *v)
         v->edibles = edible_new(&eh);
         if (v->edibles) {
             edible_load_block(v->edibles, v->scene.block);
-            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {   /* 0x3196F0: a building's window slots, then
+                                                      * its edibles, the draws in that order */
                 const SceneBuilding *sb = &v->scene.buildings[i];
+                scene_occupant_slots(&v->scene, (int)i);
                 edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
+            }
+            v->scene.slots_made = 1;
+            if (getenv("RAMPAGE_TRACE")) {
+                int nm = 0;
+                for (int k = 0; k < v->scene.nslots; k++)
+                    nm += v->scene.slots[k].military;
+                printf("window slots: %d civilian, %d military\n", v->scene.nslots - nm, nm);
             }
             add_tubes(v);                            /* a reveal's tubes, for the block now built */
             if (getenv("RAMPAGE_TRACE"))
@@ -5440,6 +5449,22 @@ static void play_step(Viewer *v, float dt, float aspect)
             const Mon *mo = &v->mon[k];
             pm[k] = (PeopleMonster){ { mo->mx, mo->my, mo->mz },
                                      mo->have_graph ? mo->graph.states[mo->run.state].name : NULL };
+        }
+        {                                            /* the occupants' clock and reach (0x318650) */
+            float lo = 1000, hi = -1000;             /* [R 0x318390] the players' monsters' x (gWorld +0x40) */
+            for (int k = 0; k < v->nmon; k++) {
+                lo = fminf(lo, v->mon[k].mx);
+                hi = fmaxf(hi, v->mon[k].mx);
+            }
+            if (fabsf(hi - lo) < 20) {               /* at least 30 wide about their middle */
+                float c = (hi + lo) / 2;
+                lo = c - 15;
+                hi = c + 15;
+            }
+            v->scene.view_lo = lo - 10;              /* and 10 more on each side */
+            v->scene.view_hi = hi + 10;
+            /* 0x347DC0, the time left; without a game, as an unstarted clock (all its limit: the range's end) */
+            v->scene.spawn_left = v->game ? game_clock(v->game, NULL) : v->scene.military_range;
         }
         scene_people_spawn(&v->scene, dt);
         people_set_world_state(v->scene.folk, v->game ? game_state(v->game) : GS_PLAY);   /* (the chains in play) */

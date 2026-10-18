@@ -18,6 +18,7 @@
 #include "look.h"
 #include "rail.h"
 #include "sound.h"
+#include "wrand.h"
 
 #define CELL 5.0f
 #define GROUND_FLOOR 6.0f
@@ -1391,7 +1392,6 @@ static void people_sync(Scene *s, double t)
     }
 }
 
-static uint32_t spawn_seed = 12345;
 /* a cell's FloorFlags entry (0x2CBB50 reads the list at 0x2CC014 into +0xE: the list in the Floor| order, left, front,
  * right); 0 without one */
 static int cell_flags(Group floor, int k)
@@ -1412,12 +1412,6 @@ static const float *cell_rect(const BuildingCell *cell, const float in[4], float
         out[2] = CELL - in[0];
     }
     return out;
-}
-
-static float spawn_rand(void)                        /* the LCG of the stand-ins, 0 .. 1 */
-{
-    spawn_seed = spawn_seed * 1664525u + 1013904223u;
-    return (float)(spawn_seed >> 8) / 16777216.0f;
 }
 
 /* the soldier a window slot put out, while it is there (the army reuses its ids: still a window soldier, at the slot's
@@ -1455,77 +1449,86 @@ void scene_window_soldier_take(Scene *s, int unit)
         }
 }
 
+/* the slots' n-th of a sort (military 1 or 0), in the order they were made (the game keeps the soldiers' first, then
+ * the civilians': 0x318650 reads +0x40 and +0x3C of them from +0xC), -1 none */
+static int slot_of_sort(const Scene *s, int military, int nth)
+{
+    for (int i = 0; i < s->nslots; i++)
+        if (s->slots[i].military == military && nth-- == 0)
+            return i;
+    return -1;
+}
+
+/* [R 0x3196F0, its first half, for each building of the block (0x31A540, 0x4D095C) when the block has an Occupants and
+ * an Edibles group]: the building's n windows (0x2BE750(building, list, 300, 1, 100, 2) -> 0x2D01F0: live storeys 1 ..
+ * standing - 1 (not the ground), the front cells not damaged, each a side of its two drawn as frand (0x106BD0) >= 0.5
+ * and the first of them with an Openable window from it; flag 2: one entry per cell), each swapped with the one at
+ * rand() % n (0x106950: gWorld +0x82C); round(n x FillRate) slots, the first total - int(total x NonMilitaryRate)
+ * soldiers, the rest civilians; the building's NumNonMilitaryOccupants (then all n, that many civilians) and
+ * NumMilitaryOccupants override the counts, each at most n. A soldier's kind rand() % the MilitaryInstances, a
+ * civilian's rand() % the OccupantInstances: their Frequency (read into the list by 0x318B40) plays no part [R
+ * 0x319994, 0x319A9C]. [G: with no MilitaryInstance (only the buffer blocks LV11, LA10 have soldier slots so) the
+ * game's rand() % 0 is undefined; here those slots are civilians'] */
+void scene_occupant_slots(Scene *s, int bi)
+{
+    if (!s->occ_setup || bi < 0 || (uint32_t)bi >= s->nbuildings)
+        return;
+    const SceneBuilding *sb = &s->buildings[bi];
+    int win[512][3], n = 0;
+    for (int o = 0; o < sb->b.storeys; o++)
+        for (int col = 0; col < sb->b.width && n < 512; col++) {
+            int ci = building_cell_index(&sb->b, FACE_FRONT, col), ls = building_live_of(&sb->b, o);
+            if (ci < 0 || ls < 1 || ls > sb->b.n - 1 || sb->b.cell[o][ci].state > 0)
+                continue;
+            int tile = sb->b.cell[o][ci].tile & 3, lr = wrand_frand() >= 0.5f;
+            if (sb->openable[tile][lr][0] < 0)
+                lr ^= 1;
+            if (sb->openable[tile][lr][0] < 0)
+                continue;
+            win[n][0] = o;
+            win[n][1] = col;
+            win[n++][2] = lr;
+        }
+    for (int k = 0; k < n; k++) {
+        int j = (int)(wrand_lf() % (uint32_t)n), t[3];
+        memcpy(t, win[k], sizeof t);
+        memcpy(win[k], win[j], sizeof t);
+        memcpy(win[j], t, sizeof t);
+    }
+    int total = (int)(0.5f + (float)n * s->fill_rate);
+    int military = total - (int)((float)total * s->nonmilitary_rate);
+    float civ = group_num(sb->props, "NumNonMilitaryOccupants", -1);
+    float mil = group_num(sb->props, "NumMilitaryOccupants", -1);
+    if (civ >= 0) {
+        int c = (int)civ < n ? (int)civ : n;
+        military = n - c;
+        total = n;
+    }
+    if (mil >= 0)
+        military = (int)mil < n ? (int)mil : n;
+    if (military > total)
+        military = total;
+    if (!s->nmilitary)
+        military = 0;
+    for (int k = 0; k < total; k++) {
+        int is_mil = k < military, kinds = is_mil ? s->nmilitary : s->noccupants;
+        if (!kinds)
+            continue;
+        int q = (int)(wrand_lf() % (uint32_t)kinds);
+        s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
+        struct WindowSlot ws = { bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2] };
+        s->slots[s->nslots++] = ws;
+    }
+}
+
 void scene_people_spawn(Scene *s, float dt)
 {
     if (!s->folk || (!s->noccupants && !s->nmilitary))
         return;
-    if (!s->slots_made) {
-        /* the windows' slots (0x31A540 -> 0x3196F0 for every building): of a building's n windows (0x2BE750(building,
-         * list, 300, 1, 100, 6) -> 0x2D01F0, 0x319B78 .. 0x319B94 [R]: below), round(n x FillRate) in a shuffled order,
-         * the first total - int(total x NonMilitaryRate) of them soldiers, the rest civilians; the building's
-         * NumNonMilitaryOccupants (then all n, that many civilians) and NumMilitaryOccupants override the counts, each
-         * at most n. A slot's occupant [R 0x319D50 .. 0x319DF4]: of its sort's list (0x318B40: the instances' names,
-         * their Frequency, the sort's total of them), a random 0 .. 1 x that total, the first kind whose running sum
-         * of Frequency reaches it */
+    if (!s->slots_made) {                            /* (a host that made none with the edibles) */
         s->slots_made = 1;
-        float civ_total = 0, mil_total = 0;
-        for (int k = 0; k < s->noccupants; k++)
-            civ_total += s->occupant_freq[k];
-        for (int k = 0; k < s->nmilitary; k++)
-            mil_total += s->military_freq[k];
-        for (uint32_t bi = 0; bi < s->nbuildings; bi++) {
-            const SceneBuilding *sb = &s->buildings[bi];
-            int win[512][3], n = 0;
-            /* 0x2D01F0: live storeys 1 .. standing - 1 (not the ground), the front cells with an Openable window:
-             * one of the column's two (LRPos), the first there is from a random one */
-            for (int o = 0; o < sb->b.storeys; o++)
-                for (int col = 0; col < sb->b.width && n < 512; col++) {
-                    int ci = building_cell_index(&sb->b, FACE_FRONT, col), ls = building_live_of(&sb->b, o);
-                    if (ci < 0 || ls < 1 || ls > sb->b.n - 1)
-                        continue;
-                    int tile = sb->b.cell[o][ci].tile & 3, lr = spawn_rand() < 0.5f ? 0 : 1;
-                    if (sb->openable[tile][lr][0] < 0)
-                        lr ^= 1;
-                    if (sb->openable[tile][lr][0] < 0)
-                        continue;
-                    win[n][0] = o;
-                    win[n][1] = col;
-                    win[n++][2] = lr;
-                }
-            for (int k = 0; k < n; k++) {             /* each one swapped with a random one */
-                int j = (int)(spawn_rand() * (float)n) % n, t[3];
-                memcpy(t, win[k], sizeof t);
-                memcpy(win[k], win[j], sizeof t);
-                memcpy(win[j], t, sizeof t);
-            }
-            int total = (int)(0.5f + (float)n * s->fill_rate);
-            int military = total - (int)((float)total * s->nonmilitary_rate);
-            float civ = group_num(sb->props, "NumNonMilitaryOccupants", -1);
-            float mil = group_num(sb->props, "NumMilitaryOccupants", -1);
-            if (civ >= 0) {
-                int c = (int)civ < n ? (int)civ : n;
-                military = n - c;
-                total = n;
-            }
-            if (mil >= 0)
-                military = (int)mil < n ? (int)mil : n;
-            if (military > total)
-                military = total;
-            if (!s->nmilitary)
-                military = 0;
-            for (int k = 0; k < total; k++) {
-                int is_mil = k < military, kinds = is_mil ? s->nmilitary : s->noccupants;
-                if (!kinds)
-                    continue;
-                const float *freq = is_mil ? s->military_freq : s->occupant_freq;
-                float pick = spawn_rand() * (is_mil ? mil_total : civ_total);
-                int q = 0;
-                while (q + 1 < kinds && pick >= freq[q]) { pick -= freq[q]; q++; }
-                s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
-                struct WindowSlot ws = { (int)bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2] };
-                s->slots[s->nslots++] = ws;
-            }
-        }
+        for (uint32_t bi = 0; bi < s->nbuildings; bi++)
+            scene_occupant_slots(s, (int)bi);
         if (getenv("RAMPAGE_TRACE")) {
             int nm = 0;
             for (int k = 0; k < s->nslots; k++)
@@ -1533,23 +1536,32 @@ void scene_people_spawn(Scene *s, float dt)
             printf("window slots: %d civilian, %d military\n", s->nslots - nm, nm);
         }
     }
-    s->spawn_clock += dt;
     s->spawn_timer += dt;                            /* +0x30 against SpawnRate (+0x44) */
     if (s->spawn_timer < s->spawn_rate || !s->nslots)
         return;
     s->spawn_timer = 0;
-    /* a soldier with the chance MilitaryStartRate + min(1, t / MilitaryTimeRange) x (End - Start), else a civilian
-     * (0x318650; t the game clock 0x347DC0, here the block's time) */
-    float f = s->military_range > 0 ? s->spawn_clock / s->military_range : 1;
-    int want_mil = s->army && s->nmilitary &&
-                   spawn_rand() < s->military_start + (f < 1 ? f : 1) * (s->military_end - s->military_start);
-    int start = (int)(spawn_rand() * (float)s->nslots);
-    for (int i = 0; i < s->nslots; i++) {            /* the first free slot of that sort from a random one */
-        struct WindowSlot *ws = &s->slots[(start + i) % s->nslots];
-        if (ws->military != want_mil || ws->retired)
+    /* [R 0x318650] a soldier's turn when rand() x 2^-32 <= MilitaryStartRate + min(1, t / MilitaryTimeRange) x (End -
+     * Start), t the clock's time left (0x347DC0: in the campaign it runs down from the largest bonus time, 480, so for
+     * the first 240 s it is End's 0.9, then falls to Start's 0.1), else a civilian's; then, from one at rand() % the
+     * sort's slots, the first of them free in a building whose x (+0x2C, its middle) is within the monsters' range
+     * (0x318390). A soldier's turn in a block without soldier slots puts out no one */
+    float f = s->military_range > 0 ? s->spawn_left / s->military_range : 1;
+    float p = s->military_start + (f < 1 ? f : 1) * (s->military_end - s->military_start);
+    int want_mil = (float)wrand_lf() * 2.3283064e-10f <= p, m = 0;
+    for (int i = 0; i < s->nslots; i++)
+        m += s->slots[i].military == want_mil;
+    if (!m || (want_mil && !s->army))
+        return;
+    int start = (int)(wrand_lf() % (uint32_t)m);
+    for (int i = 0; i < m; i++) {
+        struct WindowSlot *ws = &s->slots[slot_of_sort(s, want_mil, (start + i) % m)];
+        if (ws->retired)
             continue;
         SceneBuilding *sb = &s->buildings[ws->building];
         const Building *b = &sb->b;
+        float bx = (b->min[0] + b->max[0]) / 2;
+        if (!(bx >= s->view_lo && bx <= s->view_hi))
+            continue;
         int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
         if (b->state != BUILDING_STANDING || ls <= 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
             people_window_at(s->folk, ws->building, ws->storey, ws->column) >= 0 ||
@@ -1586,6 +1598,9 @@ void scene_people_spawn(Scene *s, float dt)
             float bottom, height;
             building_storey(b, ls, &bottom, &height);
             people_window_move(s->folk, who, b->min[2] + bottom, 0);   /* its storey's floor now */
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  a window occupant of kind %d at %.1f %.1f %.1f (person %d)\n", ws->occupant, at[0], at[1],
+                       at[2], who);
         }
         /* and its window opens over 0.5 s (0x318B04: openWindow(storey, column, LRPos, 1, 0.5)) */
         building_window_open(&sb->b, ws->storey, ws->column, ws->lr, 1, 0.5f, ol, sb->opens_h[tile][ws->lr]);
@@ -3154,6 +3169,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     Group occ = group_sub(block, "Occupants"), runners[16];
     s->music = group_str(block, "Music");
     s->block = block;
+    s->occ_setup = occ.at && group_sub(block, "Edibles").at;   /* [R 0x31A604] */
     s->fill_rate = group_num(occ, "FillRate", 0);
     s->spawn_rate = group_num(occ, "SpawnRate", 0.75f);   /* 0x31A540: the Occupants group's, 0.75 unless set */
     s->nonmilitary_rate = group_num(occ, "NonMilitaryRate", 0);

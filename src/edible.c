@@ -293,7 +293,7 @@ int edible_add_building(Edibles *e, int building, Group inst, Group props, int w
                 continue;
             cell[n][0] = s;
             cell[n][1] = c;
-            cell[n][2] = (float)rnd(e) * 2.3283064e-10f >= 0.5f;
+            cell[n][2] = wrand_frand() >= 0.5f;           /* [R 0x2D02E0] Park-Miller x 2^-31 */
             n++;
         }
     if (e->nkinds > 0 && e->freq_sum > 0 && n > 0) {
