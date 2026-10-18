@@ -610,11 +610,12 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
     }
     int billboard = script && (!_stricmp(script, "Billboard.bsf") || !_stricmp(script, "Billboard_George.bsf"));
     int tower = script && !_stricmp(script, "WaterTower.bsf"), crane = script && !_stricmp(script, "Crane.bsf");
+    int fork = script && !_stricmp(script, "ForkLift.bsf");
     if ((id >= 0 || invisible) && script && (s->placing_block || s->placing_building >= 0) &&
         s->nstreet < SCENE_STREET_MAX &&
         (!_stricmp(script, "StreetObject.bsf") || !_stricmp(script, "RoofItem.bsf") || billboard ||
          !_stricmp(script, "MerryGoRound.bsf") || !_stricmp(script, "Sign.bsf") ||
-         !_stricmp(script, "AnimatedSign.bsf") || !_stricmp(script, "Fountain.bsf") || invisible || tower || crane)) {
+         !_stricmp(script, "AnimatedSign.bsf") || !_stricmp(script, "Fountain.bsf") || invisible || tower || crane || fork)) {
         struct SceneStreetObj *so = &s->street[s->nstreet++];   /* streetobj.c's, with its flags' cloths */
         so->t = t;
         so->inst = inst;

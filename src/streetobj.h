@@ -83,7 +83,7 @@ typedef struct {
  * AnimatedSign.bsf (VegasCowboySign), Billboard_George.bsf (GeorgeBillboard), Fountain.bsf (the fountains'
  * sculptures, the fire hydrants), DamagingEffect.bsf (the geysers, the puddles) */
 enum { SK_STREET, SK_ROOF, SK_MERRY, SK_SIGN, SK_BILLBOARD, SK_2PART, SK_ATTACH, SK_ANIMSIGN, SK_GEORGE, SK_FOUNTAIN,
-       SK_DAMAGING, SK_TOWER, SK_CRANE, SK_KITE };   /* WaterTower.bsf, Crane.bsf, KiteAnchor.bsf */
+       SK_DAMAGING, SK_TOWER, SK_CRANE, SK_KITE, SK_FORK };   /* WaterTower.bsf, Crane.bsf, KiteAnchor.bsf, ForkLift.bsf */
 /* object flags (+0x4C) [R]: the template's Flags names (the table 0x3F5F20), StreetObject's Construct (0x8000 unless
  * OnlyHitWithEffNodes is 0 or IsSwaying), onPickup / onThrow clearing 0x4000 / 0x10000, 0x20000 while held,
  * 0x4000000 attached to a building (0x309E20) */
@@ -147,6 +147,8 @@ typedef struct {
      * cargoDir, slideVel, rotMin, rotMax, rotVel (rotDir is rot_dir, axisA axis, totalAngle total_angle) */
     float fall_dir[3], vel[3], rb_time, hp, crack_delay, die_delay, cargo_rot, cargo_at, cargo_dir, slide_vel,
           rot_min, rot_max, rot_vel;
+    float rot_start, rot_end, rot_cur;               /* ForkLift.bsf: startRotZ, endRotZ, curRotZ */
+    int saved;                                       /* ... savedState */
 } StreetObj;
 
 /* ---- what happened */

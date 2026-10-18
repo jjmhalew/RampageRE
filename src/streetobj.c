@@ -1806,6 +1806,148 @@ static void kite_fly(StreetObj *o)
     o->flags |= 1;
 }
 
+/* ForkLift.bsf [R] (ForkLift1 in NY02, ForkLiftHK1 in HK01): a forklift driving its round of the yard on LineMovers,
+ * turning between them at pi a second (startRotation: from curRotZ, which the first turn has not set: it snaps):
+ * from (Loc1X, Loc1Y) (23.7, 4) facing back to y -3 at 6, along x to Loc3X (-33) at 8, to y Loc4Y (4) at 6, with
+ * DoMove4_5 (1) out to x -24.5 and back at 5 (without, it stops there), to y -3 at 6, along x to Loc1X at 8, to y
+ * Loc1Y and back to y -3 at 6, and round again. Pickupable; held (onPickup) it stops for good, DamageShape; a monster's
+ * blows take its HitPoints (1): HitEffect1 on it, and at the last (not held) DamageShape, HitEffect2 on it (with none:
+ * the score, 2) and it flies off 25 a second away from the monster; thrown, landing or hit by a thrown object, or
+ * after that flight: 1.5 s later it goes (ExplodeFX on it in its last quarter second). [G: not ported: the custom
+ * collision the mover's callback 4 does on the x legs, a monster beside it pushed 0.3 towards the street] */
+static void fork_construct(StreetObj *o)
+{
+    o->oflags |= SF_PUSH_OUT | SF_EFF_NODES | SF_PICKUP;
+    o->hp = (float)(int)onum(o, "HitPoints", 2);
+    set_pulse(o, 0.1f);
+    o->die_delay = 1.5f;
+}
+/* LineMover.init(object, from, to, speed, 0): it starts at `from` */
+static void fork_move(StreetObj *o, float fx, float fy, float tx, float ty, float speed)
+{
+    float from[3] = { fx, fy, 0 }, to[3] = { tx, ty, 0 };
+    set_point(o, from);
+    line_mover(o, to, speed);
+}
+static void fork_turn(StreetObj *o, float to)       /* startRotation */
+{
+    o->rot_start = o->facing[2];
+    o->rot_end = to;
+    set_pulse(o, TIMESTEP);
+    o->saved = o->state;
+    o->state = 10;
+}
+/* onMoverCallback(2): the leg or the turn done, the next; flags 1: turned, now the leg */
+static void fork_next(StreetObj *o)
+{
+    float x = o->world[12], y = o->world[13];
+    float loc1x = onum(o, "Loc1X", 23.7f), loc1y = onum(o, "Loc1Y", 4), loc3x = onum(o, "Loc3X", -33),
+          loc4y = onum(o, "Loc4Y", 4);
+    int turned = o->flags & 1;
+    if (o->state == 2) {
+        if (!turned) { fork_turn(o, PI / 2); o->flags |= 1; return; }
+        o->oflags &= ~(uint32_t)SF_PUSH_OUT;
+        fork_move(o, x, y, loc3x, y, 8);
+        o->state = 3;
+    } else if (o->state == 3) {
+        o->oflags |= SF_PUSH_OUT;
+        if (!turned) { fork_turn(o, 0); o->flags |= 1; return; }
+        fork_move(o, x, y, x, loc4y, 6);
+        o->state = 4;
+    } else if (o->state == 4) {
+        if (!onum(o, "DoMove4_5", 1)) {
+            o->state = 6;                            /* (no leg: it stops here) */
+            return;
+        }
+        if (!turned) { fork_turn(o, -PI / 2); o->flags |= 1; return; }
+        fork_move(o, -33, 4, -24.5f, 4, 5);
+        o->state = 5;
+    } else if (o->state == 5) {
+        if (!turned) { fork_turn(o, -PI / 2); o->flags |= 1; return; }
+        fork_move(o, -24.5f, 4, -33, 4, 5);
+        o->state = 6;
+    } else if (o->state == 6) {
+        if (!turned) { fork_turn(o, 0); o->flags |= 1; return; }
+        fork_move(o, x, y, x, -3, 6);
+        o->state = 7;
+    } else if (o->state == 7) {
+        if (!turned) { fork_turn(o, -PI / 2); o->flags |= 1; return; }
+        o->oflags &= ~(uint32_t)SF_PUSH_OUT;
+        fork_move(o, x, y, loc1x, y, 8);
+        o->state = 8;
+    } else if (o->state == 8) {
+        o->oflags |= SF_PUSH_OUT;
+        if (!turned) { fork_turn(o, 0); o->flags |= 1; return; }
+        fork_move(o, x, -3, x, loc1y, 6);
+        o->state = 9;
+    } else if (o->state == 9) {
+        if (!turned) { fork_turn(o, 0); o->flags |= 1; return; }
+        fork_move(o, x, y, x, -3, 6);
+        o->state = 2;
+    } else
+        return;
+    o->flags &= ~1;
+}
+static void fork_pulse(StreetObjs *s, StreetObj *o)
+{
+    if (o->state == 0) {
+        float p[3] = { onum(o, "Loc1X", 23.7f), onum(o, "Loc1Y", 4), 0 }, e[3] = { 0, 0, PI };
+        set_point(o, p);
+        set_facing(o, e);
+        o->oflags |= SF_PUSH_OUT;
+        fork_move(o, p[0], p[1], p[0], -3, 6);
+        o->state = 2;
+    } else if (o->state == 10) {                     /* turning */
+        float rate = (o->rot_end < o->rot_start ? -1 : 1) * o->pulse_delay * PI;
+        o->rot_cur += rate;
+        float e[3] = { 0, 0, o->rot_cur };
+        if ((o->rot_end >= o->rot_start && o->rot_cur >= o->rot_end) ||
+            (o->rot_end <= o->rot_start && o->rot_cur <= o->rot_end)) {
+            o->rot_cur = e[2] = o->rot_end;
+            set_facing(o, e);
+            set_pulse(o, 0);
+            o->state = o->saved;
+            fork_next(o);
+        } else
+            set_facing(o, e);
+    } else if (o->state == 11) {                     /* going */
+        o->die_delay -= o->pulse_delay;
+        if (o->die_delay > 0 && o->die_delay < 0.25f)
+            effect(s, o, ostr(o, "ExplodeFX"), NULL, 1, NULL, NULL, 0, 0);
+        else if (o->die_delay < 0)
+            request_delete(s, o);
+    }
+}
+static void fork_die(StreetObj *o)                   /* onThrow, OnHitGround, TakeImpact */
+{
+    set_pulse(o, 0.1f);
+    o->state = 11;
+    o->lm_on = 0;
+}
+static void fork_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
+{
+    if (!who || mi < 0)
+        return;
+    o->hp -= 1;
+    if (o->hp < 1 && o->state != 1) {
+        set_shape(s, o, ostr(o, "DamageShape"));
+        const char *fx = ostr(o, "HitEffect2");
+        if (fx)
+            effect(s, o, fx, NULL, 1, NULL, NULL, 0, 0);
+        else
+            add_stats(s, o, mi);
+        float d[3] = { o->world[12] - who->pos[0], o->world[13] - who->pos[1], o->world[14] - who->pos[2] };
+        float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        for (int k = 0; k < 3; k++)
+            d[k] = l > 1e-6f ? d[k] / l * 25 : 0;
+        o->lm_on = 0;
+        streetobj_fly(s, idx(s, o), -1, 0, d);       /* a SphereMover */
+        set_pulse(o, 0.1f);
+        o->state = 11;
+    } else
+        effect(s, o, ostr(o, "HitEffect1"), NULL, 1, NULL, NULL, 0, 0);
+}
+
 int streetobj_kind_of(Group tmpl)
 {
     const char *sc = gstr(tmpl, "ScriptName");
@@ -1817,7 +1959,8 @@ int streetobj_kind_of(Group tmpl)
            same_text(sc, "Billboard.bsf") ? SK_BILLBOARD : same_text(sc, "Billboard_George.bsf") ? SK_GEORGE :
            same_text(sc, "AnimatedSign.bsf") ? SK_ANIMSIGN : same_text(sc, "Fountain.bsf") ? SK_FOUNTAIN :
            same_text(sc, "DamagingEffect.bsf") ? SK_DAMAGING : same_text(sc, "WaterTower.bsf") ? SK_TOWER :
-           same_text(sc, "Crane.bsf") ? SK_CRANE : same_text(sc, "KiteAnchor.bsf") ? SK_KITE : -1;
+           same_text(sc, "Crane.bsf") ? SK_CRANE : same_text(sc, "KiteAnchor.bsf") ? SK_KITE :
+           same_text(sc, "ForkLift.bsf") ? SK_FORK : -1;
 }
 
 /* a book's collision keys (WSimpleObject 0x28FD70): CollisionBox { min x y z, max x y z } */
@@ -1911,6 +2054,8 @@ static int add_kind(StreetObjs *s, int kind, Group tmpl, Group inst, const float
         crane_construct(s, o);
     else if (kind == SK_KITE)
         o->oflags |= SF_EFF_NODES;
+    else if (kind == SK_FORK)
+        fork_construct(o);
     return i;
 }
 
@@ -1962,7 +2107,7 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
                    o->kind == SK_ATTACH ? "attachment" : o->kind == SK_ANIMSIGN ? "AnimatedSign" :
                    o->kind == SK_FOUNTAIN ? "Fountain" : o->kind == SK_DAMAGING ? "DamagingEffect" :
                    o->kind == SK_TOWER ? "WaterTower" : o->kind == SK_CRANE ? "Crane" :
-                   o->kind == SK_KITE ? "KiteAnchor" : "StreetObject",
+                   o->kind == SK_KITE ? "KiteAnchor" : o->kind == SK_FORK ? "ForkLift" : "StreetObject",
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
@@ -2029,6 +2174,8 @@ static void fly_step(StreetObjs *s, StreetObj *o)
         streetobj_take_impact(s, i);
     else if (c.ground && o->kind == SK_STREET && o->alive)
         streetobj_hit_ground(s, i);
+    else if ((c.nmet || c.ground) && o->kind == SK_FORK && o->state != 11)
+        fork_die(o);                                 /* ForkLift's TakeImpact, OnHitGround */
 }
 
 static void step(StreetObjs *s)
@@ -2065,14 +2212,20 @@ static void step(StreetObjs *s)
                     tower_pulse(s, o);
                 else if (o->kind == SK_CRANE)
                     crane_pulse(s, o);
+                else if (o->kind == SK_FORK)
+                    fork_pulse(s, o);
             }
         }
         if (o->kind == SK_GEORGE)                    /* Process: every frame */
             george_process(s, o);
         else if (o->kind == SK_CRANE && !s->deleting[i])
             crane_process(s, o);
-        if (o->lm_on && !s->deleting[i] && line_step(o) && o->kind == SK_KITE)
-            request_delete(s, o);                    /* KiteAnchor's onMoverCallback */
+        if (o->lm_on && !s->deleting[i] && !(o->oflags & SF_HELD) && !o->flying && line_step(o)) {
+            if (o->kind == SK_KITE)                  /* onMoverCallback */
+                request_delete(s, o);
+            else if (o->kind == SK_FORK)
+                fork_next(o);
+        }
         if (o->kind == SK_2PART && o->on_path && !s->deleting[i])   /* its SplineMover */
             part_move(s, o);
         /* 0x309AC0 [R]: attached (0x4000000) to a building whose collapsing storey is set: onBuildingDestruction,
@@ -2185,6 +2338,8 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         crane_damage(s, o, mi, who, s->amount);
     else if (o->kind == SK_KITE && who && mi >= 0)
         kite_fly(o);
+    else if (o->kind == SK_FORK)
+        fork_damage(s, o, mi, who);
     else if (o->kind == SK_FOUNTAIN) {               /* the blow's way [G: the monster's facing] */
         float d[3] = { who ? -sinf(who->facing) : 0, who ? cosf(who->facing) : 0, 0 };
         fountain_break(s, o, who ? mi : -1, d);
@@ -2244,6 +2399,10 @@ int streetobj_take_impact(StreetObjs *s, int i)
     if (o->alive && o->kind == SK_FOUNTAIN) {        /* Fountain.bsf's: broken, straight up, no score */
         static const float up[3] = { 0, 0, 0 };
         fountain_break(s, o, -1, up);
+        return 1;
+    }
+    if (o->alive && o->kind == SK_FORK && !(o->oflags & SF_HELD)) {   /* ForkLift.bsf's: going */
+        fork_die(o);
         return 1;
     }
     if (o->alive && o->kind == SK_TOWER) {           /* WaterTower.bsf's: as a blow, no score */
@@ -2383,6 +2542,12 @@ void streetobj_grab(StreetObjs *s, int i, float blend)
     o->oflags &= ~(uint32_t)SF_ATTACHED;             /* its mover is the hand's now */
     if (o->kind == SK_STREET)
         streetobj_pickup(s, i);                      /* script event 8 */
+    else if (o->kind == SK_FORK) {                   /* ForkLift's onPickup: it stops, DamageShape */
+        o->state = 1;
+        o->lm_on = 0;
+        set_shape(s, o, ostr(o, "DamageShape"));
+        set_pulse(o, 0.1f);
+    }
 }
 
 /* [R] the HeldObjectMover (0x310ED0): the MajorAxis row (default 2) is the hand's z, the next its y, the third their
@@ -2452,6 +2617,8 @@ void streetobj_fly(StreetObjs *s, int i, int monster, int eat, const float vel[3
     (void)eat;                                       /* onThrow's bWasEaten: StreetObject.bsf does not look */
     if (o->kind == SK_STREET)
         streetobj_throw(s, i, monster);
+    else if (o->kind == SK_FORK && monster >= 0)    /* onThrow (not the flight its last blow starts) */
+        fork_die(o);
 }
 
 void streetobj_place(StreetObjs *s, int i, const float world[16])
