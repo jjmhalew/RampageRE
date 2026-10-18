@@ -41,6 +41,13 @@ void fx_budget(FxWorld *w, int monsters);
 int fx_spawn_free(FxWorld *w, const char *effect_name, const float pos[3], const float dir[3], float scale);
 void fx_stop(FxWorld *w, int id);      /* shut down: emitters stop, live particles finish (a looping fire, ...) */
 void fx_kill(FxWorld *w, int id);       /* gone at once: its emitters and particles (a GuiEffect given another edf) */
+/* whether an effect stands for one of the game's FollowEffects (a script's createAndStart*, an object's or a clip
+ * event's effect: a world object of its own): fx_spawn's are, fx_spawn_free's (the monster's own) are not; the
+ * effects the game starts straight from the FxManager (0x208220: a building cell's debris, a weapon's) are marked not.
+ * fx_drop_followers kills every follower at once, as activateNextBlock's sweep deletes the old block's objects and
+ * the FollowEffects with them (0x2B66C0 -> 0x292270 -> 0x207A40) [R] */
+void fx_set_follower(FxWorld *w, int id, int on);
+void fx_drop_followers(FxWorld *w);
 /* an effect in a whole frame: R its axes in the world (rows x, y, z, unit length), not made upright; fx_place moves it
  * and turns its emitters with it (an effect on the turning globe of the front end, a beam in its weapon's frame): the
  * relative emitters' particles turn and move with them, the others stay in the world, as with fx_move */

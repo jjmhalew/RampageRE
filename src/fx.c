@@ -933,6 +933,7 @@ typedef struct {
     int rod;                  /* the rod emitter (w->em), -1 none (+0x9C) */
     float rod_speed, rod_len, head, tail;   /* the rod's (unscaled), +0xA0, +0xA4 */
     int counted;               /* started through the budget (fx_spawn): it counts by its priority while it lives */
+    int follower;              /* stands for a FollowEffect (fx_spawn; fx_set_follower): fx_drop_followers drops it */
 } Fx;
 
 struct FxWorld {
@@ -1624,6 +1625,7 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     f->rod = -1;
     f->head = f->tail = 0;
     f->counted = w->budget && !w->exempt;
+    f->follower = !w->exempt;
     /* the effect's frame: Y along dir, Z the world's up made square to it. The game's callers hand the effect a
      * whole matrix of their own; a building cell's is its face's from 0x430F10 (0x30F710; the front's the identity:
      * dir +Y here, the effects' -Y out of the facade) [R]; the others are the callers' (fx_spawn_frame for a frame) */
@@ -1698,6 +1700,25 @@ void fx_move(FxWorld *w, int id, const float pos[3])
         for (int k = 0; k < 2; k++)
             if (w->em[i].used && w->em[i].fx == slot && w->em[i].sound[k])
                 w->sound(w->sound_ctx, FXS_MOVE, NULL, pos, w->em[i].sound[k]);
+}
+
+void fx_set_follower(FxWorld *w, int id, int on)
+{
+    Fx *f = fx_of(w, id);
+    if (f)
+        f->follower = on != 0;
+}
+
+/* activateNextBlock's sweep (0x2B66C0): every object of the world's list but the monsters' weapons is deleted, the
+ * FollowEffects with them; a FollowEffect's destructor (0x292270) hands its effect back to the FxManager (0x207A40), and
+ * a ParticleSystemFx is destroyed and put on the free list there and then (0x207AB8): gone, particles and all [R] */
+void fx_drop_followers(FxWorld *w)
+{
+    if (!w)
+        return;
+    for (int k = 0; k < MAX_FX; k++)
+        if (w->fx[k].used && w->fx[k].follower)
+            fx_kill(w, k | w->fx[k].gen << 8);
 }
 
 void fx_vel(FxWorld *w, int id, const float vel[3])

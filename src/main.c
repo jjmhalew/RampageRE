@@ -1056,8 +1056,10 @@ static void build(Viewer *v)
         }
     }
     v->scene.traffic = v->veh;
-    for (int k = 0; k < v->nweather_fx; k++)         /* the last block's weather [G: its object deleted, its effect
-                                                      * (setTurnOffWhenObjectDies(0)) would loop on where it stood] */
+    for (int k = 0; k < v->nweather_fx; k++)         /* the last block's weather: in the game its FollowEffect goes
+                                                      * with its object at the block's end (0x2B66C0) and the next
+                                                      * block's Weather starts at once (0x302AF0) [R]; here the old
+                                                      * one runs on until the new block is built */
         if (v->fxw)
             fx_stop(v->fxw, v->weather_fx[k]);
     v->nweather_fx = 0;
@@ -3034,6 +3036,8 @@ static void mon_weapons_step(Viewer *v, float dt)
                 if (w->fx >= 0)
                     fx_stop(v->fxw, w->fx);
                 w->fx = fx_spawn_frame(v->fxw, w->fire_fx, at, (const float (*)[3])R, 1);
+                fx_set_follower(v->fxw, w->fx, 0);   /* the weapon's own (0x295750 ..), and a monster's weapon
+                                                      * stays at a block's end (flag 0x200000) [R] */
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  effect %s at %.1f %.1f %.1f -> %d (%g s)\n", w->fire_fx, at[0], at[1], at[2], w->fx,
                            w->duration);
@@ -3341,6 +3345,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
                         printf("  boss effect %s on part %d node %s / %d at %.1f %.1f %.1f -> %d\n", e->name, e->obj,
                                e->node ? e->node : "-", e->level, p ? at[0] : e->pos[0], p ? at[1] : e->pos[1],
                                p ? at[2] : e->pos[2], id);
+                    fx_set_follower(v->fxw, id, 0);  /* the bosses stay here at a block's end (block_left) */
                     if (id >= 0 && v->nbfx < 64) {   /* to follow its part or the monster, or to stop by its id */
                         v->bfx[v->nbfx].id = e->id;
                         v->bfx[v->nbfx].fx = id;
@@ -4860,6 +4865,8 @@ static void weather_step(Viewer *v)
         v->weather_due = 0;
         for (int k = 0; k < v->scene.nweather && v->nweather_fx < 4; k++) {
             int id = fx_spawn(v->fxw, v->scene.weather[k], at, NULL, 1);
+            fx_set_follower(v->fxw, id, 0);          /* (the game's goes at a block's end and the next block's starts
+                                                      * at once, 0x302AF0; here that one at the block's start) */
             if (id >= 0)
                 v->weather_fx[v->nweather_fx++] = id;
             if (getenv("RAMPAGE_TRACE"))
@@ -4878,6 +4885,7 @@ static void fx_step(Viewer *v, float dt)
         if (v->fxw) {
             const struct SceneFx *f = &v->scene.fxreq[i];
             int id = fx_spawn(v->fxw, f->name, f->pos, f->dir, 1);
+            fx_set_follower(v->fxw, id, 0);          /* the buildings': their spawner's, from the FxManager (0x310260) */
             if (getenv("RAMPAGE_TRACE"))
                 printf("  effect %s at %.1f %.1f %.1f -> %d\n", f->name, f->pos[0], f->pos[1], f->pos[2], id);
         }
@@ -5087,15 +5095,17 @@ static void mon_fart(Mon *mo)
 
 /* the rage's effect's place (0x2F4710, each frame 0x2F5170) [R]: the head (0x2E63A0: the animation player's node
  * +0x72D0, Bip01 Head, through the monster's matrix) moved by the monster's radius (0x2E4FA0: MONSTER_DATA +0x188,
- * 3, x its scale) along the camera's vector (its manager's +0x66C, made 1 long; (1, 0, 0) when shorter than 1e-6)
- * [G: that vector is the way from the view to the eye, so the effect sits on the head's camera side]; 0 = ok */
+ * 3, x its scale) along the camera's forward (gWorld +0x66C, made 1 long; (1, 0, 0) when shorter than 1e-6): the
+ * world's view block +0x660 is the camera's rows right, forward, up and its eye (+0x684), copied from the frame's
+ * (0x285030); the renderer swaps rows 1 and 2 into its depth axis (0x2895F0 -> 0x101E90) [R]. So the effect sits a
+ * radius beyond the head, away from the camera; 0 = ok */
 static int rage_fx_at(Mon *mo, float at[3])
 {
     Viewer *v = mo->v;
     Mat4 w;
     if (scene_monster_node(&v->scene, mo->slot, "Bip01 Head", &w) != 0)
         return -1;
-    float d[3] = { v->view.pos[0] - w.m[12], v->view.pos[1] - w.m[13], v->view.pos[2] - w.m[14] };
+    float d[3] = { v->view.rows[1][0], v->view.rows[1][1], v->view.rows[1][2] };
     float l2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], r = mon_radius(mo);
     if (l2 < 1e-6f) {
         d[0] = 1; d[1] = d[2] = 0;
@@ -5832,9 +5842,9 @@ static void play_step(Viewer *v, float dt, float aspect)
                 else
                     obj_sound_stop(v, OS_PEOPLE, ev[i].who, ev[i].name);
             }
-            if (ev[i].type == PE_EFFECT && !ev[i].node) {
+            if (ev[i].type == PE_EFFECT && !ev[i].node && v->fxw) {   /* a script's createAndStart: a FollowEffect */
                 float up[3] = { 0, 1, 0 };
-                scene_fx(&v->scene, ev[i].name, ev[i].v, up);
+                fx_spawn(v->fxw, ev[i].name, ev[i].v, up, 1);
             }
             if (ev[i].type == PE_EFFECT && ev[i].node && v->fxw) {   /* createAndStartAttachedToNodeByName(actor,
                                                       * name, node): the tourist's CameraFlash on its Camera, in the
@@ -6184,14 +6194,15 @@ static void block_left(Viewer *v)
         Mon *mo = &v->mon[k];
         mo->held = mo->held_unit = mo->held_vehicle = mo->held_parade = mo->held_rail = mo->held_sobj = -1;
     }
-    if (v->fxw) {
-        for (int i = 0; i < v->nfxa; i++) fx_stop(v->fxw, v->fxa[i].fx);
-        for (int i = 0; i < v->nvfx; i++) fx_stop(v->fxw, v->vfx[i].fx);
-        for (int i = 0; i < v->nsofx; i++) fx_stop(v->fxw, v->sofx[i].fx);
-        for (int i = 0; i < v->npfx; i++) fx_stop(v->fxw, v->pfx[i].fx);
-        for (int i = 0; i < v->nrfx; i++) fx_stop(v->fxw, v->rfx[i].fx);
-        for (int i = 0; i < v->nefx; i++) fx_stop(v->fxw, v->efx[i].fx);
-    }
+    /* the FollowEffects go with the objects, at once (0x2B66C0 -> 0x292270 -> 0x207A40) [R]: the army's, the vehicles',
+     * the street objects', the parade's, the trains', the edibles', the people's, the scripts' one-shots and the
+     * monsters' clip events'; the monster's own, the buildings' debris, the monsters' weapons' and the bosses' (kept
+     * here) and the weather (the new block's at once in the game; here the old one until the new block is built) are
+     * not followers */
+    int before = fx_particles(v->fxw);
+    fx_drop_followers(v->fxw);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  block left: the FollowEffects dropped, particles %d -> %d\n", before, fx_particles(v->fxw));
     v->nfxa = v->nvfx = v->nsofx = v->npfx = v->nrfx = v->nrsnd = v->nefx = 0;
     for (int k = 0; k < v->nosnd; k++)
         sound_kill(v->osnd[k].h);

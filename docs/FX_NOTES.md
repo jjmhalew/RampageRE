@@ -165,6 +165,17 @@ AmbientEffect (+0x108) and ChallengeEffect (+0x110) itself (0x30E128 .. 0x30E1DC
 (people.c `gone`, army.c `die_with`). A CycleLoops emitter never ends until shut down; another ends when it has no
 particles and is past its cycle (0x20EFD0's answer), and the effect with its last emitter (fx.c `fx_update`).
 
+At a block's end activateNextBlock's sweep (0x2B66C0) deletes every object of the world's list but the monsters'
+weapons (flag 0x200000), and a FollowEffect is one (the world's add, vtable +0x3C 0x284CD0, puts it on both lists,
++0x58 and +0x50): its destructor (0x292270) takes it off the budget and hands its effect back to the FxManager
+(0x207A40), which destroys a ParticleSystemFx and puts it on the free list there and then (type 7, 0x207AB8). So every
+FollowEffect of the old block (the scripts' effects, the objects', the monsters' clip events') is gone at once,
+particles and all, as the results start. What the game starts straight from the FxManager (0x208220: a building
+cell's debris 0x310260, the monster's foot plants, landings and rage, the weapons) is not swept. The port: fx.c
+`Fx.follower` (fx_spawn's; not fx_spawn_free's, the buildings' requests, the weapons', the weather, the bosses',
+which the port keeps), main.c `block_left` calls `fx_drop_followers`; it had shut down only the effects it tracks,
+and those faded out over the Results.
+
 ## An emitter (start 0x1F7F90, frame 0x20EFD0)
 - **Start**: cycle = lo + r (hi − lo); age = cycle × em_start_time(r) − dt; a random rotation with
   +RandomizeEmitterXF; a sound. Only +AutoStart emitters start with the effect; the others are carried
