@@ -53,6 +53,9 @@ typedef struct {
     uint32_t *tris;                                      /* 3 indices per triangle */
     int blend;                                           /* drawn over what is behind it by its alpha (1: the cracks;
                                                           * 2: depth still written, the facade sheets: GS state 2) */
+    uint32_t rev;                                        /* counted up whenever the arrays change after the load (the
+                                                          * buildings' facades and lit models, city.c): the renderer's
+                                                          * copy of them (its GL buffers) is made again */
 } MeshPart;
 typedef struct {
     MeshPart *parts;

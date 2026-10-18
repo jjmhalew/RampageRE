@@ -1699,6 +1699,7 @@ static void part_reset(MeshPart *p, uint32_t quads)
     p->col = malloc(sizeof(float) * 16 * (quads ? quads : 1));
     p->tris = malloc(sizeof(uint32_t) * 6 * (quads ? quads : 1));
     p->nverts = p->ntris = 0;
+    p->rev++;
 }
 
 /* one quad, corners in order around it, wound to face n */
@@ -2207,12 +2208,14 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
                     if (cell_flags(floors[st], k) & CELL_MIRRORED) {   /* [R 0x2C82AC]: its u0 and u1 swapped */
                         sb->b.cell[st][i].flags |= CELL_MIRRORED;
                         MeshPart *fp = mesh >= 0 ? &s->meshes[mesh].mesh.parts[0] : NULL;
-                        if (fp && fp->uv && (uint32_t)v + 4 <= fp->nverts)
+                        if (fp && fp->uv && (uint32_t)v + 4 <= fp->nverts) {
                             for (int q = 0; q < 2; q++) {
                                 float u = fp->uv[2 * (v + q)];
                                 fp->uv[2 * (v + q)] = fp->uv[2 * (v + 2 + q)];
                                 fp->uv[2 * (v + 2 + q)] = u;
                             }
+                            fp->rev++;
+                        }
                     }
                 }
                 v += 4;
@@ -2414,6 +2417,7 @@ static void light_facade(SceneBuilding *sb, MeshPart *p)
     const Building *b = &sb->b;
     if (!p->col)
         return;
+    p->rev++;
     for (int o = 0; o < b->storeys; o++) {
         int ls = building_live_of(b, o);
         for (int c = 0; c < BUILDING_CELLS; c++) {
@@ -2513,6 +2517,7 @@ static void light_models(Scene *s, SceneBuilding *sb, const ShadowFacade *f)
             MeshPart *dp = &dst->parts[pi];
             if (!sp->nrm || sp->col || !dp->col || dp->nrm || sp->nverts != dp->nverts)
                 continue;
+            dp->rev++;
             for (uint32_t v = 0; v < sp->nverts; v++) {
                 const float *q = sp->pos + 3 * v, *nn = sp->nrm + 3 * v;
                 float p[3], n[3], rgb[3];
@@ -3565,6 +3570,7 @@ static void building_place(Scene *s, SceneBuilding *sb)
     }
     if (sb->mesh >= 0) {                             /* the facade's storeys: each quad's corners, bottom and top */
         MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
+        p->rev++;
         for (int o = 0; o < b->storeys; o++) {
             int ls = building_live_of(b, o);
             float bottom = 0, height = 0;
@@ -3755,6 +3761,7 @@ void scene_buildings_update(Scene *s, float dt)
                 for (int k = 0; k < 4; k++)
                     p->uv[2 * (v + k) + 1] = row + (k & 1 ? 0 : 0.25f);
             }
+        p->rev++;
         for (int st = 0; st < sb->b.storeys; st++) {     /* the interiors */
             int damaged = 0;
             for (int c = 0; c < BUILDING_CELLS && !damaged; c++)

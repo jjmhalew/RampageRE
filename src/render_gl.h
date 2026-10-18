@@ -43,7 +43,7 @@ typedef struct {
 
 typedef struct Renderer Renderer;
 Renderer *rnd_create(void);
-void rnd_scene(Renderer *r, const Scene *s);       /* drops the textures of the scene before */
+void rnd_scene(Renderer *r, const Scene *s);       /* drops the textures and buffers of the scene before */
 void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fog);
 void rnd_free(Renderer *r);
 /* port extra (docs/NATIVE.md "Graphics settings"): the textures' filtering: aniso = GL_TEXTURE_MAX_ANISOTROPY (1 =

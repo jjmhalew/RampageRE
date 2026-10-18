@@ -1,6 +1,8 @@
 /* render_gl.c - the Win32 window and WGL context (the SDL2 one for the other systems is plat_sdl.c) and an OpenGL 1.1
  * renderer for a Scene (city.c). */
 #include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -230,6 +232,15 @@ typedef struct { const Bundle *b; uint32_t name; int n; uint32_t frame[IFL_FRAME
 /* a blended part held back while the ambient occlusion is on (rnd_frame): drawn after it with the modelview it had */
 typedef struct { float mv[16]; const SceneMesh *sm; const Skin *skin; uint32_t part, first; } HeldPart;
 typedef struct { const MeshPart *parts; uint32_t nparts; float c[3], r; } MeshBound;   /* a mesh's sphere (item_seen) */
+/* a part's arrays in GL buffers (part_buffers): the vertices' pos, nrm, uv, col one after the other (at those byte
+ * offsets, 0 = none but pos), the triangles' indices in ibo; what they were made from, to tell when to make them again */
+typedef struct {
+    GLuint vbo, ibo;
+    uint32_t rev, nverts, ntris;
+    const float *pos, *nrm, *uv, *col; const uint32_t *tris;
+    size_t at_nrm, at_uv, at_col;
+} PartBuf;
+typedef struct { const MeshPart *parts; uint32_t nparts; PartBuf *pb; } MeshBuf;
 
 struct Renderer {
     const Scene *scene;
@@ -243,6 +254,8 @@ struct Renderer {
     int in_hud;                                      /* draw_hud: textures made now get no mips nor anisotropy */
     HeldPart *held; int nheld, cheld;
     MeshBound *bound; uint32_t nbound;               /* by Scene.meshes index, made at its first draw */
+    MeshBuf *mbuf; uint32_t nmbuf;                   /* by Scene.meshes index, made at its first draw (part_buffers) */
+    float *stage; size_t nstage;                     /* a part's arrays laid out for its buffer */
 };
 
 /* ---- texture settings (port extra, docs/NATIVE.md "Graphics settings") */
@@ -335,9 +348,140 @@ static void drop_textures(Renderer *r)
     r->nifl = 0;
 }
 
+/* ---- port extra: the unskinned parts' arrays in GL buffer objects (GL 1.5 or ARB_vertex_buffer_object; ES 2.0 has
+ * them, gles2.c tracks them), uploaded once instead of the driver copying the client arrays at every draw */
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER 0x8892
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#define GL_STATIC_DRAW 0x88E4
+#define GL_DYNAMIC_DRAW 0x88E8
+#endif
+typedef void (APIENTRY *BufGen)(GLsizei, GLuint *);
+typedef void (APIENTRY *BufDel)(GLsizei, const GLuint *);
+typedef void (APIENTRY *BufBind)(GLenum, GLuint);
+typedef void (APIENTRY *BufData)(GLenum, ptrdiff_t, const void *, GLenum);
+static struct { int tried; BufGen gen; BufDel del; BufBind bind; BufData data; } g_buf;
+
+/* the buffer calls, 0 when the GL has none (the client arrays then, as before) */
+static int buffers_ok(void)
+{
+    if (!g_buf.tried) {
+        g_buf.tried = 1;
+        const char *sfx = "", *off = getenv("RAMPAGE_NOVBO");   /* 1: the client arrays (to compare) */
+        if (off && *off && *off != '0')
+            return 0;
+#ifndef RAMPAGE_GLES
+        const char *ver = (const char *)glGetString(GL_VERSION), *ext = (const char *)glGetString(GL_EXTENSIONS);
+        int core = ver && ver[0] >= '1' && ver[0] <= '9' && (ver[0] > '1' || (ver[1] == '.' && ver[2] >= '5'));
+        sfx = core ? "" : ext && strstr(ext, "GL_ARB_vertex_buffer_object") ? "ARB" : NULL;
+        if (!sfx)
+            return 0;
+#endif
+        char n[4][32];
+        static const char *const base[4] = { "glGenBuffers", "glDeleteBuffers", "glBindBuffer", "glBufferData" };
+        for (int i = 0; i < 4; i++)
+            snprintf(n[i], sizeof n[i], "%s%s", base[i], sfx);
+        g_buf.gen = (BufGen)(void *)plat_gl_proc(n[0]);
+        g_buf.del = (BufDel)(void *)plat_gl_proc(n[1]);
+        g_buf.bind = (BufBind)(void *)plat_gl_proc(n[2]);
+        g_buf.data = (BufData)(void *)plat_gl_proc(n[3]);
+        if (!g_buf.gen || !g_buf.del || !g_buf.bind || !g_buf.data)
+            g_buf.gen = NULL;
+    }
+    return g_buf.gen != NULL;
+}
+
+static void drop_buffers(Renderer *r)
+{
+    for (uint32_t m = 0; m < r->nmbuf; m++) {
+        MeshBuf *mb = &r->mbuf[m];
+        for (uint32_t k = 0; mb->pb && k < mb->nparts; k++) {
+            GLuint id[2] = { mb->pb[k].vbo, mb->pb[k].ibo };
+            if (id[0] || id[1])
+                g_buf.del(2, id);
+        }
+        free(mb->pb);
+    }
+    free(r->mbuf);
+    r->mbuf = NULL;
+    r->nmbuf = 0;
+}
+
+/* part i of scene mesh sm in buffers, made at its first draw and again when its arrays changed (a new block's meshes
+ * reuse the indices; the buildings' facades change as they are damaged: MeshPart.rev); NULL: not a scene mesh (the
+ * effects' shapes, the shell's), no buffers in this GL, or out of memory */
+static const PartBuf *part_buffers(Renderer *r, const SceneMesh *sm, uint32_t i)
+{
+    const Scene *s = r->scene;
+    if (!s || !s->meshes || (uintptr_t)sm < (uintptr_t)s->meshes ||
+        (uintptr_t)sm >= (uintptr_t)(s->meshes + s->nmeshes) || !buffers_ok())
+        return NULL;
+    uint32_t mi = (uint32_t)(sm - s->meshes);
+    if (r->nmbuf < s->nmeshes) {
+        MeshBuf *b = realloc(r->mbuf, sizeof *b * s->nmeshes);
+        if (!b)
+            return NULL;
+        memset(b + r->nmbuf, 0, sizeof *b * (s->nmeshes - r->nmbuf));
+        r->mbuf = b;
+        r->nmbuf = s->nmeshes;
+    }
+    const Mesh *m = &sm->mesh;
+    MeshBuf *mb = &r->mbuf[mi];
+    if (mb->parts != m->parts || mb->nparts != m->nparts) {
+        for (uint32_t k = 0; mb->pb && k < mb->nparts; k++) {
+            GLuint id[2] = { mb->pb[k].vbo, mb->pb[k].ibo };
+            if (id[0] || id[1])
+                g_buf.del(2, id);
+        }
+        free(mb->pb);
+        mb->pb = calloc(m->nparts ? m->nparts : 1, sizeof *mb->pb);
+        mb->parts = m->parts;
+        mb->nparts = mb->pb ? m->nparts : 0;
+        if (!mb->pb)
+            return NULL;
+    }
+    const MeshPart *p = &m->parts[i];
+    PartBuf *pb = &mb->pb[i];
+    if (!pb->vbo || pb->rev != p->rev || pb->nverts != p->nverts || pb->ntris != p->ntris || pb->pos != p->pos ||
+        pb->nrm != p->nrm || pb->uv != p->uv || pb->col != p->col || pb->tris != p->tris) {
+        size_t n = p->nverts, floats = 3 * n + (p->nrm ? 3 * n : 0) + (p->uv ? 2 * n : 0) + (p->col ? 4 * n : 0);
+        if (floats > r->nstage) {
+            float *st = realloc(r->stage, sizeof *st * floats);
+            if (!st)
+                return NULL;
+            r->stage = st;
+            r->nstage = floats;
+        }
+        float *o = r->stage;
+        memcpy(o, p->pos, sizeof *o * 3 * n);
+        o += 3 * n;
+        pb->at_nrm = p->nrm ? sizeof *o * (size_t)(o - r->stage) : 0;
+        if (p->nrm) { memcpy(o, p->nrm, sizeof *o * 3 * n); o += 3 * n; }
+        pb->at_uv = p->uv ? sizeof *o * (size_t)(o - r->stage) : 0;
+        if (p->uv) { memcpy(o, p->uv, sizeof *o * 2 * n); o += 2 * n; }
+        pb->at_col = p->col ? sizeof *o * (size_t)(o - r->stage) : 0;
+        if (p->col) { memcpy(o, p->col, sizeof *o * 4 * n); o += 4 * n; }
+        GLenum use = pb->vbo ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;   /* made again: it changes */
+        if (!pb->vbo) {
+            GLuint id[2] = { 0, 0 };
+            g_buf.gen(2, id);
+            pb->vbo = id[0];
+            pb->ibo = id[1];
+        }
+        g_buf.bind(GL_ARRAY_BUFFER, pb->vbo);
+        g_buf.data(GL_ARRAY_BUFFER, (ptrdiff_t)(sizeof *o * floats), r->stage, use);
+        g_buf.bind(GL_ELEMENT_ARRAY_BUFFER, pb->ibo);
+        g_buf.data(GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t)(sizeof *p->tris * 3 * p->ntris), p->tris, use);
+        pb->rev = p->rev; pb->nverts = p->nverts; pb->ntris = p->ntris;
+        pb->pos = p->pos; pb->nrm = p->nrm; pb->uv = p->uv; pb->col = p->col; pb->tris = p->tris;
+    }
+    return pb;
+}
+
 void rnd_scene(Renderer *r, const Scene *s)
 {
     drop_textures(r);
+    drop_buffers(r);
     r->scene = s;
 }
 
@@ -346,10 +490,12 @@ void rnd_free(Renderer *r)
     if (!r)
         return;
     drop_textures(r);
+    drop_buffers(r);
     if (r->video_tex)
         glDeleteTextures(1, &r->video_tex);
     free(r->held);
     free(r->bound);
+    free(r->stage);
     free(r);
 }
 
@@ -817,15 +963,27 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
             glTranslatef(drift[0], drift[1], 0);
         glMatrixMode(GL_MODELVIEW);
     }
-    glVertexPointer(3, GL_FLOAT, 0, skin ? skin->pos + 3 * first : p->pos);
+    /* port extra: an unskinned part from its GL buffers (part_buffers: the pointers are their offsets), a skinned one
+     * (posed every frame) from the client arrays */
+    const PartBuf *pb = skin ? NULL : part_buffers(r, sm, i);
+    const void *pos = p->pos, *nrm = p->nrm, *uv = p->uv, *col = p->col, *idx = p->tris;
+    if (pb) {
+        g_buf.bind(GL_ARRAY_BUFFER, pb->vbo);
+        g_buf.bind(GL_ELEMENT_ARRAY_BUFFER, pb->ibo);
+        pos = idx = NULL;
+        nrm = (const void *)(uintptr_t)pb->at_nrm;
+        uv = (const void *)(uintptr_t)pb->at_uv;
+        col = (const void *)(uintptr_t)pb->at_col;
+    }
+    glVertexPointer(3, GL_FLOAT, 0, skin ? skin->pos + 3 * first : pos);
     if (skin) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, skin->nrm + 3 * first); }
-    else if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, p->nrm); }
+    else if (p->nrm) { glEnableClientState(GL_NORMAL_ARRAY); glNormalPointer(GL_FLOAT, 0, nrm); }
     else { glDisableClientState(GL_NORMAL_ARRAY); glNormal3f(0, 0, 1); }
-    if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, p->uv); }
+    if (p->uv) { glEnableClientState(GL_TEXTURE_COORD_ARRAY); glTexCoordPointer(2, GL_FLOAT, 0, uv); }
     else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     float mc[4];                                         /* the material's colour (white when textured) */
     material_color(sm->b, p->material, mc);
-    if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, p->col); }
+    if (p->col) { glEnableClientState(GL_COLOR_ARRAY); glColorPointer(4, GL_FLOAT, 0, col); }
     else { glDisableClientState(GL_COLOR_ARRAY); glColor4fv(mc); }
     /* the part's own blend (the facades'), else its material's: GS state 2 as the sheets' (material_blended) */
     int blend = p->blend ? p->blend : material_blended(sm->b, p->material) ? 2 : 0;
@@ -868,7 +1026,7 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glDisableClientState(GL_COLOR_ARRAY);
         glColor4f(1, 1, 1, 1);
     }
-    glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+    glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, idx);
     if (env_only) {
         sphere_coords(0);
         if (lit_was)
@@ -901,7 +1059,7 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
             glAlphaFunc(GL_GREATER, 0.0f);
             glDepthFunc(GL_LEQUAL);
             glDepthMask(GL_FALSE);
-            glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+            glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, idx);
             glPopAttrib();
             r->drawn += p->ntris;
         }
@@ -931,7 +1089,7 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
         glDepthFunc(GL_LEQUAL);
         glDepthMask(GL_FALSE);
-        glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, p->tris);
+        glDrawElements(GL_TRIANGLES, (GLsizei)(3 * p->ntris), GL_UNSIGNED_INT, idx);
         sphere_coords(0);
         glPopAttrib();
     }
@@ -941,6 +1099,10 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glMatrixMode(GL_TEXTURE);
         glLoadIdentity();
         glMatrixMode(GL_MODELVIEW);
+    }
+    if (pb) {                                            /* the other draws' client arrays */
+        g_buf.bind(GL_ARRAY_BUFFER, 0);
+        g_buf.bind(GL_ELEMENT_ARRAY_BUFFER, 0);
     }
 }
 

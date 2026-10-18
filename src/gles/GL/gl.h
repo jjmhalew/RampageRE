@@ -10,6 +10,8 @@
  * - client arrays (vertex, normal, colour, texcoords of both units) as vertex attributes, glBegin / glEnd as client
  *   arrays (GL_QUADS as triangles, GL_POLYGON as a fan), glPushClientAttrib / glPopClientAttrib
  * - glPushAttrib / glPopAttrib of the state above and of the GL state the renderer and the shader passes change
+ * - buffer objects under the client arrays (glBindBuffer / glBufferData / glDeleteBuffers through plat_gl_proc: an
+ *   array takes the buffer bound at its pointer call, as in GL; on a bare ES 2.0 the shim keeps a copy of each)
  * - glReadPixels into GL_RGB, GL_CLAMP (= CLAMP_TO_EDGE), glDrawElements with GL_UNSIGNED_INT on a bare ES 2.0
  * Not there: point lights, spot lights, specular, glMaterial, the other texgen modes, glPolygonMode (a no-op), GL_FLAT.
  * Shader passes with an own program (glUseProgram of it: glBegin then feeds its attribute 0 the positions) pass

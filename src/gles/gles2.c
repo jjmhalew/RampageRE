@@ -11,7 +11,7 @@
 
 /* ---- the client arrays -------------------------------------------------------------------------------------------- */
 enum { A_VERT, A_COL, A_TC0, A_TC1, A_NRM, A_N };          /* = the attribute locations */
-typedef struct { int on; GLint size; GLenum type; GLsizei stride; const void *p; } Arr;
+typedef struct { int on; GLint size; GLenum type; GLsizei stride; const void *p; GLuint buf; } Arr;   /* buf: p is its offset */
 static Arr g_arr[A_N];
 static GLenum g_unit = GL_TEXTURE0;                        /* glClientActiveTexture */
 
@@ -23,7 +23,45 @@ static int arr_of(GLenum array)
 void gles_enable_client_state(GLenum array) { int a = arr_of(array); if (a >= 0) g_arr[a].on = 1; }
 void gles_disable_client_state(GLenum array) { int a = arr_of(array); if (a >= 0) g_arr[a].on = 0; }
 void gles_client_active_texture(GLenum unit) { g_unit = unit; }
-static void track(int a, GLint size, GLenum type, GLsizei stride, const void *p) { g_arr[a].size = size; g_arr[a].type = type; g_arr[a].stride = stride; g_arr[a].p = p; }
+/* ---- buffer objects: the bindings as the viewer made them (an array takes the GL_ARRAY_BUFFER bound at its pointer
+ * call, as in GL; flush binds each one's for its glVertexAttribPointer) and, on a bare ES 2.0 (no 32-bit indices), a
+ * copy of each buffer's data for gles_draw_elements to read */
+static GLuint g_abuf, g_ebuf, g_es_abuf;                   /* the viewer's GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER; ES's */
+static struct { void *p; size_t n; } *g_copy; static GLuint g_ncopy;
+static int uint_ok(void);
+static void es_array_buffer(GLuint b) { if (b != g_es_abuf) { glBindBuffer(GL_ARRAY_BUFFER, b); g_es_abuf = b; } }
+void gles_bind_buffer(GLenum target, GLuint b)
+{
+    if (target == GL_ARRAY_BUFFER) { g_abuf = b; es_array_buffer(b); return; }
+    if (target == GL_ELEMENT_ARRAY_BUFFER) g_ebuf = b;
+    glBindBuffer(target, b);
+}
+void gles_buffer_data(GLenum target, GLsizeiptr size, const void *data, GLenum usage)
+{
+    glBufferData(target, size, data, usage);
+    GLuint b = target == GL_ARRAY_BUFFER ? g_abuf : target == GL_ELEMENT_ARRAY_BUFFER ? g_ebuf : 0;
+    if (!b || uint_ok()) return;
+    if (b >= g_ncopy) {
+        GLuint n = b + 64; void *t = realloc(g_copy, sizeof *g_copy * n); if (!t) return;
+        g_copy = t; memset(g_copy + g_ncopy, 0, sizeof *g_copy * (n - g_ncopy)); g_ncopy = n;
+    }
+    void *c = realloc(g_copy[b].p, size > 0 ? (size_t)size : 1); if (!c) return;
+    if (data) memcpy(c, data, (size_t)size);
+    g_copy[b].p = c; g_copy[b].n = (size_t)size;
+}
+void gles_delete_buffers(GLsizei n, const GLuint *b)
+{
+    for (GLsizei i = 0; i < n; i++) {
+        if (b[i] < g_ncopy) { free(g_copy[b[i]].p); g_copy[b[i]].p = NULL; g_copy[b[i]].n = 0; }
+        if (b[i] == g_abuf) g_abuf = 0;
+        if (b[i] == g_es_abuf) g_es_abuf = 0;
+        if (b[i] == g_ebuf) g_ebuf = 0;
+    }
+    glDeleteBuffers(n, b);
+}
+static const void *copy_at(GLuint b, const void *p) { return b < g_ncopy && g_copy[b].p ? (const unsigned char *)g_copy[b].p + (size_t)p : NULL; }
+
+static void track(int a, GLint size, GLenum type, GLsizei stride, const void *p) { g_arr[a].size = size; g_arr[a].type = type; g_arr[a].stride = stride; g_arr[a].p = p; g_arr[a].buf = g_abuf; }
 void gles_vertex_pointer(GLint size, GLenum type, GLsizei stride, const void *p) { track(A_VERT, size, type, stride, p); }
 void gles_normal_pointer(GLenum type, GLsizei stride, const void *p) { track(A_NRM, 3, type, stride, p); }
 void gles_color_pointer(GLint size, GLenum type, GLsizei stride, const void *p) { track(A_COL, size, type, stride, p); }
@@ -320,8 +358,9 @@ static void flush(const Arr *arr)                          /* the state of the n
         if (fm > 0) glUniform3f(u_fogc, S.fog_col[0], S.fog_col[1], S.fog_col[2]);
     }
     for (int a = 0; a < A_N; a++) {
-        if (arr[a].on && arr[a].p) {
+        if (arr[a].on && (arr[a].p || arr[a].buf)) {
             glEnableVertexAttribArray((GLuint)a);
+            es_array_buffer(arr[a].buf);
             glVertexAttribPointer((GLuint)a, arr[a].size, arr[a].type, (a == A_COL || a == A_NRM) && arr[a].type != GL_FLOAT, arr[a].stride, arr[a].p);
         } else {
             glDisableVertexAttribArray((GLuint)a);
@@ -331,25 +370,30 @@ static void flush(const Arr *arr)                          /* the state of the n
             else glVertexAttrib4f((GLuint)a, S.tc[a - A_TC0][0], S.tc[a - A_TC0][1], 0, 1);
         }
     }
+    es_array_buffer(g_abuf);
 }
 void gles_draw_arrays(GLenum mode, GLint first, GLsizei count) { flush(g_arr); glDrawArrays(mode, first, count); }
 void gles_draw_elements(GLenum mode, GLsizei count, GLenum type, const void *idx)
 {
     flush(g_arr);
-    static int has_uint = -1;
-    if (has_uint < 0) { const char *e = (const char *)glGetString(GL_EXTENSIONS); has_uint = es3() || (e && strstr(e, "GL_OES_element_index_uint")); }
-    if (type != GL_UNSIGNED_INT || has_uint) { glDrawElements(mode, count, type, idx); return; }
-    const GLuint *in = (const GLuint *)idx;                /* a bare ES 2.0: 16 bit indices, or the vertices gathered */
+    if (type != GL_UNSIGNED_INT || uint_ok()) { glDrawElements(mode, count, type, idx); return; }
+    /* a bare ES 2.0: 16 bit indices, or the vertices gathered (from the buffers' copies when they are in buffers) */
+    const GLuint *in = (const GLuint *)(g_ebuf ? copy_at(g_ebuf, idx) : idx);
+    if (!in) return;
     static GLushort *s; static GLsizei cap; GLuint mx = 0;
     for (GLsizei i = 0; i < count; i++) if (in[i] > mx) mx = in[i];
     if (mx < 65536) {
         if (count > cap) { GLushort *t = (GLushort *)realloc(s, (size_t)count * sizeof *t); if (!t) return; s = t; cap = count; }
         for (GLsizei i = 0; i < count; i++) s[i] = (GLushort)in[i];
-        glDrawElements(mode, count, GL_UNSIGNED_SHORT, s); return;
+        if (g_ebuf) glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glDrawElements(mode, count, GL_UNSIGNED_SHORT, s);
+        if (g_ebuf) glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_ebuf);
+        return;
     }
     static unsigned char *buf[A_N]; static size_t bcap[A_N]; Arr g[A_N]; memcpy(g, g_arr, sizeof g);
     for (int a = 0; a < A_N; a++) {
-        if (!g[a].on || !g[a].p) continue;
+        if (!g[a].on || (!g[a].p && !g[a].buf)) continue;
+        if (g[a].buf) { g[a].p = copy_at(g[a].buf, g[a].p); g[a].buf = 0; if (!g[a].p) return; }
         size_t es = (size_t)g[a].size * (g[a].type == GL_UNSIGNED_BYTE || g[a].type == GL_BYTE ? 1 : g[a].type == GL_SHORT || g[a].type == GL_UNSIGNED_SHORT ? 2 : 4);
         size_t st = g[a].stride ? (size_t)g[a].stride : es;
         if ((size_t)count * es > bcap[a]) { unsigned char *t = (unsigned char *)realloc(buf[a], (size_t)count * es); if (!t) return; buf[a] = t; bcap[a] = (size_t)count * es; }
@@ -357,6 +401,12 @@ void gles_draw_elements(GLenum mode, GLsizei count, GLenum type, const void *idx
         g[a].stride = 0; g[a].p = buf[a];
     }
     flush(g); glDrawArrays(mode, 0, count);
+}
+static int uint_ok(void)
+{
+    static int has_uint = -1;
+    if (has_uint < 0) { const char *e = (const char *)glGetString(GL_EXTENSIONS); has_uint = es3() || (e && strstr(e, "GL_OES_element_index_uint")); }
+    return has_uint;
 }
 
 /* ---- glBegin / glEnd ------------------------------------------------------------------------------------------------- */
@@ -558,6 +608,9 @@ void (*gles_proc(const char *name))(void)
     if (!strcmp(base, "glUseProgram")) return (void (*)(void))gles_use_program;
     if (!strcmp(base, "glShaderSource")) return (void (*)(void))gles_shader_source;
     if (!strcmp(base, "glLinkProgram")) return (void (*)(void))gles_link_program;
+    if (!strcmp(base, "glBindBuffer")) return (void (*)(void))gles_bind_buffer;
+    if (!strcmp(base, "glBufferData")) return (void (*)(void))gles_buffer_data;
+    if (!strcmp(base, "glDeleteBuffers")) return (void (*)(void))gles_delete_buffers;
     #define P(f) { #f, (void (*)(void))f }
     static const struct { const char *name; void (*f)(void); } k_es2[] = {
         P(glCreateShader), P(glCompileShader), P(glGetShaderiv), P(glGetShaderInfoLog), P(glDeleteShader),
