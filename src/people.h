@@ -88,7 +88,7 @@ typedef struct {                                     /* what the people see of a
 enum {
     PE_SOUND,                                        /* name: a 3D sound at the person (on = 0: stop that person's
                                                       * looping sound of that name, remove3DSfx) */
-    PE_EFFECT,                                       /* name at v (node: on the monster, by that node; NULL: at v) */
+    PE_EFFECT,                                       /* name at v (node: on person who's node, by that name) */
     PE_DROP,                                         /* a droppable (the block's DroppableDef) falls from v */
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */
     PE_MONSTER_KNOCK,                                /* the monster: setVel(v, world) and setReaction(2) */
@@ -110,8 +110,9 @@ enum {                                               /* PE_FX_ON's slots */
 };
 /* monster: the monster slot it is about (PE_MONSTER_*: the one whose blow it was; otherwise 0) */
 typedef struct { int type, who, on; const char *name, *node; float v[3], amount; int monster; } PeopleEvent;
-/* fart: Monsters::timedDoFart on the eater in 2 s (one in five) */
-typedef struct { float health, energy, points; int priest, fart; } PeopleEaten;
+/* fart: Monsters::timedDoFart on the eater in 2 s (one in five); eat_fx: StationaryPerson's EatEffect, on the eater's
+ * node eat_node (its EatEffectNode + "1": fxNode_Lightning1) */
+typedef struct { float health, energy, points; int priest, fart; const char *eat_fx; char eat_node[48]; } PeopleEaten;
 
 /* the clip length the viewer knows: the clip anim (NULL: the shape's own RawAnim) of a look; 0 = none */
 typedef float (*PeopleClipSeconds)(void *ctx, const char *anim, const char *shape);

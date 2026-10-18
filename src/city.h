@@ -367,6 +367,7 @@ int scene_unit_node(const Scene *s, int unit, const char *node, float out[16]); 
 int scene_boss_node(const Scene *s, int part, const char *node, float out[16]);
 int scene_boss_node_at(const Scene *s, int part, const char *node, int id, float out[16]);   /* node NULL: number id */
 int scene_vehicle_node(const Scene *s, int obj, const char *node, float out[16]);
+int scene_person_node(const Scene *s, int who, const char *node, float out[16]);   /* person who's look (people.c) */
 void scene_free(Scene *s);
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);   /* the 30 monsters (NAME_anims.cmp) */
 

@@ -1855,12 +1855,9 @@ PeopleEaten people_eat(People *p, int who)
         }
         if (q->kind == PK_STATIONARY) {
             const char *fx = tstr(q, "Effect|EatEffect"), *node = tstr(q, "EatEffectNode");
-            static char nodes[8][48];                /* the node's name + "1" */
-            static int next;
-            if (fx && node) {
-                char *n = nodes[next++ & 7];
-                snprintf(n, sizeof nodes[0], "%s1", node);
-                emit(p, PE_EFFECT, -1, fx, n, q->pos, 0, 1);
+            if (fx && node) {                        /* on the monster's node: its name + "1" */
+                e.eat_fx = fx;
+                snprintf(e.eat_node, sizeof e.eat_node, "%s1", node);
             }
             const char *reaction = tstr(q, "ReactionType");
             if (reaction && same_text(reaction, "Priest")) {

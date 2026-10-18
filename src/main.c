@@ -169,7 +169,7 @@ typedef struct Mon {
     int fx_slot[MON_FX_SLOTS], fx_node[MON_FX_SLOTS]; uint32_t fx_used;
     /* the scripts' FollowEffects on a node of the monster by name (createAndStartAttachedToNodeByName: doFart's,
      * doBarf's; Nick's fire and eyes): the effect and its node, kept on it while the effect lives */
-    struct { int fx; const char *node; } fx_named[MON_FX_NAMED]; int nfx_named;
+    struct { int fx; char node[48]; } fx_named[MON_FX_NAMED]; int nfx_named;
     float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
     char rage_fx_name[32]; int rage_fx, rage_on;     /* its book's MonsterFx RageFx (+0x164) and the one on (+0x168) */
     int nick, nick_fx[3];                            /* Nick's fire and eyes (+0x174 .. +0x17C): 0 not Nick, 1 to
@@ -1658,6 +1658,8 @@ static void throw_held(Mon *mo, int eat, float x, float y, float z)
         monster_stats(mo, got.health, got.energy);
         if (got.fart)
             mon_fart_later(mo, 2.0f);
+        if (got.eat_fx)                              /* the lightning on the priest's eater */
+            mon_fx_named(mo, got.eat_fx, got.eat_node);
         if (first) {                                 /* gCommon.addStats(actor, slot, 1): civilian points */
             if (v->game && got.points != 0)
                 game_add_points(v->game, mo->slot, GPT_CIVILIAN, (int)got.points);
@@ -4615,7 +4617,7 @@ static int mon_fx_named(Mon *mo, const char *name, const char *node)
     }
     if (id >= 0 && mo->nfx_named < MON_FX_NAMED) {
         mo->fx_named[mo->nfx_named].fx = id;
-        mo->fx_named[mo->nfx_named++].node = node;
+        snprintf(mo->fx_named[mo->nfx_named++].node, sizeof mo->fx_named[0].node, "%s", node);
     }
     if (getenv("RAMPAGE_TRACE"))
         printf("  effect %s on %s -> %d\n", name, node, id);
@@ -5345,6 +5347,21 @@ static void play_step(Viewer *v, float dt, float aspect)
             if (ev[i].type == PE_EFFECT && !ev[i].node) {
                 float up[3] = { 0, 1, 0 };
                 scene_fx(&v->scene, ev[i].name, ev[i].v, up);
+            }
+            if (ev[i].type == PE_EFFECT && ev[i].node && v->fxw) {   /* createAndStartAttachedToNodeByName(actor,
+                                                      * name, node): the tourist's CameraFlash on its Camera, in the
+                                                      * node's frame (a flash: not followed) */
+                Mat4 n;
+                float pos[3], R[3][3];
+                int on = scene_person_node(&v->scene, ev[i].who, ev[i].node, n.m) == 0;
+                if (on) {
+                    frame_of(&n, pos, R);
+                    fx_spawn_frame(v->fxw, ev[i].name, pos, (const float (*)[3])R, 1);
+                } else {
+                    fx_spawn(v->fxw, ev[i].name, ev[i].v, NULL, 1);
+                }
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  person %d effect %s on %s%s\n", ev[i].who, ev[i].name, ev[i].node, on ? "" : " (no node)");
             }
             if (ev[i].type == PE_WINDOW_CLOSE)       /* back in: its window shuts */
                 scene_window_close_at(&v->scene, ev[i].v);
