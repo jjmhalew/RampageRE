@@ -5822,15 +5822,21 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
             if (ev[i].type == PE_FX_ON && v->fxw && ev[i].name &&   /* the ChallengeEffect only on a goal */
                 (ev[i].on != PFX_CHALLENGE || challenge_is_goal(&v->challenge, people_get(v->scene.folk, ev[i].who)->name))) {
-                int id = fx_spawn(v->fxw, ev[i].name, ev[i].v, NULL, 1);
+                /* attached (0x291ED0(effect, actor, node -1)): on the person where it is now, offset 0; the place it was
+                 * started at may be stale (a SpawnsItem mime is made at its spot, then sent to walk in from x -80
+                 * before the host sees this: its NPC_Target ran 40 ahead of it) [R] */
                 const Person *p = people_get(v->scene.folk, ev[i].who);
+                int follow = ev[i].amount != 0 && p;
+                float at[3] = { ev[i].v[0], ev[i].v[1], ev[i].v[2] };
+                if (follow)
+                    memcpy(at, &p->world[12], sizeof at);
+                int id = fx_spawn(v->fxw, ev[i].name, at, NULL, 1);
                 if (id >= 0 && p && v->nppfx < 64) {
                     v->ppfx[v->nppfx].fx = id;
                     v->ppfx[v->nppfx].who = ev[i].who;
                     v->ppfx[v->nppfx].slot = ev[i].on;
-                    v->ppfx[v->nppfx].follow = ev[i].amount != 0;
-                    for (int k = 0; k < 3; k++)
-                        v->ppfx[v->nppfx].off[k] = ev[i].v[k] - p->world[12 + k];
+                    v->ppfx[v->nppfx].follow = follow;
+                    memset(v->ppfx[v->nppfx].off, 0, sizeof v->ppfx[v->nppfx].off);
                     v->nppfx++;
                 }
             }
@@ -6290,6 +6296,23 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
         }
         if (_stricmp(word, "rage") == 0) {           /* the energy full through addStats: the rage starts */
             monster_stats(mo, 0, 100);
+            continue;
+        }
+        if (_stricmp(word, "eatperson") == 0) {      /* eatperson name: the first living person of that template
+                                                      * grabbed and eaten (as the monster's grab and its eat) */
+            char name[64];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
+            name[k] = 0;
+            for (int who = 0; v->scene.folk && mo->held < 0 && who < people_count(v->scene.folk); who++) {
+                const Person *q = people_get(v->scene.folk, who);
+                if (q->phase != PP_GONE && q->name && _stricmp(q->name, name) == 0) {
+                    people_grab(v->scene.folk, who, 0.1f);
+                    mo->held = who;
+                    throw_held(mo, 1, 0, 0, 0);
+                }
+            }
             continue;
         }
         if (_stricmp(word, "hurt") == 0) {           /* hurt amount: TakeDamage on the monster (no knock), its level
