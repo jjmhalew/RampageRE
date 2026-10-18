@@ -3452,13 +3452,11 @@ static void edible_step(Viewer *v, float dt)
                     }
                 break;
             case EE_SOUND: sound_play(e->name, e->pos, 1); break;
-            case EE_REACTION:                        /* playReaction: the state of that name, only while alive */
-                if (mo->hp > 0 && mo->have_graph && e->name)
-                    for (int k = 0; k < mo->graph.n; k++)
-                        if (!_stricmp(mo->graph.states[k].name, e->name)) {
-                            moves_force(&mo->run, k);
-                            break;
-                        }
+            case EE_REACTION:                        /* playReaction: the state of that name, only while alive; at
+                                                      * the next step, its clip with it (forced here, the runner went
+                                                      * on in the old clip from 0: Face_Eat_Item twice, no Yum) */
+                if (mo->hp > 0)
+                    force_state(mo, e->name);
                 break;
             case EE_SPEED: edible_power_speed(&mo->power, e->amount, e->v[0]); break;
             case EE_STATS:                           /* the score through the army, HP and energy here */
