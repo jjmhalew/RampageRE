@@ -217,6 +217,7 @@ typedef struct Viewer {
     int street_of[SCENE_STREET_MAX];                 /* per streetobj index its Scene.street entry */
     /* their effects that follow an object (obj >= 0: at its point off, or its model node) or monster mon's node */
     struct { int id, fx, obj, node_id, mon; const char *node; char mnode[32]; float off[3]; } sofx[64]; int nsofx;
+    int weather_fx[4], nweather_fx, weather_due;     /* the block's Weather.bsf effects on, and whether to start them */
     Army *army;
     struct { int id, fx, unit, shot; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
                                                       * (a beam's: its stream's head last frame, its rod) */
@@ -1036,6 +1037,12 @@ static void build(Viewer *v)
         }
     }
     v->scene.traffic = v->veh;
+    for (int k = 0; k < v->nweather_fx; k++)         /* the last block's weather [G: its object deleted, its effect
+                                                      * (setTurnOffWhenObjectDies(0)) would loop on where it stood] */
+        if (v->fxw)
+            fx_stop(v->fxw, v->weather_fx[k]);
+    v->nweather_fx = 0;
+    v->weather_due = v->have_scene;
     streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
     v->sobj = NULL;
     v->nsofx = 0;
@@ -4353,9 +4360,31 @@ static void army_step(Viewer *v, float dt)
     }
 }
 
+/* Weather.bsf (an InvisShape in the block: rain, fog, wind) [R]: onInit starts its Effect on its node 1, kept on
+ * it, not turned off when it dies; Process puts the object at the camera's place, 2 more in y, every frame */
+static void weather_step(Viewer *v)
+{
+    if (!v->fxw)
+        return;
+    float at[3] = { v->view.pos[0], v->view.pos[1] + 2.0f, v->view.pos[2] };
+    if (v->weather_due) {
+        v->weather_due = 0;
+        for (int k = 0; k < v->scene.nweather && v->nweather_fx < 4; k++) {
+            int id = fx_spawn(v->fxw, v->scene.weather[k], at, NULL, 1);
+            if (id >= 0)
+                v->weather_fx[v->nweather_fx++] = id;
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  weather %s -> %d\n", v->scene.weather[k], id);
+        }
+    }
+    for (int k = 0; k < v->nweather_fx; k++)
+        fx_move(v->fxw, v->weather_fx[k], at);
+}
+
 /* the effects the scene and the people asked for, started; the world's particles moved on */
 static void fx_step(Viewer *v, float dt)
 {
+    weather_step(v);
     for (int i = 0; i < v->scene.nfxreq; i++)
         if (v->fxw) {
             const struct SceneFx *f = &v->scene.fxreq[i];

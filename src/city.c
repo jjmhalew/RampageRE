@@ -522,6 +522,15 @@ static void place_object(City *c, Scene *s, Group inst, Mat4 parent)
         }
         return;
     }
+    if (s->placing_block && script && !_stricmp(script, "Weather.bsf")) {   /* an InvisShape whose effect the
+                                                      * viewer keeps at the camera (main.c weather_step) */
+        const char *fx = group_str(inst, "Effect|Effect");   /* getStringProp("Effect"): the instance's */
+        if (!fx && t.at)
+            fx = group_str(t, "Effect|Effect");
+        if (fx && s->nweather < 4)
+            s->weather[s->nweather++] = fx;
+        return;
+    }
     if (t.at && boss_is_boss_template(t))           /* a boss's part (the NY generators): boss.c's */
         return;
     if (s->placing_block && parade_script_ours(script))   /* a balloon or a food cart: parade.c's (main) */

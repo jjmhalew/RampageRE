@@ -173,6 +173,8 @@ typedef struct {
     Parade *parade;                                   /* the balloons, bikers and food carts (parade.c), driven by main */
     Boss *boss;                                       /* the block's boss and the ambient ones (boss.c) */   /* the block's WaterObject|s (water.c), stepped at 1/60 */
     struct { const char *name; float pos[3], facing; int building; } rockets[16]; int nrockets;
+    const char *weather[4]; int nweather;            /* the block's Weather.bsf objects' effects (their Effect|Effect:
+                                                      * Rain, Weather_Fog, Weather_wind, ...), main's to play */
     int placing_building;                             /* the playable building whose objects are placed, -1 none */
     float ambient[3]; float light_colour[4][3], light_dir[4][3]; int nlights;
     /* the buildings' light (building_light_*: the light file's ambient and lights, LightingData's Ramp*) and the
