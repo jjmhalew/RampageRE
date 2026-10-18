@@ -8297,7 +8297,8 @@ static int viewer_main(int argc, char **argv)
                         memset(v.mon[k].pad.pressed, 0, sizeof v.mon[k].pad.pressed);
                 }
             play_step(&v, shot && !v.ap ? 0 : (dt > 0.1f ? 0.1f : dt), aspect);
-            pose_monsters(&v, shot && !v.ap ? shot_time : now - start);   /* the clips at the states' times (clip_at) */
+            pose_monsters(&v, shot && !v.ap ? shot_time : world_t);   /* the clips at the states' times (clip_at),
+                                                      * against the clock the scene poses by (scene_update's t) */
             memcpy(cam.pos, v.view.pos, sizeof cam.pos);
             cam_shaken(v.view.pos, (const float (*)[3])v.view.rows, v.shakes, 8 + MONSTERS - 1, cam.rows);   /* after the
                                                       * smoothing */
