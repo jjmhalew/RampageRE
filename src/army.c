@@ -273,6 +273,13 @@ static int effect_on(Army *a, ArmyUnit *u, const char *name, const float offset[
         memcpy(e->v, offset, sizeof e->v);
     return e->id;
 }
+/* setTurnOffWhenObjectDies(1) on the effect just started (id): it stops with its unit; returns id */
+static int die_with(Army *a, int id)
+{
+    if (id >= 0 && a->nev > 0 && a->ev[a->nev - 1].id == id)
+        a->ev[a->nev - 1].die_with = 1;
+    return id;
+}
 /* createAndStartAttachedToNode(unit, name, node): on that node of its model */
 static int effect_on_node(Army *a, ArmyUnit *u, const char *name, int node)
 {
@@ -2198,7 +2205,7 @@ static void heli_init(Army *a, ArmyUnit *u)          /* onInit (is_cop = bIsFrie
     u->target = -1;                                  /* setTarget(nullTarget) */
     const char *fx = ustr(u, "AttachEffect");
     if (fx)                                          /* on its AttachEffectNode (2 in every helicopter) when set */
-        u->aux[0] = (float)effect_on_node(a, u, fx, (int)unum(u, "AttachEffectNode", -1));
+        u->aux[0] = (float)die_with(a, effect_on_node(a, u, fx, (int)unum(u, "AttachEffectNode", -1)));
     else
         u->aux[0] = -1;
     if (!u->is_cop) {
@@ -2371,7 +2378,7 @@ static void truck_init(Army *a, ArmyUnit *u)         /* Construct + onInit */
     u->aux[1] = -1;
     if (amb) {
         float off[3] = { 0, unum(u, "AmbientEffectYOffset", 0), unum(u, "AmbientEffectZOffset", 0) };
-        u->aux[1] = (float)effect_on(a, u, amb, off);
+        u->aux[1] = (float)die_with(a, effect_on(a, u, amb, off));
     }
     sound(a, u, tstr(u, "EngineSound"));
     u->state_time = 0;
@@ -2492,7 +2499,7 @@ static int truck_pulse(Army *a, ArmyUnit *u)
         u->aux[0] -= u->pulse_delay;
         truck_damaged_shape(a, u);
         if (u->aux[0] < 0.25f && u->aux[0] > 0)
-            effect_on(a, u, tstr(u, "DamageEffect"), NULL);
+            die_with(a, effect_on(a, u, tstr(u, "DamageEffect"), NULL));
         else if (u->aux[0] < 0) {
             effect_at(a, tstr(u, "ExplodeEffect"), u->pos);
             remove_ai(a, u);
@@ -2584,7 +2591,7 @@ static void truck_damage(Army *a, ArmyUnit *u, int monster)
         u->pulse_delay = 0.25f;
         u->state = 6;
     } else
-        effect_on(a, u, tstr(u, "HitEffect1"), NULL);
+        die_with(a, effect_on(a, u, tstr(u, "HitEffect1"), NULL));
 }
 
 static void truck_pickup(Army *a, ArmyUnit *u)       /* onPickup */
@@ -2598,7 +2605,7 @@ static void truck_thrown(Army *a, ArmyUnit *u, int monster)   /* onThrow */
 {
     u->oflags &= ~(uint32_t)OF_PICKUP;
     u->pulse_delay = 0.125f;
-    effect_on(a, u, tstr(u, "HitEffect2"), NULL);
+    die_with(a, effect_on(a, u, tstr(u, "HitEffect2"), NULL));
     effect_on(a, u, ustr(u, "ThrowSound"), NULL);
     u->state = 6;
     add_stats(a, u, monster, 2);
@@ -3117,7 +3124,7 @@ static void bomber_init(Army *a, ArmyUnit *u)
     u->facing = PI / 2 * dir;
     const char *sh = ustr(u, dir == 1 ? "ShadowEffect2" : "ShadowEffect1");
     float off[3] = { 0, 0, -u->pos[2] };
-    u->aux[0] = sh ? (float)effect_on(a, u, sh, off) : -1;
+    u->aux[0] = sh ? (float)die_with(a, effect_on(a, u, sh, off)) : -1;
     u->ihp = (int)tnum(u, "HitPoints", 1);
     u->state = 1;
     const char *type = tstr(u, "Type");
@@ -3167,7 +3174,8 @@ static int bomber_pulse(Army *a, ArmyUnit *u)
             line_init(u, u->pos, end, 20);
             effect_stop(a, (int)u->aux[0]);
             float off[3] = { 0, 0, -u->pos[2] };
-            u->aux[0] = (float)effect_on(a, u, ustr(u, u->pos[0] >= 0 ? "ShadowEffect2" : "ShadowEffect1"), off);
+            u->aux[0] = (float)die_with(a, effect_on(a, u, ustr(u, u->pos[0] >= 0 ? "ShadowEffect2" : "ShadowEffect1"),
+                                                      off));
         }
     }
     return 1;
@@ -3439,7 +3447,7 @@ static void unit_init(Army *a, ArmyUnit *u)
     u->goal_fx = -1;
     if (mark) {
         int before = a->nev;
-        u->goal_fx = effect_on(a, u, mark, NULL);
+        u->goal_fx = die_with(a, effect_on(a, u, mark, NULL));   /* [G: the mark goes with its unit] */
         if (a->nev > before)
             a->ev[a->nev - 1].level = 1;
     }

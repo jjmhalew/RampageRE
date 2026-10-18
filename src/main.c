@@ -219,7 +219,7 @@ typedef struct Viewer {
     struct { int id, fx, obj, node_id, mon; const char *node; char mnode[32]; float off[3]; } sofx[64]; int nsofx;
     int weather_fx[4], nweather_fx, weather_due;     /* the block's Weather.bsf effects on, and whether to start them */
     Army *army;
-    struct { int id, fx, unit, shot, node; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
+    struct { int id, fx, unit, shot, node, die_with; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
                                                       * (a beam's: its stream's head last frame, its rod) */
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     /* the people's own effects (PE_FX_ON): per person and slot, following it (follow) at off, until PE_FX_OFF */
@@ -4299,6 +4299,7 @@ static void army_step(Viewer *v, float dt)
                         v->fxa[v->nfxa].unit = e->shot >= 0 ? -1 : e->unit;
                         v->fxa[v->nfxa].shot = e->shot;
                         v->fxa[v->nfxa].node = e->node;
+                        v->fxa[v->nfxa].die_with = e->die_with;
                         FxRod rod;
                         int has_rod = bs && fx_rod(v->fxlib, e->name, &rod);
                         v->fxa[v->nfxa].head = 0;
@@ -4393,9 +4394,13 @@ static void army_step(Viewer *v, float dt)
             memcpy(at, sh->pos, sizeof at);
         } else if (v->fxa[k].unit >= 0) {
             const ArmyUnit *u = army_unit(v->army, v->fxa[k].unit);
-            if (!u || u->phase == AU_GONE) {
-                fx_stop(v->fxw, v->fxa[k].fx);
-                v->fxa[k--] = v->fxa[--v->nfxa];
+            if (!u || u->phase == AU_GONE) {         /* its unit gone: a turn-off one stops, the others run
+                                                      * on where they were (as the other modules' FollowEffects) */
+                v->fxa[k].unit = -1;
+                if (v->fxa[k].die_with) {
+                    fx_stop(v->fxw, v->fxa[k].fx);
+                    v->fxa[k--] = v->fxa[--v->nfxa];
+                }
                 continue;
             }
             float R[3][3];
