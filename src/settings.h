@@ -14,6 +14,9 @@ typedef struct {
     int ao; float ao_radius;                         /* ao= ao_radius= (world units) */
     int aniso, mips;                                 /* aniso=1|2|4|8|16 mips= */
     int smaa, msaa;                                  /* smaa=0..4 (off, low, medium, high, ultra) msaa=0|2|4|8 */
+    /* profile_autoload= (port extra, docs/NATIVE.md "The profile at launch"): 1 (the default) loads the profile file at
+     * launch as if picked from the list, and with none opens the name entry once; 0 the game's way */
+    int profile_autoload;
 } Settings;
 
 void settings_unset(Settings *flags);                /* nothing given yet (for settings_arg) */

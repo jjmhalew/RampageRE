@@ -18,11 +18,13 @@ static void defaults(Settings *s)
     s->ao = 0; s->ao_radius = 4;
     s->aniso = 1; s->mips = 0;
     s->smaa = 0; s->msaa = 0;
+    s->profile_autoload = 1;
 }
 
 void settings_unset(Settings *f)
 {
     f->width = f->height = f->fullscreen = f->vsync = f->ao = f->aniso = f->mips = f->smaa = f->msaa = UNSET;
+    f->profile_autoload = UNSET;
     f->ao_radius = UNSET;
 }
 
@@ -60,6 +62,7 @@ static int set(Settings *s, const char *key, const char *v)
     else if (!_stricmp(key, "mips")) s->mips = atoi(v) != 0;
     else if (!_stricmp(key, "smaa")) s->smaa = smaa_of(v);
     else if (!_stricmp(key, "msaa")) s->msaa = clamp_msaa(atoi(v));
+    else if (!_stricmp(key, "profile_autoload")) s->profile_autoload = atoi(v) != 0;
     else return 0;
     return 1;
 }
@@ -92,7 +95,8 @@ static void read_cfg(Settings *s, const char *path)
 
 static void read_env(Settings *s)
 {
-    static const char *const KEYS[] = { "window", "fullscreen", "vsync", "ao", "ao_radius", "aniso", "mips", "smaa", "msaa" };
+    static const char *const KEYS[] = { "window", "fullscreen", "vsync", "ao", "ao_radius", "aniso", "mips", "smaa", "msaa",
+                                        "profile_autoload" };
     for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++) {
         char name[32];
         snprintf(name, sizeof name, "RAMPAGE_%s", KEYS[k]);
@@ -113,6 +117,8 @@ int settings_arg(Settings *f, int argc, char **argv, int *i)
     else if (!strcmp(a, "--nomips")) f->mips = 0;
     else if (!strcmp(a, "--fullscreen")) f->fullscreen = 1;
     else if (!strcmp(a, "--windowed")) f->fullscreen = 0;
+    else if (!strcmp(a, "--autoload")) f->profile_autoload = 1;
+    else if (!strcmp(a, "--noautoload")) f->profile_autoload = 0;
     else if (v && !strcmp(a, "--ao-radius")) { float r = (float)atof(v); if (r > 0) f->ao_radius = r; ++*i; }
     else if (v && !strcmp(a, "--smaa")) { f->smaa = smaa_of(v); ++*i; }
     else if (v && !strcmp(a, "--msaa")) { f->msaa = clamp_msaa(atoi(v)); ++*i; }
@@ -141,6 +147,7 @@ void settings_resolve(Settings *s, const Settings *f, int use_cfg)
     if (f->mips != UNSET) s->mips = f->mips;
     if (f->smaa != UNSET) s->smaa = f->smaa;
     if (f->msaa != UNSET) s->msaa = f->msaa;
+    if (f->profile_autoload != UNSET) s->profile_autoload = f->profile_autoload;
 }
 
 static void apply_render(const Settings *s)

@@ -212,6 +212,7 @@ typedef struct Viewer {
     struct { int id, fx, obj, monster, node_id; const char *node; float off[3]; } bfx[64]; int nbfx;
     struct { int obj, h; } bsnd[64]; int nbsnd;      /* and their sounds (add3DSfx: each follows its part) */
     float play_now;                                  /* the world's play time (gWorld.curTime): the buildings' alarms */
+    int profile_autoload;                            /* rampage.cfg profile_autoload (port extra, settings.h) */
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
@@ -6440,6 +6441,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->was_saving = v->prof.was_saving;
     sp->language = v->lang;
     sp->profile_shown = v->prof.profile_shown;
+    sp->offer_create = v->profile_autoload && !v->prof_on_card && v->prof_write;
     snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
     for (int p = 0; p < 4; p++)
         for (int m = 0; m < SHELL_MONSTERS; m++)
@@ -7788,14 +7790,23 @@ static int viewer_main(int argc, char **argv)
     v.prof_write = !shot || v.prof_path;
     if (!v.prof_path)
         v.prof_path = "rampage_profile.bin";
+    v.profile_autoload = gfx.profile_autoload;
     int prof_read = !newprofile && v.prof_write ? profile_read(&v.prof, v.prof_path) : -1;
     if (prof_read > 0) {
         printf("profile %s\n", v.prof_path);
         v.prof_on_card = 1;
         snprintf(v.card_name, sizeof v.card_name, "%s", v.prof.block.name);
-        if (v.shell_mode)                            /* the shell's popup loads it */
+        if (v.shell_mode && !gfx.profile_autoload)   /* the game's way: the shell's popup loads it */
             profile_init(&v.prof);
-        else                                         /* straight into a game: as if picked from the list */
+        else if (v.shell_mode) {                     /* [port extra, profile_autoload] as if picked from the list
+                                                      * (SHELL_EVT_PROFILE_LOAD): loaded, saving, its checkpoint, and
+                                                      * shown, so the main menu opens no list (close(1): 0x300) */
+            v.prof.loaded = 1;
+            v.prof.allow_save = v.prof.was_saving = 1;
+            v.prof.profile_shown = 1;
+            profile_restore_checkpoint(&v.prof);
+            printf("profile %s loaded at launch (profile_autoload)\n", v.prof.block.name);
+        } else                                       /* straight into a game: as if picked from the list */
             v.prof.allow_save = v.prof.was_saving = 1;
     } else if (prof_read == 0) {                     /* there but not a profile: the list still has it (its load
                                                       * shows "Corrupt Profile"), by the header's name (+0x30) */

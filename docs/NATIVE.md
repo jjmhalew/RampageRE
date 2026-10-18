@@ -416,6 +416,7 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | SMAA | `smaa=0` | `--smaa N` | `RAMPAGE_SMAA` | F6 (cycles) | edge smoothing, 0 off, 1 .. 4 (or `low`, `medium`, `high`, `ultra`, SMAA's presets): polygon edges and the alpha-tested cut-outs (fire escapes, trees, facade sheets) |
 | MSAA | `msaa=0` | `--msaa N` | `RAMPAGE_MSAA` | F7 (cycles) | multisampling, 0, 2, 4, 8 samples: polygon edges only |
 | anisotropy | `aniso=1` | `--aniso N` | `RAMPAGE_ANISO` | F8 (cycles) | `GL_TEXTURE_MAX_ANISOTROPY` 1 (off), 2, 4, 8, 16 on the world's textures: streets and walls at a grazing angle stay sharp |
+| the profile at launch | `profile_autoload=1` | `--autoload`, `--noautoload` | `RAMPAGE_PROFILE_AUTOLOAD` | | not graphics, but read the same way: see "The profile at launch" below |
 | mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
 
 **rampage.cfg** is read from the current directory (next to `rampage_profile.bin`) before the window opens: one
@@ -450,6 +451,20 @@ medium +1.2 ms, ultra +2.4 ms, MSAA 4× +1.2 ms, 8× +3 ms, anisotropy 16× with
 discrete GPU does the ambient occlusion in well under a millisecond (WoodyRE: 0.1 - 0.5 ms at 1080p on an RX 6800).
 Golden `--shot` pictures only hold with everything off: the MSAA resolve and the shaders' rounding differ between
 drivers (Mesa's llvmpipe against the Windows driver: about 0.1 % of the pixels by more than 8 of 255, as without them).
+
+### The profile at launch
+A port extra (`profile_autoload=1`, the default). The game itself starts every time with no profile: the main menu
+comes up with saving off until the player opens Profiles and picks one (SHELL_NOTES.md "Profile list"). The port keeps
+one profile, `rampage_profile.bin`, so with `profile_autoload` on:
+- **The file is there and reads:** it is loaded at launch as if picked from the list (main.c: loaded, saving on, its
+  checkpoint restored, and marked shown, so the main menu opens no list). Profiles still opens the list, to load it
+  again or make a new one. A file that does not read is left to the game's way (its load shows the error).
+- **No file:** the main menu's first focus opens the list's Create New Profile at once (the room test first), once a
+  launch. Back goes to the list and the list's Back to the game's "WARNING: No Profile", so a game without a profile
+  can still be played.
+
+`profile_autoload=0` (or `--noautoload`) is the game's way. A `--shot` run reads no `rampage.cfg` and starts a new
+profile unless `--profile` names one.
 
 ## Source
 | File | |

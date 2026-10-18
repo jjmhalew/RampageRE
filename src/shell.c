@@ -2007,6 +2007,7 @@ struct Shell {
     ShellStart st;
     /* gShell (0x4D51F0) */
     int state, attract_state, boot_completed, show_profile;
+    int create_offered;                                  /* offer_create's name entry was opened this launch */
     int attract_game;                                    /* +0x20: startAttractGame's */
     float idle, movie_time;
     float movie_clock;                                   /* seconds since the playing movie started */
@@ -3605,6 +3606,16 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
         if (s->show_profile) {                           /* gShell.getShowProfile() */
             if (s->prof.allow_save)
                 load_profile(s);
+            else if (s->prof.offer_create && !s->prof.nprofiles && !s->create_offered && s->mc.L) {
+                /* [port extra, profile_autoload] no profile yet: the list's Create New Profile at once, as its Cross
+                 * would (the room test first, 0x343D38); Back goes to the list, the list's Back warns as the game */
+                s->create_offered = 1;
+                load_profile(s);
+                if (!mc_room(s))
+                    mc_error(s, 11);
+                else
+                    mc_open_keyboard(s);
+            }
             /* else gCommon.restoreProfile(): the viewer's copy stays */
         }
         m->start_retro = 0;

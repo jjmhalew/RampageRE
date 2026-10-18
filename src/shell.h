@@ -50,6 +50,8 @@ typedef struct {
     int was_saving;                 /* its flag 8: set with 4 by a load (and a save the card id changed for), cleared
                                      * only by warn-continue's Continue / Don't Save */
     int profile_shown;              /* 0x4D7FF8 & 0x200: a popup closed with a result but 3 (getShowProfile() 0) */
+    int offer_create;               /* port extra (profile_autoload): no profile file yet, so the main menu's first focus
+                                     * opens the list's Create New Profile, once a launch */
     char name[16];                  /* its name (the popup shows it) */
     /* gCommon.getMonsterFlags(player, monster): 0x80 unlocked, 1 2 4 8 the four upgrades (Charge Punch, Double Punch,
      * Roar Attack, Jump Smash); player 0 the profile, 1 .. 3 a buddy's profile when loaded, else the profile's [R
