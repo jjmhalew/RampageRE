@@ -653,7 +653,10 @@ static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
                 bot_action(r, ag, DA_ATTACK, 1, call, ctx);
                 return;
             }
-            float mx = o->pos[0] - v->pos[0], my = o->pos[1] - v->pos[1];
+            /* [R 0x2EDF1C .. 0x2EDFCC] in the way: the two reference points (0x2E4E90) 0.75 apart within the
+             * radii (0x102DA0) */
+            const float *me = v->m[v->self].ref;
+            float mx = o->ref[0] - me[0], my = o->ref[1] - me[1];
             if (0.75f * sqrtf(mx * mx + my * my) < rme + ro) {
                 if (!o->ai || v->pos[1] < o->pos[1] || o->mounted >= 0)
                     st[1] -= 1;

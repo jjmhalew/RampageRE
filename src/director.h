@@ -67,7 +67,9 @@ typedef struct {
     int mounted, rail;       /* the building it is on (+0xC640, -1 none) and its rail there */
     int human;               /* it became human (+0xAB4) */
     int ai;                  /* +0x108 */
-    float radius;            /* MONSTER_DATA +0x188 x its scale: its half width (+0x198), 3 in all 30 [R] */
+    float radius;            /* (MONSTER_DATA +0x188 + the kept type-15 record's +0x8) x its scale (0x2E4FA0) [R] */
+    float ref[3];            /* its reference point (0x2E4E90): the place + MONSTER_DATA +0x190 / +0x194 and the
+                              * record's +0xC / +0x10 along its x / y axes, x its scale [R] */
 } DirMonster;
 typedef struct {
     /* the bot itself */

@@ -153,6 +153,7 @@ typedef struct Mon {
     int air_hits;                                    /* +0xA9C: the blows it took in the air (MONSTER_AIR_HITS land) */
     unsigned atk_seq;
     int sph0, nsph;                                  /* its armed spheres this frame: Scene.spheres sph0 .. */
+    float ev15, ev15x, ev15r;                        /* the kept type-15 record's +0x10, +0xC and +0x8 (+0xBA9C) */
     float ev16, ev16x;                               /* the kept type-16 event record's +0x10 and +0xC (+0xBAA0),
                                                       * 0 none */
     const Water *water_in; int water_tested;         /* 0x2D5F00's answer this frame (+0xC700), asked (+0xC704) */
@@ -435,6 +436,7 @@ static void play_state(Mon *mo)
     }
     mo->armed = 0;                                    /* 0x2E7F70: a clip starts with no attack armed, on the ground */
     mo->ev16 = mo->ev16x = 0;                         /* (and no event record kept) */
+    mo->ev15 = mo->ev15x = mo->ev15r = 0;
     mo->mode = MODE_GROUND;                           /* (its events set the mode it is in) */
     climb_clip_started(&mo->mount, st->name);
     tail_blend(&mo->tail, st->tail, st->blend);      /* 0x2E6884: to node +0x10 over the request's +0x4, which is
@@ -1981,6 +1983,14 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     int set = 0, add = 0, relative = 0;
     if (e->type == 7) {                              /* 0x2E7DE0 */
         mo->mode = (int)e->value;
+        return;
+    }
+    if (e->type == 15) {                             /* the record kept at +0xBA9C till the next clip (0x2E7F04,
+                                                      * 0x2E8084): the bots' reference point and radius [R] */
+        union { uint32_t u; float f; } r = { e->value };
+        mo->ev15 = e->p[0];
+        mo->ev15x = e->p[1];
+        mo->ev15r = r.f;
         return;
     }
     if (e->type == 16) {                             /* the record kept at +0xBAA0 till the next clip (0x2E7F70) */
@@ -5179,7 +5189,15 @@ static void bot_views(Viewer *v, DirBuilding *db, DirMonster *dm, DirBotView *bv
         o->rail = mo->mount.at.rail;
         o->human = mo->human;
         o->ai = mo->is_ai;
-        o->radius = (mo->graph.box[0] > 0 ? mo->graph.box[0] : MONSTER_HALF_WIDTH) * (mo->scale > 0 ? mo->scale : 1);
+        float s = mo->scale > 0 ? mo->scale : 1, h = mo->heading / 57.2957795f;
+        /* [R 0x2E4FA0] (MONSTER_DATA +0x188 + the type-15 record's +0x8) x its scale */
+        o->radius = (mo->graph.bot_r > 0 ? mo->graph.bot_r + mo->ev15r : MONSTER_HALF_WIDTH) * s;
+        /* [R 0x2E4E90] its place + (+0x190 + the record's +0xC) along its x axis + (+0x194 + its +0x10) along its y,
+         * x its scale */
+        float fx = (mo->graph.bot_off[0] + mo->ev15x) * s, fy = (mo->graph.bot_off[1] + mo->ev15) * s;
+        o->ref[0] = mo->mx + cosf(h) * fx - sinf(h) * fy;
+        o->ref[1] = mo->my + sinf(h) * fx + cosf(h) * fy;
+        o->ref[2] = mo->mz;
     }
     for (int k = 0; k < v->nmon; k++) {
         Mon *mo = &v->mon[k];
