@@ -381,6 +381,10 @@ int city_camera(City *c, Group *two_tilts);
 Group city_book_group(City *c, const char *book, const char *name);
 /* a block's index in the city's BlockList as the game counts it (the first at or after WorldData BlockStart), -1 */
 int city_block_index(City *c, const char *name);
+/* the block a game with that start block (GameStatus +0x210, a BlockList index) begins with: the list's entry at
+ * max(start block, BlockStart) (0x2B74D0); NULL past the list. The BlockList repeats its first block (BlockStart 1),
+ * which city_blocks' names keep once */
+const char *city_game_block(City *c, int start_block);
 /* a model's bounds in its own frame (its meshes' vertices); 0 = ok */
 int city_shape_box(City *c, const char *shape, float min[3], float max[3]);
 /* the sphere the model keeps (the union of its meshes' header spheres); 0 = ok */

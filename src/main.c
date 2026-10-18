@@ -1362,7 +1362,9 @@ static void build(Viewer *v)
            v->scene.missing);
 }
 
-static int open_city(Viewer *v, int index, uint32_t block)
+/* block: the index in the city's block names (city_blocks); game_block >= 0 instead: a game's start block, a
+ * BlockList index (the profile's saved one), its block found by name */
+static int open_city(Viewer *v, int index, uint32_t block, int game_block)
 {
     City *c = city_open(&v->vol, CITIES[index]);
     if (!c)
@@ -1377,6 +1379,12 @@ static int open_city(Viewer *v, int index, uint32_t block)
     if (v->roster.n)                                 /* its names are the old city's book's: read from this one's */
         reveal_roster_load(&v->roster, city_book_group(c, "ShellData", "MonsterData"));
     v->nblocks = city_blocks(c, v->blocks, 64);
+    const char *at = game_block >= 0 ? city_game_block(c, game_block) : NULL;
+    for (uint32_t i = 0; at && i < v->nblocks; i++)
+        if (!_stricmp(v->blocks[i], at)) {
+            block = i;
+            break;
+        }
     v->block = block < v->nblocks ? block : 0;
     build(v);
     return 0;
@@ -7147,7 +7155,10 @@ static void shell_start_game(Viewer *v)
     shell_close(v->shell);
     v->shell = NULL;
     v->exit_game = 0;
-    open_city(v, city, (uint32_t)(v->last_game.start_block > 0 ? v->last_game.start_block : 0));   /* (g is gone) */
+    /* the start block is the BlockList's index (Profile.getStartBlock: the block after the last one won); the names'
+     * list keeps the repeated first block once, so taken as their index it began one block on, the block after the
+     * one to play again skipped */
+    open_city(v, city, 0, v->last_game.start_block > 0 ? v->last_game.start_block : 0);   /* (g is gone) */
     const ShellGame *lg = &v->last_game;
     ap_event(v->ap, "what=game_start city=%s type=%d players=%d bots=%d start_block=%d night=%d monsters=%s,%s,%s,%s",
              CITIES[city], lg->play_type, lg->num_players, lg->num_bots, lg->start_block, lg->night, lg->monster_name[0],
@@ -8040,7 +8051,7 @@ static int viewer_main(int argc, char **argv)
             v.shell_go = 0;
             shell_start_game(&v);
         }
-    } else if (open_city(&v, city, block) != 0) {
+    } else if (open_city(&v, city, block, -1) != 0) {
         plat_message("The city's bundles are not in RAMPAGE.VOL.", 1);
         return 1;
     } else if (v.ap) {                               /* --autoplay straight into a city: the shell takes over after it,
@@ -8056,7 +8067,7 @@ static int viewer_main(int argc, char **argv)
         }
         g->city_index = campaign_index(CITIES[city]);
         snprintf(g->city, sizeof g->city, "%s", CITIES[city]);
-        g->start_block = (int)block;
+        g->start_block = city_block_index(v.city, v.blocks[v.block]);   /* (a BlockList index, as the profile's) */
         g->night = night;
         v.kept.idle = SHELL_IDLE_SECONDS;            /* (no shell before it: not the attract mode after it) */
     }
@@ -8257,7 +8268,7 @@ static int viewer_main(int argc, char **argv)
         }
         for (int i = 0; i < NCITIES; i++)
             if (w.pressed['1' + i] && i != v.city_index)
-                open_city(&v, i, 0);
+                open_city(&v, i, 0, -1);
         if (w.wheel) speed *= powf(1.25f, (float)w.wheel);
         cam.yaw -= w.mouse_dx * 0.005f;
         cam.pitch -= w.mouse_dy * 0.005f;

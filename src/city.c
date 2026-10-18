@@ -221,6 +221,15 @@ int city_block_index(City *c, const char *name)
     return first;
 }
 
+const char *city_game_block(City *c, int start_block)
+{
+    Group list = group_sub(group_sub(c->world, "BlockData"), "BlockList");
+    Record r[MAX_REC];
+    uint32_t n = group_items(list, r, MAX_REC);
+    int start = (int)group_num(c->world, "BlockStart", 0), i = start_block > start ? start_block : start;
+    return i >= 0 && (uint32_t)i < n ? record_str(list, r[i]) : NULL;
+}
+
 uint32_t city_blocks(City *c, const char **names, uint32_t max)
 {
     Group list = group_sub(group_sub(c->world, "BlockData"), "BlockList");
