@@ -168,10 +168,12 @@ typedef struct Mon {
      * slot k's effect id and the node it follows (MoveGraph.fxnode), while bit k of fx_used is set */
     int fx_slot[MON_FX_SLOTS], fx_node[MON_FX_SLOTS]; uint32_t fx_used;
     /* the scripts' FollowEffects on a node of the monster by name (createAndStartAttachedToNodeByName: doFart's,
-     * doBarf's): the effect and its node, kept on it while the effect lives */
+     * doBarf's; Nick's fire and eyes): the effect and its node, kept on it while the effect lives */
     struct { int fx; const char *node; } fx_named[MON_FX_NAMED]; int nfx_named;
     float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
     char rage_fx_name[32]; int rage_fx, rage_on;     /* its book's MonsterFx RageFx (+0x164) and the one on (+0x168) */
+    int nick, nick_fx[3];                            /* Nick's fire and eyes (+0x174 .. +0x17C): 0 not Nick, 1 to
+                                                      * start, 2 on, 3 shut down (becomeHuman) */
     float face_ev;                                   /* the face's event player's time (+0x7DE8 +0x8), a share */
 } Mon;
 
@@ -525,6 +527,7 @@ static void mon_fart_later(Mon *mo, float delay);
 static void mon_function(Mon *mo, const char *name);
 static void mon_rage_fx(Mon *mo, int on);
 static int rage_fx_at(Mon *mo, float at[3]);
+static void mon_nick_fx(Mon *mo);
 static Group army_find(void *ctx, const char *book, const char *name);
 
 static void start_moves(Mon *mo)
@@ -532,6 +535,7 @@ static void start_moves(Mon *mo)
     Viewer *v = mo->v;
     mon_fx_stop_all(mo);
     mon_rage_fx(mo, 0);
+    mo->nick = mo->monster >= 0 && !_stricmp(v->monsters[mo->monster], "Nick");   /* the setup's (0x2F5D80) */
     if (mo->have_graph) {
         moves_stop(&mo->run);
         moves_free(&mo->graph);
@@ -1883,6 +1887,11 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             printf("  becomeHuman: %s (state %d)\n", human == 1 ? "a streaker" : "not in play", v->game ? game_state(v->game) : -1);
         if (human != 1)
             return;
+        if (mo->nick == 2 && v->fxw)                 /* Nick's fire and eyes shut down (0x2F4F60) */
+            for (int k = 0; k < 3; k++)
+                fx_stop(v->fxw, mo->nick_fx[k]);
+        if (mo->nick)
+            mo->nick = 3;
         Group t = city_template(v->city, monster_female(mo) ? "NakedFemale" : "NakedMale");
         float at[3] = { mo->mx, mo->my, mo->mz };
         if (t.at && (mo->streaker = people_add_streaker(v->scene.folk, t, at, v->view.pos[0])) >= 0) {
@@ -4409,7 +4418,7 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
 }
 
 /* a node of the monster by name in the world as drawn: an attachment node of MONSTER_DATA's (fxNode_Fart,
- * fxNode_Belch), else a bone of its skeleton (Bip01 Head); 0 = ok */
+ * fxNode_Belch), else a bone of its skeleton (Nick's FxFire, Bip01 Head); 0 = ok */
 static int mon_node_world(Mon *mo, const char *name, Mat4 *out)
 {
     return attach_world(mo, name, out) == 0 ? 0 : scene_monster_node(&mo->v->scene, mo->slot, name, out);
@@ -4513,6 +4522,7 @@ static void mon_fx_follow(Mon *mo)
         else if (rage_fx_at(mo, at) == 0)
             fx_move(v->fxw, mo->rage_fx, at);
     }
+    mon_nick_fx(mo);
     for (int k = 0; k < mo->nfx_named && v->fxw; k++) {
         float pos[3], R[3][3];
         Mat4 w;
@@ -4598,6 +4608,36 @@ static void mon_rage_fx(Mon *mo, int on)
         printf("  rage effect %s -> %d\n", mo->rage_fx_name, mo->rage_on ? mo->rage_fx : -1);
 }
 
+/* Nick's own (0x2F5D80 for a monster named Nick, each frame 0x2F5170) [R]: Nick_Fire on its node FxFire in that
+ * node's frame, Glowing_Eyeball on FxFireEyeL and on FxFireEyeR in the world's; made at the setup, outside the
+ * budget, shut down by becomeHuman (0x2D3ED0 -> 0x2F4F60) until the next world's setup */
+static void mon_nick_fx(Mon *mo)
+{
+    static const char *const NODE[3] = { "FxFire", "FxFireEyeL", "FxFireEyeR" };
+    static const char *const NAME[3] = { "Nick_Fire", "Glowing_Eyeball", "Glowing_Eyeball" };
+    static const float I[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+    Viewer *v = mo->v;
+    if ((mo->nick != 1 && mo->nick != 2) || !v->fxw || !mon_in(mo))
+        return;
+    for (int k = 0; mo->nick == 1 && k < 3; k++)
+        mo->nick_fx[k] = -1;
+    for (int k = 0; k < 3; k++) {
+        Mat4 w;
+        float pos[3], R[3][3];
+        if (mon_node_world(mo, NODE[k], &w) != 0)
+            continue;
+        frame_of(&w, pos, R);
+        if (mo->nick == 1) {
+            mo->nick_fx[k] = fx_spawn_free(v->fxw, NAME[k], pos, NULL, 1);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  effect %s on %s at %.2f %.2f %.2f -> %d\n", NAME[k], NODE[k], pos[0], pos[1], pos[2],
+                       mo->nick_fx[k]);
+        }
+        fx_place(v->fxw, mo->nick_fx[k], pos, k == 0 ? (const float (*)[3])R : I);
+    }
+    mo->nick = 2;
+}
+
 /* monster.callMonsterFunction(name, 0, 0, 0, 0): "<Monster>::name", else "Monsters::name" (Monsters.bsf); no
  * monster has its own of these. The books' MonsterFunction (Beans: doFart, the cats: doCatSound) */
 static void mon_function(Mon *mo, const char *name)
@@ -4637,6 +4677,10 @@ static void mon_fx_stop_all(Mon *mo)
         if (mo->v->fxw)
             fx_stop(mo->v->fxw, mo->fx_named[k].fx);
     mo->nfx_named = 0;
+    for (int k = 0; mo->nick == 2 && k < 3; k++)     /* Nick's, as the slots' */
+        if (mo->v->fxw)
+            fx_stop(mo->v->fxw, mo->nick_fx[k]);
+    mo->nick = 0;
 }
 
 /* canGrabPerson's / doGrabPerson's window person (getBuildingOccupant 0x2B37C0), -1 none */
