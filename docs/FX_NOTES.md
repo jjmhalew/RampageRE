@@ -168,13 +168,25 @@ particles and is past its cycle (0x20EFD0's answer), and the effect with its las
 At a block's end activateNextBlock's sweep (0x2B66C0) deletes every object of the world's list but the monsters'
 weapons (flag 0x200000), and a FollowEffect is one (the world's add, vtable +0x3C 0x284CD0, puts it on both lists,
 +0x58 and +0x50): its destructor (0x292270) takes it off the budget and hands its effect back to the FxManager
-(0x207A40), which destroys a ParticleSystemFx and puts it on the free list there and then (type 7, 0x207AB8). So every
-FollowEffect of the old block (the scripts' effects, the objects', the monsters' clip events') is gone at once,
-particles and all, as the results start. What the game starts straight from the FxManager (0x208220: a building
-cell's debris 0x310260, the monster's foot plants, landings and rage, the weapons) is not swept. The port: fx.c
-`Fx.follower` (fx_spawn's; not fx_spawn_free's, the buildings' requests, the weapons', the weather, the bosses',
-which the port keeps), main.c `block_left` calls `fx_drop_followers`; it had shut down only the effects it tracks,
-and those faded out over the Results.
+(0x207A40), which destroys a ParticleSystemFx and puts it on the free list there and then (type 7, 0x207AB8). The
+sweep's 0x302800 deletes the block's buildings too (0x4D0958 / 0x4D095C, destructor 0x2BF490), and a building's
+destructor runs its spawner's (0x310810), which releases every effect the spawner holds the same way. So the old
+block's effects are gone at once, particles and all, as the results start: the scripts', the objects', the monsters'
+clip events' and the buildings' (their cells' debris, the floors' and the pre-collapse dust). What the game starts
+straight from the FxManager outside a building (the monster's foot plants, landings and rage, the weapons') is not
+swept. The port: fx.c `Fx.of_block` (fx_spawn's; not fx_spawn_free's, the monsters' weapons', the weather, the bosses',
+which the port keeps), main.c `block_left` calls `fx_drop_block`; it had shut down only the effects it tracks, and
+those (and every building effect) faded out over the Results.
+
+**The buildings' spawner** (+0x8F4; 0x3101C0 by key, 0x30FD40 by name, both → 0x310260) [R]: a record (0x58 bytes, a
+list at +0x0 / +0x4, next +0x4C) per effect: the key (three words, +0x4), the cell's place (+0x10, 0x30F710), the
+flags (+0x0), the effect (+0x54); the building goes on the world's update list (0x4D17F0 / 0x4D17F4) and its update
+(0x2BDC70 → 0x310660) advances them, releasing each that is done. The cells' hits (0x2BBBA4, 0x2BBCB0, 0x2BBE3C) pass
+flags −1, the floor's and the pre-collapse dust (0x2BD784, 0x2BD8EC) 0. Flag 2: a new effect shuts down a flag-2 one of
+the same key (0x3103D0 .. 0x31044C); flag 1: while the building is not falling (grid +0x1CC = INT_MAX, 0x2CE230) the
+effect is put back on its cell each update (0x30F690: the cell's storey, the next one still standing up, at that
+storey's height now, 0x2CD010), so a cell's debris comes down with its storey when a floor below gives way. Not ported:
+`src/city.c` starts each at its place and leaves it there (scene_fx), and two hits on one cell play both.
 
 ## An emitter (start 0x1F7F90, frame 0x20EFD0)
 - **Start**: cycle = lo + r (hi − lo); age = cycle × em_start_time(r) − dt; a random rotation with

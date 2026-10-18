@@ -933,7 +933,7 @@ typedef struct {
     int rod;                  /* the rod emitter (w->em), -1 none (+0x9C) */
     float rod_speed, rod_len, head, tail;   /* the rod's (unscaled), +0xA0, +0xA4 */
     int counted;               /* started through the budget (fx_spawn): it counts by its priority while it lives */
-    int follower;              /* stands for a FollowEffect (fx_spawn; fx_set_follower): fx_drop_followers drops it */
+    int of_block;              /* goes with the block at its end (fx_spawn's; fx_set_of_block): fx_drop_block */
 } Fx;
 
 struct FxWorld {
@@ -1625,7 +1625,7 @@ int fx_spawn(FxWorld *w, const char *effect_name, const float pos[3], const floa
     f->rod = -1;
     f->head = f->tail = 0;
     f->counted = w->budget && !w->exempt;
-    f->follower = !w->exempt;
+    f->of_block = !w->exempt;
     /* the effect's frame: Y along dir, Z the world's up made square to it. The game's callers hand the effect a
      * whole matrix of their own; a building cell's is its face's from 0x430F10 (0x30F710; the front's the identity:
      * dir +Y here, the effects' -Y out of the facade) [R]; the others are the callers' (fx_spawn_frame for a frame) */
@@ -1702,22 +1702,23 @@ void fx_move(FxWorld *w, int id, const float pos[3])
                 w->sound(w->sound_ctx, FXS_MOVE, NULL, pos, w->em[i].sound[k]);
 }
 
-void fx_set_follower(FxWorld *w, int id, int on)
+void fx_set_of_block(FxWorld *w, int id, int on)
 {
     Fx *f = fx_of(w, id);
     if (f)
-        f->follower = on != 0;
+        f->of_block = on != 0;
 }
 
 /* activateNextBlock's sweep (0x2B66C0): every object of the world's list but the monsters' weapons is deleted, the
- * FollowEffects with them; a FollowEffect's destructor (0x292270) hands its effect back to the FxManager (0x207A40), and
- * a ParticleSystemFx is destroyed and put on the free list there and then (0x207AB8): gone, particles and all [R] */
-void fx_drop_followers(FxWorld *w)
+ * FollowEffects with them, and the block's buildings (0x302800), their spawners' effects with them (0x2BF490 ->
+ * 0x310810); each effect goes back to the FxManager (0x207A40), which destroys a ParticleSystemFx and puts it on the free
+ * list there and then (0x207AB8): gone, particles and all [R] */
+void fx_drop_block(FxWorld *w)
 {
     if (!w)
         return;
     for (int k = 0; k < MAX_FX; k++)
-        if (w->fx[k].used && w->fx[k].follower)
+        if (w->fx[k].used && w->fx[k].of_block)
             fx_kill(w, k | w->fx[k].gen << 8);
 }
 

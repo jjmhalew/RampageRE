@@ -3036,7 +3036,7 @@ static void mon_weapons_step(Viewer *v, float dt)
                 if (w->fx >= 0)
                     fx_stop(v->fxw, w->fx);
                 w->fx = fx_spawn_frame(v->fxw, w->fire_fx, at, (const float (*)[3])R, 1);
-                fx_set_follower(v->fxw, w->fx, 0);   /* the weapon's own (0x295750 ..), and a monster's weapon
+                fx_set_of_block(v->fxw, w->fx, 0);   /* the weapon's own (0x295750 ..), and a monster's weapon
                                                       * stays at a block's end (flag 0x200000) [R] */
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  effect %s at %.1f %.1f %.1f -> %d (%g s)\n", w->fire_fx, at[0], at[1], at[2], w->fx,
@@ -3345,7 +3345,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
                         printf("  boss effect %s on part %d node %s / %d at %.1f %.1f %.1f -> %d\n", e->name, e->obj,
                                e->node ? e->node : "-", e->level, p ? at[0] : e->pos[0], p ? at[1] : e->pos[1],
                                p ? at[2] : e->pos[2], id);
-                    fx_set_follower(v->fxw, id, 0);  /* the bosses stay here at a block's end (block_left) */
+                    fx_set_of_block(v->fxw, id, 0);  /* the bosses stay here at a block's end (block_left) */
                     if (id >= 0 && v->nbfx < 64) {   /* to follow its part or the monster, or to stop by its id */
                         v->bfx[v->nbfx].id = e->id;
                         v->bfx[v->nbfx].fx = id;
@@ -4865,8 +4865,8 @@ static void weather_step(Viewer *v)
         v->weather_due = 0;
         for (int k = 0; k < v->scene.nweather && v->nweather_fx < 4; k++) {
             int id = fx_spawn(v->fxw, v->scene.weather[k], at, NULL, 1);
-            fx_set_follower(v->fxw, id, 0);          /* (the game's goes at a block's end and the next block's starts
-                                                      * at once, 0x302AF0; here that one at the block's start) */
+            fx_set_of_block(v->fxw, id, 0);          /* (the game's goes at a block's end and the next block's starts
+                                                      * at once, 0x302AF0; here once the new block is built) */
             if (id >= 0)
                 v->weather_fx[v->nweather_fx++] = id;
             if (getenv("RAMPAGE_TRACE"))
@@ -4885,7 +4885,6 @@ static void fx_step(Viewer *v, float dt)
         if (v->fxw) {
             const struct SceneFx *f = &v->scene.fxreq[i];
             int id = fx_spawn(v->fxw, f->name, f->pos, f->dir, 1);
-            fx_set_follower(v->fxw, id, 0);          /* the buildings': their spawner's, from the FxManager (0x310260) */
             if (getenv("RAMPAGE_TRACE"))
                 printf("  effect %s at %.1f %.1f %.1f -> %d\n", f->name, f->pos[0], f->pos[1], f->pos[2], id);
         }
@@ -6194,15 +6193,15 @@ static void block_left(Viewer *v)
         Mon *mo = &v->mon[k];
         mo->held = mo->held_unit = mo->held_vehicle = mo->held_parade = mo->held_rail = mo->held_sobj = -1;
     }
-    /* the FollowEffects go with the objects, at once (0x2B66C0 -> 0x292270 -> 0x207A40) [R]: the army's, the vehicles',
-     * the street objects', the parade's, the trains', the edibles', the people's, the scripts' one-shots and the
-     * monsters' clip events'; the monster's own, the buildings' debris, the monsters' weapons' and the bosses' (kept
-     * here) and the weather (the new block's at once in the game; here the old one until the new block is built) are
-     * not followers */
+    /* the block's effects go with its objects and buildings, at once (0x2B66C0 -> 0x292270, 0x302800 -> 0x2BF490 ->
+     * 0x310810; 0x207A40) [R]: the army's, the vehicles', the street objects', the parade's, the trains', the edibles',
+     * the people's, the scripts' one-shots, the monsters' clip events' and the buildings' debris; not the monster's own,
+     * the monsters' weapons', the bosses' (kept here) and the weather (the new block's at once in the game; here the
+     * old one until the new block is built) */
     int before = fx_particles(v->fxw);
-    fx_drop_followers(v->fxw);
+    fx_drop_block(v->fxw);
     if (getenv("RAMPAGE_TRACE"))
-        printf("  block left: the FollowEffects dropped, particles %d -> %d\n", before, fx_particles(v->fxw));
+        printf("  block left: its effects dropped, particles %d -> %d\n", before, fx_particles(v->fxw));
     v->nfxa = v->nvfx = v->nsofx = v->npfx = v->nrfx = v->nrsnd = v->nefx = 0;
     for (int k = 0; k < v->nosnd; k++)
         sound_kill(v->osnd[k].h);
