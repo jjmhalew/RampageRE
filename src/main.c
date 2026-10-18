@@ -4437,13 +4437,18 @@ static void army_step(Viewer *v, float dt)
                     hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);
                 break;
             case AE_WINDOW_CLOSE: scene_window_close_at(&v->scene, e->pos); break;
-            case AE_BUILDING_NUKE:                   /* the airstrike's bomb: a standing building falls, no one's */
+            case AE_BUILDING_HIT:                    /* a shot's or beam's Building::hit (0x2BC150), no one's */
                 if ((uint32_t)e->id < v->scene.nbuildings &&
                     v->scene.buildings[e->id].b.state == BUILDING_STANDING) {
-                    v->scene.buildings[e->id].hitter = -1;
-                    building_destroy(&v->scene.buildings[e->id].b);
+                    SceneBuilding *sb = &v->scene.buildings[e->id];
+                    sb->hitter = -1;
+                    if (e->level == 8)               /* Nuclear (the airstrike's bomb): it falls at once */
+                        building_destroy(&sb->b);
+                    else
+                        building_hit(&sb->b, e->pos, e->amount);
                     if (getenv("RAMPAGE_TRACE"))
-                        printf("  building %d nuked\n", e->id);
+                        printf("  building %d %s by %s (%.1f)\n", e->id, e->level == 8 ? "nuked" : "hit",
+                               e->name ? e->name : "?", e->amount);
                 }
                 break;
             case AE_SCORE:

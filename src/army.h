@@ -202,9 +202,12 @@ enum {
                        * caller's to give. id the object's collision tag (collide.h COLLIDE_TAG), level its kind, pos
                        * where, dir the normal, amount the mover's Mass (a building: hit with radius Mass / 1000) */
     AE_WINDOW_CLOSE,  /* the window soldier went back in (closeWindow, 0x30C3F0): its window at pos shuts over 0.5 s */
-    AE_BUILDING_NUKE  /* a shot of DamageType 8 (Nuclear: the airstrike's FinalBomberBomb) met building id (the box's
-                       * index) at pos: Building::hit (0x2BC150, the shot's impact 0x292D20 -> its TakeDamage) fells a
-                       * standing one at once (state 4), no one's (its hitter cleared) */
+    AE_BUILDING_HIT   /* a shot or a beam met building id (the box's index) at pos: Building::hit (0x2BC150; the shot's
+                       * impact 0x292D20, the beam's 0x33B440 -> its TakeDamage) of type level (the DamageType) and
+                       * amount (ImpactDamage x the damage scale; a beam's DamagePerSec x dt after its first touch),
+                       * dir the shot's way. Its hitter is cleared (an army unit or a person: not a monster, +0x4C &
+                       * 0x40 unset, 0x2BC190); type 8 (Nuclear: the airstrike's FinalBomberBomb) fells a standing one
+                       * at once (state 4), any other is the hit at that point with the amount as its radius */
 };
 /* node: AE_EFFECT's model node number of the unit it is on (createAndStartAttachedToNode), -1 none; die_with: it
  * stops when its unit goes (setTurnOffWhenObjectDies(1)), else it runs on where the unit was */

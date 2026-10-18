@@ -174,9 +174,14 @@ otherwise.
   A hit on the shot's own unit (+0xC4) is no hit at all (0x293CD8). The monsters are their collision spheres, flagged
   0x40; a ray that starts inside a box meets it at t = 0 (0x280780 → 0x100420: the face of least depth, ties to z
   then y, on the start's side), inside a sphere too (0x100900: away from its centre), so a shot whose step starts
-  inside its own unit is blind for that step [R]. What the shot hits that is not a monster only stops it: its
-  impact on such an object (0x292D20) is not ported, but for a Nuclear shot (DamageType 8, the airstrike's
-  FinalBomberBomb) on a building: Building::hit fells a standing one at once, no one's (`AE_BUILDING_NUKE`).
+  inside its own unit is blind for that step [R]. What the shot hits that is not a monster or a building only
+  stops it: its impact on such an object (0x292D20) is not ported. On a building (`AE_BUILDING_HIT`, the beam's
+  too: 0x33B440) it is Building::hit (0x2BC150) with the shot's DamageType, its ImpactDamage x the damage scale as the
+  amount (the beam's DamagePerSec x dt after its first touch) and the point: the building's hitter is cleared (the
+  attacker is not a monster, +0x4C & 0x40, 0x2BC190), a Nuclear one (DamageType 8, the airstrike's FinalBomberBomb)
+  fells a standing building at once, any other is the hit at the point with the amount as its radius (a tank's
+  shell 25: 30 dents and the cell's 2 HP) [R]. Only the elevated train's cars carry the flag that keeps an attacker
+  off the buildings (0x10000000, 0x2BC1D0; rail.h).
 
 **A beam** (0x295750) [R]:
 - The beam runs from the weapon along its direction and stops at the first thing it meets: the world's ray with
@@ -553,7 +558,7 @@ Floating = 100
   `army_collide_add`): the shots' and beams' rays and the flights are the game's. Left:
   - flag 4 is every world object's, VolumeTriggers and held objects too (addObject 0x284CD0, COLLIDE_NOTES.md) [R],
     so a shell stops at a soldier, a passing car or a trigger's box; a shot's damage to what it hits other than a
-    monster (0x292D20: a thunk to the hit object's TakeDamage, vtable +0x34, with the shot's DamageType, its owner
+    monster or a building (0x292D20: a thunk to the hit object's TakeDamage, vtable +0x34, with the shot's DamageType, its owner
     unit, ImpactDamage, the point and the shot's direction, no knock [R]) is not ported: the scripts' TakeDamage
     begin with coerceToMonster and ignore it, but Fountain.scr (ungated) and DamagingEffect.scr would not;
   - a unit has one shape by 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox, else

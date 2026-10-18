@@ -839,6 +839,17 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
     }
 }
 
+/* a shot or beam met building `building`: its Building::hit is the viewer's (AE_BUILDING_HIT) */
+static void building_hit_event(Army *a, int building, const char *weapon, int type, float amount, const float dir[3],
+                               const float at[3])
+{
+    ArmyEvent *e = emit(a, AE_BUILDING_HIT, -1, weapon, at);
+    e->id = building;
+    e->level = type;
+    e->amount = amount;
+    memcpy(e->dir, dir, sizeof e->dir);
+}
+
 /* the shot each frame (0x293120): [R]
  *  - its age grows; past Duration it is gone (once its effects are done, 0x2931D0);
  *  - towards its target (+0xD0: 0x287F00, the target's place) it turns: the change of its unit direction is at most
@@ -895,9 +906,10 @@ static void shot_update(Army *a, ArmyShot *s, float dt)
             if (mon >= 0)
                 hit_monster(a, mon, s->weapon, s->owner, s->damage, s->damage_type, s->reaction, s->h_knock,
                             s->v_knock, s->dir, at);
-            else if (obj >= 0 && a->cw && s->damage_type == 8 &&   /* Building::hit of type 8 (its TakeDamage) */
+            else if (obj >= 0 && a->cw &&             /* Building::hit (its TakeDamage, 0x292D20) */
                      COLLIDE_TAG_OWNER(a->cw->o[obj].tag) == COLLIDE_OWN_BUILDING)
-                emit(a, AE_BUILDING_NUKE, -1, s->weapon, at)->id = COLLIDE_TAG_INDEX(a->cw->o[obj].tag);
+                building_hit_event(a, COLLIDE_TAG_INDEX(a->cw->o[obj].tag), s->weapon, s->damage_type, s->damage,
+                                   s->dir, at);
             if (s->impact_fx) {
                 ArmyEvent *e = emit(a, AE_EFFECT, -1, s->impact_fx, at);
                 e->id = a->next_fx++;
@@ -968,12 +980,13 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
         return;
     /* [R 0x2958CC] the impact at the weapon's place + t along: the tail not added */
     float at[3] = { s->pos[0] + s->dir[0] * t, s->pos[1] + s->dir[1] * t, s->pos[2] + s->dir[2] * t };
+    float dmg = w->first ? w->scale * w->damage : w->dps > 0 ? w->scale * w->dps * dt : 0;
     if (mon >= 0) {
-        float dmg = w->first ? w->scale * w->damage : w->dps > 0 ? w->scale * w->dps * dt : 0;
         if (dmg > 0)
             hit_monster(a, mon, w->name, u ? who(a, u) : -1, dmg, w->damage_type, w->reaction, w->h_knock, w->v_knock,
                         s->dir, at);
-    }
+    } else if (obj >= 0 && a->cw && dmg > 0 && COLLIDE_TAG_OWNER(a->cw->o[obj].tag) == COLLIDE_OWN_BUILDING)
+        building_hit_event(a, COLLIDE_TAG_INDEX(a->cw->o[obj].tag), w->name, w->damage_type, dmg, s->dir, at);
     if (w->first && w->impact_fx) {
         ArmyEvent *e = emit(a, AE_EFFECT, -1, w->impact_fx, at);
         e->id = a->next_fx++;
