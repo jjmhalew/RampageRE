@@ -2249,6 +2249,8 @@ static void heli_init(Army *a, ArmyUnit *u)          /* onInit (is_cop = bIsFrie
         }
     }
     weapons_enable(u, 1);
+    sound(a, u, ustr(u, "MovementSound"));           /* add3DSfx(MovementSound, 0): the rotor's COPTER LOOP, on it till
+                                                      * it is deleted [R Vehicle_Helicopter.scr onInit] */
 }
 
 static int heli_pulse(Army *a, ArmyUnit *u)
