@@ -7269,6 +7269,11 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
         { VK_RETURN, HUD_EV_ACCEPT, 0 }, { VK_SPACE, HUD_EV_ACCEPT, 0 }, { VK_BACK, HUD_EV_BACK, 0 },
         { VK_UP, HUD_EV_UP, 0 }, { VK_DOWN, HUD_EV_DOWN, 0 }, { VK_LEFT, HUD_EV_LEFT, 0 }, { VK_RIGHT, HUD_EV_RIGHT, 0 },
         { 'P', HUD_EV_START, 0 }, { 'C', HUD_EV_BUTTON, 0 }, { 'V', HUD_EV_BUTTON, 1 }, { 'R', HUD_EV_BUTTON, 4 } };
+    static const struct { int key, ev, button; } KEYS2[] = {   /* the keypad: 0 Cross, 1 Circle, 7 Square, 9 Triangle,
+                                                      * 3 R2 (the controller's A, B, X, Y, RT), 8 2 4 6 the d-pad */
+        { VK_NUMPAD0, HUD_EV_ACCEPT, 0 }, { VK_NUMPAD1, HUD_EV_BACK, 0 }, { VK_NUMPAD8, HUD_EV_UP, 0 },
+        { VK_NUMPAD2, HUD_EV_DOWN, 0 }, { VK_NUMPAD4, HUD_EV_LEFT, 0 }, { VK_NUMPAD6, HUD_EV_RIGHT, 0 },
+        { VK_NUMPAD7, HUD_EV_BUTTON, 0 }, { VK_NUMPAD9, HUD_EV_BUTTON, 1 }, { VK_NUMPAD3, HUD_EV_BUTTON, 4 } };
     const char *focus = shell_focus(v->shell);
     int typing = focus && !strcmp(focus, "MemoryCard");
     unsigned char took[256] = { 0 };                 /* the keys the name entry took (the popup's other panels
@@ -7286,6 +7291,9 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
     for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++)
         if (w->pressed[KEYS[k].key] && !took[KEYS[k].key & 255])
             shell_input(v->shell, KEYS[k].ev, KEYS[k].button);
+    for (size_t k = 0; k < sizeof KEYS2 / sizeof *KEYS2; k++)   /* player 2's keypad: pad 1, as in play */
+        if (w->pressed[KEYS2[k].key])
+            shell_input_pad(v->shell, KEYS2[k].ev, KEYS2[k].button, 1);
     for (int k = 0; k < PAD_SLOTS; k++) {            /* GuiEvent.getController(): the controller's slot */
         int m = pad_menu(v, k, dt);
         for (size_t i = 0; m && i < sizeof PAD_MENU_EV / sizeof *PAD_MENU_EV; i++)
@@ -7302,8 +7310,9 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
         v->shell_go = 1;                             /* after this frame: the loading screen is drawn once */
 }
 
-/* --shell with --shot: the --do words for the shell (wait S at 1/60 s, menu <ev>, button N, type TEXT, done); the
- * words left once a game starts (they play in it), NULL none */
+/* --shell with --shot: the --do words for the shell (wait S at 1/60 s, menu <ev>, button N, type TEXT, done; p2 ..
+ * p4 the menu words after it from that player's pad, p1 again player 1's); the words left once a game starts (they
+ * play in it), NULL none */
 static const char *shell_script(Viewer *v, const char *script)
 {
     static const struct { const char *name; int ev; } EV[] = {
@@ -7311,12 +7320,17 @@ static const char *shell_script(Viewer *v, const char *script)
         { "accept", HUD_EV_ACCEPT }, { "back", HUD_EV_BACK }, { "start", HUD_EV_START } };
     const char *p = script;
     char word[32], arg[32];
+    int pad = 0;
     while (*p && v->shell && !v->shell_go) {
         while (*p == ' ' || *p == ',') p++;
         int n = 0, k = 0;
         while (*p && *p != ' ' && *p != ',' && n < 31) word[n++] = *p++;
         word[n] = 0;
         while (*p == ' ') p++;
+        if ((word[0] == 'p' || word[0] == 'P') && word[1] >= '1' && word[1] <= '4' && !word[2]) {
+            pad = word[1] - '1';                     /* (no argument: what follows is the next word) */
+            continue;
+        }
         while (*p && *p != ',' && k < 31) arg[k++] = *p++;
         while (k > 0 && arg[k - 1] == ' ') k--;
         arg[k] = 0;
@@ -7331,10 +7345,10 @@ static const char *shell_script(Viewer *v, const char *script)
         else if (!_stricmp(word, "menu"))
             for (size_t i = 0; i < sizeof EV / sizeof *EV; i++) {
                 if (!_stricmp(arg, EV[i].name))
-                    shell_input(v->shell, EV[i].ev, 0);
+                    shell_input_pad(v->shell, EV[i].ev, 0, pad);
             }
         else if (!_stricmp(word, "button"))
-            shell_input(v->shell, HUD_EV_BUTTON, atoi(arg));
+            shell_input_pad(v->shell, HUD_EV_BUTTON, atoi(arg), pad);
         else if (!_stricmp(word, "done"))            /* the name entry's DONE */
             shell_type(v->shell, '\r');
         else if (!_stricmp(word, "type"))

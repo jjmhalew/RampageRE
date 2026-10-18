@@ -65,7 +65,8 @@ settings"), F12 a screenshot, Esc quit (in a game: the Pause menu; in the menus:
 the keys are a pad: W A S D the left stick, the arrows the right stick (the head), Space Cross (jump), J Square
 (punch), K Triangle (kick), L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter
 or Space take, Backspace back); player 2 (`--players 2`) plays on the numeric keypad, Num Lock on: 8 4 2 6 (or 5)
-the left stick, 0 Cross, 7 Square, 9 Triangle, 1 Circle, 3 R2, / and * the right stick; the monster runs its own
+the left stick, 0 Cross, 7 Square, 9 Triangle, 1 Circle, 3 R2, / and * the right stick, and in the menus the same
+keys are its pad (8 2 4 6 the d-pad, 0 Select, 1 Back: player 2's card in Monster Select); the monster runs its own
 move graph and the game's camera follows it
 ([CAMERA.md](CAMERA.md)). `--clip N` picks a clip by number (and starts with the free camera), `--time T` poses a
 `--shot`; in play a shot first lets the camera settle for 2 s, then plays `--do "right 1, cross, wait 0.8"` (stick
@@ -92,7 +93,7 @@ memory card's CHECKING / SAVING / LOADING and its errors for the profile file (o
 corrupt one, a full drive), and the SaveIcon while an autosave writes, in the menus and over the Results; the Pause menu's Quit
 goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
 square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
-`menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`), the words left once a game
+`menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`; `p2` .. `p4` the menu words after it from that player's pad, `p1` again player 1's), the words left once a game
 starts play in it, and those left once it goes back play on in the shell. After 120 s untouched in the menus the
 attract mode runs its movies and then a demo game: a random city, block, day or night and one or two monsters, all
 the computer's, for a minute (the 65 demos come in turn, 4 first; "Press START button" blinks); any key or
@@ -350,7 +351,7 @@ Keys as above, and today's controllers (port extra, WoodyRE's pad code: `src/pad
 
 **Players.** Up to four controllers, each in a slot of its own: a controller takes the lowest free slot when it is
 plugged in (at start: in the order found) and keeps it until it goes, which frees the slot for the next one. Player 1
-plays on the keys and the controller in slot 0, player 2 on the keypad and slot 1, players 3 and 4 on slots 2 and 3
+plays on the keys and the controller in slot 0, player 2 on the keypad and slot 1 (in the menus too), players 3 and 4 on slots 2 and 3
 when those have a controller as the game starts (else the computer drives them, as before; bots are always the
 computer's). Steam Input and DS4Windows show a Sony pad twice (its HID device and an XInput one): while a Sony pad is
 open on Windows, XInput is not read (`RAMPAGE_PADXINPUT=1` reads both). Input and rumble pause while the window is not
