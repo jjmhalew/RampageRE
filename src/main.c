@@ -4367,6 +4367,16 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
     }
 }
 
+/* an attached effect's frame on a street object: its axes (x, y, z: the 3 x 3's columns), made unit length */
+static void street_fx_frame(const float rot[9], float R[3][3])
+{
+    for (int a = 0; a < 3; a++) {
+        float l = sqrtf(rot[3 * a] * rot[3 * a] + rot[3 * a + 1] * rot[3 * a + 1] + rot[3 * a + 2] * rot[3 * a + 2]);
+        for (int k = 0; k < 3; k++)
+            R[a][k] = l > 1e-6f ? rot[3 * a + k] / l : (float)(a == k);
+    }
+}
+
 /* the street and roof objects' frame (streetobj.c): the monster's body against them (TakeDamage, Collision), what
  * they see of it and of the buildings, then what they did; they are drawn where they are now */
 static void street_step(Viewer *v, float dt)
@@ -4403,7 +4413,14 @@ static void street_step(Viewer *v, float dt)
             switch (e->type) {
             case SE_EFFECT:
                 if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
+                    /* one on the object: in its whole frame [R 0x277100 -> 0x291ED0: the offset x its matrix], so a
+                     * falling lamp's sparks (Sparks.edf's emitters 4 .. 5 up its z) come down with its head */
+                    const StreetObj *so = e->level && e->obj >= 0 ? streetobj_get(v->sobj, e->obj) : NULL;
+                    float R[3][3];
+                    if (so)
+                        street_fx_frame(so->rot, R);
+                    int id = so ? fx_spawn_frame(v->fxw, e->name, e->pos, (const float (*)[3])R, 1) :
+                                  fx_spawn(v->fxw, e->name, e->pos, NULL, 1);
                     if (id >= 0 && v->nsofx < 64) {
                         v->sofx[v->nsofx].id = e->id;
                         v->sofx[v->nsofx].fx = id;
@@ -4497,8 +4514,9 @@ static void street_step(Viewer *v, float dt)
             scene_street_place(&v->scene, v->street_of[i], w, !o->alive);
         }
     }
-    for (int j = 0; j < v->nsofx; j++) {             /* the effects that follow */
-        float at[3];
+    for (int j = 0; j < v->nsofx; j++) {             /* the effects that follow, turning with what they follow */
+        float at[3], R[3][3];
+        int framed = 0;
         Mat4 m;
         if (v->sofx[j].mnode[0]) {
             if (scene_monster_node(&v->scene, v->sofx[j].mon, v->sofx[j].mnode, &m) != 0 || !fx_alive(v->fxw, v->sofx[j].fx)) {
@@ -4518,14 +4536,22 @@ static void street_step(Viewer *v, float dt)
                 for (int r = 0; r < 3; r++)
                     at[r] = m.m[12 + r] + m.m[r] * v->sofx[j].off[0] + m.m[4 + r] * v->sofx[j].off[1] +
                             m.m[8 + r] * v->sofx[j].off[2];
-            } else
+                float nr[9] = { m.m[0], m.m[1], m.m[2], m.m[4], m.m[5], m.m[6], m.m[8], m.m[9], m.m[10] };
+                street_fx_frame(nr, R);
+            } else {
                 streetobj_point(v->sobj, v->sofx[j].obj, v->sofx[j].off, at);
+                street_fx_frame(o->rot, R);
+            }
+            framed = 1;
         } else {
             if (!fx_alive(v->fxw, v->sofx[j].fx))
                 v->sofx[j--] = v->sofx[--v->nsofx];
             continue;
         }
-        fx_move(v->fxw, v->sofx[j].fx, at);
+        if (framed)
+            fx_place(v->fxw, v->sofx[j].fx, at, (const float (*)[3])R);
+        else
+            fx_move(v->fxw, v->sofx[j].fx, at);
     }
 }
 

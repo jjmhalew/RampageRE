@@ -102,6 +102,10 @@ x and y, both ends in; z is not looked at** (0x2A3D20). With one, the object has
 `Oscillate`: `OscillateScale` (1) as the base and the scale, the clock at 5 × rand. The last setPulseDelay is a
 frame + the delay. `IsMonsterUpgrade` sets nFlags 2 (challenge.c).
 
+**Effects on an object** (createAndStartAttached and its kin) follow its whole frame, turning with it [R 0x277100 ->
+0x291ED0: the offset × its matrix]: a street lamp's `sparks` (Sparks.edf's emitters 4 to 5 up its z) come down with
+its head as it falls. Here main.c `street_step` (`fx_spawn_frame` / `fx_place` with the object's axes, or its node's).
+
 **onPulse.**
 - State 0 (the first pulse): the `AttachEffect` once its delay is over, and turned off when the object dies: at
   `Offset` (a Point3, unless (-1000, -1000, -1000)) on the object, else on its model node `NodeId` (> 0), else where
