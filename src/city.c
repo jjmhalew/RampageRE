@@ -1449,14 +1449,16 @@ void scene_window_soldier_take(Scene *s, int unit)
         }
 }
 
-/* the slots' n-th of a sort (military 1 or 0), in the order they were made (the game keeps the soldiers' first, then
- * the civilians': 0x318650 reads +0x40 and +0x3C of them from +0xC), -1 none */
-static int slot_of_sort(const Scene *s, int military, int nth)
+static void order_add(Scene *s, int slot)            /* 0x3195E0: one more at the list's end */
 {
-    for (int i = 0; i < s->nslots; i++)
-        if (s->slots[i].military == military && nth-- == 0)
-            return i;
-    return -1;
+    s->order = realloc(s->order, sizeof *s->order * (size_t)(s->norder + 1));
+    s->order[s->norder++] = slot;
+}
+
+void scene_occupant_pad(Scene *s, int n)
+{
+    while (n-- > 0)
+        order_add(s, -1);
 }
 
 /* [R 0x3196F0, its first half, for each building of the block (0x31A540, 0x4D095C) when the block has an Occupants and
@@ -1467,8 +1469,10 @@ static int slot_of_sort(const Scene *s, int military, int nth)
  * soldiers, the rest civilians; the building's NumNonMilitaryOccupants (then all n, that many civilians) and
  * NumMilitaryOccupants override the counts, each at most n. A soldier's kind rand() % the MilitaryInstances, a
  * civilian's rand() % the OccupantInstances: their Frequency (read into the list by 0x318B40) plays no part [R
- * 0x319994, 0x319A9C]. [G: with no MilitaryInstance (only the buffer blocks LV11, LA10 have soldier slots so) the
- * game's rand() % 0 is undefined; here those slots are civilians'] */
+ * 0x319994, 0x319A9C]. Each slot goes on at the end of the one list (0x3195E0, 0x319570), its soldiers' count on
+ * +0x40, its civilians' on +0x3C. (Without a MilitaryInstance the soldiers' rand() % 0 would be undefined: only the
+ * buffer blocks LV11 and LA10 have soldier slots so, and a buffer block is never played (GAME_NOTES.md), so the game
+ * never makes them; here they would be left out.) */
 void scene_occupant_slots(Scene *s, int bi)
 {
     if (!s->occ_setup || bi < 0 || (uint32_t)bi >= s->nbuildings)
@@ -1510,6 +1514,8 @@ void scene_occupant_slots(Scene *s, int bi)
         military = total;
     if (!s->nmilitary)
         military = 0;
+    s->order_mil += military;
+    s->order_civ += total - military;
     for (int k = 0; k < total; k++) {
         int is_mil = k < military, kinds = is_mil ? s->nmilitary : s->noccupants;
         if (!kinds)
@@ -1517,6 +1523,7 @@ void scene_occupant_slots(Scene *s, int bi)
         int q = (int)(wrand_lf() % (uint32_t)kinds);
         s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
         struct WindowSlot ws = { bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2] };
+        order_add(s, s->nslots);
         s->slots[s->nslots++] = ws;
     }
 }
@@ -1542,20 +1549,25 @@ void scene_people_spawn(Scene *s, float dt)
     s->spawn_timer = 0;
     /* [R 0x318650] a soldier's turn when rand() x 2^-32 <= MilitaryStartRate + min(1, t / MilitaryTimeRange) x (End -
      * Start), t the clock's time left (0x347DC0: in the campaign it runs down from the largest bonus time, 480, so for
-     * the first 240 s it is End's 0.9, then falls to Start's 0.1), else a civilian's; then, from one at rand() % the
-     * sort's slots, the first of them free in a building whose x (+0x2C, its middle) is within the monsters' range
-     * (0x318390). A soldier's turn in a block without soldier slots puts out no one */
+     * the first 240 s it is End's 0.9, then falls to Start's 0.1), else a civilian's. The soldier's turn looks at the
+     * list's first +0x40 (the soldiers' count) slots, the civilian's at the +0x3C after them: places in the one list,
+     * which holds each building's soldiers, civilians and edibles in turn, so either range can hold the other sort's
+     * slots (the occupant is the slot's own: +0xD, 0x318968) and edible slots (+0xD 0xFF: passed over) [R 0x319570,
+     * 0x3195C0, 0x3195E0]. From the one at rand() % the range's count on, the first free one in a building whose x
+     * (+0x2C, its middle) is within the monsters' range (0x318390). No slots in the range: no one */
     float f = s->military_range > 0 ? s->spawn_left / s->military_range : 1;
     float p = s->military_start + (f < 1 ? f : 1) * (s->military_end - s->military_start);
-    int want_mil = (float)wrand_lf() * 2.3283064e-10f <= p, m = 0;
-    for (int i = 0; i < s->nslots; i++)
-        m += s->slots[i].military == want_mil;
-    if (!m || (want_mil && !s->army))
+    int want_mil = (float)wrand_lf() * 2.3283064e-10f <= p;
+    int m = want_mil ? s->order_mil : s->order_civ, base = want_mil ? 0 : s->order_mil;
+    if (m <= 0)
         return;
     int start = (int)(wrand_lf() % (uint32_t)m);
     for (int i = 0; i < m; i++) {
-        struct WindowSlot *ws = &s->slots[slot_of_sort(s, want_mil, (start + i) % m)];
-        if (ws->retired)
+        int at_pos = base + (start + i) % m, k = at_pos < s->norder ? s->order[at_pos] : -1;
+        if (k < 0)
+            continue;                                /* an edible's slot */
+        struct WindowSlot *ws = &s->slots[k];
+        if (ws->retired || (ws->military && !s->army))
             continue;
         SceneBuilding *sb = &s->buildings[ws->building];
         const Building *b = &sb->b;
@@ -4118,6 +4130,7 @@ void scene_free(Scene *s)
         people_free(s->folk);
     free(s->looks);
     free(s->slots);
+    free(s->order);
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         free(s->buildings[i].rest);
         free(s->buildings[i].adorn);

@@ -219,6 +219,10 @@ typedef struct {
     struct WindowSlot { int building, storey, column, occupant, military, unit, lr, retired; } *slots;   /* retired:
      * its soldier grabbed (0x318140 with 1: +0xD = 0xFF), never filled again */
     int nslots, slots_made;
+    /* the game's one list of slots (+0xC, 0x3195E0 appends) in its order: per building its soldiers' slots, its
+     * civilians', then the edibles' own (here -1: the edibles keep theirs in edible.c); order_mil (+0x40) and
+     * order_civ (+0x3C) the soldiers' and civilians' counts, the spawn's two ranges of it (scene_occupant_pad) */
+    int *order, norder, order_mil, order_civ;
     /* the Occupants group's soldiers (MilitaryInstance|: Military_Window.bsf templates, the army's window soldiers)
      * and its rates (0x31A540: +0x48 MilitaryStartRate 0.1, +0x4C MilitaryEndRate 0.9, +0x50 MilitaryTimeRange 240) */
     const char *military[16]; float military_freq[16]; int nmilitary;
@@ -338,6 +342,9 @@ int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world);
 /* building bi's window slots (0x3196F0's first half): the host makes them building by building just before the
  * building's edibles (edible_add_building), as the game's draws come; any left are made at the first spawn */
 void scene_occupant_slots(Scene *s, int bi);
+/* n slots of the building's edibles made after its occupants' (where no occupant's slot was in the cell: 0x3196F0 has
+ * an edible take an occupant's slot of its cell, else a new one), in the game's list as edible slots */
+void scene_occupant_pad(Scene *s, int n);
 void scene_people_spawn(Scene *s, float dt);
 /* closeWindow (Actor binding, 0x30C3F0): the window an occupant came out of shuts over 0.5 s (openWindow(.., 0,
  * 0.5)), the slot's Openable; building and storey as people_add_window got them (the live storey then), or, _at, the

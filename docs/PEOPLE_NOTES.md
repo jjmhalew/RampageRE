@@ -128,9 +128,14 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   military rates). On the interval, when rand() × 2⁻³² (0x106950, gWorld +0x82C) is at most MilitaryStartRate +
   min(1, t / MilitaryTimeRange) × (End − Start), t the clock's time **left** (0x347DC0 on 0x4D5190: the limit
   0x4D7E48 less the time run; in the campaign it counts down from the largest bonus time, 480, so the chance is 0.9
-  for the first 240 s and falls to 0.1 at 480; in a Timed Run from 180, 0.7 falling), it looks among the military
-  slots (count +0x40), otherwise among the civilian ones (+0x3C, after them); a block with no military slots then
-  puts out no one. From the slot at rand() % the count on, the first free one (+0x14 empty, +0xD an occupant) whose
+  for the first 240 s and falls to 0.1 at 480; in a Timed Run from 180, 0.7 falling), it looks at the slot list's
+  first +0x40 places (the soldiers' count), otherwise at the +0x3C after them (the civilians'). Those are places in
+  the one list, not sorts: 0x3196F0 appends every slot to it (0x3195E0 grows it by one, 0x3195C0 is its last,
+  0x319570 copies a slot in), building by building, each building's soldiers, then its civilians, then its edibles'
+  own slots (an edible in a cell with an occupant's slot takes that slot, +0xE), so either range can hold the other
+  sort's slots and edible slots (+0xD 0xFF, passed over); what comes out is the slot's own occupant (+0xD, the kind
+  list's record at 0x318968) [R]. A range with no slots puts out no one (a block without soldier slots on a soldier's
+  turn). From the place at rand() % the range's count on, the first free slot (+0x14 empty, +0xD an occupant) whose
   building's x (+0x2C, its middle) lies in the monsters' range (0x318390: the lowest to the highest x of the players'
   monsters (gWorld +0x40, 0x4D7E28 of them), widened to 30 about their middle when less than 20 apart, then 10 more
   on each side: a lone monster's buildings within 25) and that 0x31AD00 allows [R]. The slots (0x31A540 calls
@@ -303,9 +308,16 @@ PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAni
   and rates (+0x44 … +0x50), the range (0x318390) and the cell check (0x31AD00 [R]: not on the ground storey (its
   record +0x10 is 0), the cell not hidden (0x400 by 0x2BE580), then the last building whose box holds the point 10 out
   in front of the cell (y − 10; 0x2A3D20) must have fewer standing storeys than the cell's live storey: a building in
-  front does not hide it). [G: the order within each sort's list is the order the slots were made (0x319570's insert
-  not traced); a block with soldier slots and no `MilitaryInstance` (the buffer blocks LV11, LA10) would take
-  rand() % 0 in the game, here those are civilians' slots; the bots count among the monsters for the range]
+  front does not hide it). The list is mirrored in `Scene.order` (the edibles' own slots stand in it as −1, counted by
+  main.c after each building's `edible_add_building`). The buffer blocks LV11 and LA10 would want soldier slots
+  with no `MilitaryInstance` (rand() % 0), but a buffer block is never played and only the played block gets slots.
+  [G: the bots count among the monsters for the range]
+- **The animation speed** [R]: a look's `Duration` is the play's length (the loader 0x30AC9C stores it as it is in
+  +0xC), the time runs by the frame's step (0x30A850), and the clip is posed at time / that length (0x30A770): the
+  clip is fitted to the Duration. The window occupants' WindowIdle (1.2 s clips, Duration 0.5) so plays 2.4 times
+  as fast, WindowLook (1.2 s, Duration 1) 1.2 times, WindowEmerge and WindowReEnter (0.13 … 0.17 s, Duration 0.5)
+  three or four times as slow, the window soldiers' firing (0.33 s, Duration 1) three times as slow, in the game as
+  here.
 - **The flying hut**: a script's `SphereMover` is the SpherePhysicsMover [R: createSphereMover (World binding 0x23,
   0x2AE7C0) makes the one sphere mover class there is, vtable 0x449500], so the hut flies at −25 × the hit's
   direction in x and y under its `Gravity` (DefObjectProps 35) until its next pulse (at most 1 s) deletes it. That

@@ -1170,15 +1170,30 @@ static void build(Viewer *v)
             for (uint32_t i = 0; i < v->scene.nbuildings; i++) {   /* 0x3196F0: a building's window slots, then
                                                       * its edibles, the draws in that order */
                 const SceneBuilding *sb = &v->scene.buildings[i];
+                int before = edible_slots(v->edibles), own = 0;
                 scene_occupant_slots(&v->scene, (int)i);
                 edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
+                for (int k = before; k < edible_slots(v->edibles); k++) {   /* its edibles' new slots: those in a
+                                                      * cell of no occupant's slot are slots of their own */
+                    const EdibleSlot *es = edible_slot(v->edibles, k);
+                    int shared = 0;
+                    for (int j = 0; j < v->scene.nslots && !shared; j++) {
+                        const struct WindowSlot *ws = &v->scene.slots[j];
+                        shared = ws->building == (int)i && ws->column == es->column &&
+                                 building_live_of(&sb->b, ws->storey) == es->storey;
+                    }
+                    own += !shared;
+                }
+                scene_occupant_pad(&v->scene, own);
             }
             v->scene.slots_made = 1;
             if (getenv("RAMPAGE_TRACE")) {
                 int nm = 0;
                 for (int k = 0; k < v->scene.nslots; k++)
                     nm += v->scene.slots[k].military;
-                printf("window slots: %d civilian, %d military\n", v->scene.nslots - nm, nm);
+                printf("window slots: %d civilian, %d military; the list %d long, the soldiers' turn its first %d, "
+                       "the civilians' the %d after\n", v->scene.nslots - nm, nm, v->scene.norder, v->scene.order_mil,
+                       v->scene.order_civ);
             }
             add_tubes(v);                            /* a reveal's tubes, for the block now built */
             if (getenv("RAMPAGE_TRACE"))

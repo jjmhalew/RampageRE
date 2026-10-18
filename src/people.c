@@ -279,7 +279,10 @@ static void slerp(const float a[4], const float b0[4], float f, float out[4])
 /* ---------------------------------------------------------------- the actor's anim (0x30AAD0) */
 
 /* [R] startAnim: the look ActorAnimShape|<name>; one play lasts its Duration (+0xC) if it has one, else the clip's
- * (the AnimName's, or the shape's own); AnimRepeat sets flag 2, a play that repeats. [R] The script's second argument
+ * (the AnimName's, or the shape's own); AnimRepeat sets flag 2, a play that repeats. The clip is fitted to the play:
+ * its time runs by the frame's step (0x30A850) and the pose is the clip at time / that length (0x30A770; the loader
+ * 0x30AC9C stores Duration as it is), so a window occupant's WindowIdle (a 1.2 s clip, Duration 0.5) plays 2.4 times
+ * as fast and its WindowEmerge (0.17 s, Duration 0.5) a third as fast, in the game as here. [R] The script's second argument
  * keeps the actor's mover (Actor binding 0x2D -> 0x30C820(actor, name, keep, 0)): with 0 the mover (+0x84) is
  * deleted (0x283BF0) and the actor stands; the scripts that pass 0 set their mover after it. startAnimAtRandomOffset
  * (0x2F) passes an offset of frand (0 .. 1, seconds), which the record's setTime (vtable +0x1C, 0x30C070) takes
