@@ -761,7 +761,9 @@ static int model_sphere(void *ctx, const char *shape, float centre[3], float *ra
 static int army_node_world(void *ctx, const ArmyUnit *u, const char *node, float out[16])
 {
     Viewer *v = ctx;                                 /* the weapon's node on the unit's look as drawn */
-    int ok = v->army && scene_unit_node(&v->scene, (int)(u - army_unit(v->army, 0)), node, out) == 0;
+    int k = v->army ? (int)(u - army_unit(v->army, 0)) : -1;
+    int ok = v->army && (scene_unit_node(&v->scene, k, node, out) == 0 ||   /* else the look of what it plays now */
+                         scene_unit_node_now(&v->scene, k, u, node, out) == 0);
     if (getenv("RAMPAGE_NODES"))
         printf("  %s node %s: %s (%s, %s)\n", u->name ? u->name : "?", node, ok ? "found" : "not found", u->anim,
                u->shape ? u->shape : "-");

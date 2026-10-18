@@ -1312,6 +1312,36 @@ static void rail_sync(Scene *s)
                 s->instances[i].hidden = 1;
 }
 
+/* the unit's look for what it plays now, made and posed at once: the update's syncs make a new one only after the
+ * army's update, so a weapon firing on the first frame of a new animation (a window soldier's shot as its Firing_D
+ * starts: AnimPosMin 0) found no WeaponNode on the look still drawn (Police_US_Window_Emerge has no
+ * MuzzleFlash_Small) and fired from the soldier's middle 1.5 up, the trail starting by his head [R 0x30ED58: the
+ * node's world on the actor's shape as it is now, vtable +0x4C] */
+static void pose_instance(Scene *s, Instance *in, double t);
+int scene_unit_node_now(Scene *s, int unit, const ArmyUnit *u, const char *node, float out[16])
+{
+    if (!s->army || !s->owner || !u || u->phase == AU_GONE || !node)
+        return -1;
+    int show = unit_look(s->owner, s, (1 << 20) + unit, u);
+    if (show < 0)
+        return -1;
+    Instance *in = &s->instances[show];
+    memcpy(in->base.m, u->world, sizeof in->base.m);
+    instance_turns(in, u->w, u->nw);
+    if (in->has_clip && u->anim_len > 0)             /* at the play's time (army_sync's offset, against a clock of 0) */
+        in->offset = (float)(u->anim_time / u->anim_len * in->clip.duration);
+    if (!in->tree.n || !in->node)
+        return -1;
+    pose_instance(s, in, 0);
+    for (uint32_t k = 0; k < in->tree.n; k++)
+        if (ends_with(in->tree.nodes[k].name, node)) {
+            Mat4 w = mat_mul(in->base, in->node[k]);
+            memcpy(out, w.m, sizeof w.m);
+            return 0;
+        }
+    return -1;
+}
+
 /* each frame: every army unit at its place, its clip at anim_time / anim_len of the clip (looks keyed from 1 << 20) */
 static void army_sync(Scene *s, double t)
 {

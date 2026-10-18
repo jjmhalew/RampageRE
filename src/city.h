@@ -387,6 +387,8 @@ int city_shape_box(City *c, const char *shape, float min[3], float max[3]);
 int city_shape_sphere(City *c, const char *shape, float centre[3], float *radius);
 /* an army unit's node (a weapon's WeaponNode) in the world as its look is drawn now; 0 = ok */
 int scene_unit_node(const Scene *s, int unit, const char *node, float out[16]);           /* camera.bdp's TwoTilts group; 0 = ok */
+/* the same on the look of what unit u plays now, made and posed at once when it has not been drawn yet; 0 = ok */
+int scene_unit_node_now(Scene *s, int unit, const ArmyUnit *u, const char *node, float out[16]);
 /* the same for boss part `part` (boss.c) and vehicle object `obj` (vehicle.c) as drawn; 0 = ok */
 int scene_unit_node_at(const Scene *s, int unit, const char *node, int id, float out[16]);   /* node NULL: number id */
 int scene_boss_node(const Scene *s, int part, const char *node, float out[16]);
