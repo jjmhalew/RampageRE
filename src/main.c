@@ -526,6 +526,7 @@ static int mon_fx_named(Mon *mo, const char *name, const char *node);
 static void mon_fart(Mon *mo);
 static void mon_fart_later(Mon *mo, float delay);
 static void mon_function(Mon *mo, const char *name);
+static void force_state(Mon *mo, const char *name);
 static void mon_rage_fx(Mon *mo, int on);
 static int rage_fx_at(Mon *mo, float at[3]);
 static void mon_nick_fx(Mon *mo);
@@ -1392,6 +1393,34 @@ static int held_edible(const Mon *mo)
     return 0;
 }
 
+/* the held object's IsShaker (getIntProp, 0 none) [R Monsters.bsf isShaker / addPeople / gainHealth]: 1 the buses,
+ * the trams and the cable cars (People_Pour), 2 the garbage truck (Garbage_Pour, and it hurts) */
+static int held_shaker(const Mon *mo)
+{
+    const Viewer *v = mo->v;
+    Group t = { 0 }, in = { 0 };
+    if (mo->held_vehicle >= 0 && v->veh) {
+        const VehObj *o = vehicle_obj(v->veh, mo->held_vehicle);
+        if (o)
+            t = o->tmpl;
+    } else if (mo->held_rail >= 0 && v->rail) {
+        const RailObj *o = rail_obj(v->rail, mo->held_rail);
+        if (o) {
+            t = o->tmpl;
+            in = o->inst;
+        }
+    }
+    float k = in.at ? group_num(in, "IsShaker", -1) : -1;
+    return (int)(k >= 0 ? k : t.at ? group_num(t, "IsShaker", 0) : 0);
+}
+
+/* addHitPoints(amount): + heals, - hurts (0 .. its most; nothing at 0 HP) */
+static void mon_add_hp(Mon *mo, float amount)
+{
+    if (mo->hp > 0)
+        mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + amount));
+}
+
 static Climber climber(Mon *mo)
 {
     Climber c = { { mo->mx, mo->my, mo->mz }, mo->heading, mo->graph.box[0],
@@ -1481,6 +1510,8 @@ static int answer(void *ctx, const char *call, const float *a)
         return call[10] == 'p' ? mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 ||
                                  mo->held_parade >= 0 || mo->held_sobj >= 0 :
                held_edible(mo);                      /* hasGrabbedObject 2 (0x2E5590): the held object's flag 0x80000 */
+    if (!strcmp(call, "Monsters::isShaker"))         /* Ground_Grab_Down -> Ground_Hold_Shake */
+        return held_shaker(mo) != 0;
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
         return climb_can_transfer(&mo->mount, sc, &c, mo->mirror ? a[0] == 0 : a[0] == 1) == 1;
     if (!strcmp(call, "Monsters::canSpiderTransfer"))   /* (right): mirrored always right */
@@ -1776,6 +1807,25 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     }
     else if (!strcmp(n, "Monsters::doFart"))     { mon_fart(mo); return; }
     else if (!strcmp(n, "Monsters::doBarf"))     { mon_function(mo, "doBarf"); return; }   /* Expression_Barf's */
+    else if (!strcmp(n, "Monsters::addPeople")) {   /* Ground_Hold_Shake: what pours out of the held vehicle */
+        int k = held_shaker(mo);
+        if (k == 1 || k == 2)
+            mon_fx_named(mo, k == 1 ? "People_Pour" : "Garbage_Pour", "fxNode_Belch");
+        return;
+    }
+    else if (!strcmp(n, "Monsters::gainHealth")) {  /* (amount, garbage, last): the garbage truck's last hurts 40,
+                                                        * with the barf and React_Ground_Heavy_Back */
+        if (held_shaker(mo) == 2 && (int)e->p[1] == 1) {
+            mon_add_hp(mo, -40);
+            if ((int)e->p[2] == 1 && mo->hp > 0) {
+                face_play(mo, "Expression_Barf", 0, 0, 1);
+                force_state(mo, "React_Ground_Heavy_Back");
+            }
+        } else {
+            mon_add_hp(mo, e->p[0]);
+        }
+        return;
+    }
     else if (!strcmp(n, "Monsters::disableGravity")) { mo->no_gravity = 1; return; }
     else if (!strcmp(n, "Monsters::didDoubleJump")) { mo->double_jumped = 1; return; }   /* setHasDoubleJumped(1) */
     else if (!strcmp(n, "Monsters::footStep")) { foot_step(&mo->feet, (int)e->p[0], mo->mirror); return; }
