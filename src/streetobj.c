@@ -1453,6 +1453,7 @@ StreetObjs *streetobj_new(const StreetHost *host)
         return NULL;
     if (host)
         s->host = *host;
+    s->frame = 1;                                    /* (the objects' last frame starts at 0: none) */
     return s;
 }
 void streetobj_free(StreetObjs *s) { free(s); }
@@ -2280,12 +2281,15 @@ void streetobj_update(StreetObjs *s, float dt, const StreetMonster *m, int nm, c
         s->nb = nb < MAX_BUILDINGS ? nb : MAX_BUILDINGS;
         memcpy(s->b, b, sizeof *s->b * (size_t)s->nb);
     }
-    s->frame++;                                      /* one TakeDamage an object a frame */
     s->acc += dt;
     if (s->acc > 0.25f)
         s->acc = 0.25f;
     while (s->acc >= TIMESTEP) {                     /* the scripts count in frames: run them at the game's step */
         s->acc -= TIMESTEP;
+        /* one TakeDamage an object a frame, the game's frame: its world step [R 0x2E22B0 runs in the monster's update,
+         * at the world's 30 a second]; the touches and blows the host passes between two steps are one frame's, so a
+         * faster screen does not touch twice as often (Monster_slip from a geyser, a merry-go-round's count) */
+        s->frame++;
         for (int i = 0; i < s->n; i++) {             /* (for the drawing between the steps) */
             memcpy(s->o[i].prev, s->o[i].world, sizeof s->o[i].prev);
             s->o[i].prev_ok = 1;

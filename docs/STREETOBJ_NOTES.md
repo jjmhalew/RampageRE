@@ -77,6 +77,11 @@ the monster's bound meets the object's, each of the monster's collision spheres 
   (+0x2C: 5 a punch, 20 a kick), type **1** otherwise with 2.0; direction the way from the monster, made 1 long.
 - After a blow on an 0x8000 object the object goes on the attack's list (0x2E33A0, for each body part of the
   attack; after the 8th id the bone is disarmed). The list is emptied when the attack is armed.
+- It runs in the monster's update, a world step (1/30 s, FLOW_NOTES.md): at most one TakeDamage an object a step.
+  The port's monster moves every drawn frame, so streetobj.c counts its "frame" by its own world steps: the touches
+  and blows of the frames between two steps are one. (Counted by drawn frames, a 60 Hz screen touched twice as
+  often: a geyser started `Monster_slip` 11 times as the monster walked in, against the game's 6; the
+  merry-go-round's 2 s of touches ran out in 1.)
 
 So an OnlyHitWithEffNodes object takes one blow an attack and nothing else; any other object takes TakeDamage
 **every frame** something of the monster touches it, of type 0 while an armed sphere does. 0x309A80 drops it while
