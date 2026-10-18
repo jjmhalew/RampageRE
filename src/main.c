@@ -1018,7 +1018,9 @@ static void build(Viewer *v)
             army_set_collide(v->army, &v->cw);
         if (v->army) {
             army_load_block(v->army, v->scene.block);
-            army_activate(v->army, 1);
+            army_activate(v->army, !v->game);        /* the game's BeginBlockNI activates it (GE_AI_ACTIVATE): the
+                                                      * next block is built as the results start (0x334C40 leaves
+                                                      * gAIMgr's bit 8 off), its clocks still [R] */
         }
     }
     v->scene.army = v->army;
@@ -1253,7 +1255,7 @@ static void build(Viewer *v)
                 n += boss_load_waiting(v->boss, v->scene.traffic_def[1], 41, 1);
             if (v->scene.traffic_def[2].at)
                 n += boss_load_waiting(v->boss, v->scene.traffic_def[2], 82, 2);
-            boss_activate(v->boss, 1);
+            boss_activate(v->boss, !v->game);        /* (gAIMgr's record: as the army's) */
             if (getenv("RAMPAGE_TRACE"))
                 printf("bosses: %d\n", n);
         }
@@ -3262,11 +3264,24 @@ static int boss_fx_frame(Viewer *v, int part, const char *node, int node_id, con
 }
 
 /* the bosses' frame: what they see of the monsters and the buildings, then what they did */
+/* NewYork.scr's centre building (findBuildingByPosition(0, 10, 1)) falling or down */
+static int ny_centre_down(Viewer *v)
+{
+    float cy = 10 + v->block_shift;
+    int down = 0;
+    for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
+        const Building *bb = &v->scene.buildings[i].b;
+        if (bb->min[0] <= 0 && bb->max[0] >= 0 && bb->min[1] <= cy && bb->max[1] >= cy)
+            down = bb->state != BUILDING_STANDING && bb->state != BUILDING_FLOOR_FALLING;
+    }
+    return down;
+}
+
 static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
 {
     if (!v->boss)
         return;
-    BossMonster m[MONSTERS];
+    static BossMonster m[MONSTERS];                  /* (static: boss_hit reads it after the frame's update) */
     for (int k = 0; k < nm; k++) {
         memset(&m[k], 0, sizeof m[k]);
         memcpy(m[k].pos, am[k].pos, sizeof m[k].pos);
@@ -3299,6 +3314,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
         o->inst = sb->inst;
     }
     boss_set_view(v->boss, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the view's x range [G], as the army's */
+    boss_set_city_destroyed(v->boss, game_city_destroyed(v->game));   /* gCommon.isCityDestroyed */
     boss_update(v->boss, dt, m, nm, bl, nb);
     BossEvent ev[64];
     int ne;
@@ -3375,7 +3391,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
                 break;
             case BE_DEFEATED:                        /* New York's callback finishes the block (isBossBlockFinished) */
                 if (v->game && e->name && strstr(e->name, "NewYork"))
-                    game_set_boss_finished(v->game, 0);
+                    game_set_boss_finished(v->game, ny_centre_down(v));
                 break;
             case BE_COLLAPSE:
                 if (e->building >= 0 && (uint32_t)e->building < v->scene.nbuildings)
@@ -3391,7 +3407,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
                 break;
             case BE_FORCE_DAMAGE:                    /* RoofItem.bsf's forceDamage: the roof item there is knocked
                                                       * off (the adornment nearest pos, within 2 units [G]) */
-                if (!v->sobj || streetobj_force_damage(v->sobj, e->name, e->pos) < 0)
+                if (!v->sobj || streetobj_force_damage(v->sobj, e->name, e->pos) == -1)   /* (-2: it is gone) */
                     scene_adornments_hit(&v->scene, e->pos, 2);
                 break;
             case BE_CAMERA_RMH:                      /* Levels::changeTwoTiltCameraRMH: how tall the camera frames */
@@ -3447,10 +3463,8 @@ static void game_step(Viewer *v, float dt)
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *bb = &v->scene.buildings[i].b;
         in.buildings += bb->state != BUILDING_GONE;  /* [R 0x2AEE00: +0x14C not 0, its fall included] */
-        float cy = 10 + v->block_shift;              /* NewYork.scr's centre (0, 10, 1), in the scene */
-        if (bb->min[0] <= 0 && bb->max[0] >= 0 && bb->min[1] <= cy && bb->max[1] >= cy)
-            in.centre_down = bb->state != BUILDING_STANDING && bb->state != BUILDING_FLOOR_FALLING;   /* (0, 10, 1) */
     }
+    in.centre_down = ny_centre_down(v);
     game_update(v->game, dt, &in);
     GameEvent ev[32];
     int ne;
@@ -3588,10 +3602,12 @@ static void game_step(Viewer *v, float dt)
             case GE_PLACE:
                 if (e->a == 1 && e->type == GE_PLACE) {  /* SkipResultsNI's -41: the block left; here it stays */
                     mo->mx += e->pos[0]; mo->my += e->pos[1] + v->block_shift; mo->mz += e->pos[2];
-                } else if (e->a == 1 || e->type == GE_PLACE) {
+                } else if (e->a >= 1 || e->type == GE_PLACE) {
                     mo->mx = e->pos[0]; mo->my = e->pos[1] + v->block_shift; mo->mz = e->pos[2];
-                    if (e->type == GE_RESET)
+                    if (e->a >= 1) {                 /* setFacingZ, setVel(0, 0, 0) */
                         mo->heading = e->f * 57.2957795f;
+                        memset(mo->vel, 0, sizeof mo->vel);
+                    }
                 }
                 break;
             case GE_MOVE:                            /* playMove: a goal of the AI, queued whether the monster is AI
@@ -3604,6 +3620,7 @@ static void game_step(Viewer *v, float dt)
                 break;
             case GE_AI_ACTIVATE:
                 if (v->army) army_activate(v->army, 1);
+                if (v->boss) boss_activate(v->boss, 1);
                 parade_activate(v->parade, 1);
                 break;
             case GE_HUD:                             /* every player's HUD */
@@ -4393,7 +4410,7 @@ static void street_step(Viewer *v, float dt)
 {
     if (!v->sobj)
         return;
-    StreetMonster me[MONSTERS];
+    static StreetMonster me[MONSTERS];               /* (static: kept for the hits after the update) */
     int nm = have_monster(v) ? v->nmon : 0;
     for (int k = 0; k < nm; k++) {
         Mon *mo = &v->mon[k];
@@ -4628,7 +4645,8 @@ static void army_step(Viewer *v, float dt)
 {
     if (!v->army || !have_monster(v) || !v->mon[0].have_graph || !mon_in(&v->mon[0]))
         return;
-    ArmyMonster m[MONSTERS];
+    static ArmyMonster m[MONSTERS];                  /* (static: the army's, vehicles', rail's and parade's hits read
+                                                      * it after the frame's update) */
     int nm = army_monsters(v, m);
     static ArmyBox boxes[64];
     int nb = 0;

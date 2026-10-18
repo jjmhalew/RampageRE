@@ -124,7 +124,8 @@ enum {
                         * one; build it (BlockDef|<name>), load its AIDef (army_load_block) but do not activate the AI
                         * yet (GE_AI_ACTIVATE). The block just left lies 41 towards -y now (0x302AF0) */
     GE_RESET,          /* monster slot: resetMonsterState + clearAllGoals; a = 1: also put it at pos facing f */
-    GE_PLACE,          /* monster slot: setPosition pos (a = 1: pos is added to where it is); no reset, its facing kept */
+    GE_PLACE,          /* monster slot: setPosition pos (a = 1: pos is added to where it is; a = 2: also setFacingZ f and
+                        * setVel(0)); no reset, otherwise its facing kept */
     GE_AI,             /* monster slot: setIsAI(a); b = 1: and destroyBuildings (a bot in BeginBlockNI) */
     GE_MOVE,           /* monster slot plays the move `name` (playMove); a = 1: tell game_move_done(slot) when it ends
                         * (Levels::moveComplete), the NI waits for it */

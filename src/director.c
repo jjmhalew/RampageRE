@@ -1520,8 +1520,9 @@ void dircam_script_cut(CamDirector *d)               /* 0x312300: 0x311820(force
 
 void dircam_game_event(CamDirector *d, const char *name, float blend, const float pos[3], const float v[3], int cut)
 {
-    dircam_set_mode(d, name, blend);
-    if (mode_of(name) == DCM_SCRIPT && pos && v) {
+    if (name)                                        /* (no name: the script camera moved, the mode kept) */
+        dircam_set_mode(d, name, blend);
+    if ((!name || mode_of(name) == DCM_SCRIPT) && pos && v) {
         dircam_script_location(d, -1, 0, pos, 0);
         dircam_script_target(d, -1, 0, v);
         if (cut)

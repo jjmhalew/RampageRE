@@ -102,7 +102,9 @@ in 3D (0x316E60): X = |d × (0, 0, 1)| (none: (1, 0, 0), the up at 0x40A028), Y 
 leg's built the same way for flag 4's slerp (0x3164E8 .. 0x316590) [R]: so it pitches along the leg (Path_NYEmpire1's
 z runs 42.5 .. 50.5, some 20° on one leg), as here. `initWithPath("Path_NYEmpire1", 15, 1)` (descriptor 7 →
 0x3173D0) takes the path's points from the Objects1_Props group of that name (x y z triples), starts at segment 0,
-t 0, and places the object at the first point at once [R].
+t 0, and places the object at the first point at once [R]. With flag 1 off the update writes no turn (0x316A18 skips
+0x104BB0), so the last leg's frame stays on the matrix: the knocked blimp and the one crossing the top keep their
+last leg's pitch, and `setFacing` / `setFacingZ` change only their part (boss.c reads the facing back from the frame).
 
 **Building finders** (World bindings, dispatcher 0x2AE3D0, table 0x42DD70) [R]:
 - `findBuildingNearMonster(d)` (0x318240):
@@ -246,8 +248,10 @@ Every 5 s, half the time (or when its monster is gone), it picks a random monste
 
 **Leaving** [R]:
 - **When:** after LeaveDuration (20 s) of fighting, or at a quarter crossed.
-- **Where:** it drives off to the side away from its monster, turning to face −x at π/3 a second when that is left.
-  It stops at x ±95.
+- **Where:** on its timer it drives off to the side away from its monster; when that is left (the hit retreat), it
+  turns to face −x at π/3 a second. A quarter crossed (and nearly always the killing blow) has set the hit retreat
+  already, and the fleeing never clears it, so then it always leaves to the left, and it comes back still facing −x,
+  rear first. It stops at x ±95.
 - **Return:** it comes back after ReturnDuration (20 s), with LeaveDuration + 6 to fight before the next leave.
 
 **Defeat** [R]:
@@ -435,6 +439,11 @@ falling back one loses its barriers too.
   model's box, else the sphere the model gives (its vtable +0x14, at 0x290384): SimpleShape's 0x184CB0, the union of
   its parts' spheres (0x185AA0)); here the union of its meshes' header spheres, city.c `city_shape_sphere`. The
   damage type is 0 for an armed sphere, 1 for an unarmed touch (0x2E25F4).
+- **The world's step** [R]: the game runs at 30 steps a second (FLOW_NOTES.md), and what the scripts do "a frame" is
+  a step: the Tank's × 0.9 braking, the ambient saucer's × 0.95, the whirlwind's pulse at `getTimeStep()` (10 % of
+  the gap to its monster a step) and its π/8 turn a touch. boss.c runs each frame with that frame's dt, so these are
+  taken as so much a 1/30 s step (`powf(k, dt / TIMESTEP)`, the pulse at `TIMESTEP`), and the monsters' touches
+  (`contacts`) are tested once a step, from the frame's time left over (at most 4 a frame).
 - **Weapons** [R]:
   - `setWeaponAmmo(n, cluster, weapon)` is the weapon's vtable +0x84 (0x296F50, through 0x29AC90 / 0x298D20):
     ammo = min(n, Ammo); `reloadWeapon(cluster, weapon)` its +0x80 (0x296F70): ammo = Ammo, the countdown at least

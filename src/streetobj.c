@@ -2470,15 +2470,18 @@ int streetobj_force_damage(StreetObjs *s, const char *name, const float pos[3])
     /* gWorld.findWorldObject(name) (0x279E70 -> 0x2852A0 -> 0x284930) [R]: by name alone (h = h x 131 + c, case
      * folded, 127 buckets; the stored hash +0x8C and the name +0x88 compared case-blind), the first of its chain;
      * addObject puts a named object (flag 0x1000) at its chain's head (0x284A90), so the newest one wins */
-    int best = -1;
+    int best = -1, seen = 0;
     (void)pos;
     for (int i = s->n - 1; i >= 0 && best < 0; i--) {
         const StreetObj *o = &s->o[i];
-        if (o->alive && o->kind == SK_ROOF && same_text(o->name, name))
-            best = i;
+        if (o->kind == SK_ROOF && same_text(o->name, name)) {
+            seen = 1;
+            if (o->alive)
+                best = i;
+        }
     }
-    if (best < 0)
-        return -1;
+    if (best < 0)                                    /* -2: it was here and is gone (isValid() 0: nothing) */
+        return seen ? -2 : -1;
     StreetObj *o = &s->o[best];                      /* forceDamage [R]: flags 2, 99 hits, TakeDamage(none, 1000, 0) */
     o->flags |= 2;
     o->num_hits = 99;

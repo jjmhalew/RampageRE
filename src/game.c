@@ -531,14 +531,14 @@ static float ny_boss_results_ni(Game *g, float last)
         setup_ni(g, 0.25f);
         script_camera(g, 4, -55, 78, -3, 10, 57);
         int two = np(g) >= 2;
-        for (int i = 0; i < (two ? 2 : 1); i++) {
-            GameEvent *e = emit(g, GE_RESET, i);
-            e->a = 1;
+        for (int i = 0; i < (two ? 2 : 1); i++) {    /* setPosition, setFacingZ, setVel(0): no clearAllGoals; each
+                                                      * becomes AI with its first move (playMove's setIsAI) */
+            GameEvent *e = emit(g, GE_PLACE, i);
+            e->a = 2;
             e->pos[0] = two ? AT[i][0] : 0;
             e->pos[1] = two ? AT[i][1] : 18;
             e->pos[2] = 61.5f;
             e->f = two ? FACE[i] : PI;
-            emit(g, GE_AI, i)->a = 1;
         }
         emit(g, GE_HUD, -1)->a = 0;
         for (int i = 0; i < np(g); i++) {
@@ -551,9 +551,10 @@ static float ny_boss_results_ni(Game *g, float last)
         g->ny_watch = 1;
         g->ny_moved = 0;
     }
-    if (!g->ny_moved && g->ni_time >= 1.25f) {       /* the camera comes in */
+    if (!g->ny_moved && g->ni_time >= 1.25f) {       /* the script camera comes in (its mode left as it is: after
+                                                      * the centre's fall, TwoTilts stays) */
         GameEvent *e = emit(g, GE_CAMERA, -1);
-        e->name = "Script";
+        e->name = NULL;
         e->pos[0] = -2.61f; e->pos[1] = -13.75f; e->pos[2] = 74.4f;
         e->v[0] = -3.08f; e->v[1] = 11.93f; e->v[2] = 66.46f;
         g->ny_moved = 1;

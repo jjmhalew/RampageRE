@@ -17,7 +17,8 @@
 #define MAX_WOBJ 16
 #define MAX_SP 24                                    /* a SplineMover's points */
 #define MAX_LP 40                                    /* a LineMover's points */
-#define MAX_FX_DIE 8
+#define MAX_FX_DIE 32                                /* (the burning Scumhawk's fires: 2 + 3 x 2 + 2 every 3 s) */
+#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): the world's step [R 0x2B7800] */
 #define ROOF(storeys) ((float)(storeys) * 3.0f + 3.0f * 0.5f + 6.0f)   /* the scripts' height of a building */
 
 /* object flags (+0x4C), names from the table at 0x3F5F70 [R]; 8 and 0x8000000 have no name there */
@@ -166,6 +167,7 @@ struct Boss {
     const BossBuilding *bl;
     int nb;
     float dt;
+    float touch_time;                                /* the world step's time left over for the touches */
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -806,8 +808,15 @@ static int ln_step(Obj *o, float dt)
         }
         leg_axes(q, o->lrot);
         o->oriented = 2;
-        if (o->lrot[3] != 0 || o->lrot[4] != 0)      /* the heading the scripts read: its y axis's */
-            o->p.facing[2] = atan2f(-o->lrot[3], o->lrot[4]);
+        float w[16] = { 0 };                         /* the facing read back from it (0x101220): with flag 1 off the
+                                                      * update leaves the matrix as it is (0x316A18), so the last leg's
+                                                      * pitch stays, and setFacing / setFacingZ change only their part */
+        for (int k = 0; k < 3; k++) {
+            w[k] = o->lrot[k];
+            w[4 + k] = o->lrot[3 + k];
+            w[8 + k] = o->lrot[6 + k];
+        }
+        army_turn_facing(w, o->p.facing);
     }
     return r;
 }
@@ -1327,7 +1336,7 @@ static void tank_shockwave(Boss *b, Obj *o, float dt)   /* processShockwave */
                 a = -a;
             t->vel += a;
         } else {
-            t->vel *= 0.9f;
+            t->vel *= powf(0.9f, dt / TIMESTEP);     /* x 0.9 a step */
             if (fabsf(t->vel) <= 0.1f) {
                 t->sw_retreat = 0;
                 weapon_ammo(o, 1, 0);
@@ -1362,7 +1371,7 @@ static void tank_move(Boss *b, Obj *o, float dt)     /* processMoveToTarget */
             a = -a;
         t->vel += a;
     } else
-        t->vel *= 0.9f;
+        t->vel *= powf(0.9f, dt / TIMESTEP);
     if (t->move_delay > 0)
         t->move_delay -= dt;
     else if (t->vel >= 0.1f || t->vel <= -0.1f) {
@@ -1380,7 +1389,7 @@ static void tank_move(Boss *b, Obj *o, float dt)     /* processMoveToTarget */
                 a = -a;
             t->vel += a;
         } else {
-            t->vel *= 0.9f;
+            t->vel *= powf(0.9f, dt / TIMESTEP);
             if (fabsf(t->vel) <= 0.1f)
                 t->hit_retreat = 0;
         }
@@ -2355,7 +2364,8 @@ static void saucer_new_path(Boss *b, Obj *o)         /* createNewPath: round to 
                 s->pts[i][0] = -s->pts[i][0];
         saucer_heights(b, o, 3);
         saucer_path(o, FWD, AT3, 3);
-    } else {                                         /* createGoToFrontPath (the script cannot reach it) */
+    } else {                                         /* createGoToFrontPath: its monster on a side, it in the middle
+                                                      * behind the front (after a knock or a return) */
         set3(s->pts[1], 30, -10, z + 10 + frand(b) * 6);
         set3(s->pts[2], 0, -10, z + 10 + frand(b) * 6);
         saucer_heights(b, o, 3);
@@ -2726,8 +2736,9 @@ static int wind_damage(Boss *b, Obj *o, int monster)   /* TakeDamage (by touch):
     if (!m_valid(b, w->monster)) {
         w->attached = 1;
         o->mover = MV_NONE;                          /* setMover(an empty LineMover) */
-        o->pulse_delay = 0;
-        w->pulse = 0;
+        o->pulse_delay = TIMESTEP;                   /* setPulseDelay(gWorld.getTimeStep()): it closes 10 % of the
+                                                      * gap a step */
+        w->pulse = TIMESTEP;
         w->monster = monster;
         m_hp(b, monster, -unum(o, "Damage", 10) * (w->life / 6));
         m_reaction(b, monster, "React_Tornado");
@@ -3379,7 +3390,7 @@ static int amb_process(Boss *b, Obj *o, float dt)   /* Boss_Saucer_Ambient Proce
             o->sp.vel = 0;
         }
     } else if (a->state == 1) {                      /* hovers 5 .. 8 s */
-        a->vel = fmaxf(0, a->vel * 0.95f);
+        a->vel = fmaxf(0, a->vel * powf(0.95f, dt / TIMESTEP));   /* x 0.95 a step */
         o->sp.vel = a->vel;
         a->hover_delay -= dt;
         if (a->hover_delay <= 0)
@@ -3800,7 +3811,13 @@ void boss_update(Boss *b, float dt, const BossMonster *m, int nm, const BossBuil
             obj_matrix(o);
     }
     triggers_update(b);
-    contacts(b);
+    b->touch_time += dt;                             /* the monsters' touches, once a world step [R 0x2E22B0] */
+    for (int n = 0; b->touch_time >= TIMESTEP && n < 4; n++) {
+        b->touch_time -= TIMESTEP;
+        contacts(b);
+    }
+    if (b->touch_time >= TIMESTEP)
+        b->touch_time = 0;
     while (b->n > 0 && !b->o[b->n - 1].p.alive)
         b->n--;
 }
