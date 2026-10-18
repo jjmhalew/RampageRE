@@ -214,6 +214,7 @@ int game_state(const Game *g);                       /* gWorld.getState() */
  * tryFire (0x295CC0, 0x2963EC) and the charge (0x2977BC) refuse, and the common update (0x297398) stops the
  * countdown and holds the weapon (vtable +0x7C) while its owner's state (+0x5C) is 2, 3 or 7 */
 int game_weapons_on(const Game *g);
+int game_time_up(const Game *g);                     /* 0x347D70: the block's clock armed and run out */
 int game_left(const Game *g);                        /* a GE_EXIT was given: nothing runs until game_load_city */
 int game_play_type(const Game *g);
 int game_lives(const Game *g, int slot);             /* GameStatus.getNumLives (the HUD's "xN") */

@@ -175,7 +175,8 @@ otherwise.
   0x40; a ray that starts inside a box meets it at t = 0 (0x280780 → 0x100420: the face of least depth, ties to z
   then y, on the start's side), inside a sphere too (0x100900: away from its centre), so a shot whose step starts
   inside its own unit is blind for that step [R]. What the shot hits that is not a monster only stops it: its
-  impact on such an object (0x292D20) is not ported.
+  impact on such an object (0x292D20) is not ported, but for a Nuclear shot (DamageType 8, the airstrike's
+  FinalBomberBomb) on a building: Building::hit fells a standing one at once, no one's (`AE_BUILDING_NUKE`).
 
 **A beam** (0x295750) [R]:
 - The beam runs from the weapon along its direction and stops at the first thing it meets: the world's ray with

@@ -218,6 +218,7 @@ typedef struct Viewer {
     /* their effects that follow an object (obj >= 0: at its point off, or its model node) or monster mon's node */
     struct { int id, fx, obj, node_id, mon; const char *node; char mnode[32]; float off[3]; } sofx[64]; int nsofx;
     int weather_fx[4], nweather_fx, weather_due;     /* the block's Weather.bsf effects on, and whether to start them */
+    int force_strike;                                /* --do airstrike: the time-up airstrike as if the clock were out */
     Army *army;
     struct { int id, fx, unit, shot, node, die_with; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
                                                       * (a beam's: its stream's head last frame, its rod) */
@@ -4310,9 +4311,12 @@ static void army_step(Viewer *v, float dt)
         boxes[nb].depth = b->depth;
         boxes[nb].storeys = b->n;
         boxes[nb].gone = b->state == BUILDING_GONE;
+        boxes[nb].falling = b->state >= BUILDING_CRACKING;
     }
     army_set_view(v->army, v->view.pos[0] - 45, v->view.pos[0] + 45);   /* the camera's x (FlybySound), and the x range unhosted */
     army_set_weapons(v->army, game_weapons_on(v->game));   /* the army's and the bosses' weapons (gp-0x772C) */
+    army_airstrike(v->army, v->force_strike || (v->game && game_time_up(v->game)));   /* the time-up airstrike
+                                                      * (gAIMgr 0x3320F0) */
     army_update(v->army, dt, m, nm, boxes, nb);
     vehicle_step(v, dt, m, nm, boxes, nb);
     parade_step(v, dt, m, nm);
@@ -4402,6 +4406,15 @@ static void army_step(Viewer *v, float dt)
                     hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);
                 break;
             case AE_WINDOW_CLOSE: scene_window_close_at(&v->scene, e->pos); break;
+            case AE_BUILDING_NUKE:                   /* the airstrike's bomb: a standing building falls, no one's */
+                if ((uint32_t)e->id < v->scene.nbuildings &&
+                    v->scene.buildings[e->id].b.state == BUILDING_STANDING) {
+                    v->scene.buildings[e->id].hitter = -1;
+                    building_destroy(&v->scene.buildings[e->id].b);
+                    if (getenv("RAMPAGE_TRACE"))
+                        printf("  building %d nuked\n", e->id);
+                }
+                break;
             case AE_SCORE:
                 if (v->game)
                     game_add_points(v->game, mo->slot, e->level, (int)e->amount);
@@ -5819,6 +5832,7 @@ static void game_next_block(Viewer *v)
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "rage" fills its energy (the rage starts);
+ * "airstrike" starts the time-up airstrike;
  * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col" hits that front cell of
  * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
  * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
@@ -5894,6 +5908,10 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             }
             if (v->fxw && fx_spawn(v->fxw, name, at, NULL, 1) < 0)
                 printf("no effect %s\n", name);
+            continue;
+        }
+        if (_stricmp(word, "airstrike") == 0) {      /* the time-up airstrike now, as if the clock were out */
+            v->force_strike = 1;
             continue;
         }
         if (_stricmp(word, "rage") == 0) {           /* the energy full through addStats: the rage starts */

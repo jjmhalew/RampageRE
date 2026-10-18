@@ -157,6 +157,8 @@ static float clock_left(const Game *g)               /* 0x347DC0 [R] */
     return left < 0 ? 0 : left;
 }
 
+int game_time_up(const Game *g) { return g && g->enabled && clock_left(g) <= 0; }
+
 static void clock_start(Game *g)                     /* 0x347EA0 [R] */
 {
     g->start = (float)g->now;

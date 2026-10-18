@@ -66,7 +66,8 @@ typedef struct {
 } ArmyMonster;
 
 /* a building as the units see it: its box in the world, its grid (columns of 5 along x, storeys of 3 above 6) */
-typedef struct { float min[3], max[3]; int width, depth, storeys, gone; } ArmyBox;
+/* gone: flattened (state 0); falling: coming down (state 4 on) */
+typedef struct { float min[3], max[3]; int width, depth, storeys, gone, falling; } ArmyBox;
 
 /* ---- the units */
 enum {                                               /* by the template's Script|ScriptName */
@@ -77,6 +78,7 @@ enum {                                               /* by the template's Script
     AK_WINDOW,                                       /* Military_Window.bsf: a soldier or cop in a window */
     AK_TURRET,                                       /* StationaryAttackObject.bsf (PirateShip) */
     AK_BOMBER,                                       /* Bomber.bsf */
+    AK_FINALBOMBER,                                  /* FinalBomber.bsf: the time-up airstrike's (army_airstrike) */
     AK_DROP,                                         /* Droppable.bsf */
     AK_OTHER                                         /* any other script: plays its DefaultAnim where it was made */
 };
@@ -199,7 +201,10 @@ enum {
     AE_IMPACT,        /* unit's flight met an object of another module (0x287430): its TakeImpact (vtable +0x38) is the
                        * caller's to give. id the object's collision tag (collide.h COLLIDE_TAG), level its kind, pos
                        * where, dir the normal, amount the mover's Mass (a building: hit with radius Mass / 1000) */
-    AE_WINDOW_CLOSE   /* the window soldier went back in (closeWindow, 0x30C3F0): its window at pos shuts over 0.5 s */
+    AE_WINDOW_CLOSE,  /* the window soldier went back in (closeWindow, 0x30C3F0): its window at pos shuts over 0.5 s */
+    AE_BUILDING_NUKE  /* a shot of DamageType 8 (Nuclear: the airstrike's FinalBomberBomb) met building id (the box's
+                       * index) at pos: Building::hit (0x2BC150, the shot's impact 0x292D20 -> its TakeDamage) fells a
+                       * standing one at once (state 4), no one's (its hitter cleared) */
 };
 /* node: AE_EFFECT's model node number of the unit it is on (createAndStartAttachedToNode), -1 none; die_with: it
  * stops when its unit goes (setTurnOffWhenObjectDies(1)), else it runs on where the unit was */
@@ -253,6 +258,9 @@ void army_set_view(Army *a, float xmin, float xmax);
 /* the block's AIDef (its BlockDef| group in <City>_Props; 0x334C40): the spawner's records; their count */
 int army_load_block(Army *a, Group block_def);
 void army_activate(Army *a, int on);                 /* gAIMgr.activate: the spawner's clocks run from here */
+/* the block's clock is out (0x347D70: armed and run down; game_time_up): gAIMgr's airstrike (0x3320F0) runs while
+ * it is, its FinalBombers bombing the tallest buildings */
+void army_airstrike(Army *a, int time_up);
 void army_set_weapons(Army *a, int on);              /* gp-0x772C (game_weapons_on): off, no weapon fires */
 int army_weapons_on(const Army *a);
 void army_clear(Army *a);                            /* every unit and shot gone (a new block) */

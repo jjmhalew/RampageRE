@@ -60,6 +60,12 @@ struct Army {
     float view[2];                                   /* about the camera's x (army_set_view) */
     CollideWorld *cw;                                /* the frame's collision world (army_set_collide), NULL none */
     int weapons_off;                                 /* !gp-0x772C (army_set_weapons) */
+    /* the airstrike (gAIMgr +0x40 .. +0x4C, gp-0x6C74, play value 0): the clock is out, its bombers (unit, its
+     * serial, the building it was sent at, when), the voice still to say, the wait after it, the bombing height */
+    int time_up;
+    struct { int unit, serial, building; float time; } strike[6];
+    int nstrike, strike_voice;
+    float strike_wait, strike_height;
 };
 
 /* ---------------------------------------------------------------- small things */
@@ -889,6 +895,9 @@ static void shot_update(Army *a, ArmyShot *s, float dt)
             if (mon >= 0)
                 hit_monster(a, mon, s->weapon, s->owner, s->damage, s->damage_type, s->reaction, s->h_knock,
                             s->v_knock, s->dir, at);
+            else if (obj >= 0 && a->cw && s->damage_type == 8 &&   /* Building::hit of type 8 (its TakeDamage) */
+                     COLLIDE_TAG_OWNER(a->cw->o[obj].tag) == COLLIDE_OWN_BUILDING)
+                emit(a, AE_BUILDING_NUKE, -1, s->weapon, at)->id = COLLIDE_TAG_INDEX(a->cw->o[obj].tag);
             if (s->impact_fx) {
                 ArmyEvent *e = emit(a, AE_EFFECT, -1, s->impact_fx, at);
                 e->id = a->next_fx++;
@@ -1919,7 +1928,7 @@ static int kind_of(const char *script)
     static const struct { const char *s; int k; } K[] = {
         { "Vehicle_Attack.bsf", AK_TANK }, { "Vehicle_Helicopter.bsf", AK_HELI }, { "CombatTruck.bsf", AK_TRUCK },
         { "Swat.bsf", AK_TROOP }, { "Military_Window.bsf", AK_WINDOW }, { "StationaryAttackObject.bsf", AK_TURRET },
-        { "Bomber.bsf", AK_BOMBER }, { "Droppable.bsf", AK_DROP } };
+        { "Bomber.bsf", AK_BOMBER }, { "Droppable.bsf", AK_DROP }, { "FinalBomber.bsf", AK_FINALBOMBER } };
     for (size_t i = 0; i < sizeof K / sizeof *K; i++)
         if (same_text(script, K[i].s))
             return K[i].k;
@@ -3233,6 +3242,173 @@ static void bomber_ground(Army *a, ArmyUnit *u)      /* onHitGround / TakeImpact
     u->state = 3;
 }
 
+/* ======== FinalBomber.bsf: the time-up airstrike's bomber (made by army_airstrike's update, 0x3320F0). 0 the high
+ * pass (weapons off), 1 the bombing pass, 2 shot down, 3 gone */
+
+/* the way it faces along a pass along x (as Bomber.bsf's: to +x it faces -pi/2) */
+static float fb_facing(const float from[3], const float to[3]) { return to[0] >= from[0] ? -PI / 2 : PI / 2; }
+
+static void fb_shadow(Army *a, ArmyUnit *u)           /* its shadow under it, by the pass's start's side */
+{
+    effect_stop(a, (int)u->aux[0]);
+    const char *sh = ustr(u, u->pos[0] >= 0 ? "ShadowEffect2" : "ShadowEffect1");
+    float off[3] = { 0, 0, -u->pos[2] };
+    u->aux[0] = sh ? (float)die_with(a, effect_on(a, u, sh, off)) : -1;
+}
+
+/* Construct + onInit [R]: OnlyHitWithEffNodes, Speed (20); its target the place it was made (the building's top,
+ * which the DummyObject marks: the weapons' point, u->lock); the high pass from (-100, -15, its z - 5, at least 20)
+ * to x 100 at 1.5 x its speed, weapons off; a pulse every step; the shadow */
+static void finalbomber_init(Army *a, ArmyUnit *u)
+{
+    u->oflags |= OF_EFF_NODES;
+    u->aux[1] = tnum(u, "Speed", 12);                /* fSpeed */
+    u->aux[2] = a->strike_height;                    /* fHeight: gWorld.getPlayValue(0) */
+    memcpy(u->lock, u->pos, sizeof u->lock);         /* ptTarget */
+    float start[3] = { -100, -15, fmaxf(20, u->lock[2] - 5) }, end[3] = { 100, -15, start[2] };
+    line_init(u, start, end, u->aux[1] * 1.5f);
+    u->facing = fb_facing(start, end);
+    weapons_enable(u, 0);
+    u->pulse_delay = TIMESTEP;
+    u->state = 0;
+    u->count = 0;                                    /* bPlayedSound */
+    u->aux[0] = -1;
+    fb_shadow(a, u);
+}
+
+static int finalbomber_pulse(Army *a, ArmyUnit *u)
+{
+    if (u->state == 3)
+        return DELETE_ME;
+    if (u->state == 0 && !u->count && u->pos[0] > (a->view[0] + a->view[1]) / 2 - 50) {
+        u->count = 1;                                /* past the camera's x - 50: FlybySound */
+        sound(a, u, tstr(u, "FlybySound"));
+    }
+    return 1;
+}
+
+static int finalbomber_mover(Army *a, ArmyUnit *u, int state)
+{
+    if (state != 2)
+        return 1;
+    if (u->state == 1)                               /* the bombing pass done: 4 | 8 | 16 */
+        return DELETE_ME;
+    if (u->state == 0) {                             /* the bombing pass: from x 150 at the target's y, fHeight up */
+        u->state = 1;
+        float start[3] = { 150, u->lock[1], u->aux[2] }, end[3] = { -150, u->lock[1], u->aux[2] };
+        line_init(u, start, end, u->aux[1]);
+        u->facing = fb_facing(start, end);
+        weapons_enable(u, 1);
+        weapons_reload(u);
+        fb_shadow(a, u);
+    }
+    return 1;
+}
+
+/* TakeDamage [R]: a monster's blow in either pass shoots it down: a SphereMover at 20 along x (the side its facing
+ * gives), 0.1 along y and -0.15 down, turning pi/4 a second; the shadow stops, no more pulses, it counts (2) */
+static void finalbomber_damage(Army *a, ArmyUnit *u, int monster)
+{
+    if (u->state > 1 || monster < 0)
+        return;
+    float t[3] = { cosf(u->facing + PI / 2) < 0 ? -1.0f : 1.0f, 0.1f, -0.15f };
+    for (int k = 0; k < 3; k++)
+        u->vel[k] = t[k] * 20;
+    u->spin[0] = PI / 4;
+    u->mv.active = 0;
+    u->mv.kind = 2;
+    u->cm_on = 0;
+    effect_stop(a, (int)u->aux[0]);
+    u->pulse_delay = 0;
+    weapons_enable(u, 0);
+    add_stats(a, u, monster, 2);
+    u->state = 2;
+}
+
+static void finalbomber_ground(Army *a, ArmyUnit *u)  /* OnHitGround / TakeImpact, shot down: its ExplodeEffect, gone */
+{
+    if (u->state != 2)
+        return;
+    effect_at(a, tstr(u, "ExplodeEffect"), u->pos);
+    u->state = 3;
+    u->pulse_delay = TIMESTEP;
+    u->pulse_time = 0;
+}
+
+/* the airstrike (gAIMgr's update 0x3333F0 -> 0x3320F0, while the block's clock is out, 0x347D70) [R]: the records of
+ * bombers gone are dropped; once, V_Commander_Airstrike (2D) and 3 s of wait; then, with fewer than 6 bombers out,
+ * none made in the last second and none of every other record (from the count's parity) still holding its bomb over
+ * a building not yet coming down [G: 0x29ABD0 on its weapons read as "fired"], it picks among the tallest buildings
+ * not gone and not already a bomber's (a falling one of 9 storeys or more holds the strike back) one at random
+ * (count x (frand - 0.01)) and makes a FinalBomber 5 to the right of its top, the DummyObject there its target;
+ * every bomber's bombing height (gWorld's play value 0) 20 above that top */
+static void airstrike_update(Army *a)
+{
+    if (!a->time_up)
+        return;
+    for (int k = 0; k < a->nstrike; k++) {
+        const ArmyUnit *u = a->strike[k].unit < a->n ? &a->u[a->strike[k].unit] : NULL;
+        if (!u || u->phase == AU_GONE || u->serial != a->strike[k].serial)
+            a->strike[k--] = a->strike[--a->nstrike];
+    }
+    if (a->strike_voice) {
+        a->strike_voice = 0;
+        emit(a, AE_SOUND, -1, "V_Commander_Airstrike", NULL)->level = 2;   /* 2D */
+        a->strike_wait = 3;
+    }
+    if (a->strike_wait > 0) {
+        a->strike_wait = fmaxf(0, a->strike_wait - a->dt);
+        return;
+    }
+    if (a->nstrike >= 6)
+        return;
+    for (int k = 0; k < a->nstrike; k++)
+        if (a->now - a->strike[k].time < 1)
+            return;
+    for (int k = a->nstrike & 1; k < a->nstrike; k += 2) {
+        const ArmyUnit *u = &a->u[a->strike[k].unit];
+        int b = a->strike[k].building;
+        if (u->nw > 0 && u->w[0].ammo > 0 && b >= 0 && b < a->nb && !a->b[b].falling)
+            return;
+    }
+    int pick[64], n = 0;
+    float top = 0;
+    for (int i = 0; i < a->nb && i < 64; i++) {
+        const ArmyBox *b = &a->b[i];
+        if (b->falling && b->storeys >= 9)
+            return;
+        if (b->gone)
+            continue;
+        int taken = 0;
+        for (int k = 0; k < a->nstrike; k++)
+            taken |= a->strike[k].building == i;
+        if (taken || b->max[2] < top)
+            continue;
+        if (b->max[2] > top)
+            n = 0;
+        top = b->max[2];
+        pick[n++] = i;
+    }
+    if (!n)
+        return;
+    int i = (int)((float)n * (frand(a) - 0.01f));
+    i = pick[i < 0 ? 0 : i >= n ? n - 1 : i];
+    const ArmyBox *b = &a->b[i];
+    float at[3] = { (b->min[0] + b->max[0]) / 2 + 5, (b->min[1] + b->max[1]) / 2, b->max[2] };
+    a->strike_height = (float)(int)(20 + top);
+    int k = army_spawn(a, "FinalBomber", at, 0);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  airstrike: FinalBomber %d on building %d (top %.1f)\n", k, i, b->max[2]);
+    if (k < 0)
+        return;
+    a->strike[a->nstrike].unit = k;
+    a->strike[a->nstrike].serial = a->u[k].serial;
+    a->strike[a->nstrike].building = i;
+    a->strike[a->nstrike++].time = a->now;
+}
+
+void army_airstrike(Army *a, int time_up) { if (a) a->time_up = time_up; }
+
 /* ======== Droppable.bsf: falls from a window along three points at 12 per second, turning a quarter on the way */
 
 /* findBuildingByPosition (the binding 0x2AEAA0, 0x2A3D20 with no direction) [R]: of the world's buildings the last
@@ -3432,6 +3608,7 @@ static void unit_init(Army *a, ArmyUnit *u)
     case AK_WINDOW: window_init(a, u); break;
     case AK_TURRET: turret_init(a, u); break;
     case AK_BOMBER: bomber_init(a, u); break;
+    case AK_FINALBOMBER: finalbomber_init(a, u); break;
     case AK_DROP: drop_init(a, u); break;
     default: {
         const char *def = tstr(u, "DefaultAnim");
@@ -3479,6 +3656,7 @@ static int on_mover(Army *a, ArmyUnit *u, int state)
     case AK_TRUCK: return truck_mover(a, u, state);
     case AK_TROOP: return troop_mover(a, u, state);
     case AK_BOMBER: return bomber_mover(a, u, state);
+    case AK_FINALBOMBER: return finalbomber_mover(a, u, state);
     case AK_TURRET: return 1;                        /* no onMoverCallback: the sinking ends where it is; Process
                                                       * deletes it 2.5 s after the last hit (flags 8, then 16) */
     case AK_DROP:
@@ -3502,6 +3680,7 @@ static int on_pulse(Army *a, ArmyUnit *u)
         u->state_time += 0.25f;
         return u->state == 9 ? DELETE_ME : 1;
     case AK_BOMBER: return bomber_pulse(a, u);
+    case AK_FINALBOMBER: return finalbomber_pulse(a, u);
     default: return 1;
     }
 }
@@ -3552,6 +3731,8 @@ static void unit_update(Army *a, int i, float dt)
             u->state = 6;
         else if (u->kind == AK_BOMBER)
             bomber_ground(a, u);
+        else if (u->kind == AK_FINALBOMBER)
+            finalbomber_ground(a, u);
     }
     /* the look: a play that does not repeat ends in onAnimComplete */
     if (r != DELETE_ME && u->anim[0]) {
@@ -3606,7 +3787,7 @@ static void unit_update(Army *a, int i, float dt)
     if (!flight)                                     /* a flight's matrix is its mover's */
         unit_matrix(u);
     if (u->phase == AU_ALIVE && u->nw > 0)
-        unit_weapons_tick(a, u, dt, u->kind == AK_TURRET && u->count ? u->lock : NULL);
+        unit_weapons_tick(a, u, dt, (u->kind == AK_TURRET && u->count) || u->kind == AK_FINALBOMBER ? u->lock : NULL);
 }
 
 /* ---------------------------------------------------------------- the API */
@@ -3624,6 +3805,7 @@ Army *army_new(const ArmyHost *host)
         return NULL;
     }
     a->cap = MAX_UNITS;
+    a->strike_voice = 1;                             /* (gAIMgr +0x4C: the commander's line, once a block) */
     if (host)
         a->host = *host;
     a->view[0] = -45;                                /* until the host sets it: the street about x = 0 */
@@ -3672,6 +3854,8 @@ static void unit_take_impact(Army *a, ArmyUnit *u)
 {
     if (u->phase != AU_GONE && u->kind == AK_BOMBER)
         bomber_ground(a, u);
+    else if (u->phase != AU_GONE && u->kind == AK_FINALBOMBER)
+        finalbomber_ground(a, u);
 }
 
 void army_impact(Army *a, int unit)
@@ -3826,6 +4010,7 @@ void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox 
     a->dt = dt;
     a->now += dt;
     spawner_update(a, dt);
+    airstrike_update(a);
     for (int i = 0; i < a->n; i++)                   /* (units made this frame are run too) */
         unit_update(a, i, dt);
     persons_update(a, dt);
@@ -3879,6 +4064,7 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
         case AK_TROOP: troop_damage(a, u, monster); break;
         case AK_TURRET: turret_damage(a, u, monster, dir); break;
         case AK_BOMBER: bomber_damage(a, u, monster); break;
+        case AK_FINALBOMBER: finalbomber_damage(a, u, monster); break;
         case AK_DROP:
             if (drop_damage(a, u, monster) == DELETE_ME)
                 unit_remove(a, u);
