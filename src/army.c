@@ -3924,6 +3924,20 @@ int army_spawn_window(Army *a, const char *tmpl_name, const float pos[3])
     return army_spawn(a, tmpl_name, pos, 0);
 }
 
+void army_window_place(Army *a, int unit, const float pos[3])
+{
+    if (unit < 0 || unit >= a->n || a->u[unit].phase != AU_ALIVE || a->u[unit].kind != AK_WINDOW)
+        return;
+    memcpy(a->u[unit].pos, pos, sizeof a->u[unit].pos);
+    unit_matrix(&a->u[unit]);
+}
+
+void army_window_remove(Army *a, int unit)
+{
+    if (unit >= 0 && unit < a->n && a->u[unit].phase == AU_ALIVE && a->u[unit].kind == AK_WINDOW)
+        unit_remove(a, &a->u[unit]);
+}
+
 int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b,
               int nb)
 {

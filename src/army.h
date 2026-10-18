@@ -273,6 +273,11 @@ void army_clear(Army *a);                            /* every unit and shot gone
 int army_spawn(Army *a, const char *tmpl_name, const float pos[3], float facing);
 /* a window soldier (a Military_Window.bsf template) the occupant system put in a window at pos */
 int army_spawn_window(Army *a, const char *tmpl_name, const float pos[3]);
+/* the window soldier `unit` (still in its window, not held) at pos: its storey moved (0x30CD20, as people_window_move) */
+void army_window_place(Army *a, int unit, const float pos[3]);
+/* the window soldier `unit` gone at once, its window left as it is: its floor fell (0x317A70 flags the slot's actor
+ * 0x800, which the actor update 0x30CD20 answers with 4 | 8 | 16, the delete) */
+void army_window_remove(Army *a, int unit);
 /* PE_DROP: the block's droppable template falls from a window at from (Droppable.bsf onInit) */
 int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
 /* PE_WEAPON from people.c (PAE_WEAPON from parade.c): person `who`'s weapon on, weapon its template's own

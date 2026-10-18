@@ -448,6 +448,12 @@ scripts' addStats as from a blow (CHALLENGE_NOTES.md); `RoarAttack` is the upgra
   the shots left from 1.5 above his feet.
 - `getMonsterDirection` (Actor id 0x3F → 0x2B2850) [R]: of the player monsters, the nearest (d² < 1e5); the eighth of
   the way to it 3 above its feet, in the front's plane (atan2(dz, dx), dy unused).
+- **Its storey** [R]: a window soldier is its slot's actor as a window person is, and the actor update (0x30CD20) is
+  the Actor's, so it moves with its storey as the people do: while the building moves, at its window's x plus the
+  shaker's offset, its floor coming down with the storeys below (city.c, `army_window_place`). The script has no
+  `onFallFromWindow`, so a broken cell leaves it in its window; when its own floor falls, 0x317A70 flags the slot's
+  actor 0x800 and the update deletes it at once (`army_window_remove`), no window closed, the slot never filled
+  again. (The port left them where they were: a cop above a fallen storey stood in the air until he went back in.)
 
 **StationaryAttackObject** (the PirateShip) [R]:
 - **Made by the block** (0x304450, the current block's objects): its only user, the PirateShip, is an

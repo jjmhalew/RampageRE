@@ -1522,7 +1522,7 @@ void scene_occupant_slots(Scene *s, int bi)
             continue;
         int q = (int)(wrand_lf() % (uint32_t)kinds);
         s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
-        struct WindowSlot ws = { bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2] };
+        struct WindowSlot ws = { bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2], 0, 0, 0 };
         order_add(s, s->nslots);
         s->slots[s->nslots++] = ws;
     }
@@ -1601,7 +1601,11 @@ void scene_people_spawn(Scene *s, float dt)
         float at[3] = { b->min[0] + CELL * (float)ws->column + (ol[0] + ol[2]) / 2, b->min[1],
                         b->min[2] + GROUND_FLOOR + STOREY * (float)ls + ol[1] };
         if (ws->military) {
+            float bottom, height;
+            building_storey(b, ls, &bottom, &height);
             ws->unit = army_spawn_window(s->army, s->military[ws->occupant], at);
+            ws->win_x = at[0];
+            ws->win_floor = b->min[2] + bottom;      /* its storey's floor now */
             if (getenv("RAMPAGE_TRACE"))
                 printf("  a window soldier %s at %.1f %.1f %.1f (unit %d)\n", s->military[ws->occupant], at[0], at[1], at[2], ws->unit);
         }
@@ -3763,6 +3767,22 @@ void scene_buildings_update(Scene *s, float dt)
             building_storey(&sb->b, ls, &bottom, &height);
             people_window_move(s->folk, w, sb->b.min[2] + bottom, sb->b.shake_time > 0 ? building_shake(&sb->b) : 0);
         }
+        for (int k = 0; s->army && (moving || sb->moving) && k < s->nslots; k++) {
+            /* [R 0x30CD20] its window soldiers too: the update is the Actor's, and they are the slots' actors as the
+             * people are */
+            struct WindowSlot *ws = &s->slots[k];
+            int ls = ws->military && ws->building == (int)i && slot_soldier(s, ws) >= 0 ?
+                     building_live_of(&sb->b, ws->storey) : -1;
+            if (ls < 0)
+                continue;
+            float bottom, height, pos[3];
+            building_storey(&sb->b, ls, &bottom, &height);
+            memcpy(pos, army_unit(s->army, ws->unit)->pos, sizeof pos);
+            pos[0] = ws->win_x + (sb->b.shake_time > 0 ? building_shake(&sb->b) : 0);
+            pos[2] += sb->b.min[2] + bottom - ws->win_floor;
+            ws->win_floor = sb->b.min[2] + bottom;
+            army_window_place(s->army, ws->unit, pos);
+        }
         /* its light again (0x2BF180: when it changed, +0x154, kept until it is served, or a neighbour's top did,
          * 0x31C860, used up even when refused), through the work queue, before the passes that use it */
         if (moving || sb->moving || sb->b.dirty)
@@ -3843,6 +3863,23 @@ void scene_buildings_update(Scene *s, float dt)
             if (s->edibles && k - 1 < BUILDING_STOREYS)   /* 0x317A70: its edibles gone, those next to it out */
                 edible_floor_fell(s->edibles, (int)i, sb->b.live[k - 1], k < sb->b.storeys ? sb->b.live[k] : -1,
                                   k >= 2 ? sb->b.live[k - 2] : -1);
+            for (int n = 0; k - 1 < BUILDING_STOREYS && n < s->nslots; n++) {
+                /* [R 0x317A70] the occupants' slots of the fallen floor too (the one list): their actors flagged
+                 * 0x800, which the actor update (0x30CD20) deletes, no window closed; the slots never filled again.
+                 * A window soldier stays in its window till then (Military_Window.bsf has no onFallFromWindow) */
+                struct WindowSlot *ws = &s->slots[n];
+                if (ws->building != (int)i || ws->storey != sb->b.live[k - 1])
+                    continue;
+                ws->retired = 1;
+                if (ws->military && slot_soldier(s, ws) >= 0)
+                    army_window_remove(s->army, ws->unit);
+                else if (!ws->military && s->folk) {
+                    int who = people_window_at(s->folk, ws->building, ws->storey, ws->column);
+                    if (who >= 0)
+                        people_remove(s->folk, who);
+                }
+                ws->unit = -1;
+            }
         }
         sb->seen_collapse = sb->b.collapse;
         if (s->army && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING) {   /* destroyed */

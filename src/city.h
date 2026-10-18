@@ -216,8 +216,10 @@ typedef struct {
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
     /* a slot: its front cell (template storey, column), the Openable it opens (LRPos, +0xC), its occupant's kind */
-    struct WindowSlot { int building, storey, column, occupant, military, unit, lr, retired; } *slots;   /* retired:
-     * its soldier grabbed (0x318140 with 1: +0xD = 0xFF), never filled again */
+    struct WindowSlot { int building, storey, column, occupant, military, unit, lr, retired; float win_x, win_floor; }
+        *slots;                                      /* retired: its soldier grabbed (0x318140 with 1: +0xD = 0xFF) or
+     * its floor fallen (0x317A70), never filled again; win_x, win_floor: its soldier's window x and its storey's floor
+     * when last placed (the soldier follows it as people_window_move's people do) */
     int nslots, slots_made;
     /* the game's one list of slots (+0xC, 0x3195E0 appends) in its order: per building its soldiers' slots, its
      * civilians', then the edibles' own (here -1: the edibles keep theirs in edible.c); order_mil (+0x40) and

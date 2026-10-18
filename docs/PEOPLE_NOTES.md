@@ -172,6 +172,10 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   never open a window.
 - **The fall** (0x317DC0, from cell damage 0x2BB580): when a front cell's state is 2 or more, every non-military
   window person in that building within ±1 storey of it falls (`onFallFromWindow`), whatever its column.
+- **A floor falls** (0x2BAE70 → 0x317A70 on the one list, 0x4D5F00): every slot of the fallen floor is retired
+  (+0xD, +0xE = 0xFF) and its actors flagged 0x800, which the actor update (0x30CD20) answers with a delete: an
+  occupant still in its window (a soldier, which never falls) is gone at once, its window left as it is. The
+  occupants of the storeys above come down with them (0x30CD20, soldiers as people).
 
 ## The grab
 
@@ -192,6 +196,13 @@ The monster.py printout shows only three of them; the fourth is in the data.
 - takes it out of the window (0x318140).
 
 Its `bDoEat` argument only matters for items.
+
+**A person going back in** [R]: the slot holds its actor (+0x14) until the actor is deleted at the end of
+`WindowReEnter` (0.5 s, its `Duration`), so `getBuildingOccupant` answers 1 all that time. `Front_Grab` (George:
+`Skeleton_1_Face_Eat_Item`, rate 0.429, so 2.33 s) calls `doGrabPerson` at 0.151 of it, 0.35 s after the press,
+and has no branch on `pickupSuccess`: its `throwObject(1)` at 0.36 eats whatever the hand holds. A press in the last
+0.35 s of the person's `WindowReEnter` finds the window shut by then, and the monster eats nothing, with its sound;
+the person is gone and its slot free, so the window may fill again. The same in the game and here.
 
 ### doGrabObject("Helper R Hand") (on the ground, `Ground_Grab_Down` at 0.317)
 The search (0x2D99C0) finds the nearest object to pick up:
