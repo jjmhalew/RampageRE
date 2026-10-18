@@ -1168,7 +1168,9 @@ static void start_area(FxWorld *w, const EmDef *d, const float a[3], float out[3
 }
 
 /* an emitter's shutdown (0x1F7CD0): it emits no more, its sounds end, and with EndOfLifeUponShutdown its particles
- * age out */
+ * age out. [R 0x1F7D40 .. 0x1F7D80] its age is stepped on (by the frame's step) to cycle x cycle_shutdown_time (1
+ * unless set): by default the cycle is over at once, so ParticlesDieWithEmitter particles go with it the next frame
+ * (an edible's look, its fire, gone with its floor); with 0 the cycle runs out */
 static void emit_shutdown(FxWorld *w, Emit *e)
 {
     e->shut = 1;
@@ -1176,6 +1178,9 @@ static void emit_shutdown(FxWorld *w, Emit *e)
     if (e->d->eflags & EF_ENDOFLIFE)
         for (int p = e->head; p >= 0; p = w->p[p].next)
             w->p[p].age = w->p[p].life + 1;
+    float until = e->cycle * e->d->shutdown;
+    if (e->age < until)                              /* (the loop's whole steps at once) */
+        e->age += ceilf((until - e->age) / FX_STEP) * FX_STEP;
 }
 
 static void part_free(FxWorld *w, int i)

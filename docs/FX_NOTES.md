@@ -86,7 +86,7 @@ Emitter graphs run over the emitter's cycle (t = age / cycle length), particle g
 | `graph.p_size.min/max` | +0x64 | size; with +LifetimeAndSizeLinked the same random number as the lifetime |
 | `graph.p_vel_mult.x/y/z` | +0x6C | multiplies the per-frame move over the life |
 | `range.cycle_length` | +0x78 | "lo hi": the cycle length, picked once per emitter |
-| `val.cycle_shutdown_time` | +0x80 | share of the cycle that runs on after a shutdown (1.0) |
+| `val.cycle_shutdown_time` | +0x80 | at a shutdown the age is stepped on to cycle × this (1.0): 1 ends the cycle at once, 0 lets it run out |
 | `graph.em_start_time` | +0x84 | start age = cycle × em_start_time(random) |
 | `graph.orbit_accel_in/along` | +0x88/+0x8C | pull to the emitter / along the velocity (unused by the files) |
 | `val.stretchlength`, `val.stretch_percent_time`, `val.destretch_percent_time` | +0x90…0x98 | streaks (1, 0.3, 0.7) |
@@ -158,7 +158,11 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
   mode a start angle (byte, 2π / 256) and a spin (start_rot_distribution(r)), the emitter colour emvc(age /
   cycle). Inserted in the list before the first particle of its texture or a later one (0x211970).
 - **Done** when it has no particles and is shut down, or does not loop and is past its cycle.
-- **Shutdown** (0x1F7CD0): no more particles; +EndOfLifeUponShutdown ends the live ones.
+- **Shutdown** (0x1F7CD0): no more particles; +EndOfLifeUponShutdown ends the live ones. The emitter's age is then
+  stepped on by the frame's step to cycle × `cycle_shutdown_time` (0x1F7D40 .. 0x1F7D80), 1.0 unless set (97 + 52
+  emitters set 1, 9 set 0): by default the cycle is over at once, so +ParticlesDieWithEmitter particles go the next
+  frame. The edibles' looks (`Powerup_*`, `Hazard_Fire`) are such, so an edible deleted with its floor vanishes; the
+  port ran the cycle out (up to 2 s) and the food and fire hung where the window had been.
 
 ## A particle's frame (0x20F9B8…)
 1. age += dt; gone when age > lifetime + 0.0001.
