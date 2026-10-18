@@ -1261,7 +1261,9 @@ static void army_sync(Scene *s, double t)
         in->hidden = 0;
         memcpy(in->base.m, u->world, sizeof in->base.m);
         instance_turns(in, u->w, u->nw);             /* a wreck's DestShape has no control nodes */
-        if (in->has_clip && u->anim_len > 0 && u->clip)
+        /* at the play's time, its clip's or the shape's own (Police_US_Window_Emerge, _Firing_D: no AnimName, the
+         * model's animation is the play): else that one runs on the block's clock, the soldier popping up mid-way */
+        if (in->has_clip && u->anim_len > 0)
             in->offset = (float)(u->anim_time / u->anim_len * in->clip.duration - t);
     }
     /* the block's objects that are army units (the PirateShip): the model as placed gives way to the unit's look,
