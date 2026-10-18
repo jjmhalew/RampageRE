@@ -7225,7 +7225,9 @@ static int pad0_held(const Viewer *v)
     static const struct { int pad, held; } MAP[] = {
         { PAD_UP, SHELL_HELD_UP }, { PAD_DOWN, SHELL_HELD_DOWN }, { PAD_LEFT, SHELL_HELD_LEFT },
         { PAD_RIGHT, SHELL_HELD_RIGHT }, { PAD_START, SHELL_HELD_START }, { PAD_BACK, SHELL_HELD_BACK },
-        { PAD_RT, SHELL_HELD_R2 }, { PAD_LT, SHELL_HELD_L2 } };
+        { PAD_RT, SHELL_HELD_R2 }, { PAD_LT, SHELL_HELD_L2 }, { PAD_RB, SHELL_HELD_R1 }, { PAD_LB, SHELL_HELD_L1 },
+        { PAD_A, SHELL_HELD_CROSS }, { PAD_B, SHELL_HELD_CIRCLE }, { PAD_X, SHELL_HELD_SQUARE },
+        { PAD_Y, SHELL_HELD_TRIANGLE }, { PAD_RS, SHELL_HELD_R3 }, { PAD_LS, SHELL_HELD_L3 } };
     int h = 0;
     for (size_t k = 0; v->pads_live && (v->pads_on & 1) && k < sizeof MAP / sizeof *MAP; k++)
         if (v->pads[0].buttons >> MAP[k].pad & 1)

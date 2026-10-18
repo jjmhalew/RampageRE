@@ -1985,6 +1985,7 @@ typedef struct {
     int intro, no_intro, dots_n, started;
     float t, dot_t;
     float start[3], end[3], s0, s1, rot;
+    unsigned pressed;                                    /* the buttons held last frame (the LD sounds, 0x3489B0) */
 } Loading;
 
 typedef struct {
@@ -2898,6 +2899,7 @@ static void show_loading(Shell *s, int shell)
     l->started = 0;
     l->dots_n = 0;
     l->dot_t = 0;
+    l->pressed = (unsigned)s->held_buttons;          /* (only a press made on the loading screen counts) */
     if (!l->L)
         return;
     Node *r = l->L->root;
@@ -2964,6 +2966,19 @@ static void loading_update(Shell *s, float dt)
         l->started = 1;
         s->state = 4;
         event(s, SHELL_EVT_START, s->gs.city, s->gs.city_index, 0);
+    }
+    /* [R 0x3489B0, from the load's step 0x3483E0 -> 0x348C90] a button newly pressed plays its sound, the table at
+     * 0x3F67C0 in getButtons' order (its last one stopped, 0x26D530, at the place 0x4D85A0 by the listener: here a 2D
+     * one); the players' pads but the bots' (0x4D7E28 - 0x4D7E2C, at least 1). [G: only pad 0's buttons reach the
+     * shell; the PS2's loads took seconds, the port's a moment] */
+    static const char *const LD[18] = { "LD DPad Up", "LD DPad Down", "LD DPad Left", "LD DPad Right", "LD Start",
+                                         "LD Back", "LD RTrigger", "LD LTrigger", "LD RShoulder", "LD LShoulder",
+                                         "LD A", "LD B", "LD X", "LD Y", "LD W", "LD Z", "LD RThumb", "LD LThumb" };
+    for (int k = 0; k < 18; k++) {
+        int on = (s->held_buttons >> k) & 1;
+        if (on && !(l->pressed >> k & 1))
+            sound(s, LD[k]);
+        l->pressed = on ? l->pressed | 1u << k : l->pressed & ~(1u << k);
     }
     /* the dots: one more every 0.25 s, 0 .. 6 [R 0x348B80] */
     l->dot_t += dt;
