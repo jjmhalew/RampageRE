@@ -178,15 +178,25 @@ swept. The port: fx.c `Fx.of_block` (fx_spawn's; not fx_spawn_free's, the monste
 which the port keeps), main.c `block_left` calls `fx_drop_block`; it had shut down only the effects it tracks, and
 those (and every building effect) faded out over the Results.
 
-**The buildings' spawner** (+0x8F4; 0x3101C0 by key, 0x30FD40 by name, both → 0x310260) [R]: a record (0x58 bytes, a
-list at +0x0 / +0x4, next +0x4C) per effect: the key (three words, +0x4), the cell's place (+0x10, 0x30F710), the
-flags (+0x0), the effect (+0x54); the building goes on the world's update list (0x4D17F0 / 0x4D17F4) and its update
+**The buildings' spawner** (+0x8F4; 0x3101C0 by key → 0x310260, 0x30FD40 by name at a point) [R]: a record (0x58
+bytes, a list at +0x0 / +0x4, next +0x4C) per effect: the flags (+0x0), the key (three words, +0x4: face, storey,
+column), the cell's place (+0x10, 0x30F710: the face's rotation, the place +0x34, 1.5 up the storey +0x40, the storey
++0x44), the effect (+0x54); the building goes on the world's update list (0x4D17F0 / 0x4D17F4) and its update
 (0x2BDC70 → 0x310660) advances them, releasing each that is done. The cells' hits (0x2BBBA4, 0x2BBCB0, 0x2BBE3C) pass
-flags −1, the floor's and the pre-collapse dust (0x2BD784, 0x2BD8EC) 0. Flag 2: a new effect shuts down a flag-2 one of
-the same key (0x3103D0 .. 0x31044C); flag 1: while the building is not falling (grid +0x1CC = INT_MAX, 0x2CE230) the
-effect is put back on its cell each update (0x30F690: the cell's storey, the next one still standing up, at that
-storey's height now, 0x2CD010), so a cell's debris comes down with its storey when a floor below gives way. Not ported:
-`src/city.c` starts each at its place and leaves it there (scene_fx), and two hits on one cell play both.
+flags −1; the front's crack (0x2BDB08, 0x2BDBC8), the floor's and the pre-collapse dust (0x2BD784, 0x2BD8EC) 0; the
+hit debris (0x30FD40) makes its record itself with flags 0 (0x31007C). Flag 2: a new effect, once made (0x208220),
+shuts down (vtable +0x30) the flag-2 ones of the same key still on the list (0x3103D0 .. 0x31044C), so one hit's
+first crack, Wall_Small and Wall_Large leave the last one going. Flag 1: while the building is not falling (grid
++0x1CC = INT_MAX, 0x2CE230) the effect is put back on its storey each update (0x30F690, z alone: the record's storey,
+or, that one fallen, the next one still standing up, kept; at that storey's place now, 0x2CD010: 6 + 3 x its live place,
+less 3 x the progress at and above a falling one; the effect's setPosition, vtable +0x68: the emitters move, the
+particles out stay), so a cell's debris comes down with its storey once a floor below it has fallen (not during the
+fall: +0x1CC is the falling storey then). The spawner's start places every record so (0x3104BC). The port:
+`Building.debris` carries the flags (`src/building.c` `debris`), `src/city.c` asks for the cells' effects with their key
+(`fx_request`), main.c's `fx_step` hands each id back (`scene_fx_started`: the flag-2 stops, the records of flags 1 and
+2, `SceneBuilding.spawn`) and `scene_fx_follow` is the update (`fx_move`). Checked: NY03, building 1, a hit on storey
+2 then storey 0's cells till the floor falls: the storey-2 debris 13.5 → 10.5 as the fall ends, the storey-1 cracks
+10.5 → 7.5; each repeat hit's Wall_Large shut down the cell's crack.
 
 ## An emitter (start 0x1F7F90, frame 0x20EFD0)
 - **Start**: cycle = lo + r (hi − lo); age = cycle × em_start_time(r) − dt; a random rotation with

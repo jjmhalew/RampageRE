@@ -120,6 +120,10 @@ typedef struct {                                      /* a building's cells and 
     int school, chicken, chickens_made; const char *swarm; float swarm_next;
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
+    /* its effect spawner's records (+0x8F4, 0x58 bytes each) that the port follows: the front cell's debris started
+     * with flags 1 or 2 (the cells' hits): the effect, the cell's key (template storey o, column; +0x4), the storey it
+     * sits on (+0x44, 0x30F690), its place (+0x34) and the flags (+0x0) [R 0x310260, 0x310660] */
+    struct { int id; uint8_t o, col, storey, flags; float at[3]; } spawn[32]; int nspawn;
     Group inst;                                       /* its BuildingInstance| (EdibleInstance| rows, ...) */
     /* its light (docs/BUILDING_LIGHT_NOTES.md): per live vertex row, face and column the grid vertex's colour
      * (building_light_grid, 0x2CE300), which the facade quads (times their storey's FloorTint) and the cracks (times
@@ -205,8 +209,9 @@ typedef struct {
     /* the people (people.c): each one's looks (ActorAnimShape|<anim>: a model and its clip), made as it needs
      * them; the block's window occupants (Occupants: OccupantInstance| templates, FillRate) */
     People *folk; struct City *owner;
-    /* effects to start (fx.c, by main) and the particles to draw this frame */
-    struct SceneFx { const char *name; float pos[3], dir[3]; } fxreq[64]; int nfxreq;
+    /* effects to start (fx.c, by main) and the particles to draw this frame; a building cell's through its spawner
+     * (building >= 0: its storey o, column and the spawner's flags, scene_fx_started) */
+    struct SceneFx { const char *name; float pos[3], dir[3]; int building, o, col, flags; } fxreq[64]; int nfxreq;
     const FxQuad *fx; int nfx;
     const FxMesh *fxm; int nfxm;                     /* the effects' mesh debris (XForm particles) */
     const SceneMesh (*fx_shapes)[8]; const int *fx_nshapes;   /* their meshes, by fx_shape_* */
@@ -336,6 +341,9 @@ Group city_template(City *c, const char *name);     /* an object template by nam
 /* one play of a look's clip (its AnimName; NULL: the shape's own RawAnim) in seconds; 0 = unknown */
 float city_clip_seconds(City *c, const char *anim, const char *shape);
 void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]);   /* an effect to start */
+/* the effect of request f started as id (main.c, fx_spawn's answer): a building cell's goes on its spawner's records */
+void scene_fx_started(Scene *s, FxWorld *w, const struct SceneFx *f, int id);
+void scene_fx_follow(Scene *s, FxWorld *w);          /* the spawners' update: their effects on their storeys */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
 int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world);
 /* the window occupants (0x318650): every SpawnRate seconds (0.75) one comes to a random free slot of a building in

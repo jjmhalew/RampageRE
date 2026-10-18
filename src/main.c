@@ -4887,8 +4887,11 @@ static void fx_step(Viewer *v, float dt)
             int id = fx_spawn(v->fxw, f->name, f->pos, f->dir, 1);
             if (getenv("RAMPAGE_TRACE"))
                 printf("  effect %s at %.1f %.1f %.1f -> %d\n", f->name, f->pos[0], f->pos[1], f->pos[2], id);
+            scene_fx_started(&v->scene, v->fxw, f, id);
         }
     v->scene.nfxreq = 0;
+    if (v->fxw)                                      /* the buildings' spawners: their cells' debris on their storeys */
+        scene_fx_follow(&v->scene, v->fxw);
     for (int k = 0; k < v->nmon; k++)                /* the timedDoFarts due */
         for (int j = 0; j < 4; j++)
             if (v->mon[k].fart_in[j] > 0 && (v->mon[k].fart_in[j] -= dt) <= 0) {

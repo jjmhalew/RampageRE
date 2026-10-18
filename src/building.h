@@ -91,8 +91,10 @@ typedef struct {
     int dirty;                                       /* a cell or a storey changed: redraw */
     BuildingWindow window[BUILDING_WINDOWS]; int nwindows;   /* its open (and opening, closing) windows */
     /* the debris effects its front cells asked for since the host last took them (0x3101C0 on the building's effect
-     * spawner +0x8F4, at the cell's face point 2.5 along and 1.5 up): the host plays them and sets ndebris to 0 */
-    struct { uint8_t o, col, kind; } debris[BUILDING_DEBRIS]; int ndebris;
+     * spawner +0x8F4, at the cell's face point 2.5 along and 1.5 up): the host plays them and sets ndebris to 0. flags
+     * the spawner's (0x310260's a3): 0xFF (-1) for a cell's hit (0x2BBBA4, 0x2BBCB0, 0x2BBE3C), 0 for the front's
+     * crack (0x2BDB08, 0x2BDBC8) [R] */
+    struct { uint8_t o, col, kind, flags; } debris[BUILDING_DEBRIS]; int ndebris;
     /* and the ground floor's: Wall_Small at a hit's own point (0x2BC88C -> 0x30FCB0 -> 0x30FD40); the host plays them
      * and sets nhit_debris to 0 */
     float hit_debris[8][3]; int nhit_debris;

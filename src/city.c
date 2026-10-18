@@ -2172,14 +2172,91 @@ static void adornments_place(Scene *s, SceneBuilding *sb, Mat4 sway)
     }
 }
 
-void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3])
+static struct SceneFx *fx_request(Scene *s, const char *name, const float pos[3], const float dir[3])
 {
     if (!name || s->nfxreq >= 64)
-        return;
+        return NULL;
     struct SceneFx *f = &s->fxreq[s->nfxreq++];
     f->name = name;
     memcpy(f->pos, pos, sizeof f->pos);
     memcpy(f->dir, dir, sizeof f->dir);
+    f->building = -1;
+    return f;
+}
+
+void scene_fx(Scene *s, const char *name, const float pos[3], const float dir[3]) { fx_request(s, name, pos, dir); }
+
+/* 0x30F690: a spawner record's height, its cell's storey o or, that one fallen (the storey's +0x4 & 2), the next one up
+ * still standing (the record keeps it), at that storey's place now (0x2CD010: 6 + 3 x its live place, less 3 x the
+ * fall's progress at and above the falling one, G+0x1CC) and the cell's 1.5 up (+0x40) [R]; 0 none standing */
+static int spawn_z(const SceneBuilding *sb, int *o, float *z)
+{
+    const Building *b = &sb->b;
+    int ls = -1;
+    while (*o < b->storeys && (ls = building_live_of(b, *o)) < 0)
+        ++*o;
+    if (ls < 0)
+        return 0;
+    *z = sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls + STOREY / 2;
+    if (b->collapse >= 0 && ls >= b->collapse)
+        *z -= STOREY * b->progress;
+    return 1;
+}
+
+void scene_fx_started(Scene *s, FxWorld *w, const struct SceneFx *f, int id)
+{
+    if (f->building < 0 || (uint32_t)f->building >= s->nbuildings || id < 0)
+        return;
+    SceneBuilding *sb = &s->buildings[f->building];
+    /* [R 0x3103D0 .. 0x31044C] flag 2: the effect shuts down the flag-2 ones of the same key (face, storey, column)
+     * still on the records, whose particles finish; after its own start (0x208220), none when it was not made */
+    for (int k = 0; k < sb->nspawn && (f->flags & 2); k++)
+        if (sb->spawn[k].o == f->o && sb->spawn[k].col == f->col && (sb->spawn[k].flags & 2)) {
+            if (getenv("RAMPAGE_TRACE") && fx_alive(w, sb->spawn[k].id))
+                printf("  building %d's cell (%d, %d): %s shuts down debris %d\n", f->building, f->o, f->col, f->name,
+                       sb->spawn[k].id);
+            fx_stop(w, sb->spawn[k].id);
+        }
+    if (!(f->flags & 3))                             /* the port follows only these (flags 0: as started, till done) */
+        return;
+    if (sb->nspawn == (int)(sizeof sb->spawn / sizeof sb->spawn[0]))
+        return;
+    sb->spawn[sb->nspawn].id = id;
+    sb->spawn[sb->nspawn].o = sb->spawn[sb->nspawn].storey = (uint8_t)f->o;
+    sb->spawn[sb->nspawn].col = (uint8_t)f->col;
+    sb->spawn[sb->nspawn].flags = (uint8_t)f->flags;
+    memcpy(sb->spawn[sb->nspawn].at, f->pos, sizeof f->pos);
+    sb->nspawn++;
+}
+
+/* the building's update (0x2BDC70 -> 0x310660, a world step) [R]: while it is not falling (G+0x1CC INT_MAX, the port's
+ * collapse -1, 0x2CE230) a flag-1 record's effect is put back on its storey (0x30F690, z alone; the effect's setPosition,
+ * vtable +0x68: its emitters move, the particles out stay), so a cell's debris comes down with its storey once a
+ * floor below it has fallen; a record whose effect is done is released */
+void scene_fx_follow(Scene *s, FxWorld *w)
+{
+    for (uint32_t i = 0; i < s->nbuildings; i++) {
+        SceneBuilding *sb = &s->buildings[i];
+        int n = 0;
+        for (int k = 0; k < sb->nspawn; k++) {
+            if (!fx_alive(w, sb->spawn[k].id))
+                continue;
+            int st = sb->spawn[k].storey;
+            float z, *at = sb->spawn[k].at;
+            if (sb->b.collapse < 0 && (sb->spawn[k].flags & 1) && spawn_z(sb, &st, &z)) {
+                sb->spawn[k].storey = (uint8_t)st;
+                if (at[2] != z) {
+                    if (getenv("RAMPAGE_TRACE"))
+                        printf("  building %u's cell (%d, %d) debris %d onto storey %d: z %.2f -> %.2f\n", i,
+                               sb->spawn[k].o, sb->spawn[k].col, sb->spawn[k].id, st, at[2], z);
+                    at[2] = z;
+                    fx_move(w, sb->spawn[k].id, at);
+                }
+            }
+            sb->spawn[n++] = sb->spawn[k];
+        }
+        sb->nspawn = n;
+    }
 }
 
 int scene_adornments_hit(Scene *s, const float centre[3], float radius)
@@ -2328,6 +2405,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->fx_wall_large = group_str(t, "Wall_Large");
         sb->fx_floor = group_str(t, "Floor_Large");
         memset(sb->broke, 0, sizeof sb->broke);
+        sb->nspawn = 0;
         sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
@@ -3890,17 +3968,20 @@ void scene_buildings_update(Scene *s, float dt)
          * a first crack Glass_Large where the cell's column has an Outline, else Wall_Small; Wall_Small; Wall_Large;
          * placed on the front at the cell's middle, in the face's frame (0x30F710: the front's the identity) [R] */
         for (int k = 0; k < sb->b.ndebris; k++) {
-            int o = sb->b.debris[k].o, col = sb->b.debris[k].col, ls = 0, ci = building_cell_index(&sb->b, FACE_FRONT, col);
-            while (ls < sb->b.n && sb->b.live[ls] != o)
-                ls++;
-            if (ls == sb->b.n || ci < 0)
+            int o = sb->b.debris[k].o, so = o, col = sb->b.debris[k].col, ci = building_cell_index(&sb->b, FACE_FRONT, col);
+            float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1], 0 }, in[3] = { 0, 1, 0 };
+            if (ci < 0 || !spawn_z(sb, &so, &at[2]))   /* its height as the spawner's start puts it (0x3104BC) */
                 continue;
             const char *name = sb->b.debris[k].kind == DEBRIS_WALL_LARGE ? sb->fx_wall_large :
                                sb->b.debris[k].kind == DEBRIS_WALL_SMALL ? sb->fx_wall_small :
                                sb->outline[sb->b.cell[o][ci].tile & 3][0] >= 0 ? sb->fx_glass : sb->fx_wall_small;
-            float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
-                            sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls + STOREY / 2 }, in[3] = { 0, 1, 0 };
-            scene_fx(s, name, at, in);
+            struct SceneFx *f = fx_request(s, name, at, in);
+            if (f) {                                 /* through the spawner, by the cell's key, with its flags */
+                f->building = (int)i;
+                f->o = o;
+                f->col = col;
+                f->flags = sb->b.debris[k].flags == 0xFF ? -1 : sb->b.debris[k].flags;
+            }
         }
         sb->b.ndebris = 0;
         if (sb->b.collapse > 0 && sb->b.collapse != sb->seen_collapse) {   /* a floor comes down */

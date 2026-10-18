@@ -242,13 +242,14 @@ static void destroyed(Building *b)
     b->dirty = 1;
 }
 
-/* a debris effect for front cell (o, col), for the host (Building.debris) */
-static void debris(Building *b, int o, int col, int kind)
+/* a debris effect for front cell (o, col), for the host (Building.debris), with the spawner's flags */
+static void debris(Building *b, int o, int col, int kind, int flags)
 {
     if (b->ndebris < BUILDING_DEBRIS) {
         b->debris[b->ndebris].o = (uint8_t)o;
         b->debris[b->ndebris].col = (uint8_t)col;
         b->debris[b->ndebris].kind = (uint8_t)kind;
+        b->debris[b->ndebris].flags = (uint8_t)flags;
         b->ndebris++;
     }
 }
@@ -293,7 +294,7 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     int st = c->state;
     if (st <= 0) {
         set_state(b, o, col, 1);                     /* cracked: glass (0x34) or wall (0x35) debris */
-        debris(b, o, col, DEBRIS_CRACK);
+        debris(b, o, col, DEBRIS_CRACK, -1);
     }
     if (now >= 7)
         return 1;
@@ -307,7 +308,7 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
         return 1;
     if (st < 2) {
         set_state(b, o, col, 2);
-        debris(b, o, col, DEBRIS_WALL_SMALL);
+        debris(b, o, col, DEBRIS_WALL_SMALL, -1);
     }
     if (now >= 3)
         return 1;
@@ -322,7 +323,7 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
         return 1;
     if (st < 3) {
         set_state(b, o, col, 3);                     /* destroyed: heavy debris (0x36) */
-        debris(b, o, col, DEBRIS_WALL_LARGE);
+        debris(b, o, col, DEBRIS_WALL_LARGE, -1);
     }
     return 1;
 }
@@ -527,7 +528,7 @@ static int crack_step(Building *b)
                     int ci = building_cell_index(b, FACE_FRONT, c);
                     if (ci >= 0 && b->cell[b->live[j - 1]][ci].state < b->min_crack) {
                         if (rnd(b) % (1 + 1) == 0)
-                            debris(b, b->live[j - 1], c, DEBRIS_CRACK);
+                            debris(b, b->live[j - 1], c, DEBRIS_CRACK, 0);
                         set_state(b, b->live[j - 1], c, b->min_crack);
                     }
                 }
