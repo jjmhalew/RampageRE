@@ -189,7 +189,7 @@ enum {
                        * (0x2D9650's), pos where, dir the shot's way, name the weapon. The monster side (0x2D6A50):
                        * see army_reaction_slot */
     AE_REACTION,      /* monster.setReaction(level): slot `level` (columns override as for any slot) */
-    AE_PUSH,          /* monster.queuePushRequest(v) */
+    AE_PUSH,          /* monster.queuePushRequest(pos): v = pos - its place, the step there */
     AE_STATS_HEALTH,  /* addStats: monster's HP = max(1, HP + amount) within its most, only while HP > 0 */
     AE_STATS_ENERGY,  /* addStats: monster's energy + amount within 0 .. 100 (100: startRage) */
     AE_SCORE,         /* points: monster's category level (0 .. 5) got amount (army_stats has the totals) */

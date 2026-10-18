@@ -4253,7 +4253,11 @@ static void army_step(Viewer *v, float dt)
                             e->pos);
                 break;
             case AE_REACTION: set_reaction(mo, e->level); break;
-            case AE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
+            case AE_PUSH:
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  army push: %.2f %.2f by %.2f %.2f\n", mo->mx, mo->my, e->v[0], e->v[1]);
+                mo->mx += e->v[0]; mo->my += e->v[1];
+                break;
             case AE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;
             case AE_STATS_HEALTH: mo->hp = mo->hp > 0 ? fmaxf(1, fminf(mon_hp_max(mo), mo->hp + e->amount)) : mo->hp; break;
             case AE_STATS_ENERGY: monster_stats(mo, 0, e->amount); break;

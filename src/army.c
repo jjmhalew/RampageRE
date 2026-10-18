@@ -2520,6 +2520,8 @@ static int truck_mover(Army *a, ArmyUnit *u, int state)
                     p[0] += tx * 0.5f;
                 ArmyEvent *e = emit(a, AE_PUSH, who(a, u), NULL, p);
                 e->monster = i;
+                for (int k = 0; k < 3; k++)
+                    e->v[k] = p[k] - a->m[i].pos[k];
             }
         }
     }
