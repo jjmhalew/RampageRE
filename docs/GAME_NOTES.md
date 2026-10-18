@@ -213,7 +213,10 @@ next block.
     y = −10, at the height where the view's top plane crosses that point (gWorld +0x660 + 0x7C is the frustum's
     fourth side plane, 0x16D150: y = +w in view space; 0x2D3510 takes z there, 0 when |n.z| ≤ 0.001) [R]. It
     faces −y, is in the air (mode 1), and plays `Jump_Butt_Slam_fall`.
-  - **Then**: scale 1, HP to the most (MONSTER_DATA +0x138), human cleared, flag 0x20 set.
+  - **Then**: HP to the most (MONSTER_DATA +0x138), human cleared, flag 0x20 set. The scale is set to 1 at once
+    (+0xA7C = +0xA78 = 1, its time 0: 0x2D3BDC .. 0x2D3C08) only when it drops in, which leaves
+    `Faceup_Idle_Respawn` before its `setScale(1, 0.833)`. Where the streaker ran, the monster comes back the
+    human's 0.2 and that `setScale` grows it over 0.83 s (the port had it full size at once either way).
 - **cancelRespawn** (0x2D36A0) runs at every block's end (0x2DCB40) and on a continue. A monster that is down or
   human comes back where it is, at full HP, for a life. In the campaign with no lives left at all it stays down and
   hidden.

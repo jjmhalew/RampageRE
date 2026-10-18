@@ -2142,10 +2142,10 @@ static void clip_event(Mon *mo, const MoveEvent *e)
                                                         or dropping in from the view */
         mo->hp = mon_hp_max(mo);
         mo->defeated = 0;
-        mo->scale = mo->scale_to = 1;                /* [R] scale 1: dropping in (Jump_Butt_Slam_fall) it leaves
-                                                      * Faceup_Idle_Respawn before that state's setScale(1) at 0.513,
-                                                      * and stayed the human's 0.2 */
-        mo->scale_left = 0;
+        if (!v->game) {                              /* (no game to place it: as dropping in) */
+            mo->scale = mo->scale_to = 1;
+            mo->scale_left = 0;
+        }
         if (mon_in(mo))
             mon_in(mo)->hidden = 0;
         if (v->game) {
@@ -2167,6 +2167,11 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             mo->heading = out.facing * 57.2957795f;
             mo->human = 0;
             if (out.fall) {                          /* in the air, Jump_Butt_Slam_fall */
+                /* [R 0x2D3BDC .. 0x2D3C08] dropping in, the scale is 1 at once (+0xA7C = +0xA78 = 1, its time 0): it
+                 * leaves Faceup_Idle_Respawn before that state's setScale(1) at 0.513 and would stay the human's 0.2.
+                 * Where the streaker ran it stays 0.2, and that setScale grows it back over 0.83 s */
+                mo->scale = mo->scale_to = 1;
+                mo->scale_left = 0;
                 mo->mode = MODE_AIRBORNE;
                 mo->dropping = 1;                    /* +0xAB5: the camera leaves it out until it lands */
                 for (int k = 0; mo->have_graph && k < mo->graph.n; k++)
