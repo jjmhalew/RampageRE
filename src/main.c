@@ -204,7 +204,7 @@ typedef struct Viewer {
     Game *game;                                      /* the world's states, the lives, the clock (game.c) */
     Boss *boss;                                      /* the block's boss and the ambient ones (boss.c) */
     /* the bosses' effects that follow (monster: the monster slot followed, -1 none) */
-    struct { int id, fx, obj, monster; float off[3]; } bfx[64]; int nbfx;
+    struct { int id, fx, obj, monster, node_id; const char *node; float off[3]; } bfx[64]; int nbfx;
     struct { int obj, h; } bsnd[64]; int nbsnd;      /* and their sounds (add3DSfx: each follows its part) */
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
@@ -2909,6 +2909,30 @@ static void challenge_points_all(Viewer *v, int points)
         game_add_points(v->game, p, GPT_CHALLENGE, points / v->nmon);
 }
 
+/* a boss effect's frame on its part (the FollowEffect's follow, 0x291440: the offset x the object's matrix, or its
+ * node's: createAndStartAttachedToNodeByName's name, ...AttachedToNode's number): the part's look's node as drawn,
+ * else the part's own matrix; R its axes made 1 long, at the offset along them; 0 = ok */
+static void frame_of(const Mat4 *m, float pos[3], float R[3][3]);
+static int boss_fx_frame(Viewer *v, int part, const char *node, int node_id, const float off[3], float at[3],
+                         float R[3][3])
+{
+    const BossPart *p = v->boss ? boss_part(v->boss, part) : NULL;
+    if (!p)
+        return -1;
+    Mat4 m;
+    int found = (node || node_id >= 0) && scene_boss_node_at(&v->scene, part, node, node_id, m.m) == 0;
+    if (!found)
+        memcpy(m.m, p->world, sizeof m.m);
+    if (getenv("RAMPAGE_NODES") && (node || node_id >= 0))
+        printf("  %s effect node %s / %d: %s\n", p->name ? p->name : "?", node ? node : "-", node_id,
+               found ? "found" : "not found");
+    float pos[3];
+    frame_of(&m, pos, R);
+    for (int k = 0; k < 3; k++)
+        at[k] = pos[k] + R[0][k] * off[0] + R[1][k] * off[1] + R[2][k] * off[2];
+    return 0;
+}
+
 /* the bosses' frame: what they see of the monsters and the buildings, then what they did */
 static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
 {
@@ -2957,15 +2981,25 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
             switch (e->type) {
             case BE_EFFECT:
                 if (v->fxw) {
-                    int id = fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    const BossPart *p = e->obj >= 0 ? boss_part(v->boss, e->obj) : NULL;
+                    float off[3], at[3], R[3][3];
+                    for (int k = 0; k < 3; k++)      /* the part's: the script's offset, in its frame */
+                        off[k] = e->pos[k] - (p ? p->pos[k] : k == 0 ? mo->mx : k == 1 ? mo->my : mo->mz);
+                    int id = p && boss_fx_frame(v, e->obj, e->node, e->level, off, at, R) == 0 ?
+                             fx_spawn_frame(v->fxw, e->name, at, (const float (*)[3])R, 1) :
+                             fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
+                    if (getenv("RAMPAGE_TRACE"))
+                        printf("  boss effect %s on part %d node %s / %d at %.1f %.1f %.1f -> %d\n", e->name, e->obj,
+                               e->node ? e->node : "-", e->level, p ? at[0] : e->pos[0], p ? at[1] : e->pos[1],
+                               p ? at[2] : e->pos[2], id);
                     if (id >= 0 && v->nbfx < 64) {   /* to follow its part or the monster, or to stop by its id */
-                        const BossPart *p = e->obj >= 0 ? boss_part(v->boss, e->obj) : NULL;
                         v->bfx[v->nbfx].id = e->id;
                         v->bfx[v->nbfx].fx = id;
                         v->bfx[v->nbfx].obj = p ? e->obj : -1;
                         v->bfx[v->nbfx].monster = !p && e->monster >= 0 ? mo->slot : -1;
-                        for (int k = 0; k < 3; k++)
-                            v->bfx[v->nbfx].off[k] = e->pos[k] - (p ? p->pos[k] : k == 0 ? mo->mx : k == 1 ? mo->my : mo->mz);
+                        v->bfx[v->nbfx].node = e->node;
+                        v->bfx[v->nbfx].node_id = e->level;
+                        memcpy(v->bfx[v->nbfx].off, off, sizeof off);
                         v->nbfx++;
                     }
                 }
@@ -3048,15 +3082,16 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
             sound_move(v->bsnd[k].h, p->pos);
     }
     for (int k = 0; k < v->nbfx; k++) {              /* the effects that follow their part or the monster */
-        float at[3];
+        float at[3], R[3][3];
         if (v->bfx[k].obj >= 0) {
             const BossPart *p = boss_part(v->boss, v->bfx[k].obj);
             if (!p || !p->alive) {
                 v->bfx[k].obj = -1;
                 continue;
             }
-            for (int j = 0; j < 3; j++)
-                at[j] = p->pos[j] + v->bfx[k].off[j];
+            if (boss_fx_frame(v, v->bfx[k].obj, v->bfx[k].node, v->bfx[k].node_id, v->bfx[k].off, at, R) == 0)
+                fx_place(v->fxw, v->bfx[k].fx, at, (const float (*)[3])R);
+            continue;
         } else if (v->bfx[k].monster >= 0) {
             const Mon *mo = &v->mon[v->bfx[k].monster];
             at[0] = mo->mx + v->bfx[k].off[0]; at[1] = mo->my + v->bfx[k].off[1]; at[2] = mo->mz + v->bfx[k].off[2];

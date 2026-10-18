@@ -1000,7 +1000,7 @@ static int unit_look(City *c, Scene *s, int who, const ArmyUnit *u)
 
 static int ends_with(const char *s, const char *tail);
 
-static int look_node(const Scene *s, int who, const char *node, float out[16])
+static int look_node(const Scene *s, int who, const char *node, int id, float out[16])   /* node NULL: number id */
 {
     for (int i = 0; i < s->nlooks; i++) {
         const struct PersonLook *l = &s->looks[i];
@@ -1008,7 +1008,7 @@ static int look_node(const Scene *s, int who, const char *node, float out[16])
             continue;
         const Instance *in = &s->instances[l->inst];
         for (uint32_t k = 0; k < in->tree.n && in->node; k++)
-            if (ends_with(in->tree.nodes[k].name, node)) {
+            if (node ? ends_with(in->tree.nodes[k].name, node) : (int)k == id) {
                 Mat4 w = mat_mul(in->base, in->node[k]);
                 memcpy(out, w.m, sizeof w.m);
                 return 0;
@@ -1018,15 +1018,19 @@ static int look_node(const Scene *s, int who, const char *node, float out[16])
 }
 int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
 {
-    return look_node(s, (1 << 20) + unit, node, out);
+    return look_node(s, (1 << 20) + unit, node, -1, out);
 }
 int scene_boss_node(const Scene *s, int part, const char *node, float out[16])
 {
-    return look_node(s, (4 << 20) + part, node, out);
+    return look_node(s, (4 << 20) + part, node, -1, out);
+}
+int scene_boss_node_at(const Scene *s, int part, const char *node, int id, float out[16])
+{
+    return look_node(s, (4 << 20) + part, node, id, out);
 }
 int scene_vehicle_node(const Scene *s, int obj, const char *node, float out[16])
 {
-    return look_node(s, (2 << 20) + obj, node, out);
+    return look_node(s, (2 << 20) + obj, node, -1, out);
 }
 
 /* the weapon clusters' turn on their control nodes (0x299010 hands the shape its WWeaponProcAnimator, the cluster
