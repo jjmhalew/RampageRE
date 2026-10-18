@@ -1791,7 +1791,10 @@ static void crane_building_gone(StreetObjs *s, StreetObj *o)
 
 /* KiteAnchor.bsf [R]: an InvisShape on the street of SF04 flying its kite: onInit its KiteFX (kite, kite_yellow)
  * on it at (xoffset, yoffset, zoffset); a monster's blow or its building coming down lets it go: up to z 80 at 4 a
- * second (a LineMover), gone at the top (the kite, not turned off with it, stays up there) */
+ * second (a LineMover), gone at the top (the kite, not turned off with it, stays up there). Its shape is the
+ * InvisShape model's sphere (no CollisionBox, CollisionRadius or AutoCollisionBox: 0x28FD70 -> 0x184CB0), radius
+ * 0.034 at its place, so a blow lets it go only when one of the monster's spheres takes in that point [R]; on SF04's
+ * roof (z 21 and 23, the top at 22.5) a standing monster's fists pass some 4 above them */
 static void kite_init(StreetObjs *s, StreetObj *o)
 {
     float off[3] = { onum(o, "xoffset", 0), onum(o, "yoffset", 0), onum(o, "zoffset", 0) };
