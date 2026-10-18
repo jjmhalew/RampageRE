@@ -4379,7 +4379,9 @@ static void army_step(Viewer *v, float dt)
                 break;
             case AE_SOUND:
                 if (e->level == 0) sound_kill_name(e->name);
-                else sound_play(e->name, e->pos, 1);
+                else sound_play(e->name, e->level == 2 ? NULL : e->pos, 1);   /* 2: a 2D one */
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  army sound %s%s\n", e->name, e->level ? "" : " (stopped)");
                 break;
             case AE_HIT:                             /* ReactionLevel < 0: through TakeDamage */
                 monster_hit(mo, e->name, e->amount, e->level >= 0 ? e->level : take_damage_level(mo, e->amount), e->v,

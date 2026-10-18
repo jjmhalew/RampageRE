@@ -338,7 +338,7 @@ int army_interest(const Army *a, float out[2][3])
 static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx */
 {
     if (name && *name)
-        emit(a, AE_SOUND, who(a, u), name, u->pos);
+        emit(a, AE_SOUND, who(a, u), name, u->pos)->level = 1;
 }
 
 /* getNearestMonster [R: the Actor binding 0x42 (0x2A8FA0 -> 0x2B26F0) and the RScriptObject / AttackObject one 0x37
@@ -1408,7 +1408,7 @@ float army_score_building(Army *a, int monster, int building, Group building_pro
                 c->step = monster_move && group_get(mf, monster_move, &r) ? record_num(r) : group_num(mf, "Base", 0);
             }
         } else if (c->sum == c->step)
-            emit(a, AE_SOUND, -1, "v_combo", at);    /* the second floor */
+            emit(a, AE_SOUND, -1, "v_combo", at)->level = 1;   /* the second floor */
         pts += c->sum;
         c->sum += c->step;
         c->skip = 1;
@@ -1423,7 +1423,7 @@ float army_score_building(Army *a, int monster, int building, Group building_pro
         if (c->skip) {
             Group k = scoring_sub(scoring, c->step < c->sum ? "MultiFloor" : "Floor");
             pts += group_num(k, "Collapse", 0);
-            emit(a, AE_SOUND, -1, "v_super", at);
+            emit(a, AE_SOUND, -1, "v_super", at)->level = 1;
         }
         c->skip = 1;
     }
