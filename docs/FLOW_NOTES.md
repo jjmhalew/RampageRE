@@ -118,7 +118,10 @@ from the frame's time, so with a faster screen their objects moved every other f
 moved every frame: a car one walks beside stuttered. They are drawn between their last two steps
 (`*_draw_world`, `collide_matrix_between`: the place along the line, the axes turned and made square again), at most
 one step behind. A held object (moved by the frame), one just made, or one that jumped more than 8 is drawn where it
-is. The game draws at its step and needs none of this.
+is. The game draws at its step and needs none of this. The monster's own update is a step too, but runs here once a
+drawn frame with its dt: its per-frame shares are taken as per step, k^(30 dt) a frame (the ground follow's 0.7, the
+face's 0.4, the foot lock's RTWSmoothFactor, the hands' 0.3, the foot records'), and what the army's mover callback
+does a step (the police car's push) is scaled by 30 dt.
 
 - **setTarget / setLocation(obj, local, x, y, z, cut)**: with an object, its place plus the offset (local: through its
   matrix) each frame; with `nul`, the offset is a world point. The sixth argument cuts.

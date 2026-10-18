@@ -2581,17 +2581,20 @@ static int truck_mover(Army *a, ArmyUnit *u, int state)
     if (u->state == 6)
         return 1;
     if (state == 4 && u->is_cop && (u->state == 10 || u->state == 2)) {
-        /* pushMonster: a monster on the ground within MonsterResponseDist is pushed along (queuePushRequest) */
+        /* pushMonster: a monster on the ground within MonsterResponseDist is pushed along (queuePushRequest). The
+         * mover's callback 4 comes each world step in the game (pushTime += getTimeStep(), 0.5 a step), each frame
+         * here: the push and the time are the frame's share of a step [R CombatTruck.scr, 0x2B7800] */
+        float steps = a->dt / TIMESTEP;
         for (int i = 0; i < a->nm; i++) {
             float dd = dist3(a->m[i].pos, u->pos);
             if (dd * dd <= u->mv.resp2 && contains(a->m[i].move, "Ground")) {
                 float d[3] = { a->m[i].pos[0] - u->pos[0], a->m[i].pos[1] - u->pos[1], a->m[i].pos[2] - u->pos[2] };
                 norm3(d);
                 float tx = cosf(u->facing + PI / 2) < 0 ? -1.0f : 1.0f;
-                u->aux[5] += TIMESTEP;
-                float p[3] = { a->m[i].pos[0], a->m[i].pos[1] + 0.5f, a->m[i].pos[2] };
+                u->aux[5] += a->dt;
+                float p[3] = { a->m[i].pos[0], a->m[i].pos[1] + 0.5f * steps, a->m[i].pos[2] };
                 if (d[0] * tx > 0.9238795f && u->aux[5] < 0.7f)
-                    p[0] += tx * 0.5f;
+                    p[0] += tx * 0.5f * steps;
                 ArmyEvent *e = emit(a, AE_PUSH, who(a, u), NULL, p);
                 e->monster = i;
                 for (int k = 0; k < 3; k++)

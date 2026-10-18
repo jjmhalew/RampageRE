@@ -314,12 +314,13 @@ void monster_air_velocity(float vel[3], float pos[3], float dt, int no_gravity)
 }
 
 /* [R] 0x2E0330: z against 0x2E8530 (the ground under the monster): within 0.001 it is the ground; otherwise, gravity
- * on, 0.3 x ground + 0.7 x z, per frame (not scaled by dt) */
-float monster_ground_follow(float z, float ground, int no_gravity)
+ * on, 0.3 x ground + 0.7 x z, a frame of the monster's update (not scaled by dt): a world step, 1/30 s (0x2B7800,
+ * FLOW_NOTES.md), so here 0.7 of the gap kept a step, 0.7^(dt x 30) of it a frame */
+float monster_ground_follow(float z, float ground, int no_gravity, float dt)
 {
     if (fabsf(ground - z) < 0.001f)
         return ground;
-    return no_gravity ? z : 0.3f * ground + 0.7f * z;
+    return no_gravity ? z : ground + (z - ground) * powf(0.7f, dt * 30);
 }
 
 /* [R] 0x2D77D8 (a blow's slide, monster_blow; dist the attack record's +0x30, time its +0x34); the spin's axis (0, 0, 1)

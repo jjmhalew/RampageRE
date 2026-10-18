@@ -426,7 +426,9 @@ scripts' addStats as from a blow (CHALLENGE_NOTES.md); `RoarAttack` is the upgra
 - **Troops:** they drop their `TroopType<n>` × `numTroop<n>Spawned`, one every 0.5 s, in a staggered line
   (`ExitTruck` from a truck), then drive off at 15.
 - **The police car** skids to a stop and becomes pickable.
-- **Pushing:** while moving, a monster on the ground within `MonsterResponseDist` is pushed along (`AE_PUSH`).
+- **Pushing:** while moving, a monster on the ground within `MonsterResponseDist` is pushed along (`AE_PUSH`): 0.5 to
+  +y and 0.5 along its way while `pushTime` (+ `getTimeStep()` a push) is under 0.7, each world step (the mover's
+  callback 4); army.c's mover runs each drawn frame, so a frame pushes its share of a step (dt × 30) and counts dt.
 - **Death:** at 0 `HitPoints` it flies 15 away from the monster (addStats type 2) and explodes 2 s later.
 - **Grabbing:** a pickable car can be grabbed and thrown (onPickup, onThrow: addStats type 2).
 

@@ -164,7 +164,8 @@ foot as the clip alone poses it **at its time 0** (0x33C290 mirrored, else the c
 +0x72C4, swapped when mirrored; f12 = 0 at 0x33C04C / 0x33C080; the place at +0x10 of the result, 0x33C098),
 through the new matrix (rows +0x0 / +0xC / +0x18, place +0x24), against the record's place, (x, y): within 1e−6
 squared (0x358637BE) the anchor is dropped and nothing moves; else the matrix is copied out with its place moved by
-**(1 − RTWSmoothFactor) of the slip**, its rotation kept, and 1 returned. The root eases after the planted foot until
+**(1 − RTWSmoothFactor) of the slip**, its rotation kept, and 1 returned (a frame of the monster's update, a world step
+of 1/30 s: here 1 − RTWSmoothFactor^(30 dt) a drawn frame, `foot_lock`'s steps). The root eases after the planted foot until
 the clip's first frame stands on it; the IK holds the foot meanwhile. Walking into Ground_Idle (George, 0.7) that is
 the half stride: the walk's forward foot, 2.56 ahead of the place, against the idle's 0.27, so the monster eases 2.3
 forward over its planted foot and stays there.
@@ -286,7 +287,8 @@ at once and the walk is as fast as without the IK.
   the horselink each after a 0x101A90 into its parent's, 0x2F75D4 the foot as 0x2F87B8), as ik_arm ports them;
   0x1017F0 is a row Gram-Schmidt, a no-op on rigid matrices [R]; the arc cap set once for the game by the first
   monster to drag (gp−0x6C68 / gp−0x6C64), a static in `drag_setup` [R]; the shares applied per world step, 1/30 s
-  (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`); the mirrored 3-link solved on the other side's
+  (RWorld 0x2B7800) [R]: k^(30 dt) a viewer frame (`FootFrame.steps`, the time since the foot object's last update:
+  it was half a step whatever the frame, so right at 60 Hz only); the mirrored 3-link solved on the other side's
   nodes with the target reflected (as the arms), where the game solves the mirrored pose itself — the same up to the
   bend's sense, which both put forward.
 - Fixed: the stop that slid the monster on (up to 17 units for George, walking into Ground_Idle on NewYork 3:

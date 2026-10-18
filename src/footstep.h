@@ -133,10 +133,10 @@ float foot_ankle(const Tree *skeleton);
  * set): while there is an anchor, the root follows the planted foot: the anchor foot as its clip alone poses it at its
  * time 0 (foot: per record, model space as drawn: ik_clip_node(in, 0, ..)), put through the monster's matrix
  * (place, heading degrees about z), is short of where it was planted by a slip (x, y); the place moves by
- * (1 - RTWSmoothFactor) of it. The
+ * (1 - RTWSmoothFactor) of it a world step (steps: the frame in steps of 1/30 s, so 1 - RTWSmoothFactor^steps). The
  * anchor is dropped as soon as the state now (node_flags: the current state's) travels (0x50, 0x1080) or the anchor
  * is no longer planted (footStep), and once the slip is within 1e-3. 1 = place moved. */
-int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading);
+int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading, float steps);
 
 /* the monster this frame as the foot object's update reads it (0x33D450, after the matrix is set) */
 typedef struct {

@@ -81,6 +81,8 @@ typedef struct {
 enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2, DRIVE_PAD = 3 };
 
 #define MONSTERS 4                                   /* the game's players and bots together (Common 0x4D7E28) */
+#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): the world's step [R 0x2B7800]; the monster's
+                                                      * update runs once a step, here once a drawn frame */
 
 #define MON_FX_SLOTS 32
 #define MON_FX_NAMED 8
@@ -126,6 +128,7 @@ typedef struct Mon {
     float hp, energy;                                /* its hit points (most: MONSTER_DATA +0x138), energy, eating */
     const MoveNode *face;                            /* the face layer's node playing now */
     IkFeet feet_ik; int feet_due;                   /* the legs bent to the held feet (ik.c), once a frame */
+    float feet_dt;                                   /* the time the foot object's next update covers */
     FootProps feet_fx; FootState feet;              /* the footfalls' names and the foot records (footstep.c) */
     FaceQueue faces;                                 /* setFacialAnim / queueFacialAnim's records, the belches (look.c) */
     HeadLook head; LookLimits look_lim;              /* the head animator (look.c) */
@@ -1137,7 +1140,7 @@ static void build(Viewer *v)
             if (v->army)
                 rail_bind_army(v->rail, v->army);
             rail_load_block(v->rail, v->scene.block);
-            rail_activate(v->rail, 1);
+            rail_activate(v->rail, !v->game);        /* (gAIMgr's record, the freighter's: as the army's) */
             static const char *const OBJ[] = { "ObjectInstance|", "AttackObjectInstance|", "XObjectInstance|" };
             for (int k = 0; k < 3; k++) {
                 Group bd = k == 0 ? v->scene.block : v->scene.traffic_def[k];
@@ -3080,16 +3083,18 @@ static void feet_update(void *ctx, IkFeet *f)
     }
     m.blend_left = in->blend_left;
     m.blend_time = in->blend_time;
-    m.steps = 30.0f / 60;                            /* a viewer frame of 1/60 s is half a world step */
+    m.steps = mo->feet_dt / TIMESTEP;                /* the frames since its last update, in world steps */
+    mo->feet_dt = 0;
     foot_update(&mo->feet, &m, f->w, f->pos);
 }
 
 /* the end of the frame's move: the foot object updates at the next posing */
-static void feet_step(Mon *mo)
+static void feet_step(Mon *mo, float dt)
 {
     Viewer *v = mo->v;
     if (!mon_in(mo))
         return;
+    mo->feet_dt += dt;
     v->scene.mon[mo->slot].feet = &mo->feet_ik;
     mo->feet_ik.update = feet_update;
     mo->feet_ik.ctx = mo;
@@ -3621,6 +3626,7 @@ static void game_step(Viewer *v, float dt)
             case GE_AI_ACTIVATE:
                 if (v->army) army_activate(v->army, 1);
                 if (v->boss) boss_activate(v->boss, 1);
+                if (v->rail) rail_activate(v->rail, 1);
                 parade_activate(v->parade, 1);
                 break;
             case GE_HUD:                             /* every player's HUD */
@@ -5459,7 +5465,7 @@ static void mon_step(Mon *mo, float dt)
              * street, it is eased down so in the state it is in; nothing in those modes makes it fall (+0xAD8 is
              * written only by the clips' mode events, 0x2E7DE4, their velocity ones, 0x2DB130, the clip's start,
              * 0x2E8028, and the landing, 0x2DC5DC). On a roof's free edge the box test holds it (0x2A49C0) */
-            mo->mz = monster_ground_follow(mo->mz, ground_at(mo), mo->no_gravity);
+            mo->mz = monster_ground_follow(mo->mz, ground_at(mo), mo->no_gravity, dt);
         }
         if ((was_mode == MODE_GROUND || was_mode == MODE_BUILDING) && (st->flags & 0x810D2)) {
             /* wading (0x2E2870, the case of modes 0 and 5 in 0x2E2770: 0x2E28A0 .. 0x2E2974): in a state that
@@ -5541,12 +5547,14 @@ static void mon_step(Mon *mo, float dt)
             float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
             float h = mo->heading;
             climb_place(&mo->mount, &v->scene, st->flags, delta, dt, pos, &h);
-            /* [R 0x2E0D44 .. 0x2E0EE4] the monster goes 0.4 of the way there each frame: its place by a lerp, its turn
-             * by a slerp (0x167DE0), so a new place (getting on, over the top, off the roof) is eased into */
-            mo->mx += (pos[0] - mo->mx) * 0.4f;
-            mo->my += (pos[1] - mo->my) * 0.4f;
-            mo->mz += (pos[2] - mo->mz) * 0.4f;
-            mo->heading += (fmodf(h - mo->heading + 540, 360) - 180) * 0.4f;
+            /* [R 0x2E0D44 .. 0x2E0EE4] the monster goes 0.4 of the way there each frame of its update (a world step):
+             * its place by a lerp, its turn by a slerp (0x167DE0), so a new place (getting on, over the top, off the
+             * roof) is eased into; here 0.6^(dt / step) of the way is left */
+            float k = 1 - powf(0.6f, dt / TIMESTEP);
+            mo->mx += (pos[0] - mo->mx) * k;
+            mo->my += (pos[1] - mo->my) * k;
+            mo->mz += (pos[2] - mo->mz) * k;
+            mo->heading += (fmodf(h - mo->heading + 540, 360) - 180) * k;
         }
         if (switched) {
             /* a clip that bakes: its root, as drawn where it ended (the axes it handed over were held at its start, a
@@ -5623,7 +5631,8 @@ static void mon_step(Mon *mo, float dt)
             const Instance *in = mon_in(mo);
             float feet[2][3], place[3] = { mo->mx, mo->my, mo->mz };
             if (ik_clip_node(in, 0, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, 0, "Bip01 R Foot", feet[1]) == 0 &&
-                foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading)) {
+                foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading,
+                          dt / TIMESTEP)) {
                 mo->mx = place[0];
                 mo->my = place[1];
                 if (mo->is_ai)                       /* 0x2E0F54: the goal's +0x38 */
@@ -5692,7 +5701,7 @@ static void mon_step(Mon *mo, float dt)
     scene_monster_sway(&v->scene, mo->slot, mo->mount.at.building >= 0 ? mo->mount.at.building :
                        mo->mode == MODE_GROUND ? mon_building_below(mo) : -1);
     hands_step(mo, dt);
-    feet_step(mo);
+    feet_step(mo, dt);
 }
 
 /* the soak test's world half (cheat 082864: hud.c hud_soak) in the world's update, running or paused */
@@ -7077,6 +7086,7 @@ static int shell_answer(Viewer *v)
                     graphics_from_menu(v, shell_graphics(v->shell), e->arg);
                 break;
             case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
+            case SHELL_EVT_VICTORY_SHOWN: profile_set_victory_shown(&v->prof); break;
             case SHELL_EVT_ATTRACT_GAME:             /* the demo (shell_game(), play type 0): its loading screen,
                                                       * then SHELL_EVT_START as any game */
                 printf("attract mode demo %d: %s\n", e->arg, e->name);

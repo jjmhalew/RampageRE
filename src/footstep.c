@@ -256,8 +256,9 @@ static void drag_setup(FootState *s, int r, const FootPose *m)
  * 0x1080: 0x33BFE8 .. 0x33C000 go to the drop at 0x33C018) or its record is no longer planted (footStep); else the
  * anchor's foot as the clip alone poses it at its time 0 (0x33C290 mirrored, else the clip's query 0x196D20; f12 = 0
  * at 0x33C04C / 0x33C080) through the matrix, against the record's place, (x, y): within 1e-6 squared the anchor is
- * let go; else the place moves by (1 - RTWSmoothFactor) of it, the rotation kept. */
-int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading)
+ * let go; else the place moves by (1 - RTWSmoothFactor) of it, the rotation kept: a frame of the monster's update,
+ * a world step (1/30 s, FLOW_NOTES.md), so by 1 - RTWSmoothFactor^steps here */
+int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading, float steps)
 {
     int a = s->anchor;
     if (a < 0 || a > 1)
@@ -274,8 +275,9 @@ int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float p
         s->anchor = -1;
         return 0;
     }
-    place[0] += (1 - s->rtw) * dx;
-    place[1] += (1 - s->rtw) * dy;
+    float k = 1 - powf(s->rtw, steps);
+    place[0] += k * dx;
+    place[1] += k * dy;
     return 1;
 }
 

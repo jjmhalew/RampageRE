@@ -88,6 +88,7 @@ struct RailObj {
     /* ---- the rest is the module's own */
     uint32_t uid;                                    /* isValid: the object a script keeps is still this one */
     int gone_age;                                    /* frames since it went (its slot is reused after 2) */
+    uint32_t hit_step;                               /* the world step of its last TakeDamage from a monster */
     float pulse_delay, pulse_timer;                  /* setPulseDelay; the time since its last onPulse */
     int mv;                                          /* the mover: MV_* in rail.c */
     struct { float a[3], b[3], t, speed, resp2; int flags; } line;

@@ -37,6 +37,7 @@ struct Rail {
     const ArmyMonster *m; int nm;
     const RailBox *b; int nb;
     float acc;
+    uint32_t step;                                   /* the world steps run (the monster's touches, once a step) */
     CollideWorld *cw;                                /* the frame's collision world (rail_set_collide), NULL none */
 };
 
@@ -1959,6 +1960,8 @@ static void spawner_update(Rail *r, float dt)
             continue;                                /* [R] alive stays 1: that record never spawns again */
         o->inst = s->g;
         o->spawner = i;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("rail: the spawner makes %s (%d left)\n", s->name, s->left);
         construct(r, o);
     }
 }
@@ -2107,13 +2110,15 @@ static void contacts(Rail *r)
     for (int i = 0; i < r->n; i++) {
         RailObj *o = &r->o[i];
         if (o->phase != RP_ALIVE || o->hidden || is_controller(o->kind) || o->kind == RK_LOOPTRAIN ||
-            (o->oflags & RF_EFF_NODES))
-            continue;
+            (o->oflags & RF_EFF_NODES) || o->hit_step == r->step)
+            continue;                                /* (a blow already this step: one TakeDamage a step) */
         CollideObj co;
         obj_collide(r, o, &co);
         for (int m = 0; m < r->nm && o->phase == RP_ALIVE; m++)
-            if (touches(&co, &r->m[m]))
+            if (touches(&co, &r->m[m])) {
                 take_damage(r, o, m, 1);
+                o->hit_step = r->step;
+            }
     }
 }
 
@@ -2170,6 +2175,7 @@ void rail_update(Rail *r, float dt, const ArmyMonster *m, int nm, const RailBox 
     while (r->acc >= TIMESTEP) {                     /* the scripts count in frames: run them at the game's step */
         r->acc -= TIMESTEP;
         r->time += TIMESTEP;
+        r->step++;
         for (int i = 0; i < r->n; i++) {             /* (for the drawing between the steps) */
             memcpy(r->o[i].prev, r->o[i].world, sizeof r->o[i].prev);
             r->o[i].prev_ok = 1;
@@ -2191,12 +2197,17 @@ int rail_hit(Rail *r, int monster, const float centre[3], float radius, float am
         RailObj *o = &r->o[i];
         if (o->phase != RP_ALIVE || o->hidden || is_controller(o->kind) || o->kind == RK_LOOPTRAIN)
             continue;
+        if (o->hit_step == r->step + 1)              /* [R 0x2E22B0] at most one TakeDamage an object a step of the
+                                                      * monster's update (a world step); the blows of the frames before
+                                                      * the next step are that step's */
+            continue;
         CollideObj co;                               /* [R 0x2E22B0 -> 0x280470] the sphere against its shape */
         float nrm[3], pt[3], push[3];
         obj_collide(r, o, &co);
         if (!collide_obj_sphere(&co, centre, radius, nrm, pt, push))
             continue;
         take_damage(r, o, monster, 0);
+        o->hit_step = r->step + 1;
         hits++;
     }
     return hits;

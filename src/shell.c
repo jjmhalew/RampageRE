@@ -3009,7 +3009,9 @@ static void victory_next(Shell *s)
     Victory *v = &s->vi;
     v->video_n++;
     if (v->video_n == 1 || v->video_n == 2) {
-        event(s, SHELL_EVT_MOVIE, v->video_n == 1 ? "Victory" : "Credits", 0, 0);   /* setVictoryShown on the first */
+        if (v->video_n == 1)                         /* gCommon.setVictoryShown() first [R Victory.scr] */
+            event(s, SHELL_EVT_VICTORY_SHOWN, "", 0, 0);
+        event(s, SHELL_EVT_MOVIE, v->video_n == 1 ? "Victory" : "Credits", 0, 0);
         v->movie_on = 1;
         s->movie_clock = 0;
         v->movie_left = s->movie_time;

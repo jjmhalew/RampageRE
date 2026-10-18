@@ -496,10 +496,12 @@ void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float 
     }
     if (h->planted)
         climb_hand_snap(m, s, hand, h->tp);
-    if (h->valid) {                                  /* 0.3 (gp - 0x7130) of the last place stays */
+    if (h->valid) {                                  /* 0.3 (gp - 0x7130) of the last place stays, a frame of the
+                                                      * monster's update: a world step, 1/30 s [R 0x2B7800] */
+        float keep = powf(0.3f, dt * 30);
         for (int k = 0; k < 3; k++)
-            h->sp[k] = h->tp[k] + (h->sp[k] - h->tp[k]) * 0.3f;
-        ik_slerp(h->tq, h->sq, 0.3f, h->sq);
+            h->sp[k] = h->tp[k] + (h->sp[k] - h->tp[k]) * keep;
+        ik_slerp(h->tq, h->sq, keep, h->sq);
     }
     /* 0x322960: what the solver gets */
     if (hand_weight(h) <= 0)

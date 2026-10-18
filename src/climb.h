@@ -82,7 +82,7 @@ void hand_detach(Hand *h, float time);
  * along), between the building's foot and top less 1.5 */
 void climb_hand_snap(const Mount *m, const Scene *s, int hand, float pos[3]);
 /* each frame: the timer, the target following the clip's hand while it attaches (anim) and held to the face, then
- * the smoothing (0.7 of the target, 0.3 of the last place) */
+ * the smoothing (0.7 of the target, 0.3 of the last place, a world step of 1/30 s: 0.3^(dt x 30) a frame) */
 void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float anim[3], float dt);
 
 #endif

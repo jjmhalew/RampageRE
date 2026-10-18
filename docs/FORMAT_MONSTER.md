@@ -295,7 +295,8 @@ in this clip, whether it is coming down from the top.
   stroke past the limit lets canClimb answer 5. The monster is not put there at once: each frame its matrix goes 0.4
   of the way to the place 0x2D5870 gives (0x2E0D44 .. 0x2E0EE4: the translation by a lerp, the rotation by 0x167DE0),
   so a new place (getting on, coming down off the roof once `transitionFromBuildingTop` puts it at the point) is
-  eased into over a few frames [R]. The place is re-checked every frame: failing it, the monster is knocked off (slot
+  eased into over a few frames [R]. A frame of the monster's update is a world step, 1/30 s (FLOW_NOTES.md): main.c
+  takes 1 − 0.6^(30 dt) of the way a drawn frame (taken as 0.4 a drawn frame, a 60 Hz screen eased in twice as fast). The place is re-checked every frame: failing it, the monster is knocked off (slot
   31, or 73 when the building falls).
 - **canClimb(dv, dh)**: −4 not mounted. Sideways: −7 off the building, −5 a building close by, else the place 5 along
   is checked; 4 when it turns a corner (to or from a side), 3 a hop along the front. Up: 2 while the mount's height
@@ -355,7 +356,8 @@ no landing while that building's state (+0x14C) is 4 or more (cracking, shaking,
 through. The matrix goes back with the new z (vtable +0x24), then 0x2DC450.
 
 The movement by mode [R] (0x2DEBB0's switch, table 0x431290): modes 0, 2 and 4 the ground's (0x2DF6F0: the friction,
-then the ground follow 0x2E0330: z = 0.3 × ground + 0.7 × z a frame, the ground within 0.001), 1 the air's
+then the ground follow 0x2E0330: z = 0.3 × ground + 0.7 × z a frame, a world step, so 0.7^(30 dt) of the gap kept
+a drawn frame here (look.c), the ground within 0.001), 1 the air's
 (0x2DEBD8: drag, gravity), 3 0x2DF300, 5 on a face (0x2E03A8). Taking off (mode 2, `Jump_Start_1` from 0.102 to the
 velocity event) is thus on the ground, and the world's pass has no landing test for it (0x2E2B28). Nothing in modes
 0, 2 and 4 makes the monster fall: +0xAD8 is written only by the clips' mode events (0x2E7DE4), their velocity events

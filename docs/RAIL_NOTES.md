@@ -258,7 +258,10 @@ starting at a random share; at its end it starts again from that side. No block 
   `collide_obj_sphere`); an unarmed one gives TakeDamage(monster, 2.0, Collision (1)) every frame to an object without
   OnlyHitWithEffNodes, an armed one the attack's damage, type 0 (Concussive), the sphere search ending at the first
   blow. As here: rail_update tests the monster's spheres (ArmyMonster.spheres; its box only for a monster without
-  any), rail_hit each armed sphere against the shape. The knock-downs repeat every frame while the monster's move still says
+  any), rail_hit each armed sphere against the shape. The monster's object test runs in its update, a world step: at most
+  one TakeDamage an object a step, touch or blow (STREETOBJ_NOTES.md). Here the touches run in rail_update's steps and
+  the blows come each drawn frame, so a blow counts for the step to come and an object takes one a step (`hit_step`):
+  a blow on a crashed elevated car no longer crashed it again each frame of the attack. The knock-downs repeat every frame while the monster's move still says
   `Ground`: the viewer starts a reaction at its next clip event, not at once. A PushOutMonsters object's push is the
   game's (collide_monster, 0x2E2C50: out of the object's box along its least overlap; a train pushes a monster on
   its track ahead of it).
@@ -283,8 +286,10 @@ starting at a random share; at its end it starts again from that side. No block 
 
 ## Driving it from the viewer
 1. **Setup** (each block): `rail_new` with a host whose `find` is the army's (city_book_group) and `shape_box` the
-   city's; `rail_bind_army(r, army)`; `rail_load_block(r, BlockDef)` and `rail_activate(r, 1)` (the AIDef's
-   freighters); every ObjectInstance whose template is ours (`rail_kind_of` ≥ 0, or `rail_script_is_ours(script)` in
+   city's; `rail_bind_army(r, army)`; `rail_load_block(r, BlockDef)`, and `rail_activate(r, 1)` (the AIDef's
+   freighters) at BeginBlockNI's `gAIMgr.activate(1)` (the game's GE_AI_ACTIVATE; 0x334C40, the load, leaves gAIMgr's bit 8
+   off, as for the army and the bosses [R]): the block is built as the results start, its freighter's clock still till
+   then; every ObjectInstance whose template is ours (`rail_kind_of` ≥ 0, or `rail_script_is_ours(script)` in
    the block loader) goes to `rail_spawn(name, its place in the world, ZRotation, the ObjectInstance group)`: the
    block's own, and those of the blocks behind with LoadWhenWaiting (slot 1, y + 41) or LoadWhenDistant (slot 2,
    y + 82). army.c must skip the AIInstances whose template's script is `freighter.bsf`, as it skips the bosses.

@@ -64,7 +64,7 @@ played.
 | +0xE0 | u32 the cities' saved flags [7] (`Profile.getCityFlags(i)`; `isCityAvailable(i)` = & 0x80) |
 | +0xFC | the cities' start blocks [7] (`Profile.getStartBlock(i)`) |
 | +0x118 | byte: changed (0x4D7AC8); every setter raises it |
-| +0x119 | byte: `getVictoryShown` (`setVictoryShown` sets it and changed) |
+| +0x119 | byte: `getVictoryShown` (`setVictoryShown` sets it and changed: Victory.scr, as its first movie starts; no script and no engine code reads it, so only the saved byte and the changed mark show it) |
 | +0x11C | float: the sound volume (0x4D7ACC) |
 | +0x120 | float: the music volume |
 | +0x124 | byte: the vibration (0x4D7AD4) |

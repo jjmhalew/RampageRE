@@ -98,9 +98,9 @@ void monster_ground_velocity(float vel[3], float pos[3], float friction, float d
 /* mode 1 (0x2DEBD8): drag MONSTER_AIR_DRAG x |v|^2 x dt against the velocity, the move, then gravity (60) unless
  * setDisableGravity. pos may be NULL. */
 void monster_air_velocity(float vel[3], float pos[3], float dt, int no_gravity);
-/* modes 0, 2, 4 after the move (0x2E0330): the height eases onto the ground under it, 0.3 of the way per frame
- * (none while gravity is off), at once within 0.001 */
-float monster_ground_follow(float z, float ground, int no_gravity);
+/* modes 0, 2, 4 after the move (0x2E0330): the height eases onto the ground under it, 0.3 of the way a world step
+ * (1/30 s; dt the frame's), none while gravity is off, at once within 0.001 */
+float monster_ground_follow(float z, float ground, int no_gravity, float dt);
 
 /* the knocks of a hit (0x2D6A50). A blow's slide: the monster slides `dist` in `time` and stops: the velocity
  * dir x 2 dist / time, the returned friction 2 dist / time^2 (keep it until the next knock). dir 1 long. */

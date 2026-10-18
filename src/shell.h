@@ -183,6 +183,7 @@ enum {
                                      * and saveProfile: read them with shell_settings */
     SHELL_EVT_MOVIE,                /* a .pss would play here (name: "midway", "pipeworks", "digital", "intro",
                                      * "Victory", "Credits", "victory", "credits", "ballers") */
+    SHELL_EVT_VICTORY_SHOWN,        /* gCommon.setVictoryShown() (0x2C3610): Victory.scr, as its first movie starts */
     SHELL_EVT_EMULATOR,             /* gShell.startEmulator(arg): 0 Rampage, 1 Rampage World Tour (skipped) */
     SHELL_EVT_ATTRACT_GAME,         /* gShell.startAttractGame() (0x308460): the attract mode's demo game, chosen at
                                      * random into shell_game() (play type 0, every player the computer's); the
