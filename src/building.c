@@ -222,9 +222,20 @@ static int dent(Building *b, int row, int u, int amount)
     return 0;
 }
 
-/* the building's HP is gone: it is destroyed (0x2BB8B0) */
+/* a Scoring call for the host (Building.score) */
+static void score(Building *b, int event, int state)
+{
+    if (b->nscore < BUILDING_SCORES) {
+        b->score[b->nscore].event = (uint8_t)event;
+        b->score[b->nscore].state = (uint8_t)state;
+        b->nscore++;
+    }
+}
+
+/* the building's HP is gone: it is destroyed (0x2BB8B0), its Scoring's 0xF9 */
 static void destroyed(Building *b)
 {
+    score(b, BSCORE_BUILDING, 0);
     b->hp = 0;
     b->state = BUILDING_CRACKING;
     b->timer = 0;
@@ -256,21 +267,28 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     int o = b->live[s];
     BuildingCell *c = &b->cell[o][i];
     int old = c->hp, now = old - amt > 0 ? old - amt : 0, d = old - now;
+    shake_more(b);                                   /* 0x2BB9AC: before the test, a cell at 0 shakes it too */
     if (d == 0)
         return 0;
-    shake_more(b);
-    if (d >= b->hp && !b->no_autocollapse) {         /* the building's HP is gone: it falls */
-        destroyed(b);
-        return 1;
-    }
-    b->hp = d >= b->hp ? 0 : b->hp - d;
-    if (d >= b->floor_hp[o]) {                       /* the floor's HP is gone: it collapses */
-        b->floor_hp[o] = 0;
-        floor_falls(b, s + 1);
-        b->state = BUILDING_FLOOR_FALLING;
-        return 1;
-    }
-    b->floor_hp[o] -= d;
+    /* the building's HP, then the floor's: with disableAutoCollapse (+0x18C) neither runs out, each left as it was
+     * (0x2BBA08, 0x2BBAB4), the cell damaged all the same [R] */
+    if (d >= b->hp) {
+        if (!b->no_autocollapse) {                   /* the building's HP is gone: it falls */
+            destroyed(b);
+            return 1;
+        }
+    } else
+        b->hp -= d;
+    if (d >= b->floor_hp[o]) {
+        if (!b->no_autocollapse) {                   /* the floor's HP is gone: it collapses */
+            b->floor_hp[o] = 0;
+            score(b, BSCORE_FLOOR, 0);
+            floor_falls(b, s + 1);
+            b->state = BUILDING_FLOOR_FALLING;
+            return 1;
+        }
+    } else
+        b->floor_hp[o] -= d;
     c->hp = (uint8_t)now;
     int st = c->state;
     if (st <= 0) {
@@ -318,6 +336,7 @@ int building_hit(Building *b, const float p[3], float radius)
     if (b->state != BUILDING_STANDING)
         return 0;
     if (one_hit) {
+        score(b, BSCORE_NO_ONE, 0);
         building_destroy(b);
         return 1;
     }
@@ -369,14 +388,19 @@ int building_hit(Building *b, const float p[3], float radius)
     /* Building::hit's dents: at the cell's corner nearest the hit, 3 x round(radius / 2.5) times (0x2CC900) */
     int vrow = s + (int)floorf(fv + 0.5f), vcol = col + (int)floorf(fh + 0.5f);
     int u = face == FACE_LEFT ? vcol : face == FACE_FRONT ? vcol + 2 : vcol + b->width + 2;
-    int dented = 0;
     for (int i = 0, n = 3 * (int)floorf(radius / 2.5f + 0.5f); i < n; i++)
-        dented |= dent(b, vrow, u, 1);
+        dent(b, vrow, u, 1);
     if (radius < 2.0f)
-        return dented;
+        return 0;
     if (face == FACE_LEFT && col == b->depth - 1) { face = FACE_FRONT; col = 0; }        /* the corners count as the */
     if (face == FACE_RIGHT && col == 0) { face = FACE_FRONT; col = b->width - 1; }       /* front's end cells */
-    return (face == FACE_FRONT ? cell_damage(b, s, col, 2, 1, fv) : 0) | dented;
+    if (face != FACE_FRONT)
+        return 0;
+    int o = b->live[s], ci = building_cell_index(b, FACE_FRONT, col);
+    if (!cell_damage(b, s, col, 2, 1, fv))
+        return 0;
+    score(b, BSCORE_CELL, ci >= 0 ? b->cell[o][ci].state : 0);   /* 0x2CF7C0: the hit cell's state now */
+    return 1;
 }
 
 /* 0x2BBE80 (hitBuildingRoof's hit): the roof one state worse (0x2CF7C0 / 0x2BB580 on face 5, G+0x658, capped at 3);
@@ -390,6 +414,7 @@ int building_hit_roof(Building *b, const float p[3], float radius, int *col_out)
     if (b->state != BUILDING_STANDING)
         return 0;
     if (one_hit) {
+        score(b, BSCORE_NO_ONE, 0);
         building_destroy(b);
         return 1;
     }
@@ -435,9 +460,8 @@ static void landed(Building *b, int k)
         return;
     b->state = BUILDING_STANDING;
     int above = k - 1, below = k - 2, front = 2 * b->depth;
-    if (below < 0)
-        return;
-    for (int c = 0; c < b->width && b->state == BUILDING_STANDING; c++) {
+    for (int c = 0; below >= 0 && c < b->width && b->state == BUILDING_STANDING; c++) {   /* (the bottom storey's
+                                                      * fall crushes nothing: 0x2BD40C, on to the storey that fell) */
         int amt = above > 0 && above < b->n ? CRUSH[b->cell[b->live[above]][front + c].hp] : 2;
         cell_damage(b, below, c, amt, 0, 0);
     }

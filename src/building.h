@@ -57,6 +57,16 @@ enum {
 };
 #define BUILDING_DEBRIS 64
 
+/* a Scoring call (0x2BA4B0) the building made, for the host (Building.score) */
+enum {
+    BSCORE_CELL,          /* event 5: a front cell Building::hit itself took HP off (0x2BC7A0 .. 0x2BC834), with the
+                           * cell's state after the hit; not the spread's cells nor the crush's (0x2BB950 alone) */
+    BSCORE_FLOOR,         /* event 4: a storey's FloorHP gone, it comes down (0x2BBAD8) */
+    BSCORE_BUILDING,      /* 0xF9: its HP gone (0x2BBA28) or collapseBuilding (0x2BB8D4) */
+    BSCORE_NO_ONE         /* the one-hit cheat clears the attacker first (0x2BC208): no one's */
+};
+#define BUILDING_SCORES 32
+
 typedef struct {
     float min[3], max[3];                            /* in the world (the grid's +0x24 .. +0x38); max z drops as it falls */
     int width, depth, storeys;                       /* storeys: as built */
@@ -90,12 +100,16 @@ typedef struct {
      * column's edge on the ground (0x3101C0 with key 0x38, the point {4: the ground, along 5 x 1, 3, ..} on the
      * front) and Building_Pre_Collapse.edf 5 before its place (0x30FD40); the host plays them and clears it */
     int pre_collapse;
+    /* the Scoring calls its hits and falls made, in order: the host pays them to the attacker (+0x190) and sets nscore
+     * to 0 */
+    struct { uint8_t event, state; } score[BUILDING_SCORES]; int nscore;
 } Building;
 
 void building_init(Building *b, const float min[3], const float max[3], int width, int depth, int storeys);
 int building_cell_index(const Building *b, int face, int column);    /* -1 if out of range */
-/* a hit at the world point p (on or near one of its faces) with radius r (2.0 from a monster's attack); 1 if a cell
- * took damage. Only front cells take damage from hits, and only while it stands, as in the game. */
+/* a hit at the world point p (on or near one of its faces) with radius r (2.0 from a monster's attack); 1 if the
+ * front cell hit took damage (Building::hit's answer, s0 set only at 0x2BC838: not for the dents, a side face or a
+ * cell already at 0). Only front cells take damage from hits, and only while it stands, as in the game. */
 int building_hit(Building *b, const float p[3], float radius);
 /* cheat 071767 (profile PCH_40000000): every hit fells a standing building (0x2BC1F0) */
 void building_set_one_hit(int on);

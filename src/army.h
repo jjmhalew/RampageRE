@@ -108,6 +108,9 @@ typedef struct {                                     /* one weapon (a Weapon| gr
     float rot_min, rot_max, elev_min, elev_max;      /* the turn's and the pitch's ends (0x299640) */
     int clear_rot, clear_elev;                       /* RequiresRotation / ElevationClearToFire (flags 2, 1) */
     int recenter;                                    /* ReCenterWhenNoTarget (flag 0x10): back to 0, 0 without one */
+    int fire_once;                                   /* FireOnceCommited (flag 0x40, 0x299C6C): a tryFire that has not
+                                                      * fired yet latches the cluster (+0x74) */
+    int latched;                                     /* the latch: it fires with no aim or range test until it does */
     /* the nodes the cluster turns (Rotation / ElevationControlNode, +0x64 / +0x4C): the host draws the shape with
      * rot_node's pose turned by yaw about its own z and elev_node's by pitch about its own x (WWeaponProcAnimator
      * 0x298980), so the WeaponNode below them is the firing frame as it is */

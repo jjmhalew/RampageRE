@@ -107,7 +107,6 @@ typedef struct {                                      /* a building's cells and 
     int open_part;                                    /* its facade mesh's part of open windows (part 4), 0 none */
     Adornment *adorn; int nadorn;
     uint8_t broke[BUILDING_STOREYS][BUILDING_CELLS];  /* a front cell at state 2 or more, its window people told */
-    uint8_t seen[BUILDING_STOREYS][BUILDING_CELLS];   /* each cell's state when its effects were last played */
     int seen_collapse, seen_state;
     Group props;                                      /* its template (DefBuildingProps' Scoring, ...) */
     int hitter;                                       /* the monster slot that hit it last (its Scoring's points) */

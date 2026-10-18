@@ -671,6 +671,7 @@ void army_cluster_read(ArmyWeapon *w, Group cl)
     w->clear_rot = group_num(cl, "RequiresRotationClearToFire", 1) != 0;
     w->clear_elev = group_num(cl, "RequiresElevationClearToFire", 1) != 0;
     w->recenter = group_num(cl, "ReCenterWhenNoTarget", 0) != 0;
+    w->fire_once = group_num(cl, "FireOnceCommited", 0) != 0;
     w->rot_node = group_str(cl, "RotationControlNode");
     w->elev_node = group_str(cl, "ElevationControlNode");
 }
@@ -1280,9 +1281,16 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
     for (int i = 0; i < u->nw; i++) {
         ArmyWeapon *w = &u->w[i];
         float from[3], dir[3], F[3][3];
-        int aimed = weapon_aim(a, u, w, tp, has, from, dir, F, dt);
-        int may = has && u->weapons_on && w->on && aimed && dist3(from, tp) <= w->range;
-        if (u->kind == AK_TROOP || u->kind == AK_WINDOW) {   /* [R 0x30EC10] an actor fires only within its clip's */
+        int aimed = weapon_aim(a, u, w, tp, has, from, dir, F, dt), actor = u->kind == AK_TROOP || u->kind == AK_WINDOW;
+        /* [R 0x30EC10] an actor's weapon tests no MaxFiringRange (+0x24: only the clusters read it, 0x299184; nor do
+         * tryFire 0x2963C0 / 0x295C70 or the charge 0x297760) */
+        int may = has && u->weapons_on && w->on && aimed && (actor || dist3(from, tp) <= w->range);
+        /* [R 0x29917C .. 0x2991F4] a cluster's weapon charging (+0xF6) or its cluster latched (+0x74) goes on to
+         * tryFire with no aim or range test, while it has a target and its weapons are on */
+        if (!actor && has && u->weapons_on && w->on && (w->latched || w->charging))
+            may = 1;
+        int ammo = w->ammo;
+        if (actor) {                                 /* [R 0x30EC10] an actor fires only within its clip's */
             float at = u->anim_len > 0.001f ? u->anim_time / u->anim_len : 0;   /* AnimPosMin .. Max (0x30C020) */
             if (at < w->anim_min || at > w->anim_max)
                 may = 0;
@@ -1291,6 +1299,9 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
                 beam_hold(a, w);
         }
         weapon_tick(a, u, w, may, from, dir, (const float (*)[3])F, point ? -1 : u->target, dt);
+        if (!actor && may)                           /* tryFire's answer: fired, the latch off; else FireOnceCommited
+                                                      * latches it (0x2991CC .. 0x2991F0) */
+            w->latched = w->ammo < ammo ? 0 : w->fire_once;
     }
 }
 
@@ -3360,8 +3371,8 @@ static void finalbomber_damage(Army *a, ArmyUnit *u, int monster)
     u->mv.kind = 2;
     u->cm_on = 0;
     effect_stop(a, (int)u->aux[0]);
-    u->pulse_delay = 0;
-    weapons_enable(u, 0);
+    u->pulse_delay = 0;                              /* (its weapons left on: FinalBomber.bsf's TakeDamage has no
+                                                      * enableWeapons(0)) */
     add_stats(a, u, monster, 2);
     u->state = 2;
 }
@@ -4057,7 +4068,8 @@ static void persons_update(Army *a, float dt)
         lob(from, tp, g->w.velocity, 9.81f * g->w.gravity, dir);   /* the throw's aim: see weapon_aim */
         int in_clip = g->clip >= g->w.anim_min && g->clip <= g->w.anim_max;
         a->person_tag = g->tag;
-        weapon_tick(a, NULL, &g->w, g->on && in_clip && m >= 0 && dist3(from, tp) <= g->w.range, from, dir, NULL, m, dt);
+        weapon_tick(a, NULL, &g->w, g->on && in_clip && m >= 0, from, dir, NULL, m, dt);   /* (no MaxFiringRange:
+                                                      * 0x30EC10 does not read it) */
         a->person_tag = 0;
     }
 }

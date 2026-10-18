@@ -2242,7 +2242,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         float lo[3] = { cx - width * CELL / 2, cy - depth * CELL / 2, 0 };
         float hi[3] = { cx + width * CELL / 2, cy + depth * CELL / 2, GROUND_FLOOR + STOREY * (float)nst + 1.5f };
         building_init(&sb->b, lo, hi, width, depth, nst);
-        sb->hitter = 0;
+        sb->hitter = -1;                             /* +0x190: no attacker yet */
         sb->b.row = (int)group_num(inst, "Row", 0);
         sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
         sb->b.seed = *count;
@@ -2257,7 +2257,6 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->moving = 0;
         sb->adorn = NULL;
         sb->nadorn = 0;
-        memset(sb->seen, 0, sizeof sb->seen);
         sb->seen_collapse = -1;
         sb->props = t;
         sb->inst = inst;
@@ -3738,6 +3737,36 @@ void scene_block_left(Scene *s)
                 s->instances[i].hidden = 1;
 }
 
+/* the Scoring calls the building made (DefBuildingProps, 0x2BA4B0), in its order, paid to its attacker (+0x190):
+ * a cell hit, a floor down, the whole building (the entry of every front cell of every storey standing, 0x2BA88C ..
+ * 0x2BA930); a floating number at the attacker's place (+0x2C, 0x2BAAD0) [R] */
+static void building_scoring(Scene *s, SceneBuilding *sb, int i)
+{
+    for (int q = 0; q < sb->b.nscore; q++) {
+        int ev = sb->b.score[q].event;
+        if (ev == BSCORE_NO_ONE) {
+            sb->hitter = -1;
+            continue;
+        }
+        if (!s->army)
+            continue;
+        const Instance *in = mon_inst(s, sb->hitter);
+        float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
+        if (in)
+            memcpy(at, &in->base.m[12], sizeof at);
+        int fronts[BUILDING_STOREYS * BUILDING_CELLS], nf = 0;
+        for (int ls = 0; ev == BSCORE_BUILDING && ls < sb->b.n; ls++)
+            for (int col = 0; col < sb->b.width; col++) {
+                int ci = building_cell_index(&sb->b, FACE_FRONT, col);
+                fronts[nf++] = ci >= 0 ? sb->b.cell[sb->b.live[ls]][ci].state : 0;
+            }
+        army_score_building(s->army, sb->hitter, i, sb->props, ev == BSCORE_CELL ? ARMY_SCORE_CELL :
+                            ev == BSCORE_FLOOR ? ARMY_SCORE_FLOOR : ARMY_SCORE_BUILDING, sb->b.score[q].state,
+                            hitter_move(s, sb), sb->b.width, sb->b.n, fronts, nf, at);
+    }
+    sb->b.nscore = 0;
+}
+
 void scene_buildings_update(Scene *s, float dt)
 {
     s->water_acc += dt;                              /* the water, a world step at a time: 0x338180 -> 0x336DC0 in */
@@ -3798,6 +3827,7 @@ void scene_buildings_update(Scene *s, float dt)
             float in[3] = { 0, 1, 0 };
             scene_fx(s, sb->fx_wall_small, sb->b.hit_debris[k], in);
         }
+        building_scoring(s, sb, (int)i);
         sb->b.nhit_debris = 0;
         if (sb->b.pre_collapse) {                    /* about to fall: the dust at its foot [R 0x2BD890 .. 0x2BD934] */
             float in[3] = { 0, 1, 0 };
@@ -3834,29 +3864,8 @@ void scene_buildings_update(Scene *s, float dt)
             scene_fx(s, name, at, in);
         }
         sb->b.ndebris = 0;
-        for (int ls = 0; ls < sb->b.n; ls++)   /* the cells' scoring as their state rises */
-            for (int col = 0; col < sb->b.width; col++) {
-                int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];
-                if (ci < 0)
-                    continue;
-                int st = sb->b.cell[o][ci].state, was = sb->seen[o][ci];
-                if (st <= was)
-                    continue;
-                sb->seen[o][ci] = (uint8_t)st;
-                if (s->army && sb->b.state == BUILDING_STANDING) {   /* a cell hit: Scoring.cell[state] */
-                    float at[3] = { sb->b.min[0] + CELL * (float)col + CELL / 2, sb->b.min[1],
-                                    sb->b.min[2] + GROUND_FLOOR + STOREY * (float)ls };
-                    army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_CELL, st, hitter_move(s, sb),
-                                        sb->b.width, sb->b.n, NULL, 0, at);
-                }
-            }
         if (sb->b.collapse > 0 && sb->b.collapse != sb->seen_collapse) {   /* a floor comes down */
             int k = sb->b.collapse;
-            if (s->army && sb->b.state == BUILDING_FLOOR_FALLING) {
-                float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
-                army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_FLOOR, 0, hitter_move(s, sb),
-                                    sb->b.width, sb->b.n, NULL, 0, at);
-            }
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
                             sb->b.min[2] + GROUND_FLOOR + STOREY * (float)(k - 1) }, in[3] = { 0, 1, 0 };
             scene_fx(s, sb->fx_floor, at, in);
@@ -3882,16 +3891,6 @@ void scene_buildings_update(Scene *s, float dt)
             }
         }
         sb->seen_collapse = sb->b.collapse;
-        if (s->army && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING) {   /* destroyed */
-            int fronts[BUILDING_CELLS], nf = 0;
-            for (int col = 0; col < sb->b.width && nf < BUILDING_CELLS; col++) {
-                int ci = building_cell_index(&sb->b, FACE_FRONT, col), top = sb->b.n > 0 ? sb->b.live[sb->b.n - 1] : 0;
-                fronts[nf++] = ci >= 0 ? sb->b.cell[top][ci].state : 0;
-            }
-            float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1], sb->b.min[2] };
-            army_score_building(s->army, sb->hitter, (int)i, sb->props, ARMY_SCORE_BUILDING, 0, hitter_move(s, sb),
-                                sb->b.width, sb->b.n, fronts, nf, at);
-        }
         if (s->traffic && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING)
             vehicle_building_gone(s->traffic, (int)i);   /* onBuildingDestruction: its roof rockets fly */
         sb->seen_state = sb->b.state;

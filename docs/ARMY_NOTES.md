@@ -89,8 +89,14 @@ else 0.
 - **Objects:** the WeaponCluster turns towards the target's aim point, lifted for the shot's fall (0x293050:
   Velocity, Gravity). Rotation and elevation step at Rate × dt, each within ±Range in degrees (0x298E70 / 0x298F40).
   The weapon fires when the turret is on target, unless `RequiresRotation/ElevationClearToFire` is 0, and the target
-  is within MaxFiringRange. `FireOnceCommited` latches the fire.
-- **Actors:** they fire while `enableWeapon(1)` is on and `setWeaponTarget` is set. The actor's weapon is updated
+  is within MaxFiringRange (0x299184). A weapon already charging (+0xF6), or one whose cluster is latched (+0x74), goes
+  on to tryFire with neither test while the cluster has a target and its weapons are on; `FireOnceCommited` (flag
+  0x40) latches the cluster at a tryFire that has not fired yet, and the latch clears when it fires (0x2991CC ..
+  0x2991F0). So a tank (every tank template has it; TankWeapon's ChargeTime 2 + FiringOffset 3) that has had the
+  monster in its cone once fires about 5 s later wherever the monster went. Here `ArmyWeapon.fire_once` / `latched`.
+- **Actors:** they fire while `enableWeapon(1)` is on and `setWeaponTarget` is set, at any distance: 0x30EC10 reads
+  only the definition's Gravity and Velocity, never MaxFiringRange, and nor do tryFire (0x2963C0 / 0x295C70) or the
+  charge (0x297760). The actor's weapon is updated
   every frame, enabled or not (0x30EC10 ends in the weapon's vtable +0x6C with the enable byte +0x0), so a disabled
   one keeps counting down to its floor and is ready again when re-enabled; it goes with its actor. The punks
   (WalkingAroundPerson.bsf) enable theirs at the end of `Throw` and disable it 0.25 s later (`disableWeaponDelay`
@@ -549,17 +555,24 @@ MultiFloor { Base 500, ..., Collapse 2500 }
 Floating = 100
 ```
 
-- **A cell hit:** cell[its state after the hit].
+- **A cell hit:** cell[its state after the hit], on every hit that takes HP off the front cell Building::hit meets
+  (0x2BC7A0 .. 0x2BC834), so a cell hit five times pays 10 + 10 + 25 + 25 + 50. The cells the hit spreads to and the
+  ones a landing floor crushes (0x2BB950 alone) pay nothing.
 - **The first falling floor:** floor.Base × the front's width. It also starts a chain step of MultiFloor's entry
   for the monster's state, which in practice is Base 500. The hit that dropped the floor pays this instead of its
   cell.
 - **Each next floor of the chain:** the chain sum so far, which then grows by the step. The second floor says
   `v_combo`.
-- **The building:** Base × width × storeys standing, plus the Building entry for each front cell's state. If a floor
-  fell just before, it adds MultiFloor.Collapse (or floor.Collapse) and `v_super`.
-- **Display:** an award of `Floating` (100) or more shows a floating number.
+- **The building:** Base × width × storeys standing, plus the Building entry for the state of each front cell of
+  every storey standing (0x2BA88C .. 0x2BA930). If a floor fell just before, it adds MultiFloor.Collapse (or
+  floor.Collapse) and `v_super`. Its HP running out and collapseBuilding (0x2BB8B0) both pay it.
+- **No attacker** (+0x190 empty: a thrown object's hit, a shot's, the one-hit cheat's, a building no monster has hit
+  yet): nothing is paid and the chain is reset.
+- **Display:** an award of `Floating` (100) or more shows a floating number at the attacker's place (+0x2C), 5 nearer
+  the camera (0x2BAAD0).
 
-`army_score_building` keeps the chain per building.
+The building records each Scoring call as it makes it (building.c `Building.score`, in order) and city.c
+`building_scoring` pays them; `army_score_building` keeps the chain per building.
 
 ## Not traced (stand-ins in army.c)
 - **Random numbers:** `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R]; the frame step is the world's, 1/30

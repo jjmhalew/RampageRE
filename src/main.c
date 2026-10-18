@@ -1587,12 +1587,17 @@ static int answer(void *ctx, const char *call, const float *a)
  * front (+y), 5 its roof. */
 /* setReaction(slot) (0x2E1AD0): taken unless the monster is defeated (+0xA59, set with its slot 67 at 0 HP, 0x2D95F4,
  * cleared by the respawn, 0x2D3898) or shrunk below 0.3 (+0xA78, the defeat's setDynamicScale); the interruptible
- * byte +0xAA2 it asks first is always set in play [R]. 1 when taken */
+ * byte +0xAA2 it asks first is always set in play [R]. With the slot's entry there (+0x110 not 0) 0x2DA570(monster, 0):
+ * what it holds is let go of, throwObject(vel (0, 10, 10), not eaten) (0x2DA698 .. 0x2DA6B8), for every caller (the
+ * scripts' setReaction with a2 0 at 0x2ABBC8, the blows, the shots, the rage, the defeats) [R]. 1 when taken */
+static void throw_held(Mon *mo, int eat, float x, float y, float z);
 static int set_reaction(Mon *mo, int slot)
 {
     if (mo->defeated || mo->scale < 0.3f)
         return 0;
     mo->pending_slot = slot;
+    if (moves_slot(&mo->graph, slot, mo->column) >= 0)
+        throw_held(mo, 0, 0, 10, 10);
     return 1;
 }
 
@@ -2757,9 +2762,9 @@ static void hit_spheres(Mon *mo)
         if (v->army)                                 /* and the army's units: the attack's damage, once an attack */
             army_hit(v->army, mo->slot, c, c[3], atk->damage, atk->seq);
         if (v->veh)                                  /* and the vehicles and rockets */
-            vehicle_hit(v->veh, mo->slot, c, c[3], 20);
+            vehicle_hit(v->veh, mo->slot, c, c[3], atk->damage);
         if (v->rail)                                 /* and the trains, cable cars and freighters */
-            rail_hit(v->rail, mo->slot, c, c[3], 20);
+            rail_hit(v->rail, mo->slot, c, c[3], atk->damage);
         if (v->boss)                                 /* and the bosses */
             boss_hit(v->boss, mo->slot, c, c[3], atk->damage, atk->seq);   /* the record's damage, once a record */
         if (v->parade)                               /* and the balloons, bikers and food carts */
@@ -2768,7 +2773,8 @@ static void hit_spheres(Mon *mo)
         if (v->sobj) {                               /* and the street and roof objects (TakeDamage, type 0) */
             StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f,
                                  mo->graph.states[mo->run.state].name };
-            streetobj_hit(v->sobj, mo->slot, &me, c, c[3], 20, atk->seq);
+            streetobj_hit(v->sobj, mo->slot, &me, c, c[3], atk->damage, atk->seq);   /* the record's +0x2C (0x2E268C):
+                                                      * Crane.bsf's HitPoints 5 take it */
         }
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, mo->slot, c, c[3], mo->heading, mo->graph.states[mo->run.state].name);
@@ -3784,8 +3790,7 @@ static void monster_stats(Mon *mo, float health, float energy)
 {
     if (edible_power_add_stats(&mo->power, &mo->hp, mon_hp_max(mo), health, energy, others_full(mo))) {
         edible_power_start_rage(&mo->power, others_full(mo));
-        if (!mo->defeated)
-            mo->pending_slot = 54;
+        set_reaction(mo, 54);
         rage_started(mo);
         if (getenv("RAMPAGE_TRACE"))
             printf("  rage\n");
@@ -3867,10 +3872,12 @@ static void edible_step(Viewer *v, float dt)
                     force_state(mo, e->name);
                 break;
             case EE_SPEED: edible_power_speed(&mo->power, e->amount, e->v[0]); break;
-            case EE_STATS:                           /* the score through the army, HP and energy here */
+            case EE_STATS:                           /* gCommon.addStats once (0x2C51A0): through the army (its
+                                                      * AE_STATS_* give the HP and energy), else here */
                 if (v->army)
                     army_add_stats(v->army, mo->slot, e->tmpl, e->level);
-                monster_stats(mo, e->v[0], e->v[1]);
+                else
+                    monster_stats(mo, e->v[0], e->v[1]);
                 break;
             case EE_BANNER:
                 if (v->hud)
@@ -3967,12 +3974,8 @@ static int monster_hittable(const Mon *mo)
  * monster is out of the air (mon_step, 0x2E68D0) [R] */
 static void monster_take(Mon *mo, const char *name, float amount, int level, int slot)
 {
-    if (slot >= 0) {
+    if (slot >= 0)                                   /* (what it holds let go of: set_reaction) */
         set_reaction(mo, slot);
-        /* [R] with the reaction asked (+0x110) 0x2DA570(monster, 0): what it holds is let go of, throwObject(vel
-         * (0, 10, 10), not eaten): a person or a soldier smashed away, not left in a hand that no longer holds it */
-        throw_held(mo, 0, 0, 10, 10);
-    }
     if (level == 1 || level == 2)
         mon_rumble(mo, level == 1 ? 400 : 800);
     mo->hp = fmaxf(0, mo->hp - amount);
@@ -4066,6 +4069,12 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
                 break;
             case VE_SOUND: obj_sound(v, OS_VEHICLE, e->obj, e->name, e->level, e->pos); break;   /* add3DSfx */
             case VE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
+            case VE_BUILDING_HIT:                    /* the fire truck's stream: Building::hit, no one's */
+                if ((uint32_t)e->obj < v->scene.nbuildings && v->scene.buildings[e->obj].b.state == BUILDING_STANDING) {
+                    v->scene.buildings[e->obj].hitter = -1;
+                    building_hit(&v->scene.buildings[e->obj].b, e->pos, e->amount);
+                }
+                break;
             case VE_REACTION: set_reaction(mo, e->level); break;
             case VE_FART: mon_fart_later(mo, e->amount); break;
             case VE_SET_VEL: memcpy(mo->vel, e->v, sizeof mo->vel); break;
@@ -5422,15 +5431,6 @@ static void mon_step(Mon *mo, float dt)
         if (st->flags & NODE_STEER)
             mo->heading += steer(mo, st, lx, ly, dt);
         scene_monster_blend_step(&v->scene, mo->slot, dt);
-        if (!mo->defeated && mo->hp <= 0 && mo->pending_slot < 0 && mo->mode != MODE_AIRBORNE) {
-            /* [R 0x2E68D0 .. 0x2E6A4C] the update's own test: at 0 HP, no reaction asked (+0x110), not in the air
-             * (+0xAD8 1) and not yet defeated (+0xA59), the defeat as TakeDamage's (0x2D9500 .. 0x2D95F4): its slot
-             * (67), the velocity 0, +0xA59 = 1. So the HP the scripts take (addHitPoints 0x2DA530: the bosses, the
-             * trains, the rockets) fells it too, rather than leaving it standing at 0 */
-            mo->defeated = 1;
-            mo->pending_slot = 67;
-            memset(mo->vel, 0, sizeof mo->vel);
-        }
         if (ev != 0 && mo->pending_slot >= 0) {       /* the army's hit: the reaction slot (0x2D6A50), its column's;
                                                       * the mount stays (0x2D6A50 does not unmount: a face's reaction
                                                       * holds on, any other lets go at the next mount check, mode 5 no
@@ -5552,6 +5552,17 @@ static void mon_step(Mon *mo, float dt)
              * event and fires, in order, every one at or before the start, so a state entered part-way (phase
              * kept) still gets its set-up (mode, column) */
             clip_events(mo, to, -1, mo->run.time);
+            if (ev != 0 && !mo->defeated && mo->hp <= 0 && mo->pending_slot < 0 && mo->mode != MODE_AIRBORNE) {
+                /* [R 0x2E68A0 .. 0x2E6A4C] the state command's own test, as a state starts that is not a reaction
+                 * (the command's +0xC; a forced start, ev 0 here) with none asked (+0x110): at 0 HP, not in the air
+                 * (+0xAD8 1) and not yet defeated (+0xA59), the defeat as TakeDamage's (0x2D9500 .. 0x2D95F4): the
+                 * velocity 0, its slot (67, setReaction's rules: what it holds let go of), +0xA59 = 1. So the
+                 * reaction to the blow that took the last HP plays out first, and the HP the scripts take
+                 * (addHitPoints 0x2DA530: the bosses, the trains, the rockets) fells it too at its next state */
+                memset(mo->vel, 0, sizeof mo->vel);
+                set_reaction(mo, 67);
+                mo->defeated = 1;
+            }
         }
         if (mon_in(mo) && mo->feet.anchor >= 0) {   /* the foot lock (0x33BF10): the root eases onto
                                                       * the planted foot as the clip has it at its time 0 */
@@ -5807,9 +5818,10 @@ static void play_step(Viewer *v, float dt, float aspect)
             Mon *mo = ev_mon(v, ev[i].monster);
             if (ev[i].type == PE_MONSTER_HP)
                 mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + ev[i].amount));
-            else if (ev[i].type == PE_MONSTER_KNOCK) {   /* setVel(v, world), setReaction(2) */
-                memcpy(mo->vel, ev[i].v, sizeof mo->vel);
-                mo->mode = MODE_AIRBORNE;
+            else if (ev[i].type == PE_MONSTER_KNOCK) {   /* setVel(v, world), setReaction(2) (Person_Child.bsf,
+                                                          * Monsters.bsf doPriestReaction) [R] */
+                memcpy(mo->vel, ev[i].v, sizeof mo->vel);   /* (setVel 0x2E74F0 leaves the mode: the reaction's) */
+                set_reaction(mo, 2);
             }
             if (getenv("RAMPAGE_TRACE"))
                 printf("  people event %d (%s) from %d\n", ev[i].type, ev[i].name ? ev[i].name : "-", ev[i].who);
@@ -6252,6 +6264,12 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
         }
         if (_stricmp(word, "rage") == 0) {           /* the energy full through addStats: the rage starts */
             monster_stats(mo, 0, 100);
+            continue;
+        }
+        if (_stricmp(word, "hurt") == 0) {           /* hurt amount: TakeDamage on the monster (no knock), its level
+                                                      * by the amount */
+            float knock[3] = { 0, 0, 0 }, from[3] = { mo->mx, mo->my - 5, mo->mz };
+            monster_hit(mo, "hurt", seconds, take_damage_level(mo, seconds), knock, from);
             continue;
         }
         if (_stricmp(word, "monfn") == 0) {          /* monfn name: callMonsterFunction (doFart, doBarf) */

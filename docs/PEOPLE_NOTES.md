@@ -239,9 +239,11 @@ The script's `onThrow(monster, eat)` always runs. After that:
     - A 1 in 5 chance of `Monsters::timedDoFart` 2 s later.
   - If not eaten, the script calls `smash` → `smashObject` (0x2B2F50).
 - **Any let-go is a throw**: the many `throwObject(0, 0, 2, −2)` at the start of jumps and reactions smash a held
-  person. A hit that asks a reaction does it too, whatever the clip: TakeDamage (0x2D6A50, each `+0x110` it sets)
-  calls 0x2DA570(monster, 0), which throws what is held, not eaten, at (0, 10, 10) in the monster's frame [R]
-  (`throw_held` in main.c's `monster_take`).
+  person. Any reaction does it too, whatever the clip: setReaction (0x2E1AD0, from the scripts with a2 0 at
+  0x2ABBC8), TakeDamage (0x2D6A50, each `+0x110` it sets) and both defeats (0x2D95BC, the state command's 0x2E6A14)
+  call 0x2DA570(monster, 0), which throws what is held, not eaten, at (0, 10, 10) in the monster's frame [R]
+  (`throw_held` in main.c's `set_reaction`): a blow, a shot, a train's or rocket's knock-down, the child's and the
+  priest's, the rage starting.
 - **The face**: the eating clips set the expression themselves (`faceAnim` 13 Chomp, then 10 Chew, with a belch 5 s
   later).
 

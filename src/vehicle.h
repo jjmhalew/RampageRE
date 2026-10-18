@@ -120,6 +120,8 @@ enum {
     VE_SHAPE,         /* obj's model is now `name` (also in obj->shape) */
     VE_HIT,           /* as army.h's AE_HIT: the fire truck's beam reached monster `monster`: amount damage, level the
                        * ReactionLevel, v the knock, pos where, dir the beam's way; route it through army_reaction_slot */
+    VE_BUILDING_HIT,  /* the fire truck's beam met building `obj`: its TakeDamage, Building::hit (0x33B440 -> 0x296C70
+                       * -> 0x2BC150) at pos with amount, no one's (+0x190 cleared) */
     VE_REACTION,      /* monster.setReaction(level): slot `level` */
     VE_SET_VEL,       /* monster.setVel(v, 0): the monster is thrown with velocity v */
     VE_HP,            /* monster.addHitPoints(amount): HP + amount within 0 .. its most, nothing at 0 HP (0x2DA530) */

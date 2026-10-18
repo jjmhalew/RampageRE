@@ -1122,7 +1122,7 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
                 from[k] += dir[k] * tail;
             reach -= tail;
             (void)tdist;                             /* [R 0x295750] the beam is not cut at its target */
-            int mon = -1;
+            int mon = -1, bld = -1;
             float t = !v->cw && reach > 0.001f ? ray_monster(v, from, dir, reach, &mon) : -1;
             /* [R 0x295750] the beam's ray is the world's (include -1, exclude 8 with the truck flagged 8 while it is
              * cast): the street, the buildings and every object stop it, the nearest wins */
@@ -1141,7 +1141,8 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
                     if (h.obj >= 0 && COLLIDE_TAG_OWNER(v->cw->o[h.obj].tag) == COLLIDE_OWN_MONSTER) {
                         int m = COLLIDE_TAG_INDEX(v->cw->o[h.obj].tag);
                         mon = m < v->nm ? m : -1;
-                    }
+                    } else if (h.obj >= 0 && COLLIDE_TAG_OWNER(v->cw->o[h.obj].tag) == COLLIDE_OWN_BUILDING)
+                        bld = COLLIDE_TAG_INDEX(v->cw->o[h.obj].tag);
                 }
             }
             if (t >= 0 && v->host.rod)
@@ -1150,10 +1151,17 @@ static void ft_weapon(Vehicles *v, VehObj *o, float dt)
             memcpy(o->beam.from, from, sizeof from);
             memcpy(o->beam.dir, dir, sizeof dir);
             o->beam.length = t >= 0 ? t : reach > 0 ? reach : 0;
-            if (t >= 0 && mon >= 0) {
+            if (t >= 0) {
+                /* [R 0x295A2C] the first touch (ImpactDamage) is spent on whatever the stream meets first: the
+                 * street, a building, a monster; then DamagePerSec x dt */
                 float dmg = o->w.first ? o->w.damage : o->w.dps > 0 ? o->w.dps * dt : 0;
                 o->w.first = 0;
-                if (dmg > 0) {
+                if (dmg > 0 && bld >= 0) {
+                    float at[3] = { from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t };
+                    VehicleEvent *e = emit(v, VE_BUILDING_HIT, bld, o->w.name, at);
+                    e->amount = dmg;
+                }
+                if (dmg > 0 && mon >= 0) {
                     float at[3] = { from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t };
                     VehicleEvent *e = emit(v, VE_HIT, idx(v, o), o->w.name, at);
                     float k[2] = { dir[0], dir[1] }, kl = sqrtf(k[0] * k[0] + k[1] * k[1]);
