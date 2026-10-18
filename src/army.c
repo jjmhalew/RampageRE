@@ -2849,7 +2849,10 @@ static void troop_pickup(Army *a, ArmyUnit *u)       /* onPickup */
     troop_notify(a, u);
     u->state = 32;
     weapons_enable(u, 0);
-    sound(a, u, ustr(u, "VoiceGrabbed"));
+    if (ustr(u, "VoiceGrabbed")) {                   /* remove3DSfx(-1): its own lines cut first [R SWAT.scr] */
+        emit(a, AE_SOUND, who(a, u), NULL, u->pos)->level = 0;
+        sound(a, u, ustr(u, "VoiceGrabbed"));
+    }
 }
 
 static void troop_damage(Army *a, ArmyUnit *u, int monster)
