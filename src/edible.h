@@ -220,10 +220,13 @@ int edible_power_update(EdiblePower *p, float dt, float hp);
 /* Monsters.bsf's ability checks: hasRoarEnergy, hasRoarAttack, hasChargePunch, hasJumpSmash, canStartRage
  * (others_full: no), inRageMode; -1 for any other call */
 int edible_power_answer(const EdiblePower *p, const char *call);
-void edible_power_use_roar(EdiblePower *p);         /* useRoarEnergy: 15 off, not while raging */
-/* hitBuildingFront's energy (Monsters.bsf): a hit that landed with energy_gain (kinds 0 .. 2 and 6) gives 2, not while
- * raging; in the air it stops at 99. Returns 1 when the rage is to start (Monsters::startRage). While raging the
- * script hits the building twice (hitBuildingPt before and in the test) */
-int edible_power_hit_building(EdiblePower *p, int energy_gain, int airborne, int others_full);
+/* useRoarEnergy (call: the clip's "<Name>::useRoarEnergy"): its cost off (15; Furby's 30, Leon's 8), not while raging */
+void edible_power_use_roar(EdiblePower *p, const char *call);
+/* hitBuildingFront's energy (Monsters.bsf): a hit that landed with energy_gain (kinds 0 .. 2 and 6) gives amount (2;
+ * Dick's 2 - 1, Philbert's 2 + 1.5: edible_power_hit_gain), not while raging; in the air it stops at 99. Returns 1
+ * when the rage is to start (Monsters::startRage). While raging the script hits the building twice (hitBuildingPt
+ * before and in the test) */
+int edible_power_hit_building(EdiblePower *p, int energy_gain, float amount, int airborne, int others_full);
+float edible_power_hit_gain(const char *call);      /* that energy for the clip's "<Name>::hitBuildingFront" */
 
 #endif

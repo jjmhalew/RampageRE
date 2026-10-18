@@ -919,14 +919,34 @@ int edible_power_update(EdiblePower *p, float dt, float hp)
     return 0;
 }
 
+/* [R Furby.scr, Leon.scr] the energy a roar needs and costs: Monsters.bsf's 15; Furby's own 30, Leon's own 8 (their
+ * clips call "Furby::hasRoarEnergy" and the rest) */
+static float roar_cost(const char *call)
+{
+    if (call && !strncmp(call, "Furby::", 7))
+        return 30;
+    if (call && !strncmp(call, "Leon::", 6))
+        return 8;
+    return 15;
+}
+
+float edible_power_hit_gain(const char *call)       /* [R Dick.scr, Philbert.scr] 2 - 1, 2 + 1.5 */
+{
+    if (call && !strncmp(call, "Dick::", 6))
+        return 2.0f - 1.0f;
+    if (call && !strncmp(call, "Philbert::", 10))
+        return 2.0f + 1.5f;
+    return 2;
+}
+
 int edible_power_answer(const EdiblePower *p, const char *call)
 {
     if (!call)
         return -1;
     const char *colon = strstr(call, "::"), *f = colon ? colon + 2 : call;
     int all = (p->cheats & 8) != 0;
-    if (same_text(f, "hasRoarEnergy"))               /* [R] Monsters.bsf */
-        return (p->energy >= 15 && ((p->abilities & 4) || all)) || p->rage;
+    if (same_text(f, "hasRoarEnergy"))               /* [R] Monsters.bsf, Furby.bsf, Leon.bsf */
+        return (p->energy >= roar_cost(call) && ((p->abilities & 4) || all)) || p->rage;
     if (same_text(f, "hasRoarAttack"))
         return (p->abilities & 4) || all || p->rage;
     if (same_text(f, "hasChargePunch"))
@@ -940,20 +960,21 @@ int edible_power_answer(const EdiblePower *p, const char *call)
     return -1;
 }
 
-void edible_power_use_roar(EdiblePower *p)
+void edible_power_use_roar(EdiblePower *p, const char *call)
 {
+    float cost = roar_cost(call);
     if (!p->rage)                                    /* [R] useRoarEnergy */
-        p->energy = p->energy > 15 ? p->energy - 15 : 0;
+        p->energy = p->energy > cost ? p->energy - cost : 0;
 }
 
-int edible_power_hit_building(EdiblePower *p, int energy_gain, int airborne, int others_full)
+int edible_power_hit_building(EdiblePower *p, int energy_gain, float amount, int airborne, int others_full)
 {
     if (!energy_gain || p->rage)                     /* [R] Monsters::hitBuildingFront */
         return 0;
-    if (p->energy + 2 >= 100 && airborne) {
+    if (p->energy + amount >= 100 && airborne) {
         edible_power_set_energy(p, 99, others_full);
         return 0;
     }
-    edible_power_set_energy(p, p->energy + 2, others_full);   /* addEnergy (0x2E5720) */
+    edible_power_set_energy(p, p->energy + amount, others_full);   /* addEnergy (0x2E5720) */
     return p->energy >= 100;
 }

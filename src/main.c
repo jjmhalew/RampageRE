@@ -1511,6 +1511,13 @@ static int answer(void *ctx, const char *call, const float *a)
         }
         return 0;
     }
+    if (!strcmp(call, "Eyegore::canSpin")) {         /* Eyegore.bsf's own: the first counted, then with MULTI-SPIN, */
+        if (mo->spins == 0) {                        /* cheat 8 or the rage any number, uncounted [R] */
+            mo->spins++;
+            return 1;
+        }
+        return (mo->power.abilities & 2) || (mo->power.cheats & 8) || mo->power.rage;
+    }
     int r = v ? edible_power_answer(&mo->power, call) : -1;   /* hasRoarEnergy, hasChargePunch, ... (edible.c) */
     if (r >= 0)
         return r;
@@ -1775,7 +1782,7 @@ static void building_script(Viewer *v, SceneBuilding *sb, float amount)
     }
 }
 
-static void hit_building_front(Mon *mo, const float *p)
+static void hit_building_front(Mon *mo, const float *p, float gain)
 {
     Viewer *v = mo->v;
     int mirror = mo->mirror, side = 0, kind = (int)p[0];
@@ -1810,7 +1817,8 @@ static void hit_building_front(Mon *mo, const float *p)
     if (best)
         building_script(v, best, 2.0f);
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
-        edible_power_hit_building(&mo->power, 1, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF, others_full(mo))) {
+        edible_power_hit_building(&mo->power, 1, gain, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF,
+                                  others_full(mo))) {
         edible_power_start_rage(&mo->power, others_full(mo));
         set_reaction(mo, 54);
         rage_started(mo);
@@ -1820,7 +1828,7 @@ static void hit_building_front(Mon *mo, const float *p)
         printf("  hitBuildingFront side %d at %.1f %.1f %.1f: %s", side, w[0], w[1], w[2],
                !best ? "no building\n" : hit ? "hit" : "no damage");
     if (getenv("RAMPAGE_TRACE") && best)
-        printf(" (state %d, %d storeys, HP %d)\n", best->b.state, best->b.n, best->b.hp);
+        printf(" (state %d, %d storeys, HP %d; energy %.1f)\n", best->b.state, best->b.n, best->b.hp, mo->energy);
 }
 
 /* the building under the monster's body (0x2D6150: the one at its probe point, its top no more than 5 above the
@@ -2252,7 +2260,12 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             printf("  %s: %d\n", n, r);
         return;
     }
-    else if (!strcmp(n, "Monsters::useRoarEnergy")) { edible_power_use_roar(&mo->power); mo->energy = mo->power.energy; return; }
+    else if (strstr(n, "::useRoarEnergy")) {         /* Monsters', Furby's and Leon's costs */
+        edible_power_use_roar(&mo->power, n);
+        mo->energy = mo->power.energy;
+        return;
+    }
+    else if (!strcmp(n, "Marco::eatPerson")) { mon_add_hp(mo, 10); return; }   /* Marco.bsf: addHitPoints(10) [R] */
     else if (!strcmp(n, "Monsters::fireWeapon")) {   /* Monsters.bsf: p0 == 0 "roar", else p1 == 1 "fart" [R] */
         if (e->p[0] == 0 || e->p[1] == 1)
             army_mon_weapon_fire(&mo->weapons, e->p[0] == 0 ? "roar" : "fart");
@@ -2264,7 +2277,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Monsters::transitionFromBuildingTop")) { mo->mount.from_top = 1; return; }
-    else if (strstr(n, "::hitBuildingFront")) { hit_building_front(mo, e->p); return; }
+    else if (strstr(n, "::hitBuildingFront")) { hit_building_front(mo, e->p, edible_power_hit_gain(n)); return; }
     else if (strstr(n, "::damageRoof")) {            /* Monsters.bsf the foot, Cal.bsf's kin the spine */
         hit_building_roof(mo, !strncmp(n, "Monsters::", 10) ? "Bip01 R Foot" : "Bip01 Spine");
         return;
