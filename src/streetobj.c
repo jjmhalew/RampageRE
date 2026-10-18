@@ -1251,7 +1251,8 @@ static void george_process(StreetObjs *s, StreetObj *o)   /* Process, every fram
     else if (o->state == 3)
         george_destroy(s, o);
 }
-/* the hand and the jaw go (AtchDestFx where each is), the bubbles stop */
+/* the hand and the jaw go (AtchDestFx where each is, with fx); with fx the bubbles stop too: a building falling once
+ * the sign was hit leaves them running where they were, in the air [R onBuildingDestruction: both under state < 1] */
 static void george_drop(StreetObjs *s, StreetObj *o, int fx)
 {
     const char *name = fx ? gstr(o->tmpl, "AtchDestFx") : NULL;
@@ -1262,7 +1263,7 @@ static void george_drop(StreetObjs *s, StreetObj *o, int fx)
             request_delete(s, a);
         }
     }
-    if (o->bubble_fx >= 0)
+    if (fx && o->bubble_fx >= 0)
         effect_stop(s, o, o->bubble_fx);
     o->bubble_fx = -1;
 }
