@@ -9,8 +9,12 @@
  * simulated in world axes relative to the effect's origin, unscaled, and scaled on output: when the effect moves
  * (fx_move, fx_place) the others are moved back by as much, so they stay where they were, and the relative ones turn
  * with the new frame.
- * The game advances effects once per frame with gravity added per frame [R 0x2105E0], so fx_update runs fixed 1/60 s
- * frames: the effects world's dt is 1 / the display rate (0x309210), 60 here (50 for a PAL game) [R]. */
+ * The game advances an effect once per step of its world, by the effects adapter's step (+0x64 x +0x10, 0x1F2938),
+ * with gravity added per step [R 0x2105E0], so fx_update runs whole fixed steps (fx_set_step): in play the world's
+ * 1/30, which its start hands the adapter (0x2852E0 -> 0x282260: the world's rate +8 and step +4, 30 and 1/30 from
+ * RWorld's init 0x2B7800), each effect advanced by its FollowEffect's update (0x290F60) in the world's object pass
+ * (0x284E40) once a tick; in the front end 1 / the display rate (0x309210: 60 here, 50 for a PAL game) [R]. A particle
+ * is drawn between its last two steps (Part.prev), as the port's other 30 Hz objects are. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +24,7 @@
 #include "iso.h"
 
 #define FX_PI 3.14159265f
-#define FX_STEP (1.0f / 60.0f)
+#define FX_STEP (1.0f / 60.0f)   /* the front end's step (0x309210), the default; fx_set_step */
 #define MAX_PARTS 8192
 #define MAX_EMITS 1024
 #define MAX_FX 256
@@ -901,6 +905,7 @@ typedef struct {
     /* XForm: the start orientation (+0x4C, a quaternion there; here the matrix whose columns are the mesh's axes in
      * the world), the tumbling axis in the mesh's frame (+0x5C) and its speed in radians a second (+0x68) */
     float xr0[3][3], xaxis[3], xrate;
+    float prev[3], prev_stretch;   /* pos and stretch before its last step: drawn between them (the port's own) */
     int next, child, em;
     uint16_t tile0;                /* +0x2C */
     uint8_t tex, used, shape;      /* +0x28, +0x29 */
@@ -933,7 +938,7 @@ typedef struct {
 struct FxWorld {
     const FxLib *lib;
     uint32_t seed;
-    float accum;
+    float accum, step;         /* the time not yet stepped; the step (fx_set_step) */
     int free_part, nparts;
     Part p[MAX_PARTS];
     Emit em[MAX_EMITS];
@@ -965,8 +970,15 @@ FxWorld *fx_world(const FxLib *lib)
         return NULL;
     w->lib = lib;
     w->seed = 1;
+    w->step = FX_STEP;
     fx_clear(w);
     return w;
+}
+
+void fx_set_step(FxWorld *w, float step)
+{
+    if (w && step > 0)
+        w->step = step;
 }
 
 void fx_world_free(FxWorld *w) { free(w); }
@@ -1070,7 +1082,7 @@ static int emit_new(FxWorld *w, int fx, const Effect *owner, const EmDef *d, int
     if (e->cycle < 1e-4f)
         e->cycle = 1e-4f;
     e->inv_cycle = 1 / e->cycle;
-    e->age = e->cycle * graph_eval(w->lib, &d->g[G_START], rnd01(w)) - FX_STEP;
+    e->age = e->cycle * graph_eval(w->lib, &d->g[G_START], rnd01(w)) - w->step;
     if (d->eflags & EF_WORLDMATRIX) {
         memset(e->R, 0, sizeof e->R);
         e->R[0][0] = e->R[1][1] = e->R[2][2] = 1;
@@ -1180,7 +1192,7 @@ static void emit_shutdown(FxWorld *w, Emit *e)
             w->p[p].age = w->p[p].life + 1;
     float until = e->cycle * e->d->shutdown;
     if (e->age < until)                              /* (the loop's whole steps at once) */
-        e->age += ceilf((until - e->age) / FX_STEP) * FX_STEP;
+        e->age += ceilf((until - e->age) / w->step) * w->step;
 }
 
 static void part_free(FxWorld *w, int i)
@@ -1350,6 +1362,7 @@ static void emit_one(FxWorld *w, int ei, const EmitFrame *f, float dt)
     if ((d->eflags & EF_EMITEMITTERS) && d->spawn < e->owner->nem)   /* the particle carries an emitter of the
                                                                            * same effect (int.emitter_to_spawn) */
         p->child = emit_new(w, e->fx, e->owner, &e->owner->em[d->spawn], pi);
+    memcpy(p->prev, p->pos, sizeof p->prev);
     /* into the list sorted by texture, before the others of its texture [R 0x211970] */
     int *link = &e->head;
     while (*link >= 0 && w->p[*link].tex < p->tex)
@@ -1383,6 +1396,8 @@ static int distance_limit(const EmDef *d, const Emit *e, Part *p, float limit)
 static int part_step(FxWorld *w, Emit *e, Part *p, float dt, float ground, float limit)
 {
     const EmDef *d = e->d;
+    memcpy(p->prev, p->pos, sizeof p->prev);
+    p->prev_stretch = p->stretch;
     p->age += dt;
     if (p->age > p->life + 1e-4f)
         return 1;
@@ -1673,8 +1688,10 @@ void fx_move(FxWorld *w, int id, const float pos[3])
         if (!e->used || e->fx != slot || (e->d->eflags & EF_RELATIVE))
             continue;
         for (int p = e->head; p >= 0; p = w->p[p].next)
-            for (int k = 0; k < 3; k++)
+            for (int k = 0; k < 3; k++) {
                 w->p[p].pos[k] -= back[k];
+                w->p[p].prev[k] -= back[k];
+            }
     }
     memcpy(f->origin, pos, sizeof f->origin);
     for (int i = 0; i < MAX_EMITS && w->sound; i++)       /* its sounds follow it (add3DSfx keeps the place's address) */
@@ -1711,12 +1728,13 @@ void fx_place(FxWorld *w, int id, const float pos[3], const float R[3][3])
                     T[r][c] = R[0][r] * e->R[0][c] + R[1][r] * e->R[1][c] + R[2][r] * e->R[2][c];
             for (int p = e->head; p >= 0; p = w->p[p].next) {
                 Part *q = &w->p[p];
-                float *v[4] = { q->pos, q->vel, q->sdir, q->xaxis }, t[3];
-                for (int k = 0; k < 4; k++) {
-                    float o[3] = { v[k][0] - (k ? 0 : e->origin[0]), v[k][1] - (k ? 0 : e->origin[1]),
-                                   v[k][2] - (k ? 0 : e->origin[2]) };
+                float *v[5] = { q->pos, q->prev, q->vel, q->sdir, q->xaxis }, t[3];
+                for (int k = 0; k < 5; k++) {
+                    int at = k < 2;                   /* a place: about the emitter's origin */
+                    float o[3] = { v[k][0] - (at ? e->origin[0] : 0), v[k][1] - (at ? e->origin[1] : 0),
+                                   v[k][2] - (at ? e->origin[2] : 0) };
                     for (int j = 0; j < 3; j++)
-                        t[j] = T[j][0] * o[0] + T[j][1] * o[1] + T[j][2] * o[2] + (k ? 0 : e->origin[j]);
+                        t[j] = T[j][0] * o[0] + T[j][1] * o[1] + T[j][2] * o[2] + (at ? e->origin[j] : 0);
                     memcpy(v[k], t, sizeof t);
                 }
                 float X[3][3];
@@ -1773,14 +1791,14 @@ void fx_update(FxWorld *w, float dt, float ground_z)
     w->accum += dt;
     if (w->accum > 0.25f)
         w->accum = 0.25f;
-    while (w->accum >= FX_STEP) {
-        w->accum -= FX_STEP;
+    while (w->accum >= w->step) {
+        w->accum -= w->step;
         for (int i = 0; i < MAX_EMITS; i++) {
             if (!w->em[i].used)
                 continue;
             Fx *f = &w->fx[w->em[i].fx];
             float ground = (ground_z - f->origin[2]) / f->scale;
-            if (emit_step(w, i, FX_STEP, ground)) {
+            if (emit_step(w, i, w->step, ground)) {
                 if (f->rod == i) {
                     if (f->tail < f->head)               /* the rod's emitter stays while its tail is short of the
                                                           * head [R 0x1F2CE8] */
@@ -1799,10 +1817,10 @@ void fx_update(FxWorld *w, float dt, float ground_z)
             if (!f->used || f->rod < 0)
                 continue;
             const Emit *e = &w->em[f->rod];
-            f->head += f->rod_speed * FX_STEP;
+            f->head += f->rod_speed * w->step;
             if (f->head > f->rod_len)
                 f->head = f->rod_len;
-            f->tail = e->shut || e->age > e->cycle ? f->tail + f->rod_speed * FX_STEP : 0;
+            f->tail = e->shut || e->age > e->cycle ? f->tail + f->rod_speed * w->step : 0;
         }
     }
 }
@@ -1820,6 +1838,15 @@ void fx_cut(FxWorld *w, int id, float t)
 }
 
 /* ---------------------------------------------------------------- drawing (0x2214D0, 0x21C7E0) */
+/* where the draw is between the last two steps: a of the way from a particle's prev to its pos, and its age lag behind
+ * (the game draws at its step; here the screen may draw more often, so a particle is drawn between them, at most one
+ * step behind, its last state the game's last before it goes) */
+static void step_between(const FxWorld *w, float *a, float *lag)
+{
+    *a = w->accum < w->step ? w->accum / w->step : 1;
+    *lag = (1 - *a) * w->step;
+}
+
 static float blend(int mode, float v, float e)              /* the emitter colour on the particle's [R 0x21C638..] */
 {
     switch (mode) {
@@ -1838,6 +1865,8 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
         return 0;
     const FxLib *L = w->lib;
     int n = 0;
+    float a, lag;
+    step_between(w, &a, &lag);
     for (int ei = 0; ei < MAX_EMITS; ei++) {
         const Emit *e = &w->em[ei];
         if (!e->used || (slot >= 0 && e->fx != slot))
@@ -1848,10 +1877,10 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
             continue;                                   /* XForm particles are meshes (shapes.name): not drawn */
         for (int pi = e->head; pi >= 0; pi = w->p[pi].next) {
             const Part *p = &w->p[pi];
-            float t = p->age * p->inv_life;
-            if (t < 0)
-                t = 0;
-            float tp = (d->pnorm & 4) ? t : p->age;
+            float age = p->age - lag > 0 ? p->age - lag : 0, t = age * p->inv_life, at[3];
+            for (int i = 0; i < 3; i++)
+                at[i] = p->prev[i] + a * (p->pos[i] - p->prev[i]);
+            float tp = (d->pnorm & 4) ? t : age;
             FxQuad q;
             memset(&q, 0, sizeof q);
             /* [R 0x22233C] a billboard's axes are size x size_mul along the camera's right and up: the effect's matrix
@@ -1860,20 +1889,20 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
             float size = p->size * graph_eval(L, &d->g[G_SIZEMUL], tp), size_s = size * f->scale;
             float v[4];                                 /* the colour [R 0x21C5BC.., 0x222680..] */
             for (int i = 0; i < 4; i++)
-                v[i] = graph_eval(L, &d->g[G_VC + i], (d->pnorm & (i < 3 ? 1 : 2)) ? t : p->age);
+                v[i] = graph_eval(L, &d->g[G_VC + i], (d->pnorm & (i < 3 ? 1 : 2)) ? t : age);
             for (int i = 0; i < 3; i++)
                 q.col[i] = d->cblend == BL_NONE && d->rgb_const ? p->emvc[i] : blend(d->cblend, v[i], p->emvc[i]);
             q.col[3] = d->ablend == BL_NONE && d->a_const ? p->emvc[3] : blend(d->ablend, v[3], p->emvc[3]);
             float rot = 0;
             if (d->pmode & 2)                           /* RotatesOnly, Tiles [R 0x2225E0] */
-                rot = graph_eval(L, &d->g[G_ROT], (d->pnorm & 8) ? t : p->age) + p->spin * p->age + p->ang0;
+                rot = graph_eval(L, &d->g[G_ROT], (d->pnorm & 8) ? t : age) + p->spin * age + p->ang0;
             /* [R 0x221E50, 0x3B2480, 0x3B24D0] the quad's corners (+-0.5 along the camera's right, +-0.5 up) take
              * u = 0.5 + x, v = 0.5 - y of texture_center +- texture_radius / 2 (4.12 fixed point; 0.5 and 1, as no
              * file sets them): v 0 at the top */
             q.uv[0] = q.uv[1] = 0;
             q.uv[2] = q.uv[3] = 1;
             if (d->pmode & 4) {                         /* Tiles, TilesNoRotation [R 0x223488] */
-                int adv = (int)floorf(graph_eval(L, &d->g[G_TILE], (d->pnorm & 0x10) ? t : p->age));
+                int adv = (int)floorf(graph_eval(L, &d->g[G_TILE], (d->pnorm & 0x10) ? t : age));
                 unsigned idx = (d->pflags & PF_CYCLEINAREA) ? (unsigned)adv % (unsigned)d->tile_step + p->tile0 :
                                p->tile0 + (unsigned)adv;
                 unsigned nu = (unsigned)d->ntiles[0], nv = (unsigned)d->ntiles[1];
@@ -1884,10 +1913,10 @@ static int quads_of(const FxWorld *w, int slot, FxQuad *out, int max)
                 q.uv[3] = (float)(row + 1) / nv;
             }
             for (int i = 0; i < 3; i++)
-                q.pos[i] = f->origin[i] + p->pos[i] * f->scale;
+                q.pos[i] = f->origin[i] + at[i] * f->scale;
             if (d->ptype == PT_STRETCH) {               /* from the tail (pos) to the head [R 0x1F7500] */
                 q.kind = FXQ_STRETCH;
-                float half = 0.5f * p->stretch * f->scale;
+                float half = 0.5f * (p->prev_stretch + a * (p->stretch - p->prev_stretch)) * f->scale;
                 for (int i = 0; i < 3; i++) {
                     q.axis[0][i] = p->sdir[i] * half;
                     q.pos[i] += q.axis[0][i];
@@ -1973,6 +2002,8 @@ int fx_meshes(const FxWorld *w, FxMesh *out, int max)
         return 0;
     const FxLib *L = w->lib;
     int n = 0;
+    float a, lag;
+    step_between(w, &a, &lag);
     for (int ei = 0; ei < MAX_EMITS && n < max; ei++) {
         const Emit *e = &w->em[ei];
         if (!e->used || e->d->ptype != PT_XFORM || (e->d->pflags & PF_NORENDER) || !e->d->nshapes)
@@ -1981,13 +2012,13 @@ int fx_meshes(const FxWorld *w, FxMesh *out, int max)
         const Fx *f = &w->fx[e->fx];
         for (int pi = e->head; pi >= 0 && n < max; pi = w->p[pi].next) {
             const Part *p = &w->p[pi];
-            float t = p->age * p->inv_life;
-            float s = graph_eval(L, &d->g[G_SIZEMUL], (d->pnorm & 4) ? t : p->age);
+            float age = p->age - lag > 0 ? p->age - lag : 0, t = age * p->inv_life;
+            float s = graph_eval(L, &d->g[G_SIZEMUL], (d->pnorm & 4) ? t : age);
             int shape = d->shape[p->shape < d->nshapes ? p->shape : 0];
             if (s <= 0 || !L->shapes[shape].nmesh)
                 continue;
             float T[3][3], R[3][3];
-            axis_angle(p->xaxis, p->xrate * (p->age > 0 ? p->age : 0), T);
+            axis_angle(p->xaxis, p->xrate * age, T);
             for (int r = 0; r < 3; r++)                 /* [R 0x21B8EC] mat(Q x quat(axis, -rate age)): T x xr0 */
                 for (int c = 0; c < 3; c++)
                     R[r][c] = T[r][0] * p->xr0[0][c] + T[r][1] * p->xr0[1][c] + T[r][2] * p->xr0[2][c];
@@ -1999,7 +2030,7 @@ int fx_meshes(const FxWorld *w, FxMesh *out, int max)
                 m->m[4 * c + 3] = 0;
             }
             for (int r = 0; r < 3; r++)
-                m->m[12 + r] = f->origin[r] + p->pos[r] * f->scale;
+                m->m[12 + r] = f->origin[r] + (p->prev[r] + a * (p->pos[r] - p->prev[r])) * f->scale;
             m->m[15] = 1;
             m->shape = shape;
         }

@@ -1645,7 +1645,12 @@ int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float
 
 static void gone(People *p, Person *q)
 {
-    for (int k = PFX_AMBIENT; k <= PFX_SCRIPT; k++)   /* [G] its effects end with it (the effects' own side) */
+    /* its effects end with it: the Actor's destructor shuts down its AmbientEffect (+0x108) and ChallengeEffect (+0x110)
+     * (vtable +0x30, 0x30E128 .. 0x30E1DC) [R]; the scripts stop their own first: the IdleEffect in playEffect (onPickup,
+     * TakeDamage: StationaryPerson.scr 92), the kid's BalloonFX as it runs off (onMoverCallback, Tourist.scr 288; a kid
+     * cannot be picked up) [R]. [G: a kid deleted another way would leave its balloon running where it stood (not
+     * attached any more, setTurnOffWhenObjectDies not called); here it stops] */
+    for (int k = PFX_AMBIENT; k <= PFX_SCRIPT; k++)
         fx_off(p, q, k);
     q->phase = PP_GONE;
     q->flags |= OF_DYING;                            /* requestDelete (vtable +0x58, 0x285DD0) */

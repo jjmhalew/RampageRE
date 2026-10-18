@@ -60,7 +60,11 @@ void fx_vel(FxWorld *w, int id, const float vel[3]);
  * +0x80, 0x1F2520, called by the beam weapon on a hit, 0x295938) */
 void fx_cut(FxWorld *w, int id, float t);
 void fx_clear(FxWorld *w);
-/* advances everything by dt seconds (run as fixed 1/60 s game frames); ground_z is the height of the ground plane for
+/* the step fx_update runs in: the game advances an effect by its world's step, once a step, gravity per step: in play
+ * the world's 1/30 (0x2852E0 -> 0x282260), in the front end 1 / the display rate, 1/60 (0x309210) [R]. 1/60 unless set */
+void fx_set_step(FxWorld *w, float step);
+/* advances everything by dt seconds (run as whole fixed steps, fx_set_step; the particles are drawn between their last
+ * two); ground_z is the height of the ground plane for
  * particles that collide with the ground (+CollidesWithGround). The game's ground is what the world returns around
  * the effect for its CollidesWithGround / CollidesWithWater / CollidesWithObjects flags (up to two planes, 0x1F2A48,
  * 0x206140); CollidesWithBuildings is not asked for, and no effect sets anything but CollidesWithGround. */

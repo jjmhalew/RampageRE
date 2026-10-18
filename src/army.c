@@ -3679,7 +3679,8 @@ static void unit_init(Army *a, ArmyUnit *u)
     u->goal_fx = -1;
     if (mark) {
         int before = a->nev;
-        u->goal_fx = die_with(a, effect_on(a, u, mark, NULL));   /* [G: the mark goes with its unit] */
+        u->goal_fx = die_with(a, effect_on(a, u, mark, NULL));   /* it goes with its unit: the Actor's destructor
+                                                      * shuts down +0x110 (0x30E188 .. 0x30E1DC) [R] */
         if (a->nev > before)
             a->ev[a->nev - 1].level = 1;
     }

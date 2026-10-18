@@ -6769,7 +6769,8 @@ static void gui3d_step(Viewer *v, Shell *sh, float dt)
                 R[r][c] = l > 0 ? m.m[4 * r + c] / l : (r == c);
         }
         if (it->running) {
-            if (!x->started) {                       /* [G: the frame's scale scales the effect] */
+            if (!x->started) {                       /* the frame's scale scales the effect's places, not its
+                                                      * billboards (0x2376E0 -> +0x6C, kept at +0x2C) [R] */
                 x->fx = fx_spawn_frame(w, it->name, pos, R, scale > 0 ? scale : 1);
                 x->started = 1;
                 x->stopped = 0;
@@ -6796,8 +6797,11 @@ static void gui3d_step(Viewer *v, Shell *sh, float dt)
             x->started = 0;
         }
     }
-    for (int i = 0; i < g->nlib; i++)
+    for (int i = 0; i < g->nlib; i++) {              /* the adapter's step: the world's in play (the popup), the front
+                                                      * end's 1 / the display rate there [R 0x2852E0, 0x309210] */
+        fx_set_step(g->lib[i].w, sh == v->popup ? TIMESTEP : 1.0f / 60);
         fx_update(g->lib[i].w, dt, -1e9f);
+    }
 }
 
 /* this frame's 3D layers for the renderer, one per HUD_TEX_3D quad */
@@ -7943,6 +7947,7 @@ static int viewer_main(int argc, char **argv)
             v.fxlib = fx_open(v.data_path, bl, 1);
             v.fxw = v.fxlib ? fx_world(v.fxlib) : NULL;
             if (v.fxw) {
+                fx_set_step(v.fxw, TIMESTEP);        /* the world's effects: its step (0x2852E0 -> 0x282260) [R] */
                 fx_on_shake(v.fxw, fx_shake, &v);
                 fx_on_sound(v.fxw, fx_sound, &v);
             }

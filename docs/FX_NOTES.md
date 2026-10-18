@@ -136,19 +136,46 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
 0x800000 (the colour / alpha graphs are constants); UsesTinyParticles is cleared (0x1F9800: flags & ~0x80), so the
 31 emitters that set it draw as the others [R].
 
+## The step [R]
+An effect is advanced once per step of what owns it, by the step of the effects adapter (gp −0x6E8C: +0x64 the step,
++0x10 a factor 1.0, +0x60 the rate). Two set it:
+- **In play** the world's start (RWorld +0x2C 0x2B74D0 → 0x2852E0) hands the world's adapter its rate +8 and step +4
+  (vtable +0x54, 0x282260), 30 and 1/30 (25 and 1/25 below a 51 Hz display) from RWorld's init 0x2B7800, and makes it
+  the one at gp −0x6E8C. A FollowEffect is a world object: its update (secondary vtable +0x10, 0x290F60) advances its
+  effect (+0x3C, 0x2913E8) in the world's object pass (0x284E40, from RWorld's update 0x2B6A30), once a tick; RWorld's
+  frame (0x2B7A70) runs the ticks by the real time in whole 1/30 s steps (+0x608), two at most a drawn frame. The
+  GuiEffects (0x237590) take the same adapter's step. So every effect in play moves 1/30 s a step, 30 steps a second.
+- **In the front end** 0x309210 (from 0x309500) gives its adapter 1 / the display rate (0x4CB550: 60, or 50 for a PAL
+  game without option flag 0x80, 0x25E1A0) and the front end's loop (0x3093B0) runs at that rate: 1/60 s a step.
+Per step and not per second: gravity (below), the random rounding of the emission (rate × step + r), the spread of new
+particles back over the step (−r × step), the start age (− a step) and the shutdown's steps. The port: `fx_set_step`
+(main.c: the world's effects and the popup's GuiEffects 1/30, the front end's 1/60); fx_update runs whole steps from
+the frame's time and draws each particle between its last two (`Part.prev`: its place, streak length and age eased
+by the leftover time), at most a step behind, as the port's other 30 Hz objects (FLOW_NOTES.md "The world's step").
+Up to v0.10.18 the port stepped every effect at 1/60: the particles fell (or rose) under twice the game's gravity
+(`car_hit` started 10 above the street, 1 s in: its sparks' mean height 1.5, against 10.8 at the game's step: on
+the ground instead of in their arc).
+
+## When the object goes [R]
+A FollowEffect started on an object (createAndStartAttached*, 0x291ED0 → 0x292050 → 0x291A20) follows it while the
+object is valid (its serial, 0x291440). When the object is gone: with setTurnOffWhenObjectDies(1) (+0xF4 bit 8) the
+effect is shut down (vtable +0x30, 0x291238 .. 0x291264: no more particles, the live ones finish), without it the
+effect keeps its last matrix and runs on (a looping one for good). An Actor's destructor (0x30DF80) shuts down its
+AmbientEffect (+0x108) and ChallengeEffect (+0x110) itself (0x30E128 .. 0x30E1DC), the people's and the army units'
+(people.c `gone`, army.c `die_with`). A CycleLoops emitter never ends until shut down; another ends when it has no
+particles and is past its cycle (0x20EFD0's answer), and the effect with its last emitter (fx.c `fx_update`).
+
 ## An emitter (start 0x1F7F90, frame 0x20EFD0)
 - **Start**: cycle = lo + r (hi − lo); age = cycle × em_start_time(r) − dt; a random rotation with
   +RandomizeEmitterXF; a sound. Only +AutoStart emitters start with the effect; the others are carried
   (+EmitEmitters).
-- **Frame** (dt = the effects world's +0x64 × +0x10: 1 / the display rate 0x4CB550 and 1.0, set at its init 0x309210
-  [R]; the rate is 60, or 50 in PAL mode without option flag 0x80 (0x25E1A0): this disc is PAL, so a 50 Hz game steps
-  its effects at 1/50 s, gravity still per frame; the port takes 60): age += dt; past the cycle with +CycleLoops (and not
-  shut down) age −= cycle; past it with +ParticlesDieWithEmitter all its particles go. A carried emitter sits on
+- **Frame** (dt = the effects adapter's +0x64 × +0x10, 0x1F2938: "The step" above): age += dt; past the cycle with
+  +CycleLoops (and not shut down) age −= cycle; past it with +ParticlesDieWithEmitter all its particles go. A carried emitter sits on
   its particle.
 - **How many**: +OneTimeEmission: n = gen_rate(0) on the frame age ≤ dt, else 0. Otherwise rate = gen_rate(age /
   cycle) while age ≤ cycle and not shut down; +PredictableEmissionRate keeps a running count (n += rate dt),
   otherwise n = rate dt + r (a random rounding). Particles are made while n ≥ 1.
-- **A particle** (once per frame the graphs above are read at age / cycle): p0 in the start area (0x212A20: a
+- **A particle** (once per step the graphs above are read at age / cycle): p0 in the start area (0x212A20: a
   box (2r − 1) per axis; +EllipsoidalStartArea up to 16 tries for a point in the unit ball, else (0, 0, 0.2);
   +SurfaceStart on its surface; on a box a face picked by area, a segment its ends); position = p0 + em_pt_offset
   through the emitter's axes; velocity = normalise(p0) × vel_from_start + em_vel + em_vel_r (2r − 1), through the
@@ -183,7 +210,8 @@ Derived at load: 0x10000 "does not rotate" (mode without bit 2, or rotation and 
    | Delete 6, DeleteCheckCenter 7, DeleteCheckEntire 8 | 1/0/−1 0 0 0 0 2 |
    | AgeHalf 9, AgeQuarter 10, AgeHalfEnd 11, AgeQuarterEnd 12 | 1 −1 1 0 1 .5, …, 1 −1 1 0 .5 .5, 1 −1 1 0 .75 .25 |
    | (Bounce, HalfBounce, QuarterBounce)(AgeHalf, AgeQuarter, AgeHalfEnd, AgeQuarterEnd) 13 … 24 | the same with c1 1 / .5 / .25 |
-4. Gravity (0x2105E0): v.z += −196.2 × grav_multiplier, once per frame (no dt).
+4. Gravity (0x2105E0): v.z += −196.2 × grav_multiplier, once per step (no dt): in play −5886 × grav_multiplier a
+   second², in the front end twice that.
 5. Air (0x2118E0, 0x210450): v ×= max(0, 1 − dt × air × |v|), or with +LinearAirResistance max(0, 1 − dt × air).
 
 ## Drawing (0x2214D0, 0x21C7E0)
@@ -341,7 +369,8 @@ depth, GEQUAL: an equal depth passes) [R 0x3A75C8, 0x3B26C0]. The street writes 
 parts are kind 2 materials (162 of 167 with flags 0xC: shader 1, one pass, GS state 1, TEST 0x50002, Z test and
 write; the rest shader 2 and 0xC, Z written too; FORMAT_BDP.md "How a material is built"), so the billboards' lower
 halves are behind it on the PS2 as well. `render_gl.c` pulls the flat quads in front of the street with a polygon
-offset [G: for GEQUAL's equal-depth pass; how two coplanar draws round on the GS is the hardware's].
+offset [G: for GEQUAL's equal-depth pass; how two coplanar draws round on the GS is the hardware's; seen only as
+whether a flat glow flickers against the street].
 
 ## Not done / not known
 - Not ported because no effect uses them: the Streams modes, RenderAsDatapoints (emitter 0x4000), the orbit graphs
@@ -352,4 +381,5 @@ offset [G: for GEQUAL's equal-depth pass; how two coplanar draws round on the GS
   reads); the update's pointers to member are constants at 0x3B2630 / 0x3B2640 / 0x3B2650 (0x20EFD0, 0x213F30,
   0x216470), which nothing reads either, so the descriptor that goes with each is not in the code. The update variants compute the same; they differ in the draws: 0x216470 picks the texture,
   tile and angle (0x2193A0, 0x219410, 0x219530: two randoms for a RandomStartRotation emitter, XForm or not), 0x20EFD0
-  and 0x213F30 none of them (0x2122D0, 0x2119C0, 0x212240). The XForm emitters are taken as the latter [G].
+  and 0x213F30 none of them (0x2122D0, 0x2119C0, 0x212240). The XForm emitters are taken as the latter [G: a player cannot tell; with 0x216470 only which random numbers the
+  next particles draw would move].
