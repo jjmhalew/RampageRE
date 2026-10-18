@@ -251,6 +251,7 @@ struct Renderer {
     GLuint video_tex;
     int tex_gen;                                     /* the texture settings the cache was made with */
     int hold;                                        /* draw_mesh holds the blended parts back (gtao_active) */
+    double hud_t; int has_hud_t;                     /* the GUI's clock (rnd_hud_time), else the frame's */
     int in_hud;                                      /* draw_hud: textures made now get no mips nor anisotropy */
     HeldPart *held; int nheld, cheld;
     MeshBound *bound; uint32_t nbound;               /* by Scene.meshes index, made at its first draw */
@@ -1226,8 +1227,18 @@ static void draw_gui3d(Renderer *r, const SceneGui3D *l, float aspect, double t)
     hud_state(aspect);
 }
 
+void rnd_hud_time(Renderer *r, double t)
+{
+    if (r) {
+        r->hud_t = t;
+        r->has_hud_t = 1;
+    }
+}
+
 static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
 {
+    if (r->has_hud_t)                                /* the GUI's own clock: it runs on while the world is paused */
+        t = r->hud_t;
     hud_state(aspect);
     if (s->ngui3d)
         glClear(GL_DEPTH_BUFFER_BIT);

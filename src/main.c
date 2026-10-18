@@ -8075,6 +8075,10 @@ static int viewer_main(int argc, char **argv)
     }
     float speed = 30;
     double last = win_time(), title_at = last, start = last;
+    /* the world's clock: the scene's clips that run on it (a soldier's run, a helicopter's rotor: a model's own
+     * animation) and the texture animations (.ifl: the neon) go by it; pauseGame stops the world and its clock (App
+     * +0xA0 & 0x10 skips the world's update, 0x288340), the GUI going on with the frame's time [R] */
+    double world_t = 0;
     int frames = 0, settled = 0;                     /* a shot's game: its words played */
     while (!w.quit) {
         win_poll(&w);
@@ -8087,6 +8091,8 @@ static int viewer_main(int argc, char **argv)
             v.ap_t += dt;
             now = start + v.ap_t;
         }
+        if (!(v.hud && hud_paused(v.hud)))           /* (paused: the Pause menu, GameOver's pauseGame(1)) */
+            world_t += dt;
         if (v.pads_live) {                           /* this frame's controllers, the vibration on them */
             memcpy(v.pads_prev, v.pads, sizeof v.pads);
             v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
@@ -8125,6 +8131,7 @@ static int viewer_main(int argc, char **argv)
             gui3d_layers(&v, v.shell, v.shell_scene);
             Camera none = { { 0, 0, 0 }, 0, 0, 60 };
             sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
+            rnd_hud_time(v.rnd, now - start);
             rnd_frame(v.rnd, &w, &none, now - start, 0);
             if (shot) {
                 const char *to = apf & AP_STOP ? shot : v.ap ? ap_shot_path(v.ap) : shot;
@@ -8310,7 +8317,8 @@ static int viewer_main(int argc, char **argv)
             if (w.keys['E']) cam.pos[2] += step;
             if (w.keys['Q']) cam.pos[2] -= step;
         }
-        double t = shot && !v.ap ? shot_time : now - start;
+        double t = shot && !v.ap ? shot_time : world_t;
+        rnd_hud_time(v.rnd, shot && !v.ap ? shot_time : now - start);   /* the GUI's 3D layers: the frame's time */
         sound_listener(cam.pos, (const float (*)[3])cam.rows);   /* the camera (its rows when it is the game's) */
         sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
         if (v.have_scene) {
