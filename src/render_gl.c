@@ -229,6 +229,7 @@ typedef struct { const Bundle *b; uint32_t name; int n; uint32_t frame[IFL_FRAME
 
 /* a blended part held back while the ambient occlusion is on (rnd_frame): drawn after it with the modelview it had */
 typedef struct { float mv[16]; const SceneMesh *sm; const Skin *skin; uint32_t part, first; } HeldPart;
+typedef struct { const MeshPart *parts; uint32_t nparts; float c[3], r; } MeshBound;   /* a mesh's sphere (item_seen) */
 
 struct Renderer {
     const Scene *scene;
@@ -241,6 +242,7 @@ struct Renderer {
     int hold;                                        /* draw_mesh holds the blended parts back (gtao_active) */
     int in_hud;                                      /* draw_hud: textures made now get no mips nor anisotropy */
     HeldPart *held; int nheld, cheld;
+    MeshBound *bound; uint32_t nbound;               /* by Scene.meshes index, made at its first draw */
 };
 
 /* ---- texture settings (port extra, docs/NATIVE.md "Graphics settings") */
@@ -347,6 +349,7 @@ void rnd_free(Renderer *r)
     if (r->video_tex)
         glDeleteTextures(1, &r->video_tex);
     free(r->held);
+    free(r->bound);
     free(r);
 }
 
@@ -668,6 +671,59 @@ static void sphere_coords(int on)
         glDisable(GL_TEXTURE_GEN_T);
     }
     glMatrixMode(GL_MODELVIEW);
+}
+
+/* port extra: is the item's mesh in the view? Its sphere (its vertices' box, made once per mesh) through its world and
+ * the view (mv, the camera's modelview) against the frustum (tx, ty: the half-angles' tangents, near 0.5, far 3000).
+ * A skinned item (a monster, a person, a flag's cloth) moves its vertices every frame: always drawn. About a third of
+ * a block's items are behind or beside the camera */
+static int item_seen(Renderer *r, const DrawItem *it, const float mv[16], float tx, float ty)
+{
+    const Scene *s = r->scene;
+    if (it->skin)
+        return 1;
+    if (r->nbound < s->nmeshes) {
+        MeshBound *b = realloc(r->bound, sizeof *b * s->nmeshes);
+        if (!b)
+            return 1;
+        memset(b + r->nbound, 0, sizeof *b * (s->nmeshes - r->nbound));
+        r->bound = b;
+        r->nbound = s->nmeshes;
+    }
+    const Mesh *m = &s->meshes[it->mesh].mesh;
+    MeshBound *mb = &r->bound[it->mesh];
+    if (mb->parts != m->parts || mb->nparts != m->nparts) {   /* (a new block's meshes reuse the indices) */
+        float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+        for (uint32_t k = 0; k < m->nparts; k++)
+            for (uint32_t q = 0; q < m->parts[k].nverts; q++)
+                for (int c = 0; c < 3; c++) {
+                    float x = m->parts[k].pos[3 * q + c];
+                    lo[c] = x < lo[c] ? x : lo[c];
+                    hi[c] = x > hi[c] ? x : hi[c];
+                }
+        float r2 = 0;
+        for (int c = 0; c < 3; c++) {
+            mb->c[c] = lo[c] <= hi[c] ? (lo[c] + hi[c]) / 2 : 0;
+            r2 += lo[c] <= hi[c] ? (hi[c] - lo[c]) * (hi[c] - lo[c]) / 4 : 0;
+        }
+        mb->r = sqrtf(r2);
+        mb->parts = m->parts;
+        mb->nparts = m->nparts;
+    }
+    const float *w = it->world.m, *c = mb->c;
+    float sc = 0;                                    /* its largest scale */
+    for (int k = 0; k < 3; k++) {
+        float l = w[4 * k] * w[4 * k] + w[4 * k + 1] * w[4 * k + 1] + w[4 * k + 2] * w[4 * k + 2];
+        sc = l > sc ? l : sc;
+    }
+    float rad = mb->r * sqrtf(sc), wp[3], vp[3];
+    for (int k = 0; k < 3; k++)
+        wp[k] = w[k] * c[0] + w[4 + k] * c[1] + w[8 + k] * c[2] + w[12 + k];
+    for (int k = 0; k < 3; k++)
+        vp[k] = mv[k] * wp[0] + mv[4 + k] * wp[1] + mv[8 + k] * wp[2] + mv[12 + k];
+    float d = -vp[2];                                /* its depth in front of the eye */
+    return d + rad >= 0.5f && d - rad <= 3000 && fabsf(vp[0]) <= d * tx + rad * sqrtf(1 + tx * tx) &&
+           fabsf(vp[1]) <= d * ty + rad * sqrtf(1 + ty * ty);
 }
 
 /* the mesh's parts in order (its lead part first); while r->hold (the ambient occlusion is on: rnd_frame) the
@@ -1330,12 +1386,15 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
         if (fogged)
             glEnable(GL_FOG);
     }
+    float view_mv[16], ty = tanf(cam->fov_deg * 3.14159265f / 360.0f), tx = ty * aspect;
+    glGetFloatv(GL_MODELVIEW_MATRIX, view_mv);
     for (int pass = 0; pass < 2; pass++) {               /* the street, its building shadows, then the rest */
         r->hold = pass && gtao_active();                 /* port extra: the blended parts after the occlusion (the
                                                           * street's lie on it, darkened as it is) */
         for (uint32_t i = 0; i < s->nitems; i++) {
             const DrawItem *it = &s->items[i];
-            if (s->instances[it->instance].hidden || it->instance == s->sky || (it->instance == s->ground_inst) != !pass)
+            if (s->instances[it->instance].hidden || it->instance == s->sky || (it->instance == s->ground_inst) != !pass ||
+                !item_seen(r, it, view_mv, tx, ty))
                 continue;
             glPushMatrix();
             glMultMatrixf(it->world.m);
