@@ -93,7 +93,6 @@ enum {
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */
     PE_MONSTER_KNOCK,                                /* the monster: setVel(v, world) and setReaction(2) */
     PE_MONSTER_HP,                                   /* the monster: addHitPoints(amount) */
-    PE_MONSTER_FART,                                 /* Monsters::doFart: Expression_Smile, the Fart effect, +20 up */
     PE_WINDOW_CLOSE,                                 /* closeWindow (0x30C3F0, WindowReEnter's end): the window at v
                                                       * shuts over 0.5 s (city.h scene_window_close_at) */
     PE_FX_ON,                                        /* an effect of the person's own that can be stopped: name at v;
@@ -111,7 +110,8 @@ enum {                                               /* PE_FX_ON's slots */
 };
 /* monster: the monster slot it is about (PE_MONSTER_*: the one whose blow it was; otherwise 0) */
 typedef struct { int type, who, on; const char *name, *node; float v[3], amount; int monster; } PeopleEvent;
-typedef struct { float health, energy, points; int priest; } PeopleEaten;
+/* fart: Monsters::timedDoFart on the eater in 2 s (one in five) */
+typedef struct { float health, energy, points; int priest, fart; } PeopleEaten;
 
 /* the clip length the viewer knows: the clip anim (NULL: the shape's own RawAnim) of a look; 0 = none */
 typedef float (*PeopleClipSeconds)(void *ctx, const char *anim, const char *shape);

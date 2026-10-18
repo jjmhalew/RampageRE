@@ -83,6 +83,7 @@ enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2, DRIVE_PAD = 3 };
 #define MONSTERS 4                                   /* the game's players and bots together (Common 0x4D7E28) */
 
 #define MON_FX_SLOTS 32
+#define MON_FX_NAMED 8
 /* a monster in play, one per player or bot: its slot is the scene's (Scene.mon), the army's, the game's player and
  * the HUD's (Hud<slot>.ifc). The game keeps all of this in the monster object (the MONSTER_DATA offsets below). */
 typedef struct Mon {
@@ -166,6 +167,10 @@ typedef struct Mon {
     /* the clip events' effect slots (type 12; the record +0x7DFC's +0x0 .. +0xFF: 32 x {FollowEffect, its serial}):
      * slot k's effect id and the node it follows (MoveGraph.fxnode), while bit k of fx_used is set */
     int fx_slot[MON_FX_SLOTS], fx_node[MON_FX_SLOTS]; uint32_t fx_used;
+    /* the scripts' FollowEffects on a node of the monster by name (createAndStartAttachedToNodeByName: doFart's,
+     * doBarf's): the effect and its node, kept on it while the effect lives */
+    struct { int fx; const char *node; } fx_named[MON_FX_NAMED]; int nfx_named;
+    float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
     float face_ev;                                   /* the face's event player's time (+0x7DE8 +0x8), a share */
 } Mon;
 
@@ -513,6 +518,10 @@ static float mon_hp_max(const Mon *mo)
 static void mon_fx_event(Mon *mo, const MoveEvent *e);
 static void mon_fx_stop_all(Mon *mo);
 static void mon_fx_follow(Mon *mo);
+static int mon_fx_named(Mon *mo, const char *name, const char *node);
+static void mon_fart(Mon *mo);
+static void mon_fart_later(Mon *mo, float delay);
+static void mon_function(Mon *mo, const char *name);
 static Group army_find(void *ctx, const char *book, const char *name);
 
 static void start_moves(Mon *mo)
@@ -1630,6 +1639,8 @@ static void throw_held(Mon *mo, int eat, float x, float y, float z)
         const char *name = pp ? pp->name : NULL;
         PeopleEaten got = people_eat(v->scene.folk, mo->held);
         monster_stats(mo, got.health, got.energy);
+        if (got.fart)
+            mon_fart_later(mo, 2.0f);
         if (first) {                                 /* gCommon.addStats(actor, slot, 1): civilian points */
             if (v->game && got.points != 0)
                 game_add_points(v->game, mo->slot, GPT_CIVILIAN, (int)got.points);
@@ -1744,7 +1755,8 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         dst[0] = e->p[1]; dst[1] = e->p[2]; dst[2] = e->p[3];
         add = 1;
     }
-    else if (!strcmp(n, "Monsters::doFart"))     { l[2] = 20; add = relative = 1; }
+    else if (!strcmp(n, "Monsters::doFart"))     { mon_fart(mo); return; }
+    else if (!strcmp(n, "Monsters::doBarf"))     { mon_function(mo, "doBarf"); return; }   /* Expression_Barf's */
     else if (!strcmp(n, "Monsters::disableGravity")) { mo->no_gravity = 1; return; }
     else if (!strcmp(n, "Monsters::didDoubleJump")) { mo->double_jumped = 1; return; }   /* setHasDoubleJumped(1) */
     else if (!strcmp(n, "Monsters::footStep")) { foot_step(&mo->feet, (int)e->p[0], mo->mirror); return; }
@@ -3452,6 +3464,7 @@ static void edible_step(Viewer *v, float dt)
                     }
                 break;
             case EE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case EE_MONSTER_FUNCTION: mon_function(mo, e->name); break;
             case EE_REACTION:                        /* playReaction: the state of that name, only while alive; at
                                                       * the next step, its clip with it (forced here, the runner went
                                                       * on in the old clip from 0: Face_Eat_Item twice, no Yum) */
@@ -3659,6 +3672,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
             case VE_SOUND: sound_play(e->name, e->pos, 1); break;
             case VE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
             case VE_REACTION: set_reaction(mo, e->level); break;
+            case VE_FART: mon_fart_later(mo, e->amount); break;
             case VE_SET_VEL: memcpy(mo->vel, e->v, sizeof mo->vel); break;
             case VE_HP: if (mo->hp > 0) mo->hp = fmaxf(0, fminf(mon_hp_max(mo), mo->hp + e->amount)); break;
             case VE_STATS:                           /* id 1: the army applied it (its events follow) */
@@ -3907,16 +3921,7 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                 if (v->game)
                     game_add_points(v->game, mo->slot, e->level, (int)e->amount);
                 break;
-            case PAE_FART: {                         /* Monsters::timedDoFart -> doFart */
-                Mat4 n;
-                face_play(mo, "Expression_Smile", 0, 0, 1);
-                if (v->fxw && scene_monster_node(&v->scene, mo->slot, "fxNode_Fart", &n) == 0) {
-                    float at[3] = { n.m[12], n.m[13], n.m[14] };
-                    fx_spawn(v->fxw, "Fart", at, NULL, 1);
-                }
-                mo->vel[2] += 20;                     /* addVel((0, 0, 20), 1) */
-                break;
-            }
+            case PAE_FART: mon_fart(mo); break;      /* Monsters::timedDoFart -> doFart */
             case PAE_WEAPON:                         /* the biker's bottle: the army's person weapons */
                 if (v->army) {
                     const ParadeObj *o = parade_obj(v->parade, e->obj);
@@ -4251,6 +4256,7 @@ static void army_step(Viewer *v, float dt)
                             e->pos);
                 break;
             case AE_REACTION: set_reaction(mo, e->level); break;
+            case AE_FART: mon_fart_later(mo, e->amount); break;
             case AE_PUSH:
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  army push: %.2f %.2f by %.2f %.2f\n", mo->mx, mo->my, e->v[0], e->v[1]);
@@ -4339,7 +4345,13 @@ static void fx_step(Viewer *v, float dt)
                 printf("  effect %s at %.1f %.1f %.1f -> %d\n", f->name, f->pos[0], f->pos[1], f->pos[2], id);
         }
     v->scene.nfxreq = 0;
-    for (int k = 0; k < v->nmon; k++)                /* the monsters' slot effects on their nodes */
+    for (int k = 0; k < v->nmon; k++)                /* the timedDoFarts due */
+        for (int j = 0; j < 4; j++)
+            if (v->mon[k].fart_in[j] > 0 && (v->mon[k].fart_in[j] -= dt) <= 0) {
+                v->mon[k].fart_in[j] = 0;
+                mon_fart(&v->mon[k]);
+            }
+    for (int k = 0; k < v->nmon; k++)                /* the monsters' effects on their nodes */
         mon_fx_follow(&v->mon[k]);
     if (v->fxw)
         fx_update(v->fxw, dt, 0);
@@ -4386,6 +4398,24 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
     return 0;
 }
 
+/* a node of the monster by name in the world as drawn: an attachment node of MONSTER_DATA's (fxNode_Fart,
+ * fxNode_Belch), else a bone of its skeleton; 0 = ok */
+static int mon_node_world(Mon *mo, const char *name, Mat4 *out)
+{
+    return attach_world(mo, name, out) == 0 ? 0 : scene_monster_node(&mo->v->scene, mo->slot, name, out);
+}
+
+/* a world matrix as an effect's frame: its place, its axes made 1 long */
+static void frame_of(const Mat4 *m, float pos[3], float R[3][3])
+{
+    for (int a = 0; a < 3; a++) {
+        float l = sqrtf(m->m[4 * a] * m->m[4 * a] + m->m[4 * a + 1] * m->m[4 * a + 1] + m->m[4 * a + 2] * m->m[4 * a + 2]);
+        for (int c = 0; c < 3; c++)
+            R[a][c] = l > 1e-6f ? m->m[4 * a + c] / l : (float)(a == c);
+    }
+    pos[0] = m->m[12]; pos[1] = m->m[13]; pos[2] = m->m[14];
+}
+
 /* effect slot node `node`'s frame in the world (0x2F5800's start; then the FollowEffect's follow, 0x291440: the
  * offset x the object's node, vtable +0x4C): the node's matrix on its bone as the game poses it (a mirrored
  * monster's bone is the other side's node reflected, as scene_monster_node gives it), its place x the monster's
@@ -4407,12 +4437,7 @@ static int mon_fx_frame(Mon *mo, int node, float pos[3], float R[3][3])
     for (int j = 0; j < 3; j++)
         t.m[12 + j] = n->m[9 + j];
     Mat4 m = mat_mul(w, t);
-    for (int a = 0; a < 3; a++) {
-        float l = sqrtf(m.m[4 * a] * m.m[4 * a] + m.m[4 * a + 1] * m.m[4 * a + 1] + m.m[4 * a + 2] * m.m[4 * a + 2]);
-        for (int c = 0; c < 3; c++)
-            R[a][c] = l > 1e-6f ? m.m[4 * a + c] / l : (float)(a == c);
-    }
-    pos[0] = m.m[12]; pos[1] = m.m[13]; pos[2] = m.m[14];
+    frame_of(&m, pos, R);
     return 0;
 }
 
@@ -4471,6 +4496,73 @@ static void mon_fx_follow(Mon *mo)
         else if (mon_fx_frame(mo, mo->fx_node[k], pos, R) == 0)
             fx_place(v->fxw, mo->fx_slot[k], pos, (const float (*)[3])R);
     }
+    for (int k = 0; k < mo->nfx_named && v->fxw; k++) {
+        float pos[3], R[3][3];
+        Mat4 w;
+        if (!fx_alive(v->fxw, mo->fx_named[k].fx)) {
+            mo->fx_named[k] = mo->fx_named[--mo->nfx_named];
+            k--;
+        } else if (mon_node_world(mo, mo->fx_named[k].node, &w) == 0) {
+            frame_of(&w, pos, R);
+            fx_place(v->fxw, mo->fx_named[k].fx, pos, (const float (*)[3])R);
+        }
+    }
+}
+
+/* FollowEffect.createAndStartAttachedToNodeByName(monster, name, node) (Monsters.bsf): the effect on that node of
+ * the monster's, in its frame, kept there while it lives (mon_fx_follow); its id, -1 when not started (no such
+ * node, outside the effects budget) */
+static int mon_fx_named(Mon *mo, const char *name, const char *node)
+{
+    Viewer *v = mo->v;
+    float pos[3], R[3][3];
+    Mat4 w;
+    int id = -1;
+    if (v->fxw && mon_node_world(mo, node, &w) == 0) {
+        frame_of(&w, pos, R);
+        id = fx_spawn_frame(v->fxw, name, pos, (const float (*)[3])R, 1);
+    }
+    if (id >= 0 && mo->nfx_named < MON_FX_NAMED) {
+        mo->fx_named[mo->nfx_named].fx = id;
+        mo->fx_named[mo->nfx_named++].node = node;
+    }
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  effect %s on %s -> %d\n", name, node, id);
+    return id;
+}
+
+/* Monsters::doFart (timedDoFart's, an eaten Beans' MonsterFunction) [R Monsters.bsf]: the smile, the Fart effect
+ * on fxNode_Fart, a hop of 20 */
+static void mon_fart(Mon *mo)
+{
+    face_play(mo, "Expression_Smile", 0, 0, 1);
+    mon_fx_named(mo, "Fart", "fxNode_Fart");
+    mo->vel[2] += 20;                                /* addVel((0, 0, 20), 1) */
+}
+
+/* monster.callMonsterFunction(name, 0, 0, 0, 0): "<Monster>::name", else "Monsters::name" (Monsters.bsf); no
+ * monster has its own of these. The books' MonsterFunction (Beans: doFart, the cats: doCatSound) */
+static void mon_function(Mon *mo, const char *name)
+{
+    if (!name)
+        return;
+    if (!strcmp(name, "doFart"))
+        mon_fart(mo);
+    else if (!strcmp(name, "doBarf"))
+        mon_fx_named(mo, "Barf", "fxNode_Belch");
+    else if (!strcmp(name, "doCatSound"))           /* add3DSfx("Cat_1", 0) */
+        sound_play("Cat_1", &mo->mx, 1);
+}
+
+/* installObjectTimer("Monsters::timedDoFart", delay) on the monster: one of eaten food in five (the people's,
+ * soldiers' and vehicles' onThrow) */
+static void mon_fart_later(Mon *mo, float delay)
+{
+    for (int k = 0; k < 4; k++)
+        if (mo->fart_in[k] <= 0) {
+            mo->fart_in[k] = delay > 0 ? delay : 1e-6f;
+            return;
+        }
 }
 
 /* a new monster in the slot: the old one's slot effects shut down, for the viewer's monster swap. In the game the
@@ -4483,6 +4575,10 @@ static void mon_fx_stop_all(Mon *mo)
         if ((mo->fx_used >> k & 1) && mo->v->fxw)
             fx_stop(mo->v->fxw, mo->fx_slot[k]);
     mo->fx_used = 0;
+    for (int k = 0; k < mo->nfx_named; k++)
+        if (mo->v->fxw)
+            fx_stop(mo->v->fxw, mo->fx_named[k].fx);
+    mo->nfx_named = 0;
 }
 
 /* canGrabPerson's / doGrabPerson's window person (getBuildingOccupant 0x2B37C0), -1 none */
@@ -5466,7 +5562,8 @@ static void game_next_block(Viewer *v)
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
- * "fx name" starts that effect 6 units in front of the monster, 3 up; "hitcell b floor col" hits that front cell of
+ * "fx name" starts that effect 6 units in front of the monster, 3 up;
+ * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col" hits that front cell of
  * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
  * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
  * of that template 2.5 ahead on the street; "strike k" a blow on street object k; "p2" (p1 .. p4): the words after it
@@ -5541,6 +5638,15 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             }
             if (v->fxw && fx_spawn(v->fxw, name, at, NULL, 1) < 0)
                 printf("no effect %s\n", name);
+            continue;
+        }
+        if (_stricmp(word, "monfn") == 0) {          /* monfn name: callMonsterFunction (doFart, doBarf) */
+            char name[64];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && *p != ',' && k < 63) name[k++] = *p++;
+            name[k] = 0;
+            mon_function(mo, name);
             continue;
         }
         if (_stricmp(word, "award") == 0) {          /* award name: gCommon.addStats of an object of that template */

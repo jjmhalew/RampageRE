@@ -427,10 +427,9 @@ static void smash_object(People *p, Person *q, float monster_heading)
 
 static void leave_window(Person *q) { q->building = -1; }   /* leaveBuilding / closeWindow / 0x318140 */
 
-static void fart_maybe(People *p)                    /* the scripts' onThrow when eaten: 1 in 5 */
+static int fart_maybe(People *p)                     /* the scripts' onThrow when eaten: 1 in 5 */
 {
-    if (frand(p) <= 0.2f)
-        later(p, 2.0f, PE_MONSTER_FART, NULL, 0);    /* installObjectTimer("Monsters::timedDoFart", 2.0) */
+    return frand(p) <= 0.2f;                         /* installObjectTimer("Monsters::timedDoFart", 2.0) */
 }
 
 /* ---------------------------------------------------------------- the scripts */
@@ -1873,7 +1872,7 @@ PeopleEaten people_eat(People *p, int who)
                 e.priest = 1;
             }
         }
-        fart_maybe(p);
+        e.fart = fart_maybe(p);
     }
     gone(p, q);                                      /* 0x2D9DC0: an eaten actor is deleted */
     return e;
