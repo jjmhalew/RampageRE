@@ -2232,6 +2232,19 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->inst = inst;
         sb->seen_state = BUILDING_STANDING;
         sb->fx_glass = group_str(t, "Glass_Large");   /* 0x34; Glass_Small (0x33) is never asked for */
+        const char *bsc = group_str(t, "ScriptName");
+        if (!bsc)
+            bsc = group_str(t, "Script|ScriptName");
+        sb->alarm_sound = NULL;
+        if (bsc && !_stricmp(bsc, "AlarmBuilding.bsf")) {   /* the banks' Bank_Alarm, London's ClockTower */
+            sb->alarm_sound = group_str(t, "Sound|AlarmSound");
+            if (!sb->alarm_sound)
+                sb->alarm_sound = group_str(t, "AlarmSound");
+            sb->alarm_duration = group_num(t, "AlarmDuration", 4);
+            sb->alarm_once = (int)group_num(t, "PlayOnlyOnce", 0);
+        }
+        sb->alarm_at = 0;
+        sb->alarm_played = sb->alarm_h = 0;
         sb->fx_wall_small = group_str(t, "Wall_Small");
         sb->fx_wall_large = group_str(t, "Wall_Large");
         sb->fx_floor = group_str(t, "Floor_Large");

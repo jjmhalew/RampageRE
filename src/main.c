@@ -206,6 +206,7 @@ typedef struct Viewer {
     /* the bosses' effects that follow (monster: the monster slot followed, -1 none) */
     struct { int id, fx, obj, monster, node_id; const char *node; float off[3]; } bfx[64]; int nbfx;
     struct { int obj, h; } bsnd[64]; int nbsnd;      /* and their sounds (add3DSfx: each follows its part) */
+    float play_now;                                  /* the world's play time (gWorld.curTime): the buildings' alarms */
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
@@ -1552,6 +1553,31 @@ static int set_reaction(Mon *mo, int slot)
     return 1;
 }
 
+/* AlarmBuilding.bsf's DamageCell [R AlarmBuilding.scr]: Building::hit (0x2BC150) calls its script's DamageCell (slot
+ * 0xC, 0x2BC8C0) at every hit past its early outs (the one-hit cheat, a Nuclear hit, no point; a ground-floor or roof
+ * hit that damages no cell still calls it), whatever the building's state. The building's AlarmSound when a monster
+ * hit it (coerceToMonster), AlarmDuration (4) after the last or at the first, only the first with PlayOnlyOnce: its
+ * last one stopped (remove3DSfx(-1)), add3DSfx(sound, 0) at its place. The banks' Bank_Alarm (3 s, once), London's
+ * ClockTower (GB08, every 8 s). [G: Building::hit's out for a standing building and an attacker of flag 0x10000000
+ * (+0x4C, 0x2BC1B8) is not followed; no monster's was seen to have it] */
+static void building_alarm(Viewer *v, SceneBuilding *sb)
+{
+    if (!sb->alarm_sound)
+        return;
+    if (sb->alarm_played && fabsf(v->play_now - sb->alarm_at) <= sb->alarm_duration)
+        return;
+    if (sb->alarm_once && sb->alarm_played)
+        return;
+    if (sb->alarm_h)
+        sound_kill(sb->alarm_h);
+    sb->alarm_h = sound_add3d(sb->alarm_sound, &sb->node.m[12], 0, 1, 1);
+    sb->alarm_at = v->play_now;
+    sb->alarm_played = 1;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  building %d alarm %s%s\n", (int)(sb - v->scene.buildings), sb->alarm_sound,
+               sb->alarm_h ? "" : " (refused)");
+}
+
 static void hit_building_front(Mon *mo, const float *p)
 {
     Viewer *v = mo->v;
@@ -1584,6 +1610,8 @@ static void hit_building_front(Mon *mo, const float *p)
     if (best && mo->power.rage)                      /* Monsters.bsf: in the rage hitBuildingPt twice [R] */
         building_hit(&best->b, bq, 2.0f);
     int hit = best && building_hit(&best->b, bq, 2.0f);
+    if (best)
+        building_alarm(v, best);
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
         edible_power_hit_building(&mo->power, 1, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF, others_full(mo))) {
         edible_power_start_rage(&mo->power, others_full(mo));
@@ -1635,6 +1663,8 @@ static void hit_building_roof(Mon *mo, const char *bone)
     if (sb->b.state == BUILDING_STANDING)            /* Building::hit's +0x190: its Scoring pays this monster */
         sb->hitter = mo->slot;
     int col, roof = sb->b.roof, hit = building_hit_roof(&sb->b, at, 2.0f, &col);
+    if (col >= 0)                                    /* (0x2BBE80 went on to Building::hit) */
+        building_alarm(v, sb);
     if (getenv("RAMPAGE_TRACE"))
         printf("  hitBuildingRoof %s at %.1f %.1f %.1f: building %d roof %d -> %d, top storey %d column %d %s "
                "(state %d, %d storeys, HP %d)\n", bone, at[0], at[1], at[2], bi, roof, sb->b.roof, sb->b.n - 1, col,
@@ -2690,6 +2720,7 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
         float at[3] = { b->min[0] + 2.5f + 5 * (float)col, b->min[1], b->min[2] + 6 + 3 * (float)s + 1.5f };
         sb->hitter = mo->slot;
         hit += building_hit(b, at, amount);
+        building_alarm(v, sb);
     }
     unsigned rec = ++mo->atk_seq;                    /* the rest: TakeDamage(monster, amount, type 0, the way) */
     if (v->army)
@@ -5346,6 +5377,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         popup_step(v, dt);
         return;
     }
+    v->play_now += dt;
     world_build(v);                                  /* the collision world as the frame begins */
     scene_cloth_step(&v->scene, dt);                 /* the cloths' time, simulated at the next posing */
     fx_budget(v->fxw, v->nmon + (v->extra >= 0));    /* the effects budget, by the monsters in the world (0x2B72B0) */
@@ -6051,6 +6083,7 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
                 if (sb->b.state == BUILDING_STANDING)
                     sb->hitter = 0;
                 int hit = building_hit(&sb->b, at, 2.0f);   /* (a monster attack's radius) */
+                building_alarm(v, sb);
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  hitcell %d %d %d at %.1f %.1f %.1f: %s (%d storeys, %.1f .. %.1f)\n", bi, o, col, at[0],
                            at[1], at[2], hit ? "hit" : "no damage", sb->b.n, sb->b.min[2], sb->b.max[2]);

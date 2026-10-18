@@ -234,17 +234,24 @@ them, the actors a script creates) runs one of these, counted over the seven cit
 `WalkingAroundPerson` 151, `Person_Window` 133 (the occupants, and two Las Vegas instances), `Person_Runner` 132 (the
 crowds, a streaker), `Biker` 74 (parade.c), `StationaryPerson` 73, `Military_Window` 62 (army.c), `Mime` 23,
 `RoyalGuardHut` 2 with `RoyalGuard`, `Band` 1 with `BandMember`, `AnimatedSign` 1, and the soldiers of
-`CombatTruck` (army.c). All the people's are ported. Two others are not:
+`CombatTruck` (army.c). All the people's are ported; of the others:
 - **AnimatedSign.bsf** (`VegasCowboySign`, an `ActorInstance|` of a Las Vegas `BuildingInstance|`, not a person): a
   looping `Sign` that falls (z − 10 a second, turning (π/10, 3π/20) a second, `GroundEffect` at z ≤ −0.25, then
   deleted) when a monster hits it (`HitEffect`, addStats), something thrown meets it or its building comes down
-  (`DetachEffect`). city.c places no building actor instance, so there is nothing to drive.
+  (`DetachEffect`). Ported in streetobj.c (SK_ANIMSIGN, docs/STREETOBJ_NOTES.md).
 - **ActorSwarm.bsf** (`ChildSwarm`, the school's recess: a bell, "RECESS", then 12 … 19 `ChildRunner0` … `2`
   (Person_Child) running out at 11.5): only SchoolBuilding.bsf's `DamageCell` makes one, for a monster's hit of 2.5 or
   more, at most every 20 s. Building::hit (0x2BC150) passes its own amount (f12) as `famount` (0x2BC8C0, script slot
-  0xC), and every hit the scripts make is `hitBuildingPt(…, 2.0)`. [G: so the scripts' hits would never start it,
-  unless the binding's way to 0x2BC150 changes the 2.0 (not followed); a native hit of more on a school was not
-  found.] Not ported.
+  0xC), and every hit the scripts make is `hitBuildingPt(…, 2.0)`, but the roar's burst (main.c roar_burst, 0x2BC150
+  of type 0 with no point, 0x2BC328) passes its weapon's amount, 10: a roar beside a school starts it (and
+  ChickenRestaurant.bsf's `Chickens_Run`, the same gate). [G: not seen in play] Not ported.
+- **AlarmBuilding.bsf** (a building template's script, not a person; main.c building_alarm): a monster's hit sounds
+  the building's `AlarmSound` (add3DSfx, the last one stopped first) when `AlarmDuration` (4) has gone by since the
+  last or at the first, only the first with `PlayOnlyOnce`: the banks' `Bank_Alarm` (3, once; Chicago CG2_2x7,
+  CG4_3x12a, Hong Kong HK08_3x14, London GB03_2x6 / 3x8 / 3x14 and others in Los Angeles and New York), London's
+  `ClockTower` (GB08_3x12a / b, every 8 s). Building::hit calls the script's DamageCell at every hit past its early
+  outs (the one-hit cheat, a Nuclear hit, no point), a ground-floor or roof one that breaks no cell too, and whatever
+  the building's state [R 0x2BC150 .. 0x2BC8C0].
 
 PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAnim`, no TakeDamage, no onPickup.
 

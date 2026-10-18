@@ -111,6 +111,10 @@ typedef struct {                                      /* a building's cells and 
     int seen_collapse, seen_state;
     Group props;                                      /* its template (DefBuildingProps' Scoring, ...) */
     int hitter;                                       /* the monster slot that hit it last (its Scoring's points) */
+    /* AlarmBuilding.bsf's (its template's ScriptName; alarm_sound NULL for any other): AlarmSound, AlarmDuration,
+     * PlayOnlyOnce; when it last sounded (the viewer's play time; alarm_played 0 never: prevTimeStamp 0, flags & 2)
+     * and that 3D sound (main.c building_alarm) */
+    const char *alarm_sound; float alarm_duration, alarm_at; int alarm_once, alarm_played, alarm_h;
     /* its effects (DefBuildingProps: Glass_Small / _Large, Wall_Small / _Large, Floor_Small / _Large) */
     const char *fx_glass, *fx_wall_small, *fx_wall_large, *fx_floor;
     Group inst;                                       /* its BuildingInstance| (EdibleInstance| rows, ...) */
