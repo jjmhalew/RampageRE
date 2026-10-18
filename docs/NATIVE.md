@@ -428,7 +428,8 @@ the settings as `rampage.cfg` lines (`graphics: ao=1 ...`) and in the title, wit
 the Pause menu's Options, have a third button, Triangle **Graphics** (key V), next to Cancel and Accept. It opens a page in the same frame,
 widened and made taller, whose rows are copies of the Vibration row: Ambient Occlusion, SMAA (off, low, medium, high,
 ultra), MSAA (off, 2x, 4x, 8x), Texture Filter (anisotropy: off, 2x .. 16x), Mipmaps, Fullscreen and VSync. Up and
-down choose the row (its title pulses), left and right the value, which is applied at once. Accept keeps them and
+down choose the row (its title pulses), left and right the value, which is applied at once. On the page the button is
+Square **Defaults** (key C): every row back to the defaults above (all off, VSync on), applied at once too. Accept keeps them and
 writes them to `rampage.cfg` (`settings_save`: each key's line changed in place with its comment, the missing keys
 added at the end, every other line left as it was; never in a `--shot` run). Back puts back what the page opened
 with. Either way it returns to the Options. The window size and the AO radius stay `rampage.cfg`'s alone. Order: the

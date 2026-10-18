@@ -187,7 +187,7 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   - `CLEAR_CHEATS`: 65536;
   - `GRAPHICS` (port extra): the Graphics page's values changed, read with `hud_graphics` (arg 1: its Accept).
 - **Port extra:** the Options page has a third button, Triangle **Graphics** (a copy of Cancel with CommonGUI's
-  `Controller_B1`), which opens the front end's Graphics page in the same frame (`pause_graphics_*`, NATIVE.md
+  `Controller_B1`; on the page Square **Defaults**, `Controller_B0`), which opens the front end's Graphics page in the same frame (`pause_graphics_*`, NATIVE.md
   "Graphics settings"); `hud_set_graphics` gives it the settings in use. The game's Options have no such button.
 - The sounds come out of `hud_sounds`.
 - `hud_pause_result` gives `HUD_PAUSE_RESUME` (Continue), `HUD_PAUSE_QUIT` (call `game_restart_shell`) or

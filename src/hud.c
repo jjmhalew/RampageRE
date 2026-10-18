@@ -1562,6 +1562,7 @@ typedef struct {
     float rect_x, rect_y, rect_w, rect_h, buttons_x, buttons_y, title_x, line_x1;
     char title_text[MAX_TEXT];
     HudGraphics g_open;                                  /* the values the page opened with */
+    TexRef icon_tri, icon_sq; int has_tri, has_sq;       /* the button's icons: Graphics (Triangle), Defaults (Square) */
 } Screen;
 
 typedef struct {
@@ -3994,17 +3995,18 @@ static void pause_options_setup(Hud *h, Screen *s)
 
 /* ---- port extra: the Graphics page (docs/NATIVE.md "Graphics settings"), shell.c's op_graphics_* on the Pause
  * menu's Options: Triangle opens it in the same frame, made wider and taller; a row for each setting, its title and
- * list copies of the Vibration row's, the button a copy of Cancel with CommonGUI's Controller_B1 (the triangle). Up /
- * down choose the row (its title pulses), left / right the value, tried at once (HUD_CALL_GRAPHICS); Accept keeps them
- * (the viewer writes rampage.cfg), Back puts back what the page opened with; either goes back to the Options */
-static const struct { const char *title; int n; const char *items[5]; int values[5]; } GFX_ROW[GFX_ROWS] = {
-    { "Ambient Occlusion:", 2, { "ON", "OFF" }, { 1, 0 } },
-    { "SMAA:", 5, { "OFF", "LOW", "MED", "HIGH", "ULTRA" }, { 0, 1, 2, 3, 4 } },
-    { "MSAA:", 4, { "OFF", "2X", "4X", "8X" }, { 0, 2, 4, 8 } },
-    { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 } },
-    { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 } },
-    { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 } },
-    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 } } };
+ * list copies of the Vibration row's, the button a copy of Cancel with CommonGUI's Controller_B1 (the triangle), on
+ * the page Square Defaults (Controller_B0). Up / down choose the row (its title pulses), left / right the value,
+ * Square every row's default (settings.c's: all off, VSync on), each tried at once (HUD_CALL_GRAPHICS); Accept keeps
+ * them (the viewer writes rampage.cfg), Back puts back what the page opened with; either goes back to the Options */
+static const struct { const char *title; int n; const char *items[5]; int values[5]; int def; } GFX_ROW[GFX_ROWS] = {
+    { "Ambient Occlusion:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
+    { "SMAA:", 5, { "OFF", "LOW", "MED", "HIGH", "ULTRA" }, { 0, 1, 2, 3, 4 }, 0 },
+    { "MSAA:", 4, { "OFF", "2X", "4X", "8X" }, { 0, 2, 4, 8 }, 0 },
+    { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 }, 0 },
+    { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
+    { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 } };   /* (def: the item of settings.c's default) */
 
 static int *gfx_field(HudGraphics *g, int row)
 {
@@ -4047,10 +4049,8 @@ static void pause_graphics_build(Hud *h, Screen *s)
         s->o_buttons->child = b;
         snprintf(b->name, sizeof b->name, "nb_graphics");
         node_text(b, "Graphics");
-        if (b->child)
-            b->child->has_tex = tex_find(&h->gui, "Controller_B1", &b->child->tex);
-        col_set(b->tcol, 0, 240 / 255.0f, 156 / 255.0f, 1);   /* bs_fixButton's colour of button 1 (Triangle) */
-        b->has_tcol = 1;
+        s->has_tri = tex_find(&h->gui, "Controller_B1", &s->icon_tri);
+        s->has_sq = tex_find(&h->gui, "Controller_B0", &s->icon_sq);
         s->g_button = b;
     }
     Node *g = node_copy(L, boxes, s->o_rect);           /* the page: a group in the Options group's place */
@@ -4110,7 +4110,15 @@ static void pause_graphics_page(Screen *s, int page)
     s->page = page && s->g_group;
     show(og, !s->page);
     show(s->g_group, s->page);
-    show(s->g_button, !s->page);
+    if (s->g_button) {                                   /* Triangle Graphics, or on the page Square Defaults */
+        Node *b = s->g_button;
+        node_text(b, s->page ? "Defaults" : "Graphics");
+        if (b->child) {
+            b->child->tex = s->page ? s->icon_sq : s->icon_tri;
+            b->child->has_tex = s->page ? s->has_sq : s->has_tri;
+        }
+        button_colour(s, "nb_graphics", s->page ? 2 : 3);   /* bs_fixButton's Square / Triangle colours */
+    }
     float w = s->page ? GFX_WIDER : 0, ht = s->page ? GFX_EXTRA : 0;
     if (s->o_rect) {
         s->o_rect->p[0] = s->rect_x - w / 2;
@@ -4149,9 +4157,15 @@ static void pause_graphics_open(Hud *h, Screen *s)
     pause_graphics_page(s, 1);
 }
 
-static void pause_graphics_input(Hud *h, Screen *s, int ev)
+static void pause_graphics_input(Hud *h, Screen *s, int ev, int button)
 {
-    if (ev == HUD_EV_ACCEPT) {
+    if (ev == HUD_EV_BUTTON && button == 0) {            /* Square: the defaults */
+        sound(h, "Click", 0);
+        for (int i = 0; i < GFX_ROWS; i++)
+            list_select(s->g_lists[i], GFX_ROW[i].def);
+        pause_graphics_read(h, s);
+        hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 0);
+    } else if (ev == HUD_EV_ACCEPT) {
         sound(h, "Click", 0);
         pause_graphics_read(h, s);
         hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 1);
@@ -4292,7 +4306,7 @@ static void pause_frame(Hud *h, Screen *s, float dt)
 }
 
 static void pause_graphics_open(Hud *h, Screen *s);
-static void pause_graphics_input(Hud *h, Screen *s, int ev);
+static void pause_graphics_input(Hud *h, Screen *s, int ev, int button);
 
 static void pause_options_input(Hud *h, Screen *s, int ev, int button, int pad)   /* processOptions, the pad's
                                                                                     * events */
@@ -4300,7 +4314,7 @@ static void pause_options_input(Hud *h, Screen *s, int ev, int button, int pad) 
     if (pad != 0)                                        /* event.getController() != 0: not taken */
         return;
     if (s->page)
-        pause_graphics_input(h, s, ev);
+        pause_graphics_input(h, s, ev, button);
     else if (ev == HUD_EV_BUTTON && button == 1 && s->g_group) {   /* Triangle: the Graphics page */
         sound(h, "Click", 0);
         pause_graphics_open(h, s);

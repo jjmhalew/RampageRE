@@ -1935,6 +1935,7 @@ typedef struct {
     float rect_x, rect_y, rect_w, rect_h, buttons_x, buttons_y, title_x, line_x1;
     char title_text[MAX_TEXT];
     ShellGraphics g_open, g_page;                        /* the values the page opened with, its own */
+    TexRef icon_tri, icon_sq; int has_tri, has_sq;       /* the button's icons: Graphics (Triangle), Defaults (Square) */
 } Options;
 
 /* the SaveGame popup's panels [R 0x341880: +0x2D0 1 the profile list, 2 the name entry, 3 the messages] */
@@ -3743,17 +3744,18 @@ static void op_save(Shell *s)
 
 /* ---- port extra: the Graphics page (docs/NATIVE.md "Graphics settings"). Triangle on the Options opens it in the
  * same frame, made taller: a row for each setting, its title and list copies of the Vibration row's, the button a copy
- * of Cancel with the main menu's Options icon. Up / down choose the row (its title pulses), left / right the value,
- * tried at once (SHELL_EVT_GRAPHICS); Accept keeps them (the viewer writes rampage.cfg), Back puts back what the page
- * opened with; either goes back to the Options */
-static const struct { const char *title; int n; const char *items[5]; int values[5]; } GFX_ROW[GFX_ROWS] = {
-    { "Ambient Occlusion:", 2, { "ON", "OFF" }, { 1, 0 } },
-    { "SMAA:", 5, { "OFF", "LOW", "MED", "HIGH", "ULTRA" }, { 0, 1, 2, 3, 4 } },
-    { "MSAA:", 4, { "OFF", "2X", "4X", "8X" }, { 0, 2, 4, 8 } },
-    { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 } },
-    { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 } },
-    { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 } },
-    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 } } };
+ * of Cancel with the main menu's Options icon, which on the page is Square Defaults (the main menu's Bonus Content
+ * icon). Up / down choose the row (its title pulses), left / right the value, Square every row's default (settings.c's
+ * defaults: all off, VSync on), each tried at once (SHELL_EVT_GRAPHICS); Accept keeps them (the viewer writes
+ * rampage.cfg), Back puts back what the page opened with; either goes back to the Options */
+static const struct { const char *title; int n; const char *items[5]; int values[5]; int def; } GFX_ROW[GFX_ROWS] = {
+    { "Ambient Occlusion:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
+    { "SMAA:", 5, { "OFF", "LOW", "MED", "HIGH", "ULTRA" }, { 0, 1, 2, 3, 4 }, 0 },
+    { "MSAA:", 4, { "OFF", "2X", "4X", "8X" }, { 0, 2, 4, 8 }, 0 },
+    { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 }, 0 },
+    { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
+    { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 } };   /* (def: the item of settings.c's default) */
 #define GFX_EXTRA 86.0f                                  /* the frame's height added for the page */
 #define GFX_WIDER 60.0f                                  /* and its width, half each side */
 #define GFX_Y0 80.0f                                     /* the first row, in the Options group's frame */
@@ -3771,7 +3773,7 @@ static void op_graphics_build(Shell *s, Node *r)
     Options *o = &s->op;
     Layout *L = s->ifc[IF_OPTIONS];
     Node *back = find(r, "nb_back"), *boxes = find(r, "listboxes");
-    Node *mm_opt = find(ifc_root(s, IF_MAINMENU), "btn_options");
+    Node *mm_opt = find(ifc_root(s, IF_MAINMENU), "btn_options"), *mm_retro = find(ifc_root(s, IF_MAINMENU), "btn_retro");
     o->rect = find(r, "options_rect");
     o->title = find(r, "options_title");
     o->line = find(r, "line_horizontal");                /* (under the title: its right end follows the width) */
@@ -3801,15 +3803,14 @@ static void op_graphics_build(Shell *s, Node *r)
         o->buttons->child = b;
         snprintf(b->name, sizeof b->name, "nb_graphics");
         set_text(b, "Graphics");
-        if (mm_opt && b->child && mm_opt->child) {
-            b->child->tex = mm_opt->child->tex;
-            b->child->has_tex = mm_opt->child->has_tex;
+        if (mm_opt && mm_opt->child) {
+            o->icon_tri = mm_opt->child->tex;
+            o->has_tri = mm_opt->child->has_tex;
         }
-        if (mm_opt) {
-            memcpy(b->tcol, mm_opt->tcol, sizeof b->tcol);
-            b->has_tcol = mm_opt->has_tcol;
+        if (mm_retro && mm_retro->child) {
+            o->icon_sq = mm_retro->child->tex;
+            o->has_sq = mm_retro->child->has_tex;
         }
-        fix_button(o->buttons, "nb_graphics", 3);
         o->g_button = b;
     }
     Node *g = node_copy(L, boxes, o->rect);              /* the page: a group in the Options group's place */
@@ -3867,7 +3868,14 @@ static void op_page(Shell *s, int page)
     o->page = page && o->g_group;
     show(o->group, !o->page);
     show(o->g_group, o->page);
-    show(o->g_button, !o->page);
+    if (o->g_button) {                                   /* Triangle Graphics, or on the page Square Defaults */
+        set_text(o->g_button, o->page ? "Defaults" : "Graphics");
+        if (o->g_button->child) {
+            o->g_button->child->tex = o->page ? o->icon_sq : o->icon_tri;
+            o->g_button->child->has_tex = o->page ? o->has_sq : o->has_tri;
+        }
+        fix_button(o->buttons, "nb_graphics", o->page ? 2 : 3);
+    }
     float w = o->page ? GFX_WIDER : 0, h = o->page ? GFX_EXTRA : 0;
     if (o->rect) {
         set_pos(o->rect, o->rect_x - w / 2, o->rect_y - h / 2, o->rect->p[2]);
@@ -3904,10 +3912,16 @@ static void op_graphics_open(Shell *s)
     op_page(s, 1);
 }
 
-static void op_graphics_event(Shell *s, int ev)
+static void op_graphics_event(Shell *s, int ev, int button)
 {
     Options *o = &s->op;
-    if (ev == EV_ACCEPT) {
+    if (ev == EV_BUTTON && button == 0) {                /* Square: the defaults */
+        sound(s, "Click");
+        for (int i = 0; i < GFX_ROWS; i++)
+            list_select(o->g_lists[i], GFX_ROW[i].def);
+        op_graphics_read(o);
+        event(s, SHELL_EVT_GRAPHICS, NULL, 0, 0);
+    } else if (ev == EV_ACCEPT) {
         sound(s, "Click");
         op_graphics_read(o);
         event(s, SHELL_EVT_GRAPHICS, NULL, 1, 0);
@@ -4003,7 +4017,7 @@ static void op_event(Shell *s, int ev, int button, int pad, float dt)
         op_setup(s);
         op_page(s, 0);
     } else if (o->page)
-        op_graphics_event(s, ev);
+        op_graphics_event(s, ev, button);
     else if (ev == EV_BUTTON && button == 1 && o->g_group) {   /* Triangle: the Graphics page */
         sound(s, "Click");
         op_graphics_open(s);
