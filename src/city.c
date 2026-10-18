@@ -3651,6 +3651,16 @@ void scene_buildings_update(Scene *s, float dt)
             scene_fx(s, sb->fx_wall_small, sb->b.hit_debris[k], in);
         }
         sb->b.nhit_debris = 0;
+        if (sb->b.pre_collapse) {                    /* about to fall: the dust at its foot [R 0x2BD890 .. 0x2BD934] */
+            float in[3] = { 0, 1, 0 };
+            for (int col = 1; col < sb->b.width; col += 2) {
+                float at[3] = { sb->b.min[0] + CELL * (float)col, sb->b.min[1], sb->b.min[2] };
+                scene_fx(s, sb->fx_floor, at, in);
+            }
+            float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, (sb->b.min[1] + sb->b.max[1]) / 2 - 5, 0 };
+            scene_fx(s, "Building_Pre_Collapse.edf", at, in);
+            sb->b.pre_collapse = 0;
+        }
         open_windows(s, sb);                         /* the open windows, as they now are (0x2BECC0) */
         if (!sb->b.dirty || sb->mesh < 0) {
             if (moving || relit)

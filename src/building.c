@@ -561,8 +561,9 @@ void building_update(Building *b, float dt)
         b->timer += dt;
         while (b->timer > 0 && b->state == BUILDING_CRACKING) {
             if (!crack_step(b)) {                    /* the whole front has cracked: it shakes for 2 s */
-                b->state = BUILDING_SHAKING;         /* (Building_Pre_Collapse.edf, a rumble for the monsters on it) */
+                b->state = BUILDING_SHAKING;         /* (its foot's dust, a rumble for the monsters on it) */
                 b->timer = -2.0f;
+                b->pre_collapse = 1;
                 break;
             }
             b->timer -= b->crack_time;

@@ -86,6 +86,10 @@ typedef struct {
     /* and the ground floor's: Wall_Small at a hit's own point (0x2BC88C -> 0x30FCB0 -> 0x30FD40); the host plays them
      * and sets nhit_debris to 0 */
     float hit_debris[8][3]; int nhit_debris;
+    /* the front has cracked, it shakes (0x2BD7D0 into state 5): the dust at its foot, Floor_Large at every other
+     * column's edge on the ground (0x3101C0 with key 0x38, the point {4: the ground, along 5 x 1, 3, ..} on the
+     * front) and Building_Pre_Collapse.edf 5 before its place (0x30FD40); the host plays them and clears it */
+    int pre_collapse;
 } Building;
 
 void building_init(Building *b, const float min[3], const float max[3], int width, int depth, int storeys);
