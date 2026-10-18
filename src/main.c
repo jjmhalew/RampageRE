@@ -171,6 +171,7 @@ typedef struct Mon {
      * doBarf's): the effect and its node, kept on it while the effect lives */
     struct { int fx; const char *node; } fx_named[MON_FX_NAMED]; int nfx_named;
     float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
+    char rage_fx_name[32]; int rage_fx, rage_on;     /* its book's MonsterFx RageFx (+0x164) and the one on (+0x168) */
     float face_ev;                                   /* the face's event player's time (+0x7DE8 +0x8), a share */
 } Mon;
 
@@ -522,12 +523,15 @@ static int mon_fx_named(Mon *mo, const char *name, const char *node);
 static void mon_fart(Mon *mo);
 static void mon_fart_later(Mon *mo, float delay);
 static void mon_function(Mon *mo, const char *name);
+static void mon_rage_fx(Mon *mo, int on);
+static int rage_fx_at(Mon *mo, float at[3]);
 static Group army_find(void *ctx, const char *book, const char *name);
 
 static void start_moves(Mon *mo)
 {
     Viewer *v = mo->v;
     mon_fx_stop_all(mo);
+    mon_rage_fx(mo, 0);
     if (mo->have_graph) {
         moves_stop(&mo->run);
         moves_free(&mo->graph);
@@ -545,6 +549,8 @@ static void start_moves(Mon *mo)
         foot_props_default(&mo->feet_fx);
         Group g = book[0] ? city_book_group(v->city, book, "MonsterFx") : (Group){ 0 };
         foot_props_read(&mo->feet_fx, g);
+        const char *rage = g.at ? group_str(g, "RageFx") : NULL;   /* (0x2F5D80) */
+        snprintf(mo->rage_fx_name, sizeof mo->rage_fx_name, "%s", rage ? rage : "");
         g = book[0] ? city_book_group(v->city, book, "MiscData") : (Group){ 0 };
         foot_init(&mo->feet, g.at && group_num(g, "DisableFootDrag", 0) != 0);
         if (mon_in(mo))                   /* Use3LinkFootIK, RTWSmoothFactor, the ankle (0x2E5640) */
@@ -3380,6 +3386,7 @@ static void hud_frame(Viewer *v, int after)
 static void rage_started(Mon *mo)
 {
     Viewer *v = mo->v;
+    mon_rage_fx(mo, 1);
     if (v->hud)
         hud_banner_rage(v->hud);
     dircam_rage(&v->cd, mo->slot);                          /* the script camera on the monster for 1.5 s */
@@ -3427,8 +3434,11 @@ static void edible_step(Viewer *v, float dt)
     edible_update(v->edibles, dt);
     for (int k = 0; k < v->nmon; k++) {              /* each monster's rage and speed */
         Mon *mo = &v->mon[k];
-        if (edible_power_update(&mo->power, dt, mo->hp) && getenv("RAMPAGE_TRACE"))
-            printf("  the rage ends\n");
+        if (edible_power_update(&mo->power, dt, mo->hp)) {   /* stopRage (0x2D4340): its effect released */
+            mon_rage_fx(mo, 0);
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  the rage ends\n");
+        }
         mo->energy = mo->power.energy;
     }
     EdibleEvent ev[32];
@@ -4399,7 +4409,7 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
 }
 
 /* a node of the monster by name in the world as drawn: an attachment node of MONSTER_DATA's (fxNode_Fart,
- * fxNode_Belch), else a bone of its skeleton; 0 = ok */
+ * fxNode_Belch), else a bone of its skeleton (Bip01 Head); 0 = ok */
 static int mon_node_world(Mon *mo, const char *name, Mat4 *out)
 {
     return attach_world(mo, name, out) == 0 ? 0 : scene_monster_node(&mo->v->scene, mo->slot, name, out);
@@ -4496,6 +4506,13 @@ static void mon_fx_follow(Mon *mo)
         else if (mon_fx_frame(mo, mo->fx_node[k], pos, R) == 0)
             fx_place(v->fxw, mo->fx_slot[k], pos, (const float (*)[3])R);
     }
+    float at[3];
+    if (mo->rage_on && v->fxw) {                     /* the rage's, at the head on the camera's side */
+        if (!fx_alive(v->fxw, mo->rage_fx))
+            mo->rage_on = 0;
+        else if (rage_fx_at(mo, at) == 0)
+            fx_move(v->fxw, mo->rage_fx, at);
+    }
     for (int k = 0; k < mo->nfx_named && v->fxw; k++) {
         float pos[3], R[3][3];
         Mat4 w;
@@ -4538,6 +4555,47 @@ static void mon_fart(Mon *mo)
     face_play(mo, "Expression_Smile", 0, 0, 1);
     mon_fx_named(mo, "Fart", "fxNode_Fart");
     mo->vel[2] += 20;                                /* addVel((0, 0, 20), 1) */
+}
+
+/* the rage's effect's place (0x2F4710, each frame 0x2F5170) [R]: the head (0x2E63A0: the animation player's node
+ * +0x72D0, Bip01 Head, through the monster's matrix) moved by the monster's radius (0x2E4FA0: MONSTER_DATA +0x188,
+ * 3, x its scale) along the camera's vector (its manager's +0x66C, made 1 long; (1, 0, 0) when shorter than 1e-6)
+ * [G: that vector is the way from the view to the eye, so the effect sits on the head's camera side]; 0 = ok */
+static int rage_fx_at(Mon *mo, float at[3])
+{
+    Viewer *v = mo->v;
+    Mat4 w;
+    if (scene_monster_node(&v->scene, mo->slot, "Bip01 Head", &w) != 0)
+        return -1;
+    float d[3] = { v->view.pos[0] - w.m[12], v->view.pos[1] - w.m[13], v->view.pos[2] - w.m[14] };
+    float l2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], r = mon_radius(mo);
+    if (l2 < 1e-6f) {
+        d[0] = 1; d[1] = d[2] = 0;
+    } else {
+        float l = sqrtf(l2);
+        for (int k = 0; k < 3; k++)
+            d[k] /= l;
+    }
+    for (int k = 0; k < 3; k++)
+        at[k] = w.m[12 + k] + d[k] * r;
+    return 0;
+}
+
+/* the rage's effect, on (startRage 0x2D4360 -> 0x2F4710) or off (stopRage 0x2D4340 -> 0x2F46D0: released) [R]:
+ * the book's RageFx (Rage.edf: Rage_enter, Rage_loop and camshake_collapse) in the world's frame, started outside
+ * the effects budget and only when none is on; addStats' restart stops the old one first */
+static void mon_rage_fx(Mon *mo, int on)
+{
+    Viewer *v = mo->v;
+    if (mo->rage_on && v->fxw)
+        fx_stop(v->fxw, mo->rage_fx);
+    mo->rage_on = 0;
+    float at[3];
+    if (on && v->fxw && mo->rage_fx_name[0] && rage_fx_at(mo, at) == 0 &&
+        (mo->rage_fx = fx_spawn_free(v->fxw, mo->rage_fx_name, at, NULL, 1)) >= 0)
+        mo->rage_on = 1;
+    if (getenv("RAMPAGE_TRACE") && on)
+        printf("  rage effect %s -> %d\n", mo->rage_fx_name, mo->rage_on ? mo->rage_fx : -1);
 }
 
 /* monster.callMonsterFunction(name, 0, 0, 0, 0): "<Monster>::name", else "Monsters::name" (Monsters.bsf); no
@@ -5562,7 +5620,7 @@ static void game_next_block(Viewer *v)
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
- * "fx name" starts that effect 6 units in front of the monster, 3 up;
+ * "fx name" starts that effect 6 units in front of the monster, 3 up; "rage" fills its energy (the rage starts);
  * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col" hits that front cell of
  * building b as an attack would; "bosshit n" is one blow of n on the block's boss; "spawn name" makes vehicle.c's
  * object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
@@ -5638,6 +5696,10 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             }
             if (v->fxw && fx_spawn(v->fxw, name, at, NULL, 1) < 0)
                 printf("no effect %s\n", name);
+            continue;
+        }
+        if (_stricmp(word, "rage") == 0) {           /* the energy full through addStats: the rage starts */
+            monster_stats(mo, 0, 100);
             continue;
         }
         if (_stricmp(word, "monfn") == 0) {          /* monfn name: callMonsterFunction (doFart, doBarf) */

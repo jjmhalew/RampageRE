@@ -14,7 +14,7 @@ All seven property books (`Amanda_prop`, `Cal_prop`, `George_prop`, `Jill_prop`,
 | `WaterFootStepFx` | `footfall_water.edf` | +0x144 | footPlant, in a water |
 | `GroundImpactFx` | `footfall_big.edf` | +0x150 | the landing, on the ground |
 | `WaterImpactFx` | `footfall_big_water.edf` | +0x154 | the landing, in a water |
-| `RageFx` | `Rage.edf` | +0x164 | (the rage; not followed) |
+| `RageFx` | `Rage.edf` | +0x164 | startRage (0x2D4360 -> 0x2F4710), at the head toward the camera; stopRage releases it (main.c `mon_rage_fx`) |
 
 The reader is 0x2F5D80 (the part from 0x2F6168) [R]: the book's `MonsterFx` group (0x1B0210 on the setup record's
 +0xAD0), each key's name (the key table 0x3F5BC4 .. 0x3F5BD8, read with 0x1B4490) loaded as an effect definition
