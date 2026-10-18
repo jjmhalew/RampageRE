@@ -219,7 +219,7 @@ typedef struct Viewer {
     struct { int id, fx, obj, node_id, mon; const char *node; char mnode[32]; float off[3]; } sofx[64]; int nsofx;
     int weather_fx[4], nweather_fx, weather_due;     /* the block's Weather.bsf effects on, and whether to start them */
     Army *army;
-    struct { int id, fx, unit, shot; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
+    struct { int id, fx, unit, shot, node; float off[3], head, speed, len; } fxa[128]; int nfxa;   /* the army's effects that follow
                                                       * (a beam's: its stream's head last frame, its rod) */
     int armed_people[32]; int narmed_people;         /* people firing (army_person_moved) */
     /* the people's own effects (PE_FX_ON): per person and slot, following it (follow) at off, until PE_FX_OFF */
@@ -4219,14 +4219,27 @@ static int army_monsters(Viewer *v, ArmyMonster *m)
     return nm;
 }
 
-/* an effect on a unit: its axes (the unit's matrix) and where the offset in that frame puts it */
-static void unit_fx_frame(const ArmyUnit *u, const float off[3], float R[3][3], float at[3])
+/* an effect on a unit: its axes (the unit's matrix, or its model node's as drawn: node >= 0, by number) and where
+ * the offset in that frame puts it */
+static void frame_of(const Mat4 *m, float pos[3], float R[3][3]);
+static void unit_fx_frame(Viewer *v, int unit, const ArmyUnit *u, int node, const float off[3], float R[3][3],
+                          float at[3])
 {
-    for (int a = 0; a < 3; a++)
-        for (int c = 0; c < 3; c++)
-            R[a][c] = u->world[4 * a + c];
+    Mat4 n;
+    float o[3];
+    int found = node >= 0 && scene_unit_node_at(&v->scene, unit, NULL, node, n.m) == 0;
+    if (getenv("RAMPAGE_NODES") && node >= 0)
+        printf("  %s effect node %d: %s\n", u->name ? u->name : "?", node, found ? "found" : "not found");
+    if (found)
+        frame_of(&n, o, R);
+    else {
+        for (int a = 0; a < 3; a++)
+            for (int c = 0; c < 3; c++)
+                R[a][c] = u->world[4 * a + c];
+        memcpy(o, u->pos, sizeof o);
+    }
     for (int c = 0; c < 3; c++)
-        at[c] = u->pos[c] + off[0] * R[0][c] + off[1] * R[1][c] + off[2] * R[2][c];
+        at[c] = o[c] + off[0] * R[0][c] + off[1] * R[1][c] + off[2] * R[2][c];
 }
 
 static void army_step(Viewer *v, float dt)
@@ -4276,7 +4289,7 @@ static void army_step(Viewer *v, float dt)
                     float R[3][3], at[3];            /* one on a unit: in its whole frame, the offset in it [R 0x27A990
                                                       * -> 0x291ED0, 0x291440: the offset x the unit's matrix] */
                     if (on)
-                        unit_fx_frame(on, e->v, R, at);
+                        unit_fx_frame(v, e->unit, on, e->node, e->v, R, at);
                     int id = bs ? fx_spawn_frame(v->fxw, e->name, e->pos, bs->R, 1) :
                              on ? fx_spawn_frame(v->fxw, e->name, at, (const float (*)[3])R, 1) :
                                   fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
@@ -4285,6 +4298,7 @@ static void army_step(Viewer *v, float dt)
                         v->fxa[v->nfxa].fx = id;
                         v->fxa[v->nfxa].unit = e->shot >= 0 ? -1 : e->unit;
                         v->fxa[v->nfxa].shot = e->shot;
+                        v->fxa[v->nfxa].node = e->node;
                         FxRod rod;
                         int has_rod = bs && fx_rod(v->fxlib, e->name, &rod);
                         v->fxa[v->nfxa].head = 0;
@@ -4385,7 +4399,7 @@ static void army_step(Viewer *v, float dt)
                 continue;
             }
             float R[3][3];
-            unit_fx_frame(u, v->fxa[k].off, R, at);
+            unit_fx_frame(v, v->fxa[k].unit, u, v->fxa[k].node, v->fxa[k].off, R, at);
             fx_place(v->fxw, v->fxa[k].fx, at, (const float (*)[3])R);
             continue;
         } else {

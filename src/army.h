@@ -201,7 +201,8 @@ enum {
                        * where, dir the normal, amount the mover's Mass (a building: hit with radius Mass / 1000) */
     AE_WINDOW_CLOSE   /* the window soldier went back in (closeWindow, 0x30C3F0): its window at pos shuts over 0.5 s */
 };
-typedef struct { int type, id, unit, shot, monster, level; const char *name; float v[3], dir[3], pos[3], amount; } ArmyEvent;
+/* node: AE_EFFECT's model node number of the unit it is on (createAndStartAttachedToNode), -1 none */
+typedef struct { int type, id, unit, shot, monster, level, node; const char *name; float v[3], dir[3], pos[3], amount; } ArmyEvent;
 
 Army *army_new(const ArmyHost *host);
 /* the weapons for others (boss.c): one made over a template's Weapon| group, and one frame of it with no owning unit

@@ -234,6 +234,7 @@ static ArmyEvent *emit(Army *a, int type, int unit, const char *name, const floa
     e->shot = -1;
     e->monster = -1;
     e->id = -1;
+    e->node = -1;
     e->name = name;
     if (v) {
         memcpy(e->v, v, sizeof e->v);
@@ -271,6 +272,14 @@ static int effect_on(Army *a, ArmyUnit *u, const char *name, const float offset[
     if (offset)
         memcpy(e->v, offset, sizeof e->v);
     return e->id;
+}
+/* createAndStartAttachedToNode(unit, name, node): on that node of its model */
+static int effect_on_node(Army *a, ArmyUnit *u, const char *name, int node)
+{
+    int id = effect_on(a, u, name, NULL);
+    if (id >= 0 && a->nev > 0 && a->ev[a->nev - 1].id == id)
+        a->ev[a->nev - 1].node = node;
+    return id;
 }
 static void effect_stop(Army *a, int id)
 {
@@ -2188,8 +2197,8 @@ static void heli_init(Army *a, ArmyUnit *u)          /* onInit (is_cop = bIsFrie
     u->pulse_delay = 0.25f;
     u->target = -1;                                  /* setTarget(nullTarget) */
     const char *fx = ustr(u, "AttachEffect");
-    if (fx)
-        u->aux[0] = (float)effect_on(a, u, fx, NULL);   /* (AttachEffectNode: by that node) */
+    if (fx)                                          /* on its AttachEffectNode (2 in every helicopter) when set */
+        u->aux[0] = (float)effect_on_node(a, u, fx, (int)unum(u, "AttachEffectNode", -1));
     else
         u->aux[0] = -1;
     if (!u->is_cop) {

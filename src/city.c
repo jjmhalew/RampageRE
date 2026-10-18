@@ -1020,6 +1020,10 @@ int scene_unit_node(const Scene *s, int unit, const char *node, float out[16])
 {
     return look_node(s, (1 << 20) + unit, node, -1, out);
 }
+int scene_unit_node_at(const Scene *s, int unit, const char *node, int id, float out[16])
+{
+    return look_node(s, (1 << 20) + unit, node, id, out);
+}
 int scene_boss_node(const Scene *s, int part, const char *node, float out[16])
 {
     return look_node(s, (4 << 20) + part, node, -1, out);
