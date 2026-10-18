@@ -41,8 +41,8 @@ struct People {
     int nretired;
     /* the script objects that make people: Band.bsf (once, after 0.25 s), RoyalGuardHut.bsf (pulsing each 1 s) and
      * ActorSwarm.bsf (swarm 1: pulsing each 2 s; state 0 before its first, 1 after it, 2 deleted) */
-    struct { int hut, swarm; Group t; float pos[3], timer, create_time; int state, guard; } obj[MAX_OBJECTS];
-    int nobj;
+    struct { int hut, swarm; Group t; float pos[3], timer, create_time; int state, guard, made; } obj[MAX_OBJECTS];
+    int nobj, nmade;                                 /* made: its making's number (people_object) */
     Group block;                                     /* people_set_block: its ActorInstance|s for the chains */
     int not_in_play;                                 /* people_set_world_state: the world's state is not 6 */
     Group spawn[16];                                 /* the chains' next ones, made after the frame's update */
@@ -74,6 +74,7 @@ static void emit(People *p, int type, int who, const char *name, const char *nod
     e->on = on;
     e->amount = amount;
     e->monster = p->hitter;
+    e->object = -1;
     if (v)
         memcpy(e->v, v, sizeof e->v);
 }
@@ -1335,6 +1336,14 @@ void people_set_path(People *p, int who, const float (*pts)[3], int n, float spe
 int people_count(const People *p) { return p->n; }
 const Person *people_get(const People *p, int who) { return who >= 0 && who < p->n ? &p->v[who] : NULL; }
 
+int people_object(const People *p, int o, float pos[3])
+{
+    if (o < 0 || o >= p->nobj || p->obj[o].state == 2)
+        return 0;
+    memcpy(pos, p->obj[o].pos, 3 * sizeof(float));
+    return p->obj[o].made;
+}
+
 int people_events(People *p, PeopleEvent *out, int max)
 {
     int n = p->nev < max ? p->nev : max;
@@ -1426,8 +1435,10 @@ static const char *swarm_str(People *p, int o, const char *type, const char *key
 static void swarm_sound(People *p, int o, const char *key)   /* add3DSfx(getStringProp(key), 0) at its place */
 {
     const char *s = swarm_str(p, o, "Sound|", key);
-    if (s)
+    if (s && p->nev < MAX_EVENTS) {                  /* on the swarm: it goes with it (deleted at its second pulse) */
         emit(p, PE_SOUND, -1, s, NULL, p->obj[o].pos, 0, 1);
+        p->ev[p->nev - 1].object = o;
+    }
 }
 
 /* ActorSwarm::onPulse in its state 0 [R ActorSwarm.scr]: the Message in MessageColor (default set255(220, 0, 0, 255);
@@ -1545,6 +1556,7 @@ void people_add_band(People *p, Group band, const float dest[3])
         return;
     int o = p->nobj++;
     memset(&p->obj[o], 0, sizeof p->obj[o]);
+    p->obj[o].made = ++p->nmade;
     p->obj[o].t = band;
     memcpy(p->obj[o].pos, dest, sizeof p->obj[o].pos);
     p->obj[o].timer = 0.25f;
@@ -1562,6 +1574,7 @@ void people_add_swarm(People *p, Group swarm, const float pos[3])
         p->nobj++;
     }
     memset(&p->obj[o], 0, sizeof p->obj[o]);
+    p->obj[o].made = ++p->nmade;
     p->obj[o].swarm = 1;
     p->obj[o].t = swarm;
     memcpy(p->obj[o].pos, pos, sizeof p->obj[o].pos);   /* setPoint */
@@ -1576,6 +1589,7 @@ int people_add_hut(People *p, Group hut, const float pos[3])
         return -1;
     int o = p->nobj++;
     memset(&p->obj[o], 0, sizeof p->obj[o]);
+    p->obj[o].made = ++p->nmade;
     p->obj[o].hut = 1;
     p->obj[o].t = hut;
     memcpy(p->obj[o].pos, pos, sizeof p->obj[o].pos);

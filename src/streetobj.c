@@ -1371,7 +1371,11 @@ static void damaging_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMon
         monster_call(s, o, SE_MONSTER_REACTION, mi)->name = react;
     const char *snd = ostr(o, "ReactionSound");
     if (snd)
-        emit(s, SE_SOUND, o, snd, who->pos)->level = 0;
+        {                                            /* m.add3DSfx(reactSound, 0): the monster's own */
+            StreetEvent *e = emit(s, SE_SOUND, o, snd, who->pos);
+            e->level = 0;
+            e->monster = mi;
+        }
     if ((int)onum(o, "SetMonsterVelocity", 0)) {
         StreetEvent *e = monster_call(s, o, SE_MONSTER_VEL, mi);
         e->v[0] = who->pos[0] < o->world[12] ? -10 : 10;

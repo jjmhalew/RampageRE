@@ -200,6 +200,10 @@ typedef struct Viewer {
     Rail *rail;                                      /* the trains, cable cars and freighters (rail.c) */
     struct { int id, fx, obj; float off[3]; } rfx[64]; int nrfx;   /* their effects (following them; off in its frame) */
     struct { int id, h, obj; } rsnd[64]; int nrsnd;                /* and sounds */
+    /* the objects' own 3D sounds (add3DSfx, 0x287860: in one of the object's 16 slots, at its place +0x2C so that
+     * it follows it): its module (OS_*), the object and its serial, the sound, its name and keep (the script's
+     * second argument: a deleted object, 0x288050 -> 0x274710, kills its sounds without keep) */
+    struct { int src, obj, serial, h, keep; const char *name; } osnd[128]; int nosnd;
     Edibles *edibles;                                /* the power-ups and hazards behind the windows (edible.c) */
     Game *game;                                      /* the world's states, the lives, the clock (game.c) */
     Boss *boss;                                      /* the block's boss and the ambient ones (boss.c) */
@@ -1108,6 +1112,9 @@ static void build(Viewer *v)
     rail_free(v->rail);                              /* the trains, cable cars and freighters (rail.c) */
     v->rail = NULL;
     v->nrfx = v->nrsnd = 0;
+    for (int k = 0; k < v->nosnd; k++)              /* the objects go: their sounds with them (a new block) */
+        sound_kill(v->osnd[k].h);
+    v->nosnd = 0;
     if (v->have_scene) {
         static RailHost rh;
         rh.find = army_find;
@@ -1577,6 +1584,137 @@ static int set_reaction(Mon *mo, int slot)
     return 1;
 }
 
+/* ---- the objects' own 3D sounds (add3DSfx(name, keep): 0x287860) [R, BOSS_NOTES.md "Sounds"]: one of the object's 16
+ * slots (2 bits each in +0x50: in use, keep), one whose sound has ended taken again (0x274CF0), none free: no sound;
+ * the 3D sound (0x26D560, kept in the list by its id while out of range) at the object's own place (+0x2C), so it
+ * follows it; remove3DSfx stops them; a deleted object (0x290480 -> 0x288050 -> 0x274710) kills those without keep
+ * and leaves the others where they are */
+enum { OS_ARMY, OS_PEOPLE, OS_VEHICLE, OS_STREET, OS_PARADE, OS_EDIBLE, OS_MONSTER, OS_PEOPLE_OBJECT };
+
+/* where the object is now; 0 once it is gone (deleted, or its slot made over to another: serial) */
+static int obj_where(const Viewer *v, int src, int obj, int serial, float pos[3])
+{
+    switch (src) {
+    case OS_ARMY: {
+        const ArmyUnit *u = v->army ? army_unit(v->army, obj) : NULL;
+        if (!u || u->phase == AU_GONE || u->serial != serial)
+            return 0;
+        memcpy(pos, u->pos, 3 * sizeof(float));
+        return 1;
+    }
+    case OS_PEOPLE: {
+        const Person *p = v->scene.folk ? people_get(v->scene.folk, obj) : NULL;
+        if (!p || p->phase == PP_GONE)
+            return 0;
+        memcpy(pos, p->pos, 3 * sizeof(float));
+        return 1;
+    }
+    case OS_VEHICLE: {
+        const VehObj *o = v->veh ? vehicle_obj(v->veh, obj) : NULL;
+        if (!o || o->phase == VP_GONE)
+            return 0;
+        memcpy(pos, o->pos, 3 * sizeof(float));
+        return 1;
+    }
+    case OS_STREET: {
+        const StreetObj *o = v->sobj ? streetobj_get(v->sobj, obj) : NULL;
+        if (!o || !o->alive)
+            return 0;
+        memcpy(pos, o->world + 12, 3 * sizeof(float));
+        return 1;
+    }
+    case OS_PARADE: {
+        const ParadeObj *o = v->parade ? parade_obj(v->parade, obj) : NULL;
+        if (!o || o->phase == PAP_GONE)
+            return 0;
+        memcpy(pos, o->pos, 3 * sizeof(float));
+        return 1;
+    }
+    case OS_EDIBLE: {
+        const Edible *d = v->edibles ? edible_get(v->edibles, obj) : NULL;
+        if (!d || d->phase == EP_GONE)
+            return 0;
+        memcpy(pos, d->pos, 3 * sizeof(float));
+        return 1;
+    }
+    case OS_PEOPLE_OBJECT:
+        return v->scene.folk && serial && people_object(v->scene.folk, obj, pos) == serial;
+    case OS_MONSTER:
+        if (obj < 0 || obj >= v->nmon)
+            return 0;
+        pos[0] = v->mon[obj].mx;
+        pos[1] = v->mon[obj].my;
+        pos[2] = v->mon[obj].mz;
+        return 1;
+    }
+    return 0;
+}
+
+/* add3DSfx(name, keep) on that object; an object not (or no longer) there: the sound where it was asked for, once */
+static void obj_sound(Viewer *v, int src, int obj, const char *name, int keep, const float at[3])
+{
+    float pos[3];
+    int serial = src == OS_ARMY && v->army && army_unit(v->army, obj) ? army_unit(v->army, obj)->serial : 0;
+    if (src == OS_PEOPLE_OBJECT)
+        serial = v->scene.folk ? people_object(v->scene.folk, obj, pos) : 0;
+    if (!name || !*name)
+        return;
+    if (!obj_where(v, src, obj, serial, pos)) {
+        sound_play(name, at, 1);
+        return;
+    }
+    int used = 0;
+    for (int k = 0; k < v->nosnd; k++)
+        if (v->osnd[k].src == src && v->osnd[k].obj == obj && v->osnd[k].serial == serial)
+            used++;
+    if (used >= 16 || v->nosnd >= 128)
+        return;
+    int h = sound_add3d(name, pos, 0, 1, 1);
+    if (!h)
+        return;
+    v->osnd[v->nosnd].src = src;
+    v->osnd[v->nosnd].obj = obj;
+    v->osnd[v->nosnd].serial = serial;
+    v->osnd[v->nosnd].h = h;
+    v->osnd[v->nosnd].keep = keep != 0;
+    v->osnd[v->nosnd++].name = name;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  sound %s on object %d.%d%s\n", name, src, obj, keep ? " (kept)" : "");
+}
+
+/* remove3DSfx: that object's sounds of that name (NULL: all of them) stopped */
+static void obj_sound_stop(Viewer *v, int src, int obj, const char *name)
+{
+    for (int k = 0; k < v->nosnd; k++)
+        if (v->osnd[k].src == src && v->osnd[k].obj == obj && (!name || !_stricmp(v->osnd[k].name, name))) {
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  sound %s on object %d.%d stopped\n", v->osnd[k].name, src, obj);
+            sound_kill(v->osnd[k].h);
+            v->osnd[k--] = v->osnd[--v->nosnd];
+        }
+}
+
+/* each frame: a sound that has ended frees its slot; the others follow their object, or with it gone die (keep 0) or
+ * stay where it was (keep 1) */
+static void obj_sounds_step(Viewer *v)
+{
+    for (int k = 0; k < v->nosnd; k++) {
+        float pos[3];
+        if (!sound_active(v->osnd[k].h)) {
+            v->osnd[k--] = v->osnd[--v->nosnd];
+        } else if (obj_where(v, v->osnd[k].src, v->osnd[k].obj, v->osnd[k].serial, pos)) {
+            sound_move(v->osnd[k].h, pos);
+        } else {
+            if (getenv("RAMPAGE_TRACE"))
+                printf("  sound %s gone with object %d.%d%s\n", v->osnd[k].name, v->osnd[k].src, v->osnd[k].obj,
+                       v->osnd[k].keep ? " (kept: left where it was)" : "");
+            if (!v->osnd[k].keep)
+                sound_kill(v->osnd[k].h);
+            v->osnd[k--] = v->osnd[--v->nosnd];
+        }
+    }
+}
+
 /* AlarmBuilding.bsf's DamageCell [R AlarmBuilding.scr]: Building::hit (0x2BC150) calls its script's DamageCell (slot
  * 0xC, 0x2BC8C0) at every hit past its early outs (the one-hit cheat, a Nuclear hit, no point; a ground-floor or roof
  * hit that damages no cell still calls it), whatever the building's state. The building's AlarmSound when a monster
@@ -1842,11 +1980,9 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         mo->ev16x = e->p[1];
         return;
     }
-    if (e->type == 6) {                              /* a sound at the monster ({6, at, ?, name}) */
-        float at[3] = { mo->mx, mo->my, mo->mz + 4 };
-        int h = e->name ? sound_play(e->name, at, 1) : 0;
-        if (e->name && getenv("RAMPAGE_TRACE"))
-            printf(h ? "  sound %s\n" : "  no sound %s\n", e->name);
+    if (e->type == 6) {                              /* a sound on the monster ({6, at, ?, name}): 0x287860, its own */
+        float at[3] = { mo->mx, mo->my, mo->mz };    /* place (+0x2C), following it [R] */
+        obj_sound(v, OS_MONSTER, (int)(mo - v->mon), e->name, 0, at);
         return;
     }
     if (e->type == 9) {                              /* 0x2E7E18 -> 0x2F5AC0: the camera shakes, f32 strength at +8 */
@@ -3669,7 +3805,7 @@ static void edible_step(Viewer *v, float dt)
                         break;
                     }
                 break;
-            case EE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case EE_SOUND: obj_sound(v, OS_EDIBLE, e->edible, e->name, 0, e->pos); break;   /* add3DSfx */
             case EE_MONSTER_FUNCTION: mon_function(mo, e->name); break;
             case EE_REACTION:                        /* playReaction: the state of that name, only while alive; at
                                                       * the next step, its clip with it (forced here, the runner went
@@ -3875,7 +4011,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
                         break;
                     }
                 break;
-            case VE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case VE_SOUND: obj_sound(v, OS_VEHICLE, e->obj, e->name, e->level, e->pos); break;   /* add3DSfx */
             case VE_HIT: monster_hit(mo, e->name, e->amount, e->level, e->v, e->pos); break;
             case VE_REACTION: set_reaction(mo, e->level); break;
             case VE_FART: mon_fart_later(mo, e->amount); break;
@@ -4108,7 +4244,7 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                     }
                 }
                 break;
-            case PAE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case PAE_SOUND: obj_sound(v, OS_PARADE, e->obj, e->name, e->level, e->pos); break;   /* add3DSfx */
             case PAE_MONSTER_SOUND: {
                 float at[3] = { mo->mx, mo->my, mo->mz };
                 sound_play(e->name, at, 1);
@@ -4226,7 +4362,12 @@ static void street_step(Viewer *v, float dt)
                         break;
                     }
                 break;
-            case SE_SOUND: sound_play(e->name, e->pos, 1); break;
+            case SE_SOUND:                           /* add3DSfx: the object's, or a monster's (m.add3DSfx) */
+                if (e->monster >= 0)
+                    obj_sound(v, OS_MONSTER, e->monster, e->name, e->level, e->pos);
+                else
+                    obj_sound(v, OS_STREET, e->obj, e->name, e->level, e->pos);
+                break;
             case SE_SHAPE: scene_street_shape(&v->scene, k, e->name); break;
             case SE_IMPACT: impact_route(v, e->id, e->level, e->pos, e->amount); break;   /* a thrown car met it */
             case SE_MONSTER_FACING:                  /* the MerryGoRound's rider: queueFacingZRequest (0x2E97D0) */
@@ -4471,9 +4612,17 @@ static void army_step(Viewer *v, float dt)
                         break;
                     }
                 break;
-            case AE_SOUND:
-                if (e->level == 0) sound_kill_name(e->name);
-                else sound_play(e->name, e->level == 2 ? NULL : e->pos, 1);   /* 2: a 2D one */
+            case AE_SOUND:                           /* a unit's add3DSfx (level 1) / remove3DSfx (0); 2: a 2D one */
+                if (e->level == 2)
+                    sound_play(e->name, NULL, 1);
+                else if (e->unit >= 0 && e->level == 0)
+                    obj_sound_stop(v, OS_ARMY, e->unit, e->name);
+                else if (e->unit >= 0)
+                    obj_sound(v, OS_ARMY, e->unit, e->name, 0, e->pos);
+                else if (e->level == 0)
+                    sound_kill_name(e->name);
+                else
+                    sound_play(e->name, e->pos, 1);
                 if (getenv("RAMPAGE_TRACE"))
                     printf("  army sound %s%s\n", e->name, e->level ? "" : " (stopped)");
                 break;
@@ -5538,9 +5687,15 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
         }
         for (int i = 0; i < ne; i++) {
-            if (ev[i].type == PE_SOUND && ev[i].name) {
-                const Person *p = people_get(v->scene.folk, ev[i].who);
-                sound_play(ev[i].name, p ? p->pos : ev[i].v, 1);
+            if (ev[i].type == PE_SOUND && ev[i].name) {   /* the person's add3DSfx / remove3DSfx (on 0) */
+                if (ev[i].who < 0 && ev[i].object >= 0)
+                    obj_sound(v, OS_PEOPLE_OBJECT, ev[i].object, ev[i].name, 0, ev[i].v);
+                else if (ev[i].who < 0)
+                    sound_play(ev[i].name, ev[i].v, 1);
+                else if (ev[i].on)
+                    obj_sound(v, OS_PEOPLE, ev[i].who, ev[i].name, 0, ev[i].v);
+                else
+                    obj_sound_stop(v, OS_PEOPLE, ev[i].who, ev[i].name);
             }
             if (ev[i].type == PE_EFFECT && !ev[i].node) {
                 float up[3] = { 0, 1, 0 };
@@ -5628,6 +5783,7 @@ static void play_step(Viewer *v, float dt, float aspect)
     mon_weapons_step(v, dt);                         /* the roar (army.c's monster weapons) */
     street_step(v, dt);
     army_step(v, dt);
+    obj_sounds_step(v);                              /* the objects' sounds follow them, or go with them */
     fx_step(v, dt);
     shake_step(v->shakes, 8 + MONSTERS - 1, dt);
     for (int k = v->nmon - 1; k >= 0; k--) {         /* Hud.bsf: health, rage, the score (ArmyStats points[6]); player
@@ -5895,6 +6051,9 @@ static void block_left(Viewer *v)
         for (int i = 0; i < v->nefx; i++) fx_stop(v->fxw, v->efx[i].fx);
     }
     v->nfxa = v->nvfx = v->nsofx = v->npfx = v->nrfx = v->nrsnd = v->nefx = 0;
+    for (int k = 0; k < v->nosnd; k++)
+        sound_kill(v->osnd[k].h);
+    v->nosnd = 0;
     if (v->veh) {
         vehicle_clear(v->veh);
         for (int k = 1; k < 3; k++)

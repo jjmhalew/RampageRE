@@ -160,7 +160,11 @@ t 0, and places the object at the first point at once [R].
   the sound follows the object. A deleted object (0x290480 → 0x288050) kills the sounds of its slots without keep
   (0x274710) and leaves those with keep where they are. The bosses' scripts all pass keep 0.
 - In the port each `BE_SOUND` is a `sound_add3d` moved with its part every frame (main.c `bsnd`), at most 16 a
-  part, and killed with it (`BE_SOUND` level 0, and a new block).
+  part, and killed with it (`BE_SOUND` level 0, and a new block). The other objects' add3DSfx go the same way
+  through main.c `obj_sound` (the army's units, people and ActorSwarm, vehicles, street objects, the parade,
+  edibles, the monsters' own clip sounds): at most 16 an object, moved with it each frame (`obj_sounds_step`),
+  stopped by its remove3DSfx (the army's level 0, the people's `on` 0), and on its deletion killed without keep, left
+  where it was with keep.
 - **MovementSound** (`Tank Treads` on BossTank, BossSaucer and NYBlimp, `Copter Loop` on BossHelicopter) is never
   played for the bosses: the key (0x3F5D9C) is read only by the AttackMover's init (0x314B40, 0x314CE4) and the
   HelicopterMover's (0x31EE20, 0x31F094, which starts it at once through 0x287860), and by the scripts

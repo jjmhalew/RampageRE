@@ -110,8 +110,9 @@ enum {                                               /* PE_FX_ON's slots */
     PFX_SCRIPT                                       /* the script's own (StationaryPerson's idleEffect, a kid's
                                                       * BalloonFX) */
 };
-/* monster: the monster slot it is about (PE_MONSTER_*: the one whose blow it was; otherwise 0) */
-typedef struct { int type, who, on; const char *name, *node; float v[3], amount; int monster; } PeopleEvent;
+/* monster: the monster slot it is about (PE_MONSTER_*: the one whose blow it was; otherwise 0); object: the script
+ * object it is from (people_object: ActorSwarm's sounds), -1 none */
+typedef struct { int type, who, on; const char *name, *node; float v[3], amount; int monster, object; } PeopleEvent;
 /* fart: Monsters::timedDoFart on the eater in 2 s (one in five); eat_fx: StationaryPerson's EatEffect, on the eater's
  * node eat_node (its EatEffectNode + "1": fxNode_Lightning1) */
 typedef struct { float health, energy, points; int priest, fart; const char *eat_fx; char eat_node[48]; } PeopleEaten;
@@ -176,6 +177,9 @@ void people_remove(People *p, int who);              /* requestDelete: gone at o
 void people_update(People *p, float dt, const PeopleMonster *m, int nm);
 int people_count(const People *p);
 const Person *people_get(const People *p, int who);
+/* script object o (a Band, a guard's hut, an ActorSwarm): its making's number (1 on; a reused place's differs) and
+ * its place while it is there, 0 once deleted */
+int people_object(const People *p, int o, float pos[3]);
 int people_events(People *p, PeopleEvent *out, int max);   /* takes the events since the last call */
 
 /* a front cell of a building broke (state 2 or more; 0x317DC0): the window people of that building within a storey
