@@ -525,16 +525,20 @@ static void pick_building(DirBot *bt, const DirBotView *v)
         int climbed = 0;
         for (int k = 0; k < v->nm; k++)
             climbed |= k != v->self && v->m[k].mounted == i;
+        int skip = 0;                                /* [R 0x2F10F0 .. 0x2F1140] the skip is taken after the
+                                                      * avoided building's draw, which is made for it anyway */
         if (climbed) {
             if (bt->target >= 0)
-                continue;
+                skip = 1;
             d = 1e6f;
         }
         if (i == bt->avoid && bot_rand(bt) <= 0.5f) {
             if (bt->target >= 0)
-                continue;
+                skip = 1;
             d = 1e6f;
         }
+        if (skip)
+            continue;
         best = d;
         bt->target = i;
         bt->side = s;
