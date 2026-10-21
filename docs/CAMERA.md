@@ -60,8 +60,10 @@ State: +0x5C first frame, +0x60 quaternion and +0x70 position of the smoothed ca
    i.e. 0x103FB0(new, `SmoothingFactor`, last); the first frame takes the new one as it is. The output is the matrix
    (0x104BB0), position and FOV.
 
-The smoothing works per frame, so it depends on the frame rate (the game's is 30 or 60 Hz); the viewer applies it
-per drawn frame.
+The smoothing works per frame of the camera manager, which runs the modes' updates (TwoTilts' 0x312B50 at 0x44B424,
+the script camera's 0x311750 at 0x44B3E4) once a world step, 1/30 s (gWorld +8). The viewer takes
+`SmoothingFactor`^(30 dt) for a drawn frame of dt, as for the script camera (director.c `frame_keep`); up to v0.11.4
+it took 0.9 a drawn frame, so at 60 Hz the play camera caught up twice as fast as the PS2's.
 
 ## Shake
 The shake only turns the camera, by a small yaw X and pitch Y, after the TwoTilts smoothing (a camera "munger",

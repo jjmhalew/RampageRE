@@ -254,7 +254,9 @@ void cam_update(GameCamera *c, const float (*monsters)[3], int n, int held, floa
     } else {
         if (q[0] * c->q[0] + q[1] * c->q[1] + q[2] * c->q[2] + q[3] * c->q[3] < 0)
             for (int i = 0; i < 4; i++) q[i] = -q[i];
-        float t = maxf(0, minf(1, c->s.smoothing)), n2 = 0;
+        /* SmoothingFactor is a world step's share (the camera manager runs the modes' updates once a step, 1/30 s:
+         * gWorld +8, as director.c's script camera): here k^(30 dt) for a drawn frame of dt */
+        float t = powf(maxf(0, minf(1, c->s.smoothing)), dt * 30), n2 = 0;
         for (int i = 0; i < 4; i++) { c->q[i] = q[i] + t * (c->q[i] - q[i]); n2 += c->q[i] * c->q[i]; }
         n2 = 1 / sqrtf(n2);
         for (int i = 0; i < 4; i++) c->q[i] *= n2;
