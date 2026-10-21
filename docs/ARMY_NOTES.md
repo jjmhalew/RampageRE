@@ -369,10 +369,19 @@ scripts' addStats as from a blow (CHALLENGE_NOTES.md); `RoarAttack` is the upgra
   frustum test, four sides n·p + r ≥ d, then the depth along the view within near − r .. far + r [R]; here the host's
   `visible`, the game camera's view at 4:3, main.c `people_visible`):
   - **Target:** the monster ahead nearest along x. It is the weapons' target too.
-  - **Distance:** by dx² alone. Beyond `ApproachRange` (20) the tank speeds up at 8/s to `Velocity` (8) after a 2 s
-    wait. Inside `FleeRange` (15) it backs off. In between it brakes.
-  - **Turning:** a monster behind makes it drive on 10 and then turn on the spot at π/2 per second.
-  - **Blocking:** a step towards a monster within 10 (and 5 in y) is not taken.
+  - **Distance:** by dx² alone (0x3141FC .. 0x3143F4).
+    - Beyond `ApproachRange` (20): for 2 s (+0x68 counting up) only a backing speed is braked (+8/s up to 0); then
+      it speeds up at 8/s to `Velocity` (8).
+    - Inside `FleeRange` (15): until the count is back below 0 only a forward speed is braked (down to 0); then it
+      backs off at 8/s down to −`Velocity`.
+    - In between it brakes to 0.
+    - A frame that changes no speed moves nothing: its step stays 0 (0x409FF8), so a tank that keeps a forward
+      speed through the 2 s wait stands still.
+  - **Turning:** a monster behind makes it drive on 10 (speeding up, no cap; the way counts while blocked) and then
+    turn on the spot at π/2 per second. The turn keeps the speed (0x314900 .. 0x3149C0 write no +0x5C), and the
+    count starts again at 0.
+  - **Blocking:** a step that ends within 10 of a monster (and 5 in y) whose x is on the way it goes is not taken
+    (0x314558). While it drives on to turn, any monster within 10 in x of the new place blocks it (0x3148B0).
   - **Off the street:** it does nothing while z ≥ 0.1 (the hop when hit).
 - **Damage** [R]:
   - Each hit hops it: (∓5, 0, 20), two bounces, 50/s² down.

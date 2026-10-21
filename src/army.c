@@ -3581,11 +3581,18 @@ static void attack_init(Army *a, ArmyUnit *u)
  *    monster 0; it is the weapons' target too (0x314EC0, the WeaponSystem's +4);
  *  - nothing while the tank is off the street (z >= 0.1: the hop when hit);
  *  - state 1: a target behind turns it round (state 2, to its facing - pi x the way); otherwise by dx^2 (along x
- *    only): farther than ApproachRange, after 2 s (+0x68 counting up) it speeds up by 8 / s to Velocity; nearer than
- *    FleeRange, after the count runs back to 0, it backs off down to -Velocity; between, it brakes to 0;
- *  - it moves along its own forward axis only; a step towards a monster within 10 (and 5 in y) is not taken;
- *  - state 2: it drives on 10 (speeding up, no cap), then turns on the spot at pi / 2 a second, and goes the other
- *    way (state 1);
+ *    only, 0x3141FC .. 0x3143F4), with the count +0x68:
+ *      farther than ApproachRange: while the count is under 2 it counts up and only a backing speed is braked
+ *      (+8 / s up to 0); then it speeds up by 8 / s to Velocity;
+ *      nearer than FleeRange: while the count is not below 0 it counts down and only a forward speed is braked
+ *      (down to 0); then it backs off, by 8 / s down to -Velocity;
+ *      between: it brakes to 0;
+ *    a frame in which the speed is not changed moves nothing (the step stays 0, 0x409FF8), whatever the speed;
+ *  - it moves along its own forward axis only; a step that ends within 10 of a monster (and 5 in y) whose x is
+ *    on the way it goes is not taken (0x314558);
+ *  - state 2: it drives on 10 (speeding up, no cap; the way driven counts while blocked), where any monster
+ *    within 10 in x of the new place blocks the step (0x3148B0); then it turns on the spot at pi / 2 a second,
+ *    its speed kept (0x314900 .. 0x3149C0 write no +0x5C), and goes the other way (state 1, the count 0);
  *  - the MovementSound plays while |speed| > 0.01 */
 static void attack_step(Army *a, ArmyUnit *u, float dt)
 {
@@ -3605,7 +3612,8 @@ static void attack_step(Army *a, ArmyUnit *u, float dt)
     if (u->pos[2] >= 0.1f || best < 0)
         return;
     float fwd[2] = { -sinf(u->facing), cosf(u->facing) };
-    float dx = a->m[best].pos[0] - u->pos[0];
+    float dx = a->m[best].pos[0] - u->pos[0], s = 8 * dt;
+    int move = 0, turning = 0;
     if (u->am.state == 1) {
         if (dx * u->am.sign < 0) {
             u->am.state = 2;
@@ -3613,28 +3621,43 @@ static void attack_step(Army *a, ArmyUnit *u, float dt)
             u->am.driven = 0;
         } else {
             float d2 = dx * dx;
+            move = 1;
             if (d2 > u->am.app2) {
-                u->am.timer = fminf(2, u->am.timer + dt);
-                if (u->am.timer >= 2)
-                    u->am.speed = fminf(u->am.vmax, u->am.speed + 8 * dt);
+                if (u->am.timer < 2) {
+                    u->am.timer += dt;
+                    if (u->am.speed < 0)
+                        u->am.speed = fminf(u->am.speed + s, 0);
+                    else
+                        move = 0;
+                } else
+                    u->am.speed = fminf(u->am.speed + s, u->am.vmax);
             } else if (d2 < u->am.flee2) {
-                u->am.timer = fmaxf(0, u->am.timer - dt);
-                if (u->am.timer <= 0)
-                    u->am.speed = fmaxf(-u->am.vmax, u->am.speed - 8 * dt);
-            } else {
-                float s = 8 * dt;
-                u->am.speed = fabsf(u->am.speed) <= s ? 0 : u->am.speed - (u->am.speed > 0 ? s : -s);
-            }
+                if (u->am.timer < 0)
+                    u->am.speed = fmaxf(fminf(u->am.speed - s, u->am.vmax), -u->am.vmax);
+                else {
+                    u->am.timer -= dt;
+                    if (u->am.speed > 0)
+                        u->am.speed = fmaxf(u->am.speed - s, 0);
+                    else
+                        move = 0;
+                }
+            } else if (u->am.speed > 0)
+                u->am.speed = fmaxf(u->am.speed - s, 0);
+            else if (u->am.speed < 0)
+                u->am.speed = fminf(u->am.speed + s, 0);
+            else
+                move = 0;
         }
     }
     if (u->am.state == 2) {
         if (u->am.driven < 10) {
-            u->am.speed += 8 * dt;
-            u->am.driven += fabsf(u->am.speed * dt);
+            u->am.speed += s;
+            u->am.driven += u->am.speed * dt;
+            move = 1;
+            turning = 1;
         } else {
-            u->am.speed = 0;
-            float d = u->am.goal - u->facing, s = PI / 2 * dt;
-            if (fabsf(d) <= s) {
+            float d = u->am.goal - u->facing, t = PI / 2 * dt;
+            if (fabsf(d) <= t) {
                 u->facing = u->am.goal;
                 while (u->facing > PI) u->facing -= 2 * PI;
                 while (u->facing < -PI) u->facing += 2 * PI;
@@ -3642,19 +3665,27 @@ static void attack_step(Army *a, ArmyUnit *u, float dt)
                 u->am.state = 1;
                 u->am.timer = 0;
             } else
-                u->facing += d > 0 ? s : -s;
+                u->facing += d > 0 ? t : -t;
         }
     }
-    float step[2] = { fwd[0] * u->am.speed * dt, fwd[1] * u->am.speed * dt };
-    int blocked = 0;
-    for (int i = 0; i < a->nm; i++) {
-        float mx = a->m[i].pos[0] - u->pos[0];
-        if (dist3(a->m[i].pos, u->pos) < 10 && fabsf(a->m[i].pos[1] - u->pos[1]) < 5 && mx * step[0] > 0)
-            blocked = 1;
+    float step[2] = { 0, 0 };
+    if (move) {
+        step[0] = fwd[0] * u->am.speed * dt;
+        step[1] = fwd[1] * u->am.speed * dt;
     }
-    if (!blocked) {
-        u->pos[0] += step[0];
-        u->pos[1] += step[1];
+    float to[3] = { u->pos[0] + step[0], u->pos[1] + step[1], u->pos[2] };
+    int blocked = 0;
+    for (int i = 0; move && i < a->nm; i++) {
+        float mx = a->m[i].pos[0] - to[0];
+        if (turning)
+            blocked |= mx * mx < 100;
+        else
+            blocked |= dist3(a->m[i].pos, to) < 10 && fabsf(a->m[i].pos[1] - to[1]) < 5 &&
+                       mx * u->am.sign * u->am.speed > 0;
+    }
+    if (move && !blocked) {
+        u->pos[0] = to[0];
+        u->pos[1] = to[1];
     }
     int moving = fabsf(u->am.speed) > 0.01f;
     if (moving != u->am.tread) {                     /* 0x287860 / 0x2877A0 */
