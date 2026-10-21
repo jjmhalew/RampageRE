@@ -55,6 +55,7 @@ typedef struct {
     int anim_done;                                   /* a play that does not repeat has ended (onAnimComplete sent) */
     float world[16];                                 /* column-major; always kept: pos and heading, or the hand / the flight */
     int building, storey, column;                    /* a window occupant's cell (-1 none) */
+    int slot_empty;                                  /* its slot has no occupant any more (people_window_emptied) */
     Group inst;                                      /* the block's ActorInstance| it was made from (its SpawnsItem<n>) */
     float win_x, win_floor;                          /* its window's x and its storey's floor when it came out */
     uint32_t flags;                                  /* object flags: 0x10000 Pickupable, 0x20000 BeingHeld, 0x80000 actor */
@@ -90,7 +91,7 @@ enum {
                                                       * looping sound of that name, remove3DSfx); amount 1: kept,
                                                       * it plays on once the person is gone (add3DSfx's keep) */
     PE_EFFECT,                                       /* name at v (node: on person who's node, by that name) */
-    PE_DROP,                                         /* a droppable (the block's DroppableDef) falls from v */
+    PE_DROP,                                         /* a droppable, the template name, falls from v */
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */
     PE_MONSTER_KNOCK,                                /* the monster: setVel(v, world) and setReaction(2) */
     PE_MONSTER_HP,                                   /* the monster: addHitPoints(amount) */
@@ -129,7 +130,12 @@ void people_set_templates(People *p, PeopleFindTemplate find, void *ctx);
 /* gWorld.isSphereVisible(pos, r): the streakers leave once out of view; unset, everything counts as visible */
 typedef int (*PeopleVisible)(void *ctx, const float pos[3], float radius);
 void people_set_visible(People *p, PeopleVisible visible, void *ctx);
-void people_set_droppable_rate(People *p, float rate);   /* the block's DroppableDef rate (getDroppableRate) */
+/* the block's DroppableDef (0x31A540): its number, the rate every occupant kind takes as its DropRate (+0x34 into
+ * the kinds' +0x10, 0x318CC4: no OccupantInstance sets its own), and its names, getDroppableName's pick */
+void people_set_droppables(People *p, float rate, const char *const *names, int n);
+/* the occupant's slot has none any more (+0xD = 0xFF: its window broken under it, 0x317DC0): getDroppableRate
+ * (0x30C0A0) answers 0 when it goes back in */
+void people_window_emptied(People *p, int who);
 /* the block's chains [R the Actor destructor 0x30DF80, docs/PARADE_NOTES.md "The chain"]: a person made from an
  * ActorInstance| (people_set_instance) that goes (eaten, smashed and deleted) while the world is in state 6 makes each
  * ActorInstance|<SpawnsItem<n>> of the block (people_set_block) and sends it onWalkIn: the street punks, mimes and

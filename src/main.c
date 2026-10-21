@@ -6086,15 +6086,9 @@ static void play_step(Viewer *v, float dt, float aspect)
             const Person *p = people_get(v->scene.folk, ev[i].who);
             if (!v->army || !p)
                 continue;
-            if (ev[i].type == PE_DROP) {
-                const char *tmpl = NULL;             /* the block's DroppableDef: one of its OTRef| at random */
-                Group dd = group_sub(v->scene.block, "DroppableDef"), where;
-                Record r[16];
-                uint32_t n = dd.at ? group_values(dd, "OTRef|", &where, r, 16) : 0;
-                if (n)
-                    tmpl = record_str(where, r[(uint32_t)rand() % n]);
-                if (tmpl)
-                    army_drop(v->army, tmpl, ev[i].v, NULL, 0, NULL, 0);
+            if (ev[i].type == PE_DROP) {             /* getDroppableName's pick (people.c) */
+                if (ev[i].name)
+                    army_drop(v->army, ev[i].name, ev[i].v, NULL, 0, NULL, 0);
             } else if (ev[i].type == PE_WEAPON) {            /* enableWeapon(1) with its name, enableWeapon(0) without */
                 int on = ev[i].on && ev[i].name, k;
                 army_person_weapon(v->army, ev[i].who, on ? group_sub(p->tmpl, "Weapon|RifleWeapon") : (Group){ 0 },

@@ -25,7 +25,9 @@ struct People {
     PeopleClipSeconds clip_seconds;
     void *ctx;
     float droppable_rate;
-    const PeopleMonster *m;                          /* this frame's monsters */
+    const char *drop_names[16];
+    int ndrop;
+    const PeopleMonster *m;                         /* this frame's monsters */
     int nm;
     PeopleEvent ev[MAX_EVENTS];
     int nev;
@@ -502,8 +504,12 @@ static int window_anim_done(People *p, Person *q)
                 drop = 1;
         if (q->pos[2] < 3.0f * 4.0f + 6.0f)
             drop = 0;
-        if (drop && p->droppable_rate >= frand(p))
-            emit(p, PE_DROP, who_of(p, q), NULL, NULL, q->pos, 0, 1);
+        /* getDroppableRate (0x30C0A0): its slot's kind's DropRate, 0 once the slot has none; getDroppableName
+         * (0x30C110): one of the block's names at trunc(n x frand) (0x106BD0), none drawn without names [R] */
+        if (drop && (q->slot_empty ? 0.0f : p->droppable_rate) >= frand(p) && p->ndrop > 0) {
+            int k = (int)((float)p->ndrop * frand(p));
+            emit(p, PE_DROP, who_of(p, q), p->drop_names[k < p->ndrop ? k : p->ndrop - 1], NULL, q->pos, 0, 1);
+        }
         return DELETE_ME;
     } else if (q->state == 6) {
         start_anim(p, q, "Running", 0, 1);
@@ -1270,7 +1276,19 @@ void people_free(People *p)
     }
 }
 
-void people_set_droppable_rate(People *p, float rate) { p->droppable_rate = rate; }
+void people_set_droppables(People *p, float rate, const char *const *names, int n)
+{
+    p->droppable_rate = rate;
+    p->ndrop = 0;
+    for (int i = 0; i < n && p->ndrop < 16; i++)
+        p->drop_names[p->ndrop++] = names[i];
+}
+
+void people_window_emptied(People *p, int who)
+{
+    if (who >= 0 && who < p->n)
+        p->v[who].slot_empty = 1;
+}
 
 int people_add(People *p, Group tmpl, const float pos[3], float heading_deg)
 {

@@ -1523,8 +1523,11 @@ static void scene_cell_broken(Scene *s, int building, int o, int col, int state)
         if (!ws->retired) {
             if (state == 2 && ws->military && s->nmilitary > 0)
                 ws->occupant = (int)((wrand_lf() & 0xFF) % (uint32_t)s->nmilitary);
-            else
+            else {
                 ws->retired = 1;
+                if (!ws->military && s->folk)        /* the one out drops nothing as it goes in (0x30C0A0) */
+                    people_window_emptied(s->folk, people_window_at(s->folk, building, o, col));
+            }
         }
         break;
     }
@@ -3652,6 +3655,21 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     s->owner = c;
     s->folk = people_new(people_clip_seconds, c);
     people_set_templates(s->folk, people_template, c);
+    {                                                /* [R 0x31A6AC .. 0x31A7A4] DroppableDef: its names (records of
+                                                      * kind 2), its rate the last number (+0x34; none: kept, 0.5) */
+        Group dd = group_sub(block, "DroppableDef");
+        const char *names[16];
+        int nn = 0;
+        float rate = 0.5f;
+        for (uint32_t i = 0, cnt = dd.at ? group_count(dd) : 0; i < cnt; i++) {
+            Record q = group_record(dd, i);
+            if ((q.kind & 0xFF) == PK_NAME && nn < 16)
+                names[nn++] = record_str(dd, q);
+            else if ((q.kind & 0xFF) == PK_FLOAT)
+                rate = record_num(q);
+        }
+        people_set_droppables(s->folk, rate, names, nn);
+    }
     for (int k = 0; k < s->nscripted; k++) {        /* Band.bsf, RoyalGuardHut.bsf */
         if (getenv("RAMPAGE_TRACE"))
             printf("%s at %.1f %.1f\n", s->scripted[k].hut ? "a guard's hut" : "a band", s->scripted[k].pos[0],
