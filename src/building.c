@@ -119,7 +119,9 @@ static void set_state(Building *b, int o, int col, int state)
     b->dirty = 1;
 }
 
-/* 0x2BAE70: live storey k-1 falls (k = 0: the building sinks into the ground): its cells to state 3 */
+/* 0x2BAE70: live storey k-1 falls (k = 0: the building sinks into the ground): its cells to state 3, and on the live
+ * storeys below (k-2) and above (k) it every face's cell still intact whose sheet column has an Outline (0x2D0500)
+ * cracked, state 1 (0x2BAF24 .. 0x2BAFD4: 0x2CFDA0, the state alone) [R] */
 static void floor_falls(Building *b, int k)
 {
     if (b->state == BUILDING_FLOOR_FALLING)
@@ -128,6 +130,16 @@ static void floor_falls(Building *b, int k)
         int o = b->live[k - 1];
         for (int c = 0; c < 2 * b->depth + b->width && c < BUILDING_CELLS; c++)
             b->cell[o][c].state = 3;
+        for (int nb = 0; nb < 2; nb++) {
+            int s = nb ? k : k - 2;
+            if (s < 0 || s >= b->n)
+                continue;
+            for (int c = 0; c < 2 * b->depth + b->width && c < BUILDING_CELLS; c++) {
+                BuildingCell *cl = &b->cell[b->live[s]][c];
+                if (cl->state == 0 && (b->outlined >> (cl->tile & 3) & 1))
+                    cl->state = 1;
+            }
+        }
         for (int w = b->nwindows - 1; w >= 0; w--)   /* its open windows (the flags stay, 0x2BB09C) */
             if (b->window[w].o == o)
                 window_drop(b, w);

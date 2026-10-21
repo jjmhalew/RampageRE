@@ -2454,6 +2454,10 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
         sb->b.min_crack = (int)group_num(t, "MinCollapseCrackLevel", (float)sb->b.min_crack);
         sheet_columns(c, sb, sheet);
+        sb->b.outlined = 0;
+        for (int k = 0; k < 4; k++)
+            if (sb->outline[k][0] >= 0)
+                sb->b.outlined |= (uint8_t)(1u << k);
         sb->open_part = mesh >= 0 && s->meshes[mesh].mesh.nparts >= 5 ? 4 : 0;
         memset(sb->quad, 0xFF, sizeof sb->quad);
         memset(sb->skeleton, 0xFF, sizeof sb->skeleton);

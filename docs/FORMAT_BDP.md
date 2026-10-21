@@ -566,7 +566,9 @@ The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then it
 (`GENRUBBLE_10X10` … `10X20`, by footprint).
 
 - **A floor falls** (its FloorHP gone, 0x2BAE70 with k = storey + 1; the building is in state 3 meanwhile and takes no
-  hits; only one at a time): its cells go to state 3 and its vertex rows to level 3, and over `CollapseTime` the
+  hits; only one at a time): its cells go to state 3 and its vertex rows to level 3, and on the live storeys below
+  and above it every face's cell still intact (state 0) whose sheet column has an `Outline` (0x2D0500) cracks, state 1
+  (0x2BAF24 .. 0x2BAFD4, the state alone: no window drop, no debris) [R]; over `CollapseTime` the
   storeys above come down onto it, 3 units (one storey) in all, squashing it (0x2D2D00, 0x2D2A40: the collapsing
   storey G+0x1CC, the progress 0 … 1 at G+0x1D0; G+0x1CC = INT_MAX when none). Then it is gone: the storeys above
   take its place (the storey table G+0x48 shifts down), the building is a storey lower, and the one below is

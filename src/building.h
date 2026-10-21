@@ -78,6 +78,8 @@ typedef struct {
     BuildingCell cell[BUILDING_STOREYS][BUILDING_CELLS];   /* [o][face x depth + column], fronts from 2 x depth */
     BuildingVert vert[BUILDING_STOREYS + 1][3][BUILDING_VCOLS];   /* by live row, face (FACE_*), column: the dents */
     int roof;                                        /* G+0x658: the roof's damage state 0 .. 3 (its TopFloorShapes model) */
+    uint8_t outlined;                                /* the sheet's columns (bit by +5) with an Outline (+0xEC): set by
+                                                      * the host (city.c), 0x2D0500's answer */
     int collapse;                                    /* G+0x1CC: -1 none, k >= 1 live storey k-1 falls, 0 it sinks */
     int falls;                                       /* the floors that have started to fall (k >= 1), counted: a
                                                       * floor's landing can fell the next at the same k that frame */
