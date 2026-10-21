@@ -341,10 +341,21 @@ int army_interest(const Army *a, float out[2][3])
             memcpy(out[n++], a->u[a->interest[k].unit].pos, sizeof out[0]);
     return n;
 }
-static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx */
+static void sound(Army *a, ArmyUnit *u, const char *name)   /* add3DSfx(name, 0) */
 {
     if (name && *name)
         emit(a, AE_SOUND, who(a, u), name, u->pos)->level = 1;
+}
+/* add3DSfx(name, 1): kept, it plays on where the unit was once the unit is gone (0x287860's keep bit, 0x288050) [R
+ * SWAT.scr's voices and FlyingSound, Military_Window.scr's EmergeSound, PickupSound and FlyingSound,
+ * StationaryAttackObject.scr's FireSound]; AE_SOUND's amount 1 */
+static void sound_kept(Army *a, ArmyUnit *u, const char *name)
+{
+    if (name && *name) {
+        ArmyEvent *e = emit(a, AE_SOUND, who(a, u), name, u->pos);
+        e->level = 1;
+        e->amount = 1;
+    }
 }
 
 /* getNearestMonster [R: the Actor binding 0x42 (0x2A8FA0 -> 0x2B26F0) and the RScriptObject / AttackObject one 0x37
@@ -2745,7 +2756,7 @@ static void troop_init(Army *a, ArmyUnit *u)         /* Construct */
         line_init(u, u->pos, u->pos, 0);
     float dt = fabsf(a->now - a->move_ts);
     if (!u->is_cop && a->move_played[group_of(u)] == 0 && dt > 3) {
-        sound(a, u, ustr(u, "VoiceMove"));
+        sound_kept(a, u, ustr(u, "VoiceMove"));
         a->move_played[group_of(u)] = 1;
         a->move_ts = a->now;
     }
@@ -2782,7 +2793,7 @@ static int troop_pulse(Army *a, ArmyUnit *u)
     if (a->flee[g] && (u->flags & 1024) && !u->is_cop && u->state != 512) {
         float dt = fabsf(a->fallback_ts - a->now);
         if (a->fallback_played[g] == 0 && dt > 3) {
-            sound(a, u, ustr(u, frand(a) > 0.5f ? "VoiceFallback" : "VoiceCodeRed"));
+            sound_kept(a, u, ustr(u, frand(a) > 0.5f ? "VoiceFallback" : "VoiceCodeRed"));
             a->fallback_played[g] = 1;
             a->fallback_ts = a->now;
         }
@@ -2804,7 +2815,7 @@ static int troop_pulse(Army *a, ArmyUnit *u)
         u->voice[0] -= u->pulse_delay;
         float dt = fabsf(a->fire_ts - a->now);
         if (!u->is_cop && a->fire_played[g] == 0 && u->voice[0] < 0 && dt > 3) {
-            sound(a, u, ustr(u, "VoiceFire"));
+            sound_kept(a, u, ustr(u, "VoiceFire"));
             a->fire_ts = a->now;
             a->fire_played[g] = 1;
         }
@@ -2812,7 +2823,7 @@ static int troop_pulse(Army *a, ArmyUnit *u)
             u->voice[2] -= u->pulse_delay;
             u->aux[1] -= u->pulse_delay;
             if (u->voice[2] < 0) {
-                sound(a, u, ustr(u, "VoiceCop"));
+                sound_kept(a, u, ustr(u, "VoiceCop"));
                 u->voice[2] = unum(u, "DelayCopVoice", 3);
             }
             if (u->aux[1] < 0) {                     /* a clip of 1, 2 or 3 bullets */
@@ -2874,7 +2885,7 @@ static void troop_anim_done(Army *a, ArmyUnit *u)
         u->state = 4;
     } else if (u->state == 128) {
         if (u->is_grenadier && u->voice[1] < 0) {
-            sound(a, u, ustr(u, "VoiceArni"));
+            sound_kept(a, u, ustr(u, "VoiceArni"));
             u->voice[1] = unum(u, "DelayArniVoice", 8);
         }
         u->target = m;
@@ -2892,7 +2903,7 @@ static void troop_anim_done(Army *a, ArmyUnit *u)
                 u->reload = 3;
                 start_anim(a, u, "StandingGroundFiringAngleU", 1);
                 if (u->is_grenadier)
-                    sound(a, u, ustr(u, "VoiceArni"));
+                    sound_kept(a, u, ustr(u, "VoiceArni"));
                 u->state = 128;
             } else {
                 start_anim(a, u, "Idle", 1);
@@ -2915,7 +2926,7 @@ static void troop_anim_done(Army *a, ArmyUnit *u)
 static void troop_smash(Army *a, ArmyUnit *u, int monster)
 {
     smash_object(a, u, monster >= 0 ? a->m[monster].heading : 0);
-    sound(a, u, ustr(u, "FlyingSound"));
+    sound_kept(a, u, ustr(u, "FlyingSound"));
     u->state = 512;
     u->pulse_delay = 3;
     u->pulse_time = 0;
@@ -2933,7 +2944,7 @@ static void troop_pickup(Army *a, ArmyUnit *u)       /* onPickup */
     weapons_enable(u, 0);
     if (ustr(u, "VoiceGrabbed")) {                   /* remove3DSfx(-1): its own lines cut first [R SWAT.scr] */
         emit(a, AE_SOUND, who(a, u), NULL, u->pos)->level = 0;
-        sound(a, u, ustr(u, "VoiceGrabbed"));
+        sound_kept(a, u, ustr(u, "VoiceGrabbed"));
     }
 }
 
@@ -2966,7 +2977,7 @@ static void window_init(Army *a, ArmyUnit *u)        /* Construct */
         int m = nearest_monster(a, u->pos);
         float d = m >= 0 ? fabsf(a->m[m].pos[0] - u->pos[0]) : 1e9f;
         if (fabsf(a->now - a->emerge_ts) > 2 && r < 0.2f && d <= 30) {
-            sound(a, u, emerge);
+            sound_kept(a, u, emerge);
             a->emerge_ts = a->now;
         }
     }
@@ -3039,7 +3050,7 @@ static int window_anim_done(Army *a, ArmyUnit *u)
 static void window_smash(Army *a, ArmyUnit *u, int monster)
 {
     smash_object(a, u, monster >= 0 ? a->m[monster].heading : 0);
-    sound(a, u, ustr(u, "FlyingSound"));
+    sound_kept(a, u, ustr(u, "FlyingSound"));
     u->state = 9;
     u->pulse_delay = 3;
     u->pulse_time = 0;
@@ -3050,7 +3061,7 @@ static void window_pickup(Army *a, ArmyUnit *u)
     if (u->state == 8)
         return;
     start_anim(a, u, "PickedUp", 1);
-    sound(a, u, tstr(u, "PickupSound"));
+    sound_kept(a, u, tstr(u, "PickupSound"));
     u->state = 8;
     weapons_enable(u, 0);
 }
@@ -3095,7 +3106,7 @@ static int turret_process(Army *a, ArmyUnit *u, float dt)   /* Process, every fr
     if (u->aux[2] <= 0.5f && !u->aux[3]) {
         const char *v = ustr(u, "FireSound");
         if (v) {
-            sound(a, u, v);
+            sound_kept(a, u, v);
             u->aux[3] = 1;
         }
     } else if (u->aux[2] <= 0) {

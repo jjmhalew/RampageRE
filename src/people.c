@@ -105,11 +105,13 @@ static int same_text(const char *a, const char *b)   /* any case, as the game co
     return *a == *b;
 }
 
-static void sound(People *p, Person *q, const char *key)   /* add3DSfx(getStringProp(key)) */
+/* add3DSfx(getStringProp(key), keep): keep 1, the sound plays on where the person was once it is gone (0x287860's keep
+ * bit, 0x288050: only the others are killed) [R the scripts' second arguments]; PE_SOUND's amount */
+static void sound(People *p, Person *q, const char *key, int keep)
 {
     const char *s = tstr(q, key);
     if (s)
-        emit(p, PE_SOUND, who_of(p, q), s, NULL, q->pos, 0, 1);
+        emit(p, PE_SOUND, who_of(p, q), s, NULL, q->pos, (float)keep, 1);
 }
 
 static void effect(People *p, Person *q, const char *key, const float at[3], const char *node)
@@ -559,7 +561,7 @@ static void window_fall(People *p, Person *q)
     q->mv.flags = 0;
     mover_add(q, next);
     mover_add(q, run);
-    sound(p, q, "Sound|FallingSound");
+    sound(p, q, "Sound|FallingSound", 1);                /* Person_Window.scr:292 */
     q->run_heading = dir == -1 ? -90.0f : 90.0f;     /* FACE_RIGHT runs to +x, FACE_LEFT to -x */
 }
 
@@ -805,7 +807,7 @@ static int on_pulse(People *p, Person *q)
         return 1;
     case PK_STATIONARY:
         if (q->state == 1)
-            sound(p, q, "Sound|AmbientSound");
+            sound(p, q, "Sound|AmbientSound", 0);        /* StationaryPerson.scr:76 */
         else if (q->state == 2)
             return fly_countdown(q);
         return 1;
@@ -957,7 +959,7 @@ static void play_effect(People *p, Person *q)
     float up[3] = { q->pos[0], q->pos[1], q->pos[2] + 5 };
     fx_off(p, q, PFX_SCRIPT);
     effect(p, q, "Effect|PickedUpEffect", up, NULL);
-    sound(p, q, "Sound|PickupSound");
+    sound(p, q, "Sound|PickupSound", 0);                 /* StationaryPerson.scr:109 */
 }
 
 static void on_pickup(People *p, Person *q)          /* the script's onPickup (script event 8) */
@@ -966,19 +968,19 @@ static void on_pickup(People *p, Person *q)          /* the script's onPickup (s
     case PK_WINDOW:
         if (q->state != 20) {
             start_anim(p, q, "PickedUp", 0, 1);
-            sound(p, q, "Sound|PickupSound");
+            sound(p, q, "Sound|PickupSound", 1);         /* Person_Window.scr:324 */
             q->state = 20;
         }
         break;
     case PK_RUNNER:
         start_anim(p, q, "PickedUp", 0, 1);
-        sound(p, q, "Sound|PickupSound");
+        sound(p, q, "Sound|PickupSound", 1);             /* Person_Runner.scr:131 */
         q->heading = 0;
         break;
     case PK_WALKER:
         start_anim(p, q, "PickedUp", 0, 1);
         q->state = 2;
-        sound(p, q, "Sound|Voice");
+        sound(p, q, "Sound|Voice", 1);                   /* WalkingAroundPerson.scr:331 */
         q->sub |= 1;
         break;
     case PK_STATIONARY:
@@ -987,7 +989,7 @@ static void on_pickup(People *p, Person *q)          /* the script's onPickup (s
         break;
     case PK_TOURIST:
         if (q->state != 3) {
-            sound(p, q, "Sound|PickupSound");
+            sound(p, q, "Sound|PickupSound", 1);         /* Tourist.scr:196 */
             start_anim(p, q, "PickedUp2", 0, 1);
             q->state = 3;
             q->pulse_delay = 10 * TIMESTEP;
@@ -1017,7 +1019,7 @@ static void on_pickup(People *p, Person *q)          /* the script's onPickup (s
 static void smash(People *p, Person *q, float monster_heading)
 {
     smash_object(p, q, monster_heading);
-    sound(p, q, "Sound|FlyingSound");
+    sound(p, q, "Sound|FlyingSound", 1);                 /* every person script */
     switch (q->kind) {
     case PK_WINDOW: q->state = 22; break;             /* pulses every 0.25 s */
     case PK_RUNNER: q->state = 16; q->pulse_delay = 0.5f; break;
@@ -1178,7 +1180,7 @@ static void construct(People *p, Person *q)
         q->walk_speed = tnum(q, "WalkSpeed", 4);
         q->weapon_off = -1000;
         q->pulse_delay = TIMESTEP;
-        sound(p, q, "Sound|AmbientLoopingSound");
+        sound(p, q, "Sound|AmbientLoopingSound", 0);     /* WalkingAroundPerson.scr:85 */
         q->state = 0;
         break;
     case PK_MIME:
@@ -1221,7 +1223,7 @@ static void construct(People *p, Person *q)
         q->flags |= OF_EFF_NODES | OF_PICKUP;
         start_anim(p, q, "Idle", 1, 1);
         fx_on(p, q, PFX_SCRIPT, tstr(q, "Effect|IdleEffect"), up, 0);   /* idleEffect.createAndStart(pos + 5 up) */
-        sound(p, q, "Sound|Sound");
+        sound(p, q, "Sound|Sound", (int)tnum(q, "SoundPersistent", 1));   /* StationaryPerson.scr:58 */
         if (tstr(q, "Sound|AmbientSound"))
             q->pulse_delay = 7;
         q->state = 1;

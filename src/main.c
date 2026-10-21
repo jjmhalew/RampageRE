@@ -4970,8 +4970,8 @@ static void army_step(Viewer *v, float dt)
                     sound_play(e->name, NULL, 1);
                 else if (e->unit >= 0 && e->level == 0)
                     obj_sound_stop(v, OS_ARMY, e->unit, e->name);
-                else if (e->unit >= 0)
-                    obj_sound(v, OS_ARMY, e->unit, e->name, 0, e->pos);
+                else if (e->unit >= 0)               /* (amount: the script's keep) */
+                    obj_sound(v, OS_ARMY, e->unit, e->name, e->amount != 0, e->pos);
                 else if (e->level == 0)
                     sound_kill_name(e->name);
                 else
@@ -6102,8 +6102,8 @@ static void play_step(Viewer *v, float dt, float aspect)
                     obj_sound(v, OS_PEOPLE_OBJECT, ev[i].object, ev[i].name, 0, ev[i].v);
                 else if (ev[i].who < 0)
                     sound_play(ev[i].name, ev[i].v, 1);
-                else if (ev[i].on)
-                    obj_sound(v, OS_PEOPLE, ev[i].who, ev[i].name, 0, ev[i].v);
+                else if (ev[i].on)                   /* (amount: the script's keep) */
+                    obj_sound(v, OS_PEOPLE, ev[i].who, ev[i].name, ev[i].amount != 0, ev[i].v);
                 else
                     obj_sound_stop(v, OS_PEOPLE, ev[i].who, ev[i].name);
             }

@@ -87,7 +87,8 @@ typedef struct {                                     /* what the people see of a
 /* what the people make happen elsewhere (sounds, effects, the monster's reactions) */
 enum {
     PE_SOUND,                                        /* name: a 3D sound at the person (on = 0: stop that person's
-                                                      * looping sound of that name, remove3DSfx) */
+                                                      * looping sound of that name, remove3DSfx); amount 1: kept,
+                                                      * it plays on once the person is gone (add3DSfx's keep) */
     PE_EFFECT,                                       /* name at v (node: on person who's node, by that name) */
     PE_DROP,                                         /* a droppable (the block's DroppableDef) falls from v */
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */

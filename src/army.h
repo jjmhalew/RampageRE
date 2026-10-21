@@ -190,7 +190,8 @@ enum {
                        * (the host's to decide, challenge_is_goal: the world object's init 0x30D280 -> 0x3466A0) */
     AE_EFFECT_STOP,   /* the effect with handle id stops */
     AE_EFFECT_MOVE,   /* the effect with handle id is moved to pos (a beam's ImpactEffect where it touches) */
-    AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads) */
+    AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads);
+                       * amount 1: kept (add3DSfx(name, 1): it plays on once the unit is gone) */
     AE_HIT,           /* a weapon reached monster `monster`: amount damage, id the DamageType, level the ReactionLevel
                        * (-1: none, through TakeDamage 0x2D9680, which picks the level by the amount), v the knock
                        * (0x2D9650's), pos where, dir the shot's way, name the weapon. The monster side (0x2D6A50):
