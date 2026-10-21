@@ -999,7 +999,8 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     /* the part's own blend (the facades'), else its material's: GS state 2 as the sheets' (material_blended) */
     int blend = p->blend ? p->blend : material_blended(sm->b, p->material) ? 2 : 0;
     int see_through = !blend && mc[3] < 0.98f;           /* the glass of the saucer, the hover tank, the
-                                                          * helicopter's canopy: blended by the colour's alpha */
+                                                          * helicopter's canopy: blended by the colour's alpha (kind
+                                                          * 1 with flag 0x100000, shaders 0xE / 0x10: GS state 7) */
     /* colours and no normals: the light is in the colours (docs/BUILDING_LIGHT_NOTES.md), drawn unlit: the
      * damaged interiors (their sections are format 0x142, prelit, like the game's own 0x142 buffers of shader
      * 0x51), the facades and cracks the building light colours, the ground and top models lit with it. No normals
@@ -1018,9 +1019,11 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     if (blend || see_through) {                          /* over what is behind, by its alpha */
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glAlphaFunc(GL_GREATER, blend == 2 ? 0.0f : 0.01f);
-        if (blend != 2)                                  /* a facade sheet keeps writing its depth [R GS state 2: */
-            glDepthMask(GL_FALSE);                       /* ALPHA 0x44, TEST 0x5000D (alpha > 0), Z written] */
+        glAlphaFunc(GL_GREATER, blend == 2 || see_through ? 0.0f : 0.01f);
+        if (blend != 2 && !see_through)                  /* a facade sheet and the glass keep writing their depth [R
+                                                          * GS states 2 and 7: ALPHA 0x44, TEST 0x5000D (alpha > 0),
+                                                          * Z written] */
+            glDepthMask(GL_FALSE);
     }
     /* a reflective material (kind 5: shader 0x1A, record 26 at 0x3B5C10; 0x19 with flag 2, set on none) [R]: its first
      * pass is GS state 1, TEST 0x50002, no alpha test: the texture's alpha is not a cut-out but the share of the
