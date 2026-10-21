@@ -3952,7 +3952,7 @@ static void hud_frame(Viewer *v, int after)
     HudCall calls[16];
     int nc = hud_calls(v->hud, calls, 16);
     shell_give_graphics(v);                          /* the settings in use, for the Pause menu's Graphics page */
-    for (int i = 0; i < nc; i++)                     /* gSndDev's volumes (no fades here) */
+    for (int i = 0; i < nc; i++)                     /* gSndDev's volumes */
         switch (calls[i].call) {
         case HUD_CALL_GRAPHICS: {                    /* the Pause menu's Graphics page: tried, put back or kept */
             const HudGraphics *hg = hud_graphics(v->hud);
@@ -3960,7 +3960,12 @@ static void hud_frame(Viewer *v, int after)
             graphics_from_menu(v, &g, calls[i].arg);
             break;
         }
-        case HUD_CALL_MUSIC_VOLUME: v->music_now = calls[i].value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
+        case HUD_CALL_MUSIC_VOLUME:                  /* setMusicVolume(v, ms): the music slots go there over ms
+                                                      * (0x26B5E0, group 3) [R Pause.scr: 0 over 1 s at the menu's
+                                                      * opening and back over 1 s at Continue] */
+            v->music_now = calls[i].value / 0.75f;
+            sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, calls[i].arg);
+            break;
         case HUD_CALL_SFX_VOLUME: v->sfx_vol = calls[i].value / 0.75f; sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 0); break;
         case HUD_CALL_SAVE_SETTINGS:
             hud_settings(v->hud, &sv, &mv, &rumble);
