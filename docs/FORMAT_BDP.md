@@ -533,6 +533,9 @@ units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.
    → 2 (a neighbour takes 3) → 0 (destroyed).
 4. The facade shows each cell's state as its tile's row; a floor with any damaged cell shows its `Skeleton`, the
    interior, and its `DamagedSkeleton` once `DamagedSkeletonHP` (half of `FloorHP`) is passed (around 0x2CD898).
+   A front-row building that a back-row one overlaps in x never shows its `DamagedSkeleton`: the back-row building's
+   first update (0x2BE008 → 0x2BE300) makes every such front building's storeys' `DamagedSkeletonHP` (+0x18) −1
+   (0x2CC8B0) [R].
    The interiors are prelit: their sections are format 0x142 (colour, no normals; grey shading baked in) and are drawn
    with no light set; nothing changes their colours with damage or storey. The facade itself is lit on the CPU, a
    colour per grid vertex times the storey's `FloorTintR/G/B` (the cells' tint): see

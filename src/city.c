@@ -2448,6 +2448,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->fx_wall_large = group_str(t, "Wall_Large");
         sb->fx_floor = group_str(t, "Floor_Large");
         memset(sb->broke, 0, sizeof sb->broke);
+        sb->fronts_told = 0;
         sb->nspawn = 0;
         sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
@@ -3943,6 +3944,19 @@ void scene_buildings_update(Scene *s, float dt)
     s->light_granted = 0;
     for (uint32_t i = 0; i < s->nbuildings && !s->left; i++) {
         SceneBuilding *sb = &s->buildings[i];
+        if (!sb->fronts_told) {
+            /* [R 0x2BE008 -> 0x2BE300] a back-row building's first update: every front-row building overlapping it
+             * in x (the front list, by x) has each storey's DamagedSkeletonHP (+0x18) made -1 (0x2CC8B0), so it
+             * always draws the plain Skeleton (0x2CD898 takes the damaged one only when +0x18 is not below the
+             * floor's HP) */
+            sb->fronts_told = 1;
+            for (uint32_t f = 0; sb->b.row != 0 && f < s->nbuildings; f++) {
+                SceneBuilding *fb = &s->buildings[f];
+                if (fb->b.row == 0 && fb->b.max[0] > sb->b.min[0] && fb->b.min[0] < sb->b.max[0])
+                    for (int st = 0; st < BUILDING_STOREYS; st++)
+                        fb->skeleton_hp[st] = -1;
+            }
+        }
         building_update(&sb->b, dt);
         int moving = sb->b.collapse >= 0 || sb->b.shake_time > 0 || building_sink(&sb->b) > 0 ||
                      (sb->b.state != BUILDING_STANDING && sb->b.state != BUILDING_FLOOR_FALLING);
