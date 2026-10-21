@@ -928,6 +928,11 @@ static void bot_with_target(DirAI *ai, const DirGraph *ag, MoveRunner *r, const 
 {
     DirBot *bt = &ai->bot;
     const DirBuilding *b = &v->b[bt->target];
+    /* [R 0x2F0858 .. 0x2F08D4] the timers run here only: the building knocked off (+0x68) is avoided while it is the
+     * target and its 3 s (+0x6C) last, forgotten at once for any other; the cooldown (+0x64) runs down to 0 */
+    if (bt->avoid >= 0 && (bt->avoid != bt->target || (bt->avoid_time -= dt) <= 0))
+        bt->avoid = -1;
+    bt->cooldown = bt->cooldown > dt ? bt->cooldown - dt : 0;
     bt->on_target += dt;
     if (bt->on_target > BOT_STUCK && v->collapse) {  /* stuck on it for a minute: it falls */
         v->collapse(v->ctx, bt->target);
@@ -1043,9 +1048,6 @@ static int destroy_update(DirAI *ai, const DirGraph *ag, MoveRunner *r, float dt
     const DirBotView *v = ai->view;
     if (!v)
         return 1;
-    if (bt->avoid_time > 0 && (bt->avoid_time -= dt) <= 0)
-        bt->avoid = -1;
-    bt->cooldown = bt->cooldown > dt ? bt->cooldown - dt : 0;
     if (v->hp <= 0) {                                /* down: towards the respawn */
         bot_go_state(r, ag, bt->st_respawn, call, ctx);
         return 1;
