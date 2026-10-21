@@ -32,7 +32,8 @@ Portuguese English). The display is 50 Hz on a PAL console unless the app's flag
 English one `intro_pal` (no `_a`/`_e` files), and the NTSC ones only on an NTSC console.
 
 The port plays as the European disc on a PAL console (`movie_pick`, main.c's `movie_start` with `--lang` + 1): the
-`_pal` files, the language's where there is one. The pictures are timed by the movie's own rate, so the 25 frames a
+`_pal` files, the language's where there is one; and the USA disc (the same VOL, region 0 by its `SYSTEM.CNF`) as on
+an NTSC console: the files without `_pal` (`intro.pss`; no `intro_a`). The pictures are timed by the movie's own rate, so the 25 frames a
 second play right whatever the window's rate (the game's frame steps stay at 60 Hz, a port choice).
 
 **The stream:** an MPEG-2 program stream in packs of 4096 bytes (pack header, system header in the first, then one

@@ -31,7 +31,7 @@ public class RampageActivity extends SDLActivity {
     private static final int REQ_ISO = 0x5201, REQ_DIR = 0x5202;
     // the files the viewer reads from a folder (docs/NATIVE.md "Game data"), saved under these names; RAMPAGE.VOL last
     // (src/android.c takes the folder as complete once it is there, so a copy that Android cut short is asked for again)
-    private static final String[] FOLDER_FILES = { "SYSTEM.CNF", "SLES_538.00", "RAMPAGE.ELF", "RAMPAGE.VOL" };
+    private static final String[] FOLDER_FILES = { "SYSTEM.CNF", "SLES_538.00", "SLUS_213.23", "RAMPAGE.ELF", "RAMPAGE.VOL" };
 
     private static final Object sLock = new Object();
     private static boolean sPicked;

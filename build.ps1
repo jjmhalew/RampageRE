@@ -48,6 +48,7 @@ if ($Iso) {
     python (Join-Path $root "tools\iso9660.py") $Iso $disc; Check "disc extraction"
 }
 $elf = Join-Path $disc "SLES_538.00"
+if (-not (Test-Path $elf)) { $elf = Join-Path $disc "SLUS_213.23" }   # the USA disc: the same ELF, by another name
 if (-not (Test-Path $elf)) { throw "No extracted disc in build\disc. Run: .\build.ps1 -Iso <your Rampage ISO>" }
 
 if (-not $Quick) {

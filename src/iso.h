@@ -16,11 +16,11 @@ int iso_is(FILE *f);                                     /* 1 = an ISO 9660 imag
  * bytes at *offset (from the start of the image), *size long */
 int iso_find(FILE *f, const char *path, int64_t *offset, uint32_t *size);
 
-/* the game's ELF for fx.c's words: in a disc image (path) the one SYSTEM.CNF boots (SLES_538.00); beside a
- * RAMPAGE.VOL RAMPAGE.ELF (build.ps1's split copy), else SLES_538.00. malloc'd, NULL if none */
+/* the game's ELF for fx.c's words: in a disc image (path) the one SYSTEM.CNF boots (SLES_538.00, SLUS_213.23); beside
+ * a RAMPAGE.VOL RAMPAGE.ELF (build.ps1's split copy), else SLES_538.00, else SLUS_213.23. malloc'd, NULL if none */
 uint8_t *data_elf(const char *path, uint32_t *size);
 /* the disc's files the port reads, and where they are for path (a disc image or APK; or a RAMPAGE.VOL with SYSTEM.CNF
- * and RAMPAGE.ELF or SLES_538.00 beside it): [0] SYSTEM.CNF, [1] the ELF, [2] RAMPAGE.VOL; each in file from at on,
+ * and RAMPAGE.ELF, SLES_538.00 or SLUS_213.23 beside it): [0] SYSTEM.CNF, [1] the ELF, [2] RAMPAGE.VOL; each in file from at on,
  * size bytes (0 = not there); name: what an image calls it (the ELF: what SYSTEM.CNF boots). 1 = RAMPAGE.VOL is there.
  * For the packers of tools/native (make_standalone.bat, make_android_bundle.bat) */
 typedef struct { char file[1024]; int64_t at; uint32_t size; char name[64]; } DataPart;
@@ -41,7 +41,11 @@ int data_remember(const char *path);                     /* path into the user's
 int data_ask(char *out, size_t cap);
 #endif
 const char *data_where(void);                            /* that list in words, for the message when none is there */
-/* the supported release, SLES-53800 version 1.00: 0 (with why in msg) when SYSTEM.CNF (in the image, or beside the
- * VOL) boots another one or RAMPAGE.VOL is not that release's; 1 when it is or nothing says otherwise */
+/* the supported releases, SLES-53800 version 1.00 (Europe) and SLUS-21323 version 1.01 (USA; the same ELF and
+ * RAMPAGE.VOL): 0 (with why in msg) when SYSTEM.CNF (in the image, or beside the VOL) boots another one or RAMPAGE.VOL
+ * is not theirs; 1 when it is or nothing says otherwise */
 int data_check(const char *path, const Vol *v, char *msg, size_t cap);
+/* gApp.getRegion() [R 0x10D290]: SYSTEM.CNF's BOOT2 with "SLUS" 0, "SLES" 1, else 2; 1 (the European disc) without
+ * a SYSTEM.CNF */
+int data_region(const char *path, const Vol *v);
 #endif

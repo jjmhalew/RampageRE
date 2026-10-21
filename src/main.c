@@ -281,6 +281,7 @@ typedef struct Viewer {
     Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
     int lang;                                        /* --lang: the .loc column (hud.h: 0 English .. 8 Portuguese) */
+    int region;                                      /* the disc's (iso.c data_region): 0 USA, 1 Europe, 2 another */
     ShellGame last_game;                             /* the shell's last choices (back from a game) */
     uint32_t world_rng;                              /* gShell +0x1C: the state the world's seeds are drawn from */
     ShellStart kept;                                 /* what gShell keeps while the game plays (shell_keep) */
@@ -6602,6 +6603,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->allow_save = v->prof.allow_save && v->prof_write;
     sp->was_saving = v->prof.was_saving;
     sp->language = v->lang;
+    sp->region = v->region;
     sp->profile_shown = v->prof.profile_shown;
     sp->offer_create = v->profile_autoload && !v->prof_on_card && v->prof_write;
     snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
@@ -6923,13 +6925,13 @@ static void movie_stop(Viewer *v)
 }
 
 /* SHELL_EVT_MOVIE: playVideo(name), the file by the game's pick (movie.c): the European disc's on a PAL console, at
- * 50 Hz (its flags +0x50 = 0xC never ask for 60, 0x169020): <name>_<lang>_pal, else <name>_pal; the language the
- * .loc column (hud.h's + 1) */
+ * 50 Hz (its flags +0x50 = 0xC never ask for 60, 0x169020): <name>_<lang>_pal, else <name>_pal; the USA disc's on an
+ * NTSC console, at 60 Hz: <name>_<lang>, else <name>; the language the .loc column (hud.h's + 1) */
 static void movie_start(Viewer *v, const char *name)
 {
     char picked[96];
     movie_stop(v);
-    v->movie = movie_pick(&v->vol, name, v->lang + 1, 1, picked, sizeof picked);
+    v->movie = movie_pick(&v->vol, name, v->lang + 1, v->region != 0, picked, sizeof picked);
     if (!v->movie) {
         printf("no movie %s\n", name);
         return;
@@ -7933,6 +7935,7 @@ static int viewer_main(int argc, char **argv)
     }
     if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
         plat_message(msg, 1);
+    v.region = data_region(pos[0], &v.vol);
     int city = 0;
     for (int i = 0; i < NCITIES; i++)
         if (_stricmp(pos[1], CITIES[i]) == 0)

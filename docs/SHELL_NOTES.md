@@ -397,7 +397,9 @@ English version only: `gApp.getPlatform() == 2 && gApp.getLanguage() == 1 && gAp
 language is gApp +0x70 (0x28B268), the .loc column (1 English, 2 English 2, 3 Japanese, 4 French, 5 German, 6
 Italian, 7 Spanish, 8 Dutch, 9 Portuguese; the port's `--lang` + 1; `== 7`, Spanish, moves the main menu's buttons
 5 down and the Options' rumble list); the region 0x28B200 is SYSTEM.CNF's BOOT2: SLUS 0, SLES 1, else 2
-(0x10D290), 1 for this disc, so no Ballers box and cheat video 3 is the credits. Cross starts `gShell.startEmulator(n)` after 0.25 s:
+(0x10D290): 1 for the European disc, so no Ballers box and cheat video 3 is the credits; 0 for the USA disc (the same
+ELF and data, SLUS_213.23), whose English shell has the Ballers box and plays `ballers` for cheat video 3 (the port takes
+the disc's region, iso.c `data_region`). Cross starts `gShell.startEmulator(n)` after 0.25 s:
 - It is 0x3063A0: `desi/m1` or `desi/jarvos` through `LoadExecPS2`, with `-game rampage` / `rwt`.
 - The port gives `SHELL_EVT_EMULATOR` and returns to the menu.
 

@@ -54,9 +54,17 @@ image without `RAMPAGE.VOL` is refused ("not Rampage - Total Destruction"). An A
 as a disc image on every system (`rampage.exe RampageRE-bundle.apk Chicago 1` works too): its stored entries
 `assets/RAMPAGE.VOL`, `assets/SLES_538.00` and `assets/SYSTEM.CNF` are read in place (src/iso.c `zip_find`).
 
-The supported release is the European SLES-53800 version 1.00: when `SYSTEM.CNF` (in the image, or beside the VOL)
-boots another ELF or another version, or the VOL's index is not that release's (352 files ending at byte
-1,342,827,563), the viewer says so and goes on.
+The supported releases are the European SLES-53800 version 1.00 and the USA SLUS-21323 version 1.01: their ELF
+(`SLES_538.00`, `SLUS_213.23`) and `RAMPAGE.VOL` are the same files, byte for byte, and so are `DESI/`, `MODULES/` and
+`RAMPAGE.ICN`; only `SYSTEM.CNF` differs (`BOOT2 = cdrom0:\SLUS_213.23;1`, `VER = 1.01`, `VMODE = NTSC`). When
+`SYSTEM.CNF` (in the image, or beside the VOL) boots another ELF or another version, or the VOL's index is not theirs
+(352 files ending at byte 1,342,827,563), the viewer says so and goes on. Beside a `RAMPAGE.VOL` the ELF may be
+`RAMPAGE.ELF`, `SLES_538.00` or `SLUS_213.23`; fx.c finds its word table at 0x3B1C10, or looks for it in another build.
+
+The region is `SYSTEM.CNF`'s, as the game takes it (gApp.getRegion, 0x10D290: `SLUS` 0, `SLES` 1, else 2; iso.c
+`data_region`): the USA disc plays as on an NTSC console, the movies without `_pal` (`midway.pss` at 30 frames a
+second), and its English shell has the Ballers box in the Midway Classics (SHELL_NOTES "Bonus Content"); the European
+disc as on a PAL console. The game's own steps are the NTSC ones either way (30 a second, FLOW_NOTES).
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L

@@ -209,12 +209,14 @@ uint8_t *data_elf(const char *path, uint32_t *size)
         char boot[64];
         char *cnf = (char *)iso_slurp(f, "SYSTEM.CNF", &n);
         elf = iso_slurp(f, boot_name(cnf, boot, sizeof boot) ? boot : "SLES_538.00", size);
+        if (!elf)                                        /* an APK of make_android_bundle.bat keeps it as SLES_538.00 */
+            elf = iso_slurp(f, "SLES_538.00", size);
         free(cnf);
     }
     if (f)
         fclose(f);
-    const char *names[2] = { "RAMPAGE.ELF", "SLES_538.00" };
-    for (int i = 0; i < 2 && !elf; i++) {
+    const char *names[3] = { "RAMPAGE.ELF", "SLES_538.00", "SLUS_213.23" };
+    for (int i = 0; i < 3 && !elf; i++) {
         char p[1024];
         beside(p, sizeof p, path, names[i]);
         elf = slurp(p, size);
@@ -251,8 +253,9 @@ int data_parts(const char *path, DataPart part[3])
         beside(part[0].file, sizeof part[0].file, path, "SYSTEM.CNF");
         if ((cnf = (char *)slurp(part[0].file, &n)) != NULL)
             part[0].size = n;
-        const char *elf[2] = { "RAMPAGE.ELF", "SLES_538.00" };   /* as data_elf: build.ps1's split copy first */
-        for (int i = 0; i < 2 && !part[1].size; i++) {
+        const char *elf[3] = { "RAMPAGE.ELF", "SLES_538.00", "SLUS_213.23" };   /* as data_elf: build.ps1's split
+                                                                                  * copy first */
+        for (int i = 0; i < 3 && !part[1].size; i++) {
             beside(part[1].file, sizeof part[1].file, path, elf[i]);
             FILE *e = fopen(part[1].file, "rb");
             int64_t es = e ? file_size(e) : -1;
@@ -511,11 +514,12 @@ const char *data_where(void)
 #endif
 }
 
-int data_check(const char *path, const Vol *v, char *msg, size_t cap)
+/* SYSTEM.CNF: an image's own, else the one beside the VOL; malloc'd, NULL if none */
+static char *data_cnf(const char *path, const Vol *v)
 {
     uint32_t n = 0;
-    char *cnf = NULL, boot[64] = "";
-    FILE *f = v->base ? fopen(path, "rb") : NULL;        /* an image: its SYSTEM.CNF; else the one beside the VOL */
+    char *cnf = NULL;
+    FILE *f = v->base ? fopen(path, "rb") : NULL;
     if (f) {
         cnf = (char *)iso_slurp(f, "SYSTEM.CNF", &n);
         fclose(f);
@@ -524,6 +528,20 @@ int data_check(const char *path, const Vol *v, char *msg, size_t cap)
         beside(p, sizeof p, path, "SYSTEM.CNF");
         cnf = (char *)slurp(p, &n);
     }
+    return cnf;
+}
+
+int data_region(const char *path, const Vol *v)
+{
+    char *cnf = data_cnf(path, v), boot[64];
+    int region = !boot_name(cnf, boot, sizeof boot) ? 1 : strstr(boot, "SLUS") ? 0 : strstr(boot, "SLES") ? 1 : 2;
+    free(cnf);
+    return region;
+}
+
+int data_check(const char *path, const Vol *v, char *msg, size_t cap)
+{
+    char *cnf = data_cnf(path, v), boot[64] = "";
     int boots = boot_name(cnf, boot, sizeof boot);
     const char *ver = cnf ? strstr(cnf, "VER") : NULL;
     if (ver)
@@ -536,18 +554,22 @@ int data_check(const char *path, const Vol *v, char *msg, size_t cap)
             end = (uint64_t)v->files[i].offset + v->files[i].size;
     const char *why = NULL;
     char text[96];
-    if (boots && _stricmp(boot, "SLES_538.00") != 0) {
+    /* the USA disc (SLUS_213.23, version 1.01) holds the same ELF and RAMPAGE.VOL, byte for byte; only its SYSTEM.CNF
+     * (and the ELF's name) differ */
+    int usa = boots && _stricmp(boot, "SLUS_213.23") == 0;
+    if (boots && !usa && _stricmp(boot, "SLES_538.00") != 0) {
         snprintf(text, sizeof text, "SYSTEM.CNF boots %s", boot);
         why = text;
-    } else if (boots && ver && strncmp(ver, "1.00", 4) != 0) {
+    } else if (boots && ver && strncmp(ver, usa ? "1.01" : "1.00", 4) != 0) {
         snprintf(text, sizeof text, "SYSTEM.CNF says version %.8s", ver);
         why = text;
     } else if (v->count != 352 || end != 1342827563u)
-        why = "its RAMPAGE.VOL is not that release's";
+        why = "its RAMPAGE.VOL is not theirs";
     free(cnf);
     if (!why)
         return 1;
-    snprintf(msg, cap, "%s is not the supported release, Rampage - Total Destruction (Europe) SLES-53800 version 1.00: "
+    snprintf(msg, cap, "%s is not a supported release, Rampage - Total Destruction (Europe) SLES-53800 version 1.00 "
+             "or (USA) SLUS-21323 version 1.01: "
              "%s.\nThe viewer may not work with it.", path, why);
     return 0;
 }

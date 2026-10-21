@@ -63,8 +63,11 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | The arcade games (Midway Classics: Digital Eclipse's emulators on the disc) | after v1 [docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md) |
 | Coverage of the game's code: every function of the ELF ported, read, replaced by the port's own, unused by the data, or open (0.8 % of the code: the monsters' clip effects and roar, the tail motion, a few smaller items) | [docs/COVERAGE.md](docs/COVERAGE.md) |
 
-**Supported version:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
-SLES-53800, `SLES_538.00` version 1.00. Other releases have different addresses and will not work as is.
+**Supported versions:** the European PS2 disc, *Rampage - Total Destruction (Europe) (En,Fr,De,Es,It)*,
+SLES-53800, `SLES_538.00` version 1.00, and the USA disc, *Rampage - Total Destruction (USA)*, SLUS-21323,
+`SLUS_213.23` version 1.01. Both hold the same game, byte for byte (the ELF and `RAMPAGE.VOL`); only `SYSTEM.CNF`
+differs, which picks the region: the USA disc plays the NTSC movies and has the Ballers box in the Midway Classics.
+Other releases may have different addresses and may not work as is.
 
 ## Building
 Needs Windows, Python 3, Git and Visual Studio 2022 or later with the *Desktop development with C++* workload.

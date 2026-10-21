@@ -3576,7 +3576,7 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
         m->cheat = find(r, "CheatMenu");
         fix_buttons(m->retro, "nb_select", "nb_back", "", "");
         fix_buttons(m->cheat, "cb_select", "cb_back", "", "");
-        m->ntsc = s->platform == 2 && get_language(s) == 1 && s->region == 0;   /* (English, SLUS: never here) */
+        m->ntsc = s->platform == 2 && get_language(s) == 1 && s->region == 0;   /* English, the USA disc */
         if (m->ntsc) m->retro = find(r, "RetroGamesNTSC");
         m->lb_players = find(r, "np_selection");
         m->lb_bots = find(r, "nb_selection");
@@ -5333,8 +5333,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
     s->cheat_param_block = -1;
     s->cheat_param_video = -1;
     s->platform = 2;                                     /* gApp.getPlatform(): 2 [R 0x28B1A0, a constant] */
-    s->region = 1;                                       /* gApp.getRegion() [R 0x28B200: 0x10D290 makes SYSTEM.CNF's
-                                                          * BOOT2 SLUS 0, SLES 1 (this disc, SLES_538.00), else 2] */
+    s->region = p ? p->region : 1;                       /* gApp.getRegion() [R 0x28B200: 0x10D290 makes SYSTEM.CNF's
+                                                          * BOOT2 SLUS 0, SLES 1, else 2] */
     s->idle = IDLE_SECONDS;
     if (st) s->st = *st;
     s->gs = s->st.game;

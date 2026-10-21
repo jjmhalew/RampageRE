@@ -67,6 +67,8 @@ typedef struct {
     int nprofiles;                  /* the profiles saved (the popup's list; getSaveFilesExist = nprofiles > 0) */
     char profiles[SHELL_PROFILES][16];
     int language;                   /* hud.h's languages: 0 English .. 8 Portuguese */
+    int region;                     /* gApp.getRegion(): the disc's, SYSTEM.CNF's BOOT2 (iso.c data_region): 0 the
+                                     * USA disc (SLUS), 1 the European one (SLES), 2 another */
 } ShellProfile;
 
 /* gCommon's play state and gCommon.getGameStatus() as the shell hands them to the game [R GameStatus bindings, lookup

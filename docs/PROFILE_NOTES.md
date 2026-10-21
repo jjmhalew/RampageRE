@@ -210,7 +210,9 @@ host: same logic, but the profile now holds those flags.
 - the region prefix comes from the product code: "BE" for SLES / SCES (0x1A4200);
 - the product code comes from SYSTEM.CNF's BOOT2 line (0x1A75A0).
 
-For "AA" the directory is `BESLES-53800A9601DBD`.
+For "AA" the directory is `BESLES-53800A9601DBD`. The USA disc (SLUS_213.23) makes it `BASLUS-21323` + the crc ("BA" for
+SLUS / SCUS, "BI" for the Japanese codes; 0x417B28 .. 0x417B58). The port's own profile files do not depend on it:
+either disc reads the same saves.
 
 **The files**:
 | File | What |

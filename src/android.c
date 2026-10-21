@@ -272,8 +272,8 @@ int android_data_setup(char *out, size_t cap)
         snprintf(home, sizeof home, "the app's folder");
     for (;;) {
         snprintf(m, sizeof m, "RampageRE needs the files of your own game disc: Rampage - Total Destruction (Europe, "
-                 "PlayStation 2, SLES-53800).\n\nChoose a disc image of it (.iso), or a folder with RAMPAGE.VOL and the "
-                 "game's ELF (SLES_538.00 or RAMPAGE.ELF). They are copied once (1.35 GB) into the app's folder.\n\n"
+                 "PlayStation 2, SLES-53800, or USA, SLUS-21323).\n\nChoose a disc image of it (.iso), or a folder "
+                 "with RAMPAGE.VOL and the game's ELF (SLES_538.00, SLUS_213.23 or RAMPAGE.ELF). They are copied once (1.35 GB) into the app's folder.\n\n"
                  "Or copy them, or the disc image (which is then read where it is), with a USB cable into\n%s\nand "
                  "start RampageRE again.", home);
         int r = plat_dialog(m, "Disc image", "Folder", "Cancel");
@@ -290,13 +290,13 @@ int android_data_setup(char *out, size_t cap)
             if (k == -3)
                 plat_message("Not enough free room on the device for the game files (1.35 GB).", 1);
             else if (k == -2)
-                plat_message("Could not copy the game files: that folder needs RAMPAGE.VOL (and SLES_538.00 or "
-                             "RAMPAGE.ELF) in it.", 1);
+                plat_message("Could not copy the game files: that folder needs RAMPAGE.VOL (and SLES_538.00, "
+                             "SLUS_213.23 or RAMPAGE.ELF) in it.", 1);
             if (k < 0)
                 continue;
-            if (!plat_exists("RAMPAGE.ELF") && !plat_exists("SLES_538.00"))
-                plat_message("That folder holds no SLES_538.00 or RAMPAGE.ELF: the viewer runs without the effects' "
-                             "words.", 1);
+            if (!plat_exists("RAMPAGE.ELF") && !plat_exists("SLES_538.00") && !plat_exists("SLUS_213.23"))
+                plat_message("That folder holds no SLES_538.00, SLUS_213.23 or RAMPAGE.ELF: the viewer runs without "
+                             "the effects' words.", 1);
         }
         if (data_find(out, cap))
             return 1;

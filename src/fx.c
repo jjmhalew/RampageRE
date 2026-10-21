@@ -788,38 +788,49 @@ static uint32_t elf_offset(const uint8_t *elf, uint32_t size, uint32_t a)
     return 0;
 }
 
+/* the word the pointer at file offset p names, if it is that one */
+static int word_is(const uint8_t *elf, uint32_t size, uint32_t p, const char *w)
+{
+    uint32_t at = elf_offset(elf, size, rd32(elf + p)), n = (uint32_t)strlen(w) + 1;
+    return at && at <= size - n && memcmp(elf + at, w, n) == 0;
+}
+
+/* the table at file offset table: 342 pointers to the words, the first "Text", "EDF", "file", the 12th "particle" */
+static int words_at(FxLib *L, const uint8_t *elf, uint32_t size, uint32_t table)
+{
+    if (!table || table > size - 4 * 342 || !word_is(elf, size, table, "Text") ||
+        !word_is(elf, size, table + 4 * 11, "particle"))
+        return 0;
+    for (int i = 0; i < 342; i++) {
+        uint32_t at = elf_offset(elf, size, rd32(elf + table + 4 * i));
+        if (!at)
+            return 0;
+        const char *s = (const char *)elf + at;
+        size_t n = 0, left = (size_t)(size - at);
+        while (n < left && s[n])
+            n++;
+        free(L->words[i]);
+        L->words[i] = malloc(n + 1);
+        if (!L->words[i])
+            return 0;
+        memcpy(L->words[i], s, n);
+        L->words[i][n] = 0;
+    }
+    return 1;
+}
+
 static int load_words(FxLib *L, const char *data_path)
 {
     uint32_t size = 0;
     uint8_t *elf = data_elf(data_path, &size);          /* beside the VOL, or in the disc image (iso.c) */
     if (!elf)
         return -1;
-    int ok = 0;
-    const uint32_t table = elf_offset(elf, size, 0x3B1C10);
-    if (table && table + 4 * 342 <= size) {
-        ok = 1;
-        for (int i = 0; i < 342 && ok; i++) {
-            uint32_t at = elf_offset(elf, size, rd32(elf + table + 4 * i));
-            if (!at) {
-                ok = 0;
-                break;
-            }
-            const char *s = (const char *)elf + at;
-            size_t n = 0, left = (size_t)(size - at);
-            while (n < left && s[n])
-                n++;
-            L->words[i] = malloc(n + 1);
-            if (!L->words[i]) {
-                ok = 0;
-                break;
-            }
-            memcpy(L->words[i], s, n);
-            L->words[i][n] = 0;
-        }
-        /* the first three words are "Text", "EDF", "file" */
-        if (ok && (strcmp(L->words[0], "Text") != 0 || strcmp(L->words[11], "particle") != 0))
-            ok = 0;
-    }
+    /* at 0x3B1C10 in the European and the USA disc's ELF (the same file); another build's is looked for: an array of
+     * pointers to "Text", "EDF", "file" in its segments */
+    int ok = size >= 4 * 342 && words_at(L, elf, size, elf_offset(elf, size, 0x3B1C10));
+    for (uint32_t p = 0; !ok && size >= 4 * 342 && p <= size - 4 * 342; p += 4)
+        ok = word_is(elf, size, p, "Text") && word_is(elf, size, p + 4, "EDF") && word_is(elf, size, p + 8, "file") &&
+             words_at(L, elf, size, p);
     free(elf);
     return ok ? 0 : -1;
 }
