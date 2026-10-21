@@ -1610,17 +1610,17 @@ static int answer(void *ctx, const char *call, const float *a)
  * front (+y), 5 its roof. */
 /* setReaction(slot) (0x2E1AD0): taken unless the monster is defeated (+0xA59, set with its slot 67 at 0 HP, 0x2D95F4,
  * cleared by the respawn, 0x2D3898) or shrunk below 0.3 (+0xA78, the defeat's setDynamicScale); the interruptible
- * byte +0xAA2 it asks first is always set in play [R]. With the slot's entry there (+0x110 not 0) 0x2DA570(monster, 0):
- * what it holds is let go of, throwObject(vel (0, 10, 10), not eaten) (0x2DA698 .. 0x2DA6B8), for every caller (the
+ * byte +0xAA2 it asks first is always set in play [R]. With the slot's entry there (+0x110 not 0) 0x2DA570(monster, 0),
+ * let_go: what it holds thrown, its slot effects shut down, its feet and a prepared mount let go, for every caller (the
  * scripts' setReaction with a2 0 at 0x2ABBC8, the blows, the shots, the rage, the defeats) [R]. 1 when taken */
-static void throw_held(Mon *mo, int eat, float x, float y, float z);
+static void let_go(Mon *mo, int keep);
 static int set_reaction(Mon *mo, int slot)
 {
     if (mo->defeated || mo->scale < 0.3f)
         return 0;
     mo->pending_slot = slot;
     if (moves_slot(&mo->graph, slot, mo->column) >= 0)
-        throw_held(mo, 0, 0, 10, 10);
+        let_go(mo, 0);
     return 1;
 }
 
@@ -1973,6 +1973,32 @@ static void throw_held(Mon *mo, int eat, float x, float y, float z)
         people_throw(v->scene.folk, mo->held, mo->heading);
     }
     mo->held = -1;
+}
+
+/* 0x2DA570(monster, keep) [R], wherever a state is posted to start (+0x110 set: setReaction, playReaction 0x2D9710,
+ * the blows 0x2D6A50 .. 0x2D89E0, the landing 0x2DC450, the knock-offs 0x2E176C / 0x2E185C / 0x2E19EC, the reset
+ * 0x2DCB40): the kept sound +0xC5E0 stopped (0x2877A0; George's 240 sound events keep none), a held monster let go
+ * (+0xB9C0 / +0xB9C4: none in this build), what it holds thrown unless keep (throwObject((0, 10, 10), not eaten),
+ * 0x2DA698 .. 0x2DA6B8), every slot effect shut down and its slot emptied (0x2F56E0 on the record +0x7DFC: vtable
+ * +0x30, as a slot's next event does; and its 4 swooshes, never started), the target offset +0xBD54 zeroed, with
+ * foot IK (+0x258C) both feet let go (0x33BE90: no anchor, no planted record), and a mount only prepared
+ * (+0xC640 set, +0xC644 not) cleared, its hands with it (0x322EC0; hands_step lets them go with no building). Not
+ * ported: the matrix +0xBA58 made the identity and 0x2FF7A0 (each of the record +0x7D90's +0x14 vtable +0x10) */
+static void let_go(Mon *mo, int keep)
+{
+    if (!keep)
+        throw_held(mo, 0, 0, 10, 10);
+    for (int k = 0; k < MON_FX_SLOTS && mo->v->fxw; k++)
+        if (mo->fx_used >> k & 1)
+            fx_stop(mo->v->fxw, mo->fx_slot[k]);
+    mo->fx_used = 0;
+    if (mo->feet.links) {
+        foot_step(&mo->feet, 0, 0);
+        foot_step(&mo->feet, 1, 0);
+        mo->feet.anchor = -1;
+    }
+    if (mo->mount.at.building >= 0 && !mo->mount.mounted)
+        climb_unmount(&mo->mount);
 }
 
 /* the monster as its foot object reads it (footstep.c): the feet's bones, its velocity, its ground, the water */
@@ -3230,8 +3256,8 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
  * step as a slot's start is (0x2C0DC0 .. 0x2C0E78), so the new state's events from its start fire (React_Geyser's
  * mode 1 and addVelocity(0, 0, 18) at 0); started here, between the steps, they were passed over. The binding
  * (0x2ABB18: the state by name, 0x2D9890, none found nothing) goes through 0x2D9710(monster, state, 0, 0), which takes
- * it as setReaction does (not defeated, not shrunk below 0.3) and lets go of what is held, not eaten (0x2DA570(monster,
- * 0)) [R]: the garbage truck's last shake (React_Ground_Heavy_Back) drops the truck */
+ * it as setReaction does (not defeated, not shrunk below 0.3) and lets go (0x2DA570(monster, 0): let_go) [R]: the
+ * garbage truck's last shake (React_Ground_Heavy_Back) drops the truck */
 static void force_state(Mon *mo, const char *name)
 {
     if (mo->defeated || mo->scale < 0.3f)
@@ -3239,7 +3265,7 @@ static void force_state(Mon *mo, const char *name)
     for (int k = 0; name && mo->have_graph && k < mo->graph.n; k++)
         if (!_stricmp(mo->graph.states[k].name, name)) {
             mo->force_to = k + 1;
-            throw_held(mo, 0, 0, 10, 10);
+            let_go(mo, 0);
             return;
         }
 }
@@ -3248,7 +3274,7 @@ static void force_state(Mon *mo, const char *name)
  * one before), the velocity 0 (+0xBD30), its goals cleared (0x2EE760, the caller's dir_ai_clear), and unless it is
  * defeated (+0xA59; +0xAA2, also asked, is always set in play) nor shrunk below 0.3 (+0xA78) the graph's first state
  * (+0xA54 -> +0x30, Ground_Idle) started as a slot's is (+0x110 = its own entry at +0x118: 1, the state, flags 0),
- * what it holds let go of (0x2DA570(monster, 0)); then, with foot IK (+0x258C), both feet let go (0x33BE90: no anchor,
+ * and let go (0x2DA570(monster, 0): let_go); then, with foot IK (+0x258C), both feet let go (0x33BE90: no anchor,
  * no planted record), the mount cleared (+0xC644, +0xC645, the building +0xC640) and, with the arm IK (+0x2588), the
  * hands let go of the face (0x322EC0, 0.1 s: hand_detach as the frame finds no building). Its respawn cancelled
  * (0x2D36A0) is left out: EndBlockNI, BeginBlockNI and ResultsNI, which ask it, find the monsters alive. So a taunt of
@@ -3263,7 +3289,7 @@ static void reset_monster_state(Mon *mo)
     memset(mo->vel, 0, sizeof mo->vel);
     if (!mo->defeated && mo->have_graph && mo->graph.n > 0) {   /* (the scale was just set to 1: not below 0.3) */
         mo->force_to = 1;
-        throw_held(mo, 0, 0, 10, 10);
+        let_go(mo, 0);
     }
     if (mo->feet.links) {
         foot_step(&mo->feet, 0, 0);
@@ -5072,8 +5098,9 @@ static int mon_fx_frame(Mon *mo, int node, float pos[3], float R[3][3])
  * down (its effect's vtable +0x30, 0x1F1C60 -> 0x1F2410: each emitter's 0x1F7CD0; the live particles finish) and the
  * slot is emptied. On: the new effect starts there (0x292010 -> 0x292050 -> 0x291A20: a FollowEffect on the
  * monster, the bone and offset of the slot's node, 0x2DACA0, the other side's while mirrored, kept for its life).
- * Nothing else frees a slot (no clip start, death or respawn touches +0x0 .. +0xFF): a one-shot ends by itself, a
- * looping one (Charged_Punch, Roar_Weapon) until its slot's next event, past its clip if that is cut short.
+ * A state posted to start shuts them all down too (let_go, 0x2DA570 -> 0x2F56E0: a reaction, a landing, a knock-off,
+ * the reset); no clip's own start, death or respawn does: a one-shot ends by itself, a looping one (Charged_Punch,
+ * Roar_Weapon) until its slot's next event or such a state, past its clip if that is cut short.
  * Not ported: the started FollowEffect's +0x4C |= 0x80 (0x2F5A28) [G: no code tests +0x4C against 0x80 and no
  * query's mask found holds it (the shots' 4, 0x2000, 0x2040: 0x2953E0, 0x33B770); only a mask from a script could] */
 static void mon_fx_event(Mon *mo, const MoveEvent *e)
@@ -5536,9 +5563,11 @@ static void mon_step(Mon *mo, float dt)
                 mo->dropping = 0;                    /* (0x2E1A14: in the camera again) */
                 /* no rumble: 0x2DC9F4's 400 ms is asked only in mode 1 or 2 (0x2DC9C4), and 0x2DC5DC has already set
                  * mode 4, nothing between writing +0xAD8 [R] */
-                int to = moves_slot(&mo->graph, SLOT_LAND, mo->column);   /* landed (0x2DC450): slot 56 in the
-                                                      * current column */
+                /* landed (0x2DC450): slot 56 in the current column, taken as setReaction does (not defeated, not
+                 * shrunk below 0.3, 0x2DC5E0 .. 0x2DC610) and let go (0x2DA570, 0x2DC628) */
+                int to = mo->defeated || mo->scale < 0.3f ? -1 : moves_slot(&mo->graph, SLOT_LAND, mo->column);
                 if (to >= 0) {
+                    let_go(mo, 0);
                     moves_force(&mo->run, to);
                     ev = 0;
                 }
@@ -5604,7 +5633,8 @@ static void mon_step(Mon *mo, float dt)
             int to = slot >= 0 ? moves_slot(&mo->graph, slot, mo->column) : -1;
             if (slot >= 0 && mo->is_ai)              /* knocked off: the AI keeps off it a while (0x2EEBE0) */
                 dir_ai_avoid(&mo->ai, was, NULL);
-            if (to >= 0) {
+            if (to >= 0) {                           /* (0x2E176C, 0x2E185C, 0x2E19EC: let go) */
+                let_go(mo, 0);
                 climb_unmount(&mo->mount);
                 moves_force(&mo->run, to);
                 mo->mode = MODE_AIRBORNE;

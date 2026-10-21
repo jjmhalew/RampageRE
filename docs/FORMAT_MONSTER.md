@@ -170,9 +170,15 @@ The monster's effect record (monster +0x7DFC, FOOTSTEP_NOTES.md) begins with 32 
    definition leaves the slot empty. The new FollowEffect gets +0x4C |= 0x80 (0x2F5A28) [G: no code tests +0x4C
    against 0x80 and no query's mask found holds it (the shots' 4, 0x2000, 0x2040: 0x2953E0, 0x33B770); only a mask
    from a script could].
-Nothing else touches the slots: no clip start, death or respawn; the record's release (0x2F5AF0, from the Monster's
-destructor 0x2EACA0) frees the definitions, not the slots. A one-shot ends by itself; a looping one (`Charged_Punch`,
-`Roar_Weapon`) burns until its slot's next event, past its clip when that is cut short (`Front_Charge_Punch` turns it
+A state posted to start shuts them all down: 0x2DA570 (from setReaction, playReaction's 0x2D9710, the blows
+0x2D6A50 .. 0x2D89E0, the landing 0x2DC450, the knock-offs 0x2E176C / 0x2E185C / 0x2E19EC and resetMonsterState, wherever
++0x110 is set) calls 0x2F56E0 on the record, which stops each live slot's effect (vtable +0x30) and empties the slot
+[R]. It also stops the kept sound (+0xC5E0), throws what is held unless asked to keep it, zeroes the target offset
++0xBD54, lets both feet go with foot IK (0x33BE90), and clears a mount only prepared (+0xC640 set, +0xC644 not) with
+its hands (0x322EC0): main.c `let_go`. No clip's own start, death or respawn touches the slots; the record's release
+(0x2F5AF0, from the Monster's destructor 0x2EACA0) frees the definitions, not the slots. A one-shot ends by itself; a
+looping one (`Charged_Punch`, `Roar_Weapon`) burns until its slot's next event or such a state, past its clip when that
+is cut short (`Front_Charge_Punch` turns it
 off at 0.592, but the switch to `Front_Double_Punch` at 1.7 s comes first: there `Debris_mega_punch` in the same slot
 ends it).
 

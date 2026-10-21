@@ -247,7 +247,7 @@ The script's `onThrow(monster, eat)` always runs. After that:
   person. Any reaction does it too, whatever the clip: setReaction (0x2E1AD0, from the scripts with a2 0 at
   0x2ABBC8), TakeDamage (0x2D6A50, each `+0x110` it sets) and both defeats (0x2D95BC, the state command's 0x2E6A14)
   call 0x2DA570(monster, 0), which throws what is held, not eaten, at (0, 10, 10) in the monster's frame [R]
-  (`throw_held` in main.c's `set_reaction`): a blow, a shot, a train's or rocket's knock-down, the child's and the
+  (main.c's `let_go`, FORMAT_MONSTER.md "Effect slots"): a blow, a shot, a train's or rocket's knock-down, the child's and the
   priest's, the rage starting. The scripts' playReaction (0x2ABB18: the state by name, 0x2D9890) goes through the
   same 0x2D9710(monster, state, 0, 0), with the same checks (not defeated, not shrunk below 0.3) and the same let-go
   [R] (main.c's `force_state`): Monsters.bsf's gainHealth on the garbage truck's last shake (`IsShaker` 2: −40, the
