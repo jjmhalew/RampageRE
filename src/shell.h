@@ -273,6 +273,8 @@ typedef struct {
     int parent;                     /* an effect on a shape's node: the shape's index here, and the node; -1 / NULL */
     const char *attach;
     int running, stopping, gen;     /* an effect: playing; stopped, playing out (shut it down once) */
+    int sides;                      /* the interface's own effect (MainMenu's fires): faded out past the screen's
+                                       edges in a wider window, alike each side (main.c gui3d_layers) */
     int lit;                        /* a shape: its light set (ambient, up to three lights, each a direction it travels) */
     float ambient[3]; int nlights;
     float light_dir[3][3], light_diffuse[3][3], light_ambient[3][3], light_specular[3][3];

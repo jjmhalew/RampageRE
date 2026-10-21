@@ -5925,6 +5925,7 @@ int shell_3d(Shell *s, Shell3D *out, int max)
         o->running = (nd->eflags & FXE_RUN) != 0;
         o->stopping = (nd->eflags & FXE_SHUT) != 0;
         o->gen = nd->gen;
+        o->sides = nd->fx == FX_EFFECT && nd->parent && !nd->parent->parent;
     }
     Layout *all[IF_COUNT + 3];                           /* the effects not drawn now: they run on, unseen */
     int na = 0;

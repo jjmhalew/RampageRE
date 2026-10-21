@@ -694,7 +694,11 @@ static. It is widened in four ways:
     each way (the tiles are alike, so seamlessly), the side columns (turned 90°) move out to the window's edges, their
     ragged overhang (the left column's tiles overhang x = 0 by 4 … 9 pixels) off the window;
   - the backdrop's effects (the interface's own: MainMenu's two `Fire_2`, CitySelect's shockwave; the `Background`
-    object's: MonsterSelect's lava lamp) are drawn across the window.
+    object's: MonsterSelect's lava lamp) are drawn across the window. The interface's own fade out past the screen's
+    edges, alike each side (main.c `fade_sides`, `Shell3D.sides`): MainMenu's two fires lean left by their `<x>`
+    (31.5° about the view axis), so their smoke drifts far past the left edge and hardly past the right; a particle
+    at the edge is as it is, gone 40 pixels out, by a smoothstep on where it is drawn (the GUI camera: x pixels =
+    320 + 640 x / (y + 1)), its alpha (and an additive one's colour).
 
   Everything else is cut at the 640 × 480 screen's edges (`Scene.hud_clip`, a scissor), as the PS2's frame cuts it:
   what slides in from off the screen stays unseen until it is on it. Up to v0.11.3 the whole front end was cut there

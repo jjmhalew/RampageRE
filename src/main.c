@@ -278,6 +278,7 @@ typedef struct Viewer {
     Shell *popup;                                    /* the SaveGame popup over the game's screens (Results'
                                                       * saveProfile: the SaveIcon, the card's messages) */
     struct GuiDraw *gd;                              /* its 3D objects: models, effects, this frame's layers */
+    float gui_side;                                  /* the window past each side of the 640 x 480 screen, its pixels */
     char data_path[512];                             /* RAMPAGE.VOL or the disc image (fx_open: the ELF beside / in it) */
     Movie *movie;                                    /* the movie the shell plays (movie.c), NULL none */
     int shell_mode, shell_go;                        /* --shell: a game's Quit goes back to it; a game to start */
@@ -6894,6 +6895,29 @@ static void gui3d_step(Viewer *v, Shell *sh, float dt)
 }
 
 /* this frame's 3D layers for the renderer, one per HUD_TEX_3D quad */
+/* the wider window [no PS2 meaning]: an interface's own effect (MainMenu's two fires, which lean left with their
+ * smoke: on the PS2 the screen's left edge cuts the drift) fades out past the screen's edges, alike each side: a
+ * particle at the edge as it is, gone 40 of the screen's pixels (a sixteenth) out, by a smoothstep on the place it
+ * is drawn at (the GUI camera: eye (0, -1, 0) along +y, tan(fov / 2) = 0.375, so x pixels = 320 + 640 x / (y + 1)).
+ * Alpha blended: its alpha; additive: its colour too */
+static void fade_sides(FxQuad *q, int n, float side)
+{
+    const float out = fminf(40.0f, side);
+    for (int i = 0; i < n; i++) {
+        float d = q[i].pos[1] + 1;
+        if (d <= 0.01f)
+            continue;
+        float px = 320.0f + 640.0f * q[i].pos[0] / d, past = px < 0 ? -px : px > 640 ? px - 640 : 0;
+        if (past <= 0)
+            continue;
+        float u = fminf(past / out, 1), k = 1 - u * u * (3 - 2 * u);
+        q[i].col[3] *= k;
+        if (q[i].additive)
+            for (int c = 0; c < 3; c++)
+                q[i].col[c] *= k;
+    }
+}
+
 static void gui3d_layers(Viewer *v, Shell *sh, Scene *s)
 {
     s->gui3d = NULL;
@@ -6942,6 +6966,8 @@ static void gui3d_layers(Viewer *v, Shell *sh, Scene *s)
                 if (x->fx >= 0)
                     nq += fx_quads_of(w, x->fx, g->quad + nq, 6144 - nq);
                 l->nfx = (int)(&g->quad[nq] - l->fx);
+                if (it->sides && v->gui_side > 0)
+                    fade_sides(g->quad + (l->fx - g->quad), l->nfx, v->gui_side);
             }
         }
     }
@@ -8262,7 +8288,8 @@ static int viewer_main(int argc, char **argv)
                 shell_frame(&v, &w, dt > 0.1f ? 0.1f : dt);
             static HudQuad sq[4096];
             v.shell_scene->hud = sq;
-            shell_set_wide(v.shell, w.height ? (480.0f * (float)w.width / (float)w.height - 640) / 2 : 0);
+            v.gui_side = w.height ? fmaxf(0, (480.0f * (float)w.width / (float)w.height - 640) / 2) : 0;
+            shell_set_wide(v.shell, v.gui_side);
             v.shell_scene->nhud = shell_quads(v.shell, sq, 4096);
             gui3d_layers(&v, v.shell, v.shell_scene);
             Camera none = { { 0, 0, 0 }, 0, 0, 60 };
