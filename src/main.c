@@ -5631,6 +5631,20 @@ static void mon_step(Mon *mo, float dt)
             int was = mo->mount.at.building;
             int slot = climb_check(&mo->mount, &v->scene, &cl, mo->mode);
             int to = slot >= 0 ? moves_slot(&mo->graph, slot, mo->column) : -1;
+            if (slot < 0 && !mo->mount.mounted && mo->mode != MODE_AIRBORNE && mo->mode != MODE_TAKEOFF &&
+                !mo->defeated && mo->scale >= 0.3f) {
+                /* not mounted (0x2E14F4 -> 0x2E18D0) [R]: outside modes 1 and 2, the building under it (0x2D6150)
+                 * falling (+0x14C >= 6) slips it off: slot 73 of its column (George's React_Ground_Slip_Heavy,
+                 * addVelocity(0, -20, 15) into the fall), unless that state is the one playing (+0x10C), taken as
+                 * setReaction does and let go (0x2E19EC); it does not ride the building down */
+                int under = mon_under(mo), k;
+                if (under >= 0 && v->scene.buildings[under].b.state >= BUILDING_FALLING &&
+                    (k = moves_slot(&mo->graph, 73, mo->column)) >= 0 && k != mo->run.state) {
+                    let_go(mo, 0);
+                    moves_force(&mo->run, k);
+                    ev = 0;
+                }
+            }
             if (slot >= 0 && mo->is_ai)              /* knocked off: the AI keeps off it a while (0x2EEBE0) */
                 dir_ai_avoid(&mo->ai, was, NULL);
             if (to >= 0) {                           /* (0x2E176C, 0x2E185C, 0x2E19EC: let go) */
@@ -6378,7 +6392,7 @@ static void game_next_block(Viewer *v)
 }
 
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
- * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster, as collapseBuilding does;
+ * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster (or under it), as collapseBuilding does;
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
  * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "rage" fills its energy (the rage starts);
@@ -6636,10 +6650,11 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             }
             continue;
         }
-        if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster */
+        if (_stricmp(word, "collapse") == 0) {       /* collapseBuilding on the building in front of the monster, or
+                                                      * the one it stands on */
             for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
                 Building *b = &v->scene.buildings[i].b;
-                if (mo->mx >= b->min[0] && mo->mx <= b->max[0] && mo->my < b->min[1] && mo->my > b->min[1] - 10)
+                if (mo->mx >= b->min[0] && mo->mx <= b->max[0] && mo->my < b->max[1] && mo->my > b->min[1] - 10)
                     building_destroy(b);
             }
             continue;

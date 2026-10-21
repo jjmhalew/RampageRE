@@ -304,6 +304,10 @@ in this clip, whether it is coming down from the top.
   eased into over a few frames [R]. A frame of the monster's update is a world step, 1/30 s (FLOW_NOTES.md): main.c
   takes 1 − 0.6^(30 dt) of the way a drawn frame (taken as 0.4 a drawn frame, a 60 Hz screen eased in twice as fast). The place is re-checked every frame: failing it, the monster is knocked off (slot
   31, or 73 when the building falls).
+- **On a roof that falls**: not mounted (0x2E14F4 → 0x2E18D0), outside modes 1 and 2, a monster whose building under
+  it (0x2D6150) is falling (+0x14C ≥ 6) slips off: slot 73 of its column (George's `React_Ground_Slip_Heavy`, which
+  ends in addVelocity(0, −20, 15) into `Jump_Air_Borne_Fall`), unless that state is already playing (+0x10C), taken as
+  setReaction does and let go (0x2E19EC) [R]. So it is thrown clear rather than riding the building down.
 - **canClimb(dv, dh)**: −4 not mounted. Sideways: −7 off the building, −5 a building close by, else the place 5 along
   is checked; 4 when it turns a corner (to or from a side), 3 a hop along the front. Up: 2 while the mount's height
   + 4 is not above the top, else 5 (mantle) if there is room on the roof. Down: −1 when the feet reach the foot, else 2.
