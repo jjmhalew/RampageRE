@@ -5743,6 +5743,8 @@ static void mon_step(Mon *mo, float dt)
                 ev = 0;
             }
         }
+        if (mo->dropping && mo->mode != MODE_AIRBORNE)   /* 0x2E19F8 .. 0x2E1A14: dropping in only while in the air */
+            mo->dropping = 0;
         float before[3] = { mo->mx, mo->my, mo->mz };
         float root[3] = { mo->mx, mo->my, mo->mz };
         int switched = ev == 0 || (mo->is_ai && mo->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */
