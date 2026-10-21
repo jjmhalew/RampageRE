@@ -396,7 +396,7 @@ controller, never for a computer-driven monster (+0x108):
 | What | ms | Where (port) |
 |---|---|---|
 | a hit on the monster, level 1 / level 2 (0x2D8BE4 / 0x2D8C14, in 0x2D6A50's hit) | 400 / 800 | `monster_hit` |
-| a landing from the air (0x2DC9F4, in 0x2DC450) | 400 | `mon_step`'s landing |
+| a landing from the air (0x2DC9F4, in 0x2DC450): dead, asked only in mode 1 or 2 (0x2DC9C4) after the landing has set mode 4 (0x2DC5DC) | (400) | none |
 | the front of the building the monster stands on (0x2D6150) or climbs (+0xC640 while +0xC644) has cracked, the shake before the fall (0x2BD9A0, in 0x2BD7D0) | 2000 | `play_step`, around `scene_buildings_update` |
 | `gCommon.rumble(250)` (0x2C34C8; Options.scr / Pause.scr when the vibration is turned on), pad 0 | 250 | `HUD_CALL_RUMBLE_PULSE`, `SHELL_EVT_RUMBLE_PULSE` |
 

@@ -5531,7 +5531,8 @@ static void mon_step(Mon *mo, float dt)
                     }
                 }
                 mo->dropping = 0;                    /* (0x2E1A14: in the camera again) */
-                mon_rumble(mo, 400);                 /* from the air: the pad 400 ms [R 0x2DC9F4] */
+                /* no rumble: 0x2DC9F4's 400 ms is asked only in mode 1 or 2 (0x2DC9C4), and 0x2DC5DC has already set
+                 * mode 4, nothing between writing +0xAD8 [R] */
                 int to = moves_slot(&mo->graph, SLOT_LAND, mo->column);   /* landed (0x2DC450): slot 56 in the
                                                       * current column */
                 if (to >= 0) {

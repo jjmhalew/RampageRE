@@ -146,7 +146,8 @@ players (`--players`, `DRIVE_KEYS1/2/COMPUTER`).
   (scePadSetActDirect) for that long. Every call (the object at gp−0x6F5C, the pad the monster's +0xFC, never for a
   computer's monster, +0x108) [R]:
   - a hit on the monster (0x2D6A50; its level, the 8th argument): level 1 400 ms, level 2 800 ms, level 0 none;
-  - a landing from the air, from movement modes 1 / 2 (0x2DC450): 400 ms;
+  - a landing from the air, from movement modes 1 / 2 (0x2DC450): 400 ms, but dead: the landing has set mode 4
+    (0x2DC5DC) before the test (0x2DC9C4);
   - the front of the building it climbs (0x2D6150) or stands on (+0xC640 while +0xC644) starting to crack
     (0x2BD7D0, the collapse): 2000 ms;
   - `gCommon.rumble(250)` (0x2C34AC), from Options.scr / Pause.scr when the vibration is turned on;
