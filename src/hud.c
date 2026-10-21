@@ -248,6 +248,9 @@ static const char *loc_app(const Gui *g, const char *key)
 }
 
 /* ---------------------------------------------------------------- the draw list */
+static float g_side;                                  /* hud_set_aspect: the reference units the window shows past
+                                                       * each side of the 640 (0: none) */
+
 typedef struct { HudQuad *q; float *z; int n, max; int clip; float cx0, cx1; float skew; int additive; } Emit;
 
 static void emit_quad(Emit *e, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
@@ -1363,6 +1366,24 @@ static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, 
  * sprite of a quad spans d (or its texture's used size, UVs over the used part) from the origin, or centred (Q); a
  * slider is centred (0x24A310): the bar (barColor) its whole size and the mask (maskColor) from the value's point to
  * its right end (hasMaskBar, flag 0x10), else the bar to the value's point; texts by text_emit. */
+/* the wider window [no PS2 meaning: the game's screen is 4:3]: a band of the screen's width (the results' red title
+ * band and its shadow, Band_Red / Band_Dropshadow) goes on by its edge column (half a texel in) past each end that
+ * is at the screen's edge, to the window's; one sliding in (WorldResults' title bars) so reaches back to the window's
+ * edge it comes from, and has its other end once it is there. The pictures 636 or more of the 640 wide and under
+ * 400 high (shell.c widen draws the front end's the same) */
+static void widen_band(Emit *e, const Node *nd, float x0, float y0, float x1, float y1, float vs, const float c[4],
+                       float z)
+{
+    if (g_side <= 0 || x1 - x0 < 636 || y1 - y0 >= 400)
+        return;
+    float us = nd->tex.us, half = nd->tex.w > 0 ? 0.5f * us / nd->tex.w : 0;
+    float left = -g_side - 1, right = HUD_SCREEN_W + g_side + 1;   /* the window's edges */
+    if (x0 <= 1 && x0 > left)
+        emit_quad(e, left, y0, x0, y1, half, 0, half, vs, c, nd->tex.b, nd->tex.name, z);
+    if (x1 >= HUD_SCREEN_W - 1 && x1 < right)
+        emit_quad(e, x1, y0, right, y1, us - half, 0, us - half, vs, c, nd->tex.b, nd->tex.name, z);
+}
+
 static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float oy, float sc, float z, float fade)
 {
     for (; nd; nd = nd->next) {
@@ -1374,10 +1395,12 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             nf *= gui_pulse(g);
         int first = e->n, clip = e->clip;
         float cx0 = e->cx0, cx1 = e->cx1;
-        if (nd->clip) {
+        if (nd->clip) {                                  /* (a cut at the screen's edges: at the window's, where
+                                                          * the bands go on, widen_band) */
+            int screen = nd->clip_x0 <= 0 && nd->clip_x1 >= HUD_SCREEN_W;
             e->clip = 1;
-            e->cx0 = nd->clip_x0;
-            e->cx1 = nd->clip_x1;
+            e->cx0 = screen ? nd->clip_x0 - g_side : nd->clip_x0;
+            e->cx1 = screen ? nd->clip_x1 + g_side : nd->clip_x1;
         }
         if (nd->kind == N_QUAD) {
             float w = nd->has_d ? nd->d[0] : nd->has_tex ? nd->tex.w : 0;
@@ -1390,10 +1413,14 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             int drawn = !(nd->M & 0x200) && !((nd->F & 0x20) && !nd->has_tex);
             float vs = nd->has_tex ? nd->tex.vs : 1;
             e->additive = (nd->M & 0x80) != 0;           /* [R 0x17D100] Pause's icons, ChallengeText's icon1 */
-            if (drawn && w > 0 && h > 0)
+            if (drawn && w > 0 && h > 0) {
                 emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, 0,
                           nd->has_tex ? nd->tex.us : 1, vs, c,
                           nd->has_tex ? nd->tex.b : NULL, nd->has_tex ? nd->tex.name : 0, nz);
+                if (nd->has_tex && !nd->turned)
+                    widen_band(e, nd, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h),
+                               vs, c, nz);
+            }
             e->additive = 0;
         } else if (nd->kind == N_SLIDER) {
             float w = nd->has_d ? nd->d[0] : 100, h = nd->has_d ? nd->d[1] : 20;
@@ -4669,8 +4696,6 @@ int hud_sounds(Hud *h, HudSound *out, int max)
     return n;
 }
 
-static float g_side;                                  /* hud_set_aspect: the reference units the window shows past
-                                                       * each side of the 640 (0: none) */
 
 void hud_set_aspect(float aspect)
 {

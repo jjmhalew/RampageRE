@@ -103,9 +103,14 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
   setter (0x16BA78, 0x16B8B0 → 0x25BAF0), Z = 16777210 − 16777205 z_ndc (0x25B500 ..): the glyphs at layout z 0 get
   16777210, the boxes about 16760433, and the glyphs test GEQUAL (OFont +0x5C 0x10 by default, 0x1B72E8; 0x1B6590)
   without writing depth, so they pass over the boxes; a clear (0x231900) or none changes nothing. The port draws
-  the title unclipped (but at the PS2 screen's edges, x 0 and 640, which the viewer's wider frame would
-  pass);
+  the title unclipped (but at the PS2 screen's edges, x 0 and 640; in a wider window at the window's, where the
+  title bars go on);
   "Live" blinks every 0.5 s.
+- **Widescreen** [no PS2 meaning: the game's screen is 4:3]: a band of the screen's width (the title bars,
+  `Band_Red` and `Band_Dropshadow`; the King and Timed Run results' and WorldResults' too) goes on by its edge
+  column, half a texel in, past each end that is at the screen's edge to the window's (hud.c `widen_band`): sliding
+  in from x −640 it reaches back to the window's left edge, and has its right end once it is there. A cut at the
+  screen's edges (the scrolling title's, `gGoal`) is at the window's. At 4:3 nothing changes.
 - **Count-up** (from 1.5 s): the lines destruction, people, vehicles, bonus, time bonus, challenge — the point
   categories 0..5 summed over the players — appear one by one, each counting from 0 in 0.5 s, the total with them
   (`%i,%03i` from 1000). People and vehicles show the kills. On the last block the challenge line reads "Boss
