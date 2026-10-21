@@ -8268,6 +8268,10 @@ static int viewer_main(int argc, char **argv)
             attract_press(&v);
         if (v.exit_game) {                           /* back to the shell (--shell), or the viewer ends */
             v.exit_game = 0;
+            /* [R 0x2B7CB0, RWorldPackage's vtable 0x44A820 +0x18] the world package's end: every 3D sound killed
+             * (0x26D500) and the sound's frame once (0x26D960), then setState(15): the block's loops (a broken
+             * hydrant's Geyser, a fire's Fire Loop) and the objects' sounds do not play on in the menus */
+            sound_objects_clear();
             if (v.shell_mode || v.ap) {              /* (--autoplay: the shell goes on after a city) */
                 ShellStart st = v.kept;              /* gShell's idle timer, attract state, demo byte */
                 ap_game_left(v.ap, v.attract);

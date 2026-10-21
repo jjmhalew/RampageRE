@@ -95,7 +95,11 @@ SoundDevice +2 = 0, the event player paused, +0x48), 0x26D500 (0x274610: every o
 included, killed through 0x26BB30 → 0x2725C0 and freed), the sound's frame 0x26D960 once, and enableSfx back as it
 was; entering state 8 does the same (0x324584 .. 0x3245B0). Every loop and object sound of the block stops: sound.c
 `sound_objects_clear`, from main.c at GE_BLOCK with b = 1 and at GE_STATE 8 (the extra sound frame, with the event
-player paused, makes nothing else heard).
+player paused, makes nothing else heard). Leaving the world does it too: the world package's end (0x2B7CB0,
+RWorldPackage's vtable 0x44A820 +0x18) kills every 3D sound (0x26D500) and runs the sound's frame once (0x26D960)
+before setState(15) [R]; main.c clears them as the game goes back to the shell. (Up to v0.10.19 the port left them:
+the block's loops, a broken hydrant's `Geyser` or a fire's `Fire Loop`, played on in the menus, and the stale
+tracks held 3D slots.)
 
 **NI functions** are looked up by 0x324180: the block's string property of that name (the block just won for
 ResultsNI, GameOverNI and EndBlockNI, since the next block is already current), else WorldData's, else the name
