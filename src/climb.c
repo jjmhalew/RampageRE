@@ -406,7 +406,14 @@ int climb_check(Mount *m, const Scene *s, const Climber *c, int mode)
     if (!m->mounted || !b)
         return -1;
     m->at.storey = clampi((int)((c->pos[2] + 3) / 3), 0, b->n - 1 > 0 ? b->n - 1 : 0);
+    const Building *o = across(m, s);                /* braced across the alley (0x2E15D8 .. 0x2E1610): no higher than
+                                                      * that building's top storey */
+    if (o && m->at.storey > o->n - 1)
+        m->at.storey = o->n - 1;
     int r = place_ok(s, m->at.building, m->at.pt, c);
+    if (o && o->state >= BUILDING_FALLING)           /* that building coming down knocks it off as its own would
+                                                      * (0x2E1640 .. 0x2E1658: -8, slot 73) */
+        r = -8;
     if (!c->in_water && (r == 1 || r == -9))         /* climbing down into a water: let go [R 0x2E1660] */
         return -1;
     return r == -8 ? 73 : 31;                        /* knocked off: the falling building's slot, or the plain one */
