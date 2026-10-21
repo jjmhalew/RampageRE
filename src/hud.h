@@ -294,6 +294,8 @@ typedef struct {
     uint32_t tex;            /* name index of the texture in b */
     float skew;              /* the top edge moved this far along x (a slanted glyph), 0 upright */
     int additive;            /* M 0x80: the additive shader (GS state 0x17, ALPHA 0x48: Cs As + Cd) [R 0x17D100] */
+    int wide;                /* port extra: a fill over the whole screen widened across the window, not cut at its 4:3
+                              * (Scene.hud_clip) */
     int corners;             /* set: drawn from cx / cy / cu / cv instead (a turned picture: the shell's side frost) */
     float cx[4], cy[4], cu[4], cv[4];   /* its top-left, top-right, bottom-right, bottom-left corners and their uv */
 } HudQuad;

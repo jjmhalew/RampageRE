@@ -216,6 +216,8 @@ typedef struct {
     const FxMesh *fxm; int nfxm;                     /* the effects' mesh debris (XForm particles) */
     const SceneMesh (*fx_shapes)[8]; const int *fx_nshapes;   /* their meshes, by fx_shape_* */
     const HudQuad *hud; int nhud;                     /* the HUD and the floating scores, over everything (hud.c) */
+    int hud_clip;                                    /* the HUD cut at its 640 x 480 screen, as the PS2's frame cuts
+                                                      * it (the front end, black around its 4:3) */
     const SceneGui3D *gui3d; int ngui3d;              /* the HUD's 3D layers (the front end's globe and effects) */
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;

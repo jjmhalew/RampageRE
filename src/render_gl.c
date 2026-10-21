@@ -1236,17 +1236,26 @@ void rnd_hud_time(Renderer *r, double t)
     }
 }
 
-static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
+static void draw_hud(Renderer *r, const Scene *s, int width, int height, double t)
 {
+    float aspect = height ? (float)width / height : 4.0f / 3;
     if (r->has_hud_t)                                /* the GUI's own clock: it runs on while the world is paused */
         t = r->hud_t;
     hud_state(aspect);
+    int cut = (int)(height * 4.0f / 3 + 0.5f);       /* the 640 x 480 screen's width in pixels */
+    int clip = s->hud_clip && cut < width;           /* nothing past its edges: the PS2's frame ends there */
+    if (clip)
+        glScissor((width - cut) / 2, 0, cut, height);
     if (s->ngui3d)
         glClear(GL_DEPTH_BUFFER_BIT);
     r->in_hud = 1;
     int layer = 0;
     for (int i = 0; i < s->nhud; i++) {
         const HudQuad *q = &s->hud[i];
+        if (clip && !q->wide)                        /* (the widened fills go across the window) */
+            glEnable(GL_SCISSOR_TEST);
+        else
+            glDisable(GL_SCISSOR_TEST);
         if (!q->b && q->tex == HUD_TEX_3D) {
             if (layer < s->ngui3d)
                 draw_gui3d(r, &s->gui3d[layer], aspect, t);
@@ -1280,6 +1289,7 @@ static void draw_hud(Renderer *r, const Scene *s, float aspect, double t)
         glEnd();
     }
     r->in_hud = 0;
+    glDisable(GL_SCISSOR_TEST);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_BLEND);
     glEnable(GL_ALPHA_TEST);
@@ -1631,5 +1641,5 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
     }
     postfx_end();                                          /* the HUD (and the shell's 3D layers in it) stay sharp */
     if (s->nhud)
-        draw_hud(r, s, w->height ? (float)w->width / w->height : 4.0f / 3, t);
+        draw_hud(r, s, w->width, w->height, t);
 }

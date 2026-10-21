@@ -240,6 +240,7 @@ typedef struct {
     const void *layout;                              /* the layout being emitted */
     float skew;                                      /* the top edge moved along x (a slanted glyph) */
     int additive;                                    /* M 0x80: the additive shader [R 0x17D100] */
+    int wide;                                        /* the quad is a widened fill */
 } Emit;
 
 /* a picture: the rectangle (x0, y0) .. (x1, y1) of frame f with the texture's (u0, v0) .. (u1, v1) on it */
@@ -259,6 +260,7 @@ static void emit_quad(Emit *e, const Frame *f, float x0, float y0, float x1, flo
     q->b = b;
     q->tex = tex;
     q->additive = e->additive;
+    q->wide = e->wide;
 }
 
 /* ---------------------------------------------------------------- texts (hud.c) */
@@ -1743,12 +1745,13 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
                     h >= 479.5f) {
                     x0 -= 640.0f;
                     w += 1280.0f;
+                    e->wide = 1;
                 }
                 e->additive = (nd->M & 0x80) != 0;       /* CitySelect's `basic` glow over the globe */
                 emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, nd->has_tex ? nd->tex.us : 1,
                           nd->has_tex ? nd->tex.vs : 1, c, nd->has_tex ? nd->tex.b : NULL,
                           nd->has_tex ? nd->tex.name : 0);
-                e->additive = 0;
+                e->additive = e->wide = 0;
             }
         } else if (nd->kind == N_SLIDER) {
             float w = nd->has_d ? nd->d[0] : 100, h = nd->has_d ? nd->d[1] : 20;
@@ -5952,6 +5955,7 @@ int shell_quads(const Shell *s, HudQuad *out, int max)
         memcpy(h->cv, q->v, sizeof h->cv);
         memcpy(h->col, q->col, sizeof h->col);
         h->additive = q->additive;
+        h->wide = q->wide;
         h->b = q->b;
         h->tex = q->tex;
     }

@@ -683,7 +683,10 @@ static. It is widened in four ways:
   **[R]**. The 1 / (1 + z) of a deeper `<o>` is left out: no shell `<DD>` lies in one. No picture is drawn outside a
   `<DD>` either: the only ones there, MonsterSheet's `card_template`, are hidden and drawn as copies inside `cards`.
 - **Widescreen:** an untextured quad over the whole 640 × 480 (the popup's `background_quad` dim, the fills) is drawn
-  across the viewer's wider window [no PS2 meaning: the game's screen is 4:3].
+  across the viewer's wider window [no PS2 meaning: the game's screen is 4:3]. Everything else is cut at the 640 × 480
+  screen's edges (`Scene.hud_clip`, a scissor), as the PS2's frame cuts it: MonsterSelect's background tiles overhang
+  x = 0 by up to 9 pixels, a different amount per row, which drew a ragged edge into the black at the left (up to
+  v0.11.1).
 - **No depth sort:** the layouts draw in tree order **[R 0x241770]**. `<z>` is the fade **[R 0x22C450]**:
   MonsterSelect's title (0.388) and frost border (0.58) are partly see-through, MonsterSheet's `blowup` (0) starts
   unseen.

@@ -6933,6 +6933,7 @@ static void shell_enter(Viewer *v, const ShellStart *st)
     static Scene empty;                              /* nothing but the screens, black around their 4:3 */
     memset(&empty, 0, sizeof empty);
     empty.fog_end = 1;
+    empty.hud_clip = 1;                              /* Shell's backgrounds overhang x 0 (MonsterSelect's left tiles) */
     v->shell_scene = &empty;
     if (v->shell)
         rnd_scene(v->rnd, v->shell_scene);           /* (the texture cache is keyed by the bundles: anew) */

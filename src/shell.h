@@ -247,6 +247,7 @@ typedef struct {
     const Bundle *b;                /* NULL: untextured */
     uint32_t tex;
     int additive;                   /* M 0x80: drawn additively (HudQuad's) */
+    int wide;                       /* a fill widened across the window (HudQuad's) */
 } ShellQuad;
 int shell_quads(const Shell *s, HudQuad *out, int max);
 
