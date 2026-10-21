@@ -38,6 +38,10 @@ typedef struct {                                     /* a skinned mesh's vertice
     /* a cloth mesh (hair, fur, whiskers): its vertices follow the simulation (cloth.c), each on its particle */
     Cloth *cloth; int32_t *particle; int cloth_started;
     ClothWind wind; int has_wind;                     /* a city flag's wind (its object's ClothBit group) */
+    /* a building's flag (BuildingFlag): a force for its next step besides the wind (its building's shake x 500,
+     * 0x346F88 .. 0x346FCC) and the plane n.x = d of its wall, which its particles are kept out of after each step
+     * (0x1D6630 from 0x347534) */
+    float push[3]; int has_plane; float plane[4];
 } Skin;
 
 typedef struct {
@@ -85,6 +89,16 @@ typedef struct {
     int gone;                                         /* flag 0x10: off the building */
 } Adornment;
 
+/* a building's flag: a ClothInstance| of its BuildingInstance, a ClothObject (0x2BD200 -> 0x347580) hung where its
+ * BuildingAttachment says, as an adornment is (0x30FAA0, 0x30F710), on the building's list for the punches (0x2CFA20) */
+typedef struct {
+    int inst; Skin *skin;                             /* its instance and the cloth drawn there */
+    Adornment at;                                     /* side, storey (record), x, y, deg, zoff */
+    float wall;                                       /* WallOffset (+0x14C): out from the face */
+    Mat4 off;                                         /* ClothOffset (+0x118): the model in the attachment's frame */
+    int gone;                                         /* deleted, sunk below the ground (0x3473B0) */
+} BuildingFlag;
+
 typedef struct {                                      /* a building's cells and its facade quads */
     Building b;
     int mesh;                                         /* the facade's scene mesh, -1 none */
@@ -108,6 +122,7 @@ typedef struct {                                      /* a building's cells and 
     float openable[4][2][4]; uint8_t opens_h[4][2];
     int open_part;                                    /* its facade mesh's part of open windows (part 4), 0 none */
     Adornment *adorn; int nadorn;
+    BuildingFlag *flag; int nflag;
     uint8_t broke[BUILDING_STOREYS][BUILDING_CELLS];  /* a front cell's state (2 or more) its slots were told of */
     int fronts_told;                                 /* its first update's 0x2BE300 made (a back-row building's) */
     int seen_falls, seen_state;
@@ -187,7 +202,7 @@ typedef struct {
      * slots (0 this one, 1 and 2 behind it) and the roof rockets the buildings carry, for it to make */
     Vehicles *traffic; Group traffic_def[3];
     struct Rail *rail;                               /* the trains, cable cars and freighters (rail.c), drawn here */
-    Water *water[16]; int nwater; float water_acc;
+    Water *water[16]; int nwater; float water_acc, flag_acc;
     Edibles *edibles;                                 /* the power-ups and hazards behind the windows (edible.c) */
     Parade *parade;                                   /* the balloons, bikers and food carts (parade.c), driven by main */
     Boss *boss;                                       /* the block's boss and the ambient ones (boss.c) */   /* the block's WaterObject|s (water.c), stepped at 1/60 */
@@ -328,6 +343,8 @@ int scene_monster_shoulder(const Scene *s, int k, int hand, float at[3], float *
 /* 0x2D4390: a monster's attack sphere knocks off the adornments it reaches (0.75 of its radius; not the structural
  * ones, flag 4, nor obstacles, flag 2); how many */
 int scene_adornments_hit(Scene *s, const float centre[3], float radius);
+/* a monster's punch reaching building `building`'s face at `at` (hitBuildingPt): its flags pushed off it */
+void scene_building_flags_punch(Scene *s, int building, const float at[3]);
 /* street object k (Scene.street[k], streetobj.c's object) drawn at world (its model's base: StreetObj.world), or
  * hidden: its model and its flags' cloths move together (the cloths kept where they were relative to the model) */
 void scene_street_place(Scene *s, int k, const float world[16], int hidden);

@@ -1874,11 +1874,15 @@ static void hit_building_front(Mon *mo, const float *p, float gain)
         float off[3] = { w[0] - mo->mx, w[1] - mo->my, w[2] - mo->mz };
         dir_ai_on_hit(&mo->ai, off, mo->mirror);
     }
-    if (best && mo->power.rage)                      /* Monsters.bsf: in the rage hitBuildingPt twice [R] */
+    if (best && mo->power.rage) {                    /* Monsters.bsf: in the rage hitBuildingPt twice [R] */
         building_hit(&best->b, bq, 2.0f);
+        scene_building_flags_punch(&v->scene, bi, bq);   /* 0x2D5824, after each hit */
+    }
     int hit = best && building_hit(&best->b, bq, 2.0f);
-    if (best)
+    if (best) {
+        scene_building_flags_punch(&v->scene, bi, bq);
         building_script(v, best, 2.0f);
+    }
     if (hit && (kind <= 2 || kind == 6) &&             /* +2 energy (Monsters.bsf), the rage when full */
         edible_power_hit_building(&mo->power, 1, gain, mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF,
                                   others_full(mo))) {

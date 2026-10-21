@@ -369,6 +369,97 @@ static int place_model(City *c, Scene *s, const char *name, Mat4 base, int vehic
  * vertex on its particle: cloth_mesh_part), at the object x ClothOffset (rows, then the place), in its wind */
 static Skin *new_skin(const Mesh *m);
 
+static Mat4 cloth_offset(Group cb)                   /* ClothOffset: rows, then the place; identity without */
+{
+    Mat4 off = mat_identity();
+    float rows[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+    Group og = group_sub(cb, "ClothOffset");
+    Record orr[12];
+    if (og.at && group_items(og, orr, 12) == 12)
+        for (int k = 0; k < 12; k++)
+            rows[k] = record_num(orr[k]);
+    for (int a = 0; a < 3; a++)
+        for (int b = 0; b < 3; b++)
+            off.m[4 * a + b] = rows[3 * a + b];
+    for (int b = 0; b < 3; b++)
+        off.m[12 + b] = rows[9 + b];
+    return off;
+}
+
+/* a flag of the model at `place`, in the wind of cb's keys: its instance (its skin in *skin), -1 none */
+static int flag_new(City *c, Scene *s, const char *model, Group cb, Mat4 place, Skin **skin)
+{
+    char key[96];
+    snprintf(key, sizeof key, "%s|cloth", model);
+    const BdpEntry *ce = find_entry(&c->bundle, ET_CLOTH, key), *me = NULL;
+    size_t ml = strlen(model);
+    for (uint32_t k = 0; k < c->bundle.nentries && !me; k++) {   /* the model's mesh: <model>|<object> */
+        const char *en = bdp_name(&c->bundle, c->bundle.entries[k].name);
+        if (c->bundle.entries[k].type == ET_MESH && !_strnicmp(en, model, ml) && en[ml] == '|')
+            me = &c->bundle.entries[k];
+    }
+    Cloth *cl = ce ? cloth_new(ce->data, ce->size) : NULL;
+    if (!cl || !me) {
+        if (cl) cloth_free(cl);
+        return -1;
+    }
+    Mesh m = { 0 };
+    int np = cloth_mesh_parts(me->data, me->size), nv = 0;
+    m.parts = calloc((size_t)(np > 0 ? np : 1), sizeof *m.parts);
+    ClothMeshPart *cp = calloc((size_t)(np > 0 ? np : 1), sizeof *cp);
+    for (int k = 0; k < np; k++) {
+        if (cloth_mesh_part(cl, k, me->data, me->size, me->data2, me->size2, &cp[k]) != 0)
+            continue;
+        MeshPart *p = &m.parts[m.nparts++];
+        p->material = cp[k].material;
+        p->nverts = (uint32_t)cp[k].nverts;
+        p->pos = calloc((size_t)cp[k].nverts * 3 + 1, sizeof(float));
+        p->nrm = calloc((size_t)cp[k].nverts * 3 + 1, sizeof(float));
+        if (cp[k].uv) {
+            p->uv = malloc(sizeof(float) * 2 * (size_t)cp[k].nverts + 1);
+            memcpy(p->uv, cp[k].uv, sizeof(float) * 2 * (size_t)cp[k].nverts);
+        }
+        p->ntris = (uint32_t)cp[k].ntris;
+        p->tris = malloc(sizeof(uint32_t) * 3 * (size_t)cp[k].ntris + 4);
+        memcpy(p->tris, cp[k].tris, sizeof(uint32_t) * 3 * (size_t)cp[k].ntris);
+        nv += cp[k].nverts;
+    }
+    if (!m.nparts) {
+        free(m.parts);
+        free(cp);
+        cloth_free(cl);
+        return -1;
+    }
+    int id = new_instance(s, place, -1);
+    s->instances[id].dynamic = 1;
+    Skin *sk = new_skin(&m);
+    sk->cloth = cl;
+    sk->particle = malloc(sizeof *sk->particle * (size_t)(nv ? nv : 1));
+    int at = 0;
+    for (int k = 0; k < np; k++)
+        for (int v = 0; v < cp[k].nverts; v++)
+            sk->particle[at++] = cp[k].particle ? cp[k].particle[v] : -1;
+    for (int k = 0; k < np; k++)
+        cloth_mesh_part_free(&cp[k]);
+    free(cp);
+    sk->has_wind = 1;
+    sk->wind.dir_freq = group_num(cb, "HorizontalWindDirFreq", 1);
+    sk->wind.force = group_num(cb, "HorizontalWindForce", 10);
+    sk->wind.force_freq = group_num(cb, "HorizontalWindForceFreq", 3);
+    sk->wind.min_angle = group_num(cb, "HorizontalWindMinAngle", 0);
+    sk->wind.max_angle = group_num(cb, "HorizontalWindMaxAngle", 6.28f);
+    sk->wind.vert_freq = group_num(cb, "VerticalWindFreq", 2);
+    sk->wind.vert_force = group_num(cb, "VerticalWindForce", 10);
+    sk->wind.time_offset = group_num(cb, "TimeOffset", 0);
+    push_item(s, scene_add_mesh(s, m, s->city), id, -1, sk);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("flag %s at %.1f %.1f %.1f\n", model, s->instances[id].base.m[12], s->instances[id].base.m[13],
+               s->instances[id].base.m[14]);
+    if (skin)
+        *skin = sk;
+    return id;
+}
+
 static void place_flags(City *c, Scene *s, Group t, Mat4 base)
 {
     Group where;
@@ -377,86 +468,8 @@ static void place_flags(City *c, Scene *s, Group t, Mat4 base)
     for (uint32_t i = 0; i < n; i++) {
         Group cb = record_group(where, r[i]), ref = template_of(c, group_str(cb, "ClothRef|Name"));
         const char *model = ref.at ? group_str(ref, "Shape|Shape") : NULL;
-        if (!model)
-            continue;
-        char key[96];
-        snprintf(key, sizeof key, "%s|cloth", model);
-        const BdpEntry *ce = find_entry(&c->bundle, ET_CLOTH, key), *me = NULL;
-        size_t ml = strlen(model);
-        for (uint32_t k = 0; k < c->bundle.nentries && !me; k++) {   /* the model's mesh: <model>|<object> */
-            const char *en = bdp_name(&c->bundle, c->bundle.entries[k].name);
-            if (c->bundle.entries[k].type == ET_MESH && !_strnicmp(en, model, ml) && en[ml] == '|')
-                me = &c->bundle.entries[k];
-        }
-        Cloth *cl = ce ? cloth_new(ce->data, ce->size) : NULL;
-        if (!cl || !me) {
-            if (cl) cloth_free(cl);
-            continue;
-        }
-        Mesh m = { 0 };
-        int np = cloth_mesh_parts(me->data, me->size), nv = 0;
-        m.parts = calloc((size_t)(np > 0 ? np : 1), sizeof *m.parts);
-        ClothMeshPart *cp = calloc((size_t)(np > 0 ? np : 1), sizeof *cp);
-        for (int k = 0; k < np; k++) {
-            if (cloth_mesh_part(cl, k, me->data, me->size, me->data2, me->size2, &cp[k]) != 0)
-                continue;
-            MeshPart *p = &m.parts[m.nparts++];
-            p->material = cp[k].material;
-            p->nverts = (uint32_t)cp[k].nverts;
-            p->pos = calloc((size_t)cp[k].nverts * 3 + 1, sizeof(float));
-            p->nrm = calloc((size_t)cp[k].nverts * 3 + 1, sizeof(float));
-            if (cp[k].uv) {
-                p->uv = malloc(sizeof(float) * 2 * (size_t)cp[k].nverts + 1);
-                memcpy(p->uv, cp[k].uv, sizeof(float) * 2 * (size_t)cp[k].nverts);
-            }
-            p->ntris = (uint32_t)cp[k].ntris;
-            p->tris = malloc(sizeof(uint32_t) * 3 * (size_t)cp[k].ntris + 4);
-            memcpy(p->tris, cp[k].tris, sizeof(uint32_t) * 3 * (size_t)cp[k].ntris);
-            nv += cp[k].nverts;
-        }
-        if (!m.nparts) {
-            free(m.parts);
-            free(cp);
-            cloth_free(cl);
-            continue;
-        }
-        Mat4 off = mat_identity();
-        float rows[12] = { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
-        Group og = group_sub(cb, "ClothOffset");
-        Record orr[12];
-        if (og.at && group_items(og, orr, 12) == 12)
-            for (int k = 0; k < 12; k++)
-                rows[k] = record_num(orr[k]);
-        for (int a = 0; a < 3; a++)
-            for (int b = 0; b < 3; b++)
-                off.m[4 * a + b] = rows[3 * a + b];
-        for (int b = 0; b < 3; b++)
-            off.m[12 + b] = rows[9 + b];
-        int id = new_instance(s, mat_mul(base, off), -1);
-        s->instances[id].dynamic = 1;
-        Skin *sk = new_skin(&m);
-        sk->cloth = cl;
-        sk->particle = malloc(sizeof *sk->particle * (size_t)(nv ? nv : 1));
-        int at = 0;
-        for (int k = 0; k < np; k++)
-            for (int v = 0; v < cp[k].nverts; v++)
-                sk->particle[at++] = cp[k].particle ? cp[k].particle[v] : -1;
-        for (int k = 0; k < np; k++)
-            cloth_mesh_part_free(&cp[k]);
-        free(cp);
-        sk->has_wind = 1;
-        sk->wind.dir_freq = group_num(cb, "HorizontalWindDirFreq", 1);
-        sk->wind.force = group_num(cb, "HorizontalWindForce", 10);
-        sk->wind.force_freq = group_num(cb, "HorizontalWindForceFreq", 3);
-        sk->wind.min_angle = group_num(cb, "HorizontalWindMinAngle", 0);
-        sk->wind.max_angle = group_num(cb, "HorizontalWindMaxAngle", 6.28f);
-        sk->wind.vert_freq = group_num(cb, "VerticalWindFreq", 2);
-        sk->wind.vert_force = group_num(cb, "VerticalWindForce", 10);
-        sk->wind.time_offset = group_num(cb, "TimeOffset", 0);
-        push_item(s, scene_add_mesh(s, m, s->city), id, -1, sk);
-        if (getenv("RAMPAGE_TRACE"))
-            printf("flag %s at %.1f %.1f %.1f\n", model, s->instances[id].base.m[12], s->instances[id].base.m[13],
-                   s->instances[id].base.m[14]);
+        if (model)
+            flag_new(c, s, model, cb, mat_mul(base, cloth_offset(cb)), NULL);
     }
 }
 
@@ -2115,43 +2128,49 @@ static void open_windows(Scene *s, SceneBuilding *sb)
  * (side 4: v above the base) or the roof (side 5: 1.5 + v above the roof band's foot), by LocationOrigin: 0 the
  * left face from its back, 1 the right face from its front, 2 the front from its left, 4 / 5 (u, v) from the
  * building's middle. AdornmentFlags and CellDetachDamage come from the entry, else its template. */
+static int attachment_where(Group e, const SceneBuilding *sb, int nst, Adornment *a, int *origin_out)
+{
+    float hw = sb->b.width * CELL / 2, hd = sb->b.depth * CELL / 2;
+    a->side = (int)group_num(e, "side", 2);
+    float u = group_num(e, "u", 0), v = group_num(e, "v", 0);
+    int origin = 3;                                  /* the record's +0x14: 3 on a side (0x30FC2C) */
+    if (a->side < 4) {
+        a->record = (int)group_num(e, "floor", 0);
+        a->cell = (int)group_num(e, "cell", 0);
+    } else {
+        a->record = a->side == 5 ? nst : 0;
+        a->cell = -1;
+        origin = (int)group_num(e, "LocationOrigin", 0);
+    }
+    int face = a->side < 4 ? a->side : origin;
+    float along = a->side < 4 ? CELL * (float)a->cell + u : u;
+    if (face == FACE_LEFT) { a->x = -hw; a->y = hd - along; a->deg = -90; }
+    else if (face == FACE_RIGHT) { a->x = hw; a->y = -hd + along; a->deg = 90; }
+    else if (face == FACE_FRONT) { a->x = -hw + along; a->y = -hd; a->deg = 0; }
+    else if (origin == 4 || origin == 5) { a->x = u; a->y = v; a->deg = 0; }
+    a->zoff = (a->side == 4 ? -GROUND_FLOOR : a->side == 5 ? 1.5f : 0) + (origin == 4 || origin == 5 ? 0 : v);
+    if (origin_out)
+        *origin_out = origin;
+    return a->record >= 0 && a->record <= nst;
+}
+
 static void adornments(City *c, Scene *s, SceneBuilding *sb, Group from, int nst)
 {
-    Group where;
     static Record r[MAX_REC];
     uint32_t n = from.at ? group_all(from, "Adornment|", r, MAX_REC) : 0;
-    (void)where;
-    float hw = sb->b.width * CELL / 2, hd = sb->b.depth * CELL / 2;
     for (uint32_t i = 0; i < n; i++) {
         Group e = record_group(from, r[i]), at = template_of(c, group_str(e, "TemplateName"));
         const char *shape = at.at ? group_str(at, "Shape|Shape") : NULL;
         if (!shape)
             continue;
         Adornment a = { 0 };
-        a.side = (int)group_num(e, "side", 2);
-        float u = group_num(e, "u", 0), v = group_num(e, "v", 0);
-        int origin = 3;
-        if (a.side < 4) {
-            a.record = (int)group_num(e, "floor", 0);
-            a.cell = (int)group_num(e, "cell", 0);
-        } else {
-            a.record = a.side == 5 ? nst : 0;
-            a.cell = -1;
-            origin = (int)group_num(e, "LocationOrigin", 0);
-        }
+        int where_ok = attachment_where(e, sb, nst, &a, NULL);
         a.flags = (int)group_num(e, "AdornmentFlags", group_num(at, "AdornmentFlags", 0));
         a.detach = (int)group_num(e, "CellDetachDamage", group_num(at, "CellDetachDamage", 0));
         a.fx = group_str(e, "DislodgedFx");
         if (!a.fx)
             a.fx = group_str(at, "DislodgedFx");
-        int face = a.side < 4 ? a.side : origin;
-        float along = a.side < 4 ? CELL * (float)a.cell + u : u;
-        if (face == FACE_LEFT) { a.x = -hw; a.y = hd - along; a.deg = -90; }
-        else if (face == FACE_RIGHT) { a.x = hw; a.y = -hd + along; a.deg = 90; }
-        else if (face == FACE_FRONT) { a.x = -hw + along; a.y = -hd; a.deg = 0; }
-        else if (origin == 4 || origin == 5) { a.x = u; a.y = v; a.deg = 0; }
-        a.zoff = (a.side == 4 ? -GROUND_FLOOR : a.side == 5 ? 1.5f : 0) + (origin == 4 || origin == 5 ? 0 : v);
-        if (a.record < 0 || a.record > nst)
+        if (!where_ok)
             continue;
         int missing = s->missing;
         a.inst = place_model(c, s, shape, sb->node, -1);
@@ -2220,6 +2239,132 @@ static void adornments_place(Scene *s, SceneBuilding *sb, Mat4 sway)
          * matrix's height, 0 .. 1 (the lights the scene's): brighter higher up by day, the night's blue gone up high */
         in->own_ambient = 1;
         building_light_ambient(&s->building_light, in->base.m[14], in->ambient);
+    }
+}
+
+/* a building's flag where it hangs now (0x346E90 on a standing building, +0x14C 1 .. 3): its attachment's frame, at its
+ * storey's height (0x30F690, as an adornment's), moved by the building's shake (0x2BAC50) and WallOffset out from the
+ * face it is on (by side: 0 -x, 1 +x, 2 -y, 5 +z), then ClothOffset in that frame (0x101A90: Offset x the frame) [R] */
+static Mat4 flag_frame(const SceneBuilding *sb, const BuildingFlag *f, float shake)
+{
+    Mat4 m = mat_mul(sb->node, mat_trs_z(f->at.x, f->at.y, adornment_z(&sb->b, &f->at), f->at.deg));
+    m.m[12] += shake;
+    if (f->at.side == 0) m.m[12] -= f->wall;
+    else if (f->at.side == 1) m.m[12] += f->wall;
+    else if (f->at.side == 2) m.m[13] -= f->wall;
+    else if (f->at.side == 5) m.m[14] += f->wall;
+    return mat_mul(m, f->off);
+}
+
+/* a BuildingInstance's ClothInstance| entries [R 0x2BD200 -> 0x347580]: the object template its Name (OTRef|Name)
+ * names, whose Shape is the flag's model; only with a BuildingAttachment (else 0x3475D0 makes nothing); the wind and
+ * ClothOffset as a street flag's (place_flags), WallOffset (0.2 on the walls); and the plane of its wall taken from the
+ * building's box as it is now (0x347948 .. 0x347A10: side 0 x = min x - WallOffset, 1 x = max x + it, 2 y = min y - it,
+ * 5 z = the top + it), which its particles stay out of unless the attachment's +0x14 (3 on a side, else its
+ * LocationOrigin) is 5 (0x347514): the roofs' flags, all LocationOrigin 5, have none */
+static void building_flags(City *c, Scene *s, SceneBuilding *sb, Group inst, int nst)
+{
+    static Record r[MAX_REC];
+    uint32_t n = inst.at ? group_all(inst, "ClothInstance|", r, MAX_REC) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        Group e = record_group(inst, r[i]), ba = group_sub(e, "BuildingAttachment");
+        const char *name = group_str(e, "OTRef|Name");
+        Group t = template_of(c, name ? name : group_str(e, "Name"));
+        const char *model = t.at ? group_str(t, "Shape|Shape") : NULL;
+        if (!model || !ba.at)
+            continue;
+        BuildingFlag f = { 0 };
+        int origin;
+        attachment_where(ba, sb, nst, &f.at, &origin);
+        f.wall = group_num(e, "WallOffset", 0);
+        f.off = cloth_offset(e);
+        f.inst = flag_new(c, s, model, e, flag_frame(sb, &f, 0), &f.skin);
+        if (f.inst < 0)
+            continue;
+        const Building *b = &sb->b;
+        float *pl = f.skin->plane;
+        int side = f.at.side;
+        if (side == 0) { pl[0] = -1; pl[3] = f.wall - b->min[0]; }
+        else if (side == 1) { pl[0] = 1; pl[3] = f.wall + b->max[0]; }
+        else if (side == 2) { pl[1] = -1; pl[3] = f.wall - b->min[1]; }
+        else if (side == 5) { pl[2] = 1; pl[3] = f.wall + b->max[2]; }
+        f.skin->has_plane = origin != 5 && (side <= 2 || side == 5);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  on the building at x %.0f .. %.0f: side %d, storey %d of %d, its wall's plane %s\n", b->min[0],
+                   b->max[0], side, f.at.record, nst, f.skin->has_plane ? "kept" : "none");
+        sb->flag = realloc(sb->flag, sizeof *sb->flag * (size_t)(sb->nflag + 1));
+        sb->flag[sb->nflag++] = f;
+    }
+}
+
+/* a flag's bounding radius (the ClothInstance's sphere +0x58, 0x1D68F0): here its particles' farthest from their
+ * middle [G: the game's sphere is its own fit, not followed] */
+static float flag_radius(const Cloth *cl)
+{
+    int n = cloth_count(cl);
+    const float *x = cloth_positions(cl);
+    float mid[3] = { 0, 0, 0 }, r2 = 0;
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < 3; j++)
+            mid[j] += x[3 * i + j] / (float)n;
+    for (int i = 0; i < n; i++) {
+        float d2 = 0;
+        for (int j = 0; j < 3; j++)
+            d2 += (x[3 * i + j] - mid[j]) * (x[3 * i + j] - mid[j]);
+        if (d2 > r2) r2 = d2;
+    }
+    return sqrtf(r2);
+}
+
+/* the ClothObject's update (0x3473B0, a world step) for its place: on a standing building where it hangs, the
+ * building's shake (x 500) pushing its cloth for the step (0x346F88 .. 0x346FCC); on a destroyed one (+0x14C 4 and up)
+ * or a gone one it stays as it was and sinks by 1/2 x 196.2 x step^2 a step (0x346EC0 .. 0x346F5C: 3.27 a second, with
+ * no speed kept), and once the building is gone and it is more than twice its radius below 0 it is deleted [R] */
+static void building_flags_update(Scene *s, SceneBuilding *sb, int steps)
+{
+    const Building *b = &sb->b;
+    for (int i = 0; i < sb->nflag; i++) {
+        BuildingFlag *f = &sb->flag[i];
+        Instance *in = &s->instances[f->inst];
+        if (f->gone)
+            continue;
+        if (b->state != BUILDING_GONE && b->state < BUILDING_CRACKING) {
+            float x = building_shake(b);
+            in->base = flag_frame(sb, f, x);
+            f->skin->push[0] = 500 * x;
+            continue;
+        }
+        f->skin->push[0] = 0;
+        for (int k = 0; k < steps; k++) {
+            if (b->state == BUILDING_GONE && in->base.m[14] < -2 * flag_radius(f->skin->cloth)) {
+                f->gone = 1;
+                in->hidden = 1;
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  building %d's flag %d sunk: deleted\n", (int)(sb - s->buildings), i);
+                break;
+            }
+            in->base.m[14] -= 0.5f * 196.2f / (30.0f * 30.0f);
+        }
+    }
+}
+
+/* a monster's punch reaching the building's face at `at` (hitBuildingPt 0x2D54F0 -> 0x2CFB30, after its hit, when it
+ * has flags): each of them out of a sphere of 3.5 there (0x1D6520, still; the game's test lets in only what is within
+ * sqrt 3.5) and a step more under its matrix as it is (0x1D90E0 with +0x1C, the world's step) [R] */
+void scene_building_flags_punch(Scene *s, int building, const float at[3])
+{
+    if (building < 0 || (uint32_t)building >= s->nbuildings)
+        return;
+    SceneBuilding *sb = &s->buildings[building];
+    static const float still[3] = { 0, 0, 0 };
+    for (int i = 0; i < sb->nflag; i++) {
+        if (sb->flag[i].gone)
+            continue;
+        Cloth *cl = sb->flag[i].skin->cloth;
+        int moved = cloth_collide_sphere(cl, at, 3.5f, still);
+        cloth_step_again(cl, 1.0f / 30);
+        if (getenv("RAMPAGE_TRACE") && moved)
+            printf("  building %d's flag %d: %d particles pushed off the punch\n", building, i, moved);
     }
 }
 
@@ -2424,6 +2569,8 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->moving = 0;
         sb->adorn = NULL;
         sb->nadorn = 0;
+        sb->flag = NULL;
+        sb->nflag = 0;
         sb->seen_falls = 0;
         sb->props = t;
         sb->inst = inst;
@@ -2563,6 +2710,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
             sb->rest[i - sb->first] = s->instances[i].base;
         facade_passes(s, sb);
         adornments_place(s, sb, mat_identity());
+        building_flags(c, s, sb, inst, nst);         /* after last: its flags are not moved as its pieces */
     }
 }
 
@@ -3177,7 +3325,13 @@ static void skin_item(const Scene *s, const Instance *in, DrawItem *it)
             float wind[3] = { 0, 0, 0 };
             if (sk->has_wind)                        /* 0x3473B0: the flag's wind at the game clock */
                 cloth_flag_wind(&sk->wind, s->cloth_time, wind);
+            for (int j = 0; j < 3; j++)              /* a building flag's push from its building's shake */
+                wind[j] += sk->push[j];
             cloth_step(sk->cloth, s->cloth_dt, nodes ? (const float (*)[16])world : NULL, sk->has_wind ? wind : NULL);
+            if (sk->has_plane) {                     /* 0x347534: out of its wall, which stands still */
+                static const float still[3] = { 0, 0, 0 };
+                cloth_collide_plane(sk->cloth, sk->plane, sk->plane[3], still);
+            }
         }
         int np = cloth_count(sk->cloth);
         float *lp = malloc(sizeof(float) * 6 * (size_t)(np ? np : 1)), *ln = lp + 3 * np;
@@ -4094,6 +4248,12 @@ void scene_buildings_update(Scene *s, float dt)
     for (; s->water_acc >= 1.0f / 30; s->water_acc -= 1.0f / 30)
         for (int k = 0; k < s->nwater; k++)
             water_step(s->water[k], 1.0f / 30);
+    int flag_steps = 0;                              /* the buildings' flags' world steps (0x3473B0) */
+    s->flag_acc += dt;
+    if (s->flag_acc > 0.25f)
+        s->flag_acc = 0.25f;
+    for (; s->flag_acc >= 1.0f / 30; s->flag_acc -= 1.0f / 30)
+        flag_steps++;
     s->light_frame++;                                /* 0x2B8F80: the queue's frame; no grant yet */
     s->light_granted = 0;
     for (uint32_t i = 0; i < s->nbuildings && !s->left; i++) {
@@ -4112,6 +4272,7 @@ void scene_buildings_update(Scene *s, float dt)
             }
         }
         building_update(&sb->b, dt);
+        building_flags_update(s, sb, flag_steps);
         int moving = sb->b.collapse >= 0 || sb->b.shake_time > 0 || building_sink(&sb->b) > 0 ||
                      (sb->b.state != BUILDING_STANDING && sb->b.state != BUILDING_FLOOR_FALLING);
         if (moving || sb->moving || sb->b.dirty)
@@ -4511,6 +4672,7 @@ void scene_free(Scene *s)
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         free(s->buildings[i].rest);
         free(s->buildings[i].adorn);
+        free(s->buildings[i].flag);
         free(s->buildings[i].light);
         free(s->buildings[i].gf_vert);
     }
@@ -4518,6 +4680,7 @@ void scene_free(Scene *s)
     for (uint32_t i = 0; i < s->nscenery; i++) {
         free(s->scenery[i].rest);
         free(s->scenery[i].adorn);
+        free(s->scenery[i].flag);
         free(s->scenery[i].light);
     }
     free(s->scenery);

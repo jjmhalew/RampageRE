@@ -17,6 +17,8 @@ The hair, fur and whiskers of 16 monsters (`000<NAME>_CLOTH`, one per `.cmp`) an
 | 0x1D7710 | one substep of a part: forces, semi-implicit Euler |
 | 0x1D8CA0 | inverse dynamics: the springs' stretch cut back, velocities re-read |
 | 0x1D87F0, 0x1D5E00 | collisions with the entry's spheres (none in the data) |
+| 0x1D6630 / 0x1D61D0 | a plane's collision (a building's flag against its wall) |
+| 0x1D6520 / 0x1D5E00 | a sphere's collision (a punch near a building's flags) |
 | 0x1D7490 | the triangles' normals |
 | 0x1D6E30 | the particles' normals (when drawn) |
 | 0x1D67B0, 0x1D89C0 | stop: snap to rest and blend from the kept positions; resume after |
@@ -25,7 +27,8 @@ The hair, fur and whiskers of 16 monsters (`000<NAME>_CLOTH`, one per `.cmp`) an
 | 0x3473B0 | ClothObject (a city flag, vtable 0x44BA50) each frame: its wind, then 0x1D90E0 |
 | 0x246B10 ... | a monster's cloth: 0x1D90E0 with the monster's world matrix, no force |
 
-Callers of 0x1D90E0: 0x246B10 (GuiShape), 0x29C0B0 (ClothBlob), 0x2CFB30, 0x2E03A8 (not followed), 0x3473B0 (ClothObject).
+Callers of 0x1D90E0: 0x246B10 (GuiShape), 0x29C0B0 (ClothBlob), 0x2CFB30 (a building's flags after a punch),
+0x2E03A8 (not followed), 0x3473B0 (ClothObject).
 
 ## The part record (0x8C bytes)
 
@@ -116,6 +119,50 @@ n = k ^ (k << 13), smoothed ¼ ½ ¼ and interpolated linearly) plus 5 octaves (
 strength at twice the frequency. The vertical force about cancels the gravity of 9.8: the flags fly.
 The sincos at 0x106730 returns sin through its first pointer (checked against the slerp at 0x167EE0).
 
+## The buildings' flags
+
+52 flags hang on building fronts, sides and roofs: 7 in Chicago (the art museum's two `Flag_ArtExhibit` banners and
+five red flags), 29 in Hong Kong, 15 in San Francisco (laundry lines on a right side among them), 1 in New York. They
+are `ClothInstance|` groups of a `BuildingInstance|`, read by the building's instance loader (0x2BC920: 0x2BD200, the
+record named so and a group) [R]: their `Name` (`OTRef|Name` in some) is an object template (`Flag_ArtMuseum`,
+`flagpole_red`, `Flagpole_US` ...) whose `Shape` is the flag's model, and a ClothObject (class 0x4D8220) is made and set
+up with the group, the template and the building (vtable +0x60 = 0x347580):
+
+- Without a `BuildingAttachment` nothing more is done (0x3475D0). With one: the attachment's record (0x30FAA0: `side`,
+  `cell`, `floor`, `u`, `v`; +0x14 is 3 on a side, else `LocationOrigin`) and its frame (0x30F710), as an adornment's
+  (FORMAT_BDP.md "Adornments"); the building at +0xB0 and the object on the building's cloth list (G+0xA4, count
+  +0xAC, 0x2CFA20).
+- The wind keys as the street flags' (above), `WallOffset` (+0x14C: 0.2 on the walls, 0 or 0.2 on the roofs) and
+  `ClothOffset` (+0x118, a 4 × 3 matrix; identity when it does not parse). The roof flags turn their model with it
+  ((1 0 0) (0 0 −1) (0 1 0)), as do seven of Hong Kong's on the fronts ((0 0 −1) (0 1 0) (1 0 0)).
+- The wall's plane (n at +0x108, d at +0x114, n·x = d) from the building's box as it is then (0x347948 .. 0x347A10):
+  side 0 n = (−1, 0, 0), d = WallOffset − min x; side 1 (1, 0, 0), WallOffset + max x; side 2 (0, −1, 0),
+  WallOffset − min y; side 5 (0, 0, 1), WallOffset + the top. Side 4: not set (no data).
+
+Each world step (0x3473B0) [R]:
+1. A building gone (+0x14C 0) and the flag's place more than twice its bounding radius (the ClothInstance's sphere,
+   0x1D68F0) below 0: the object goes (the update answers 0x1C).
+2. Its place (0x346E90). On a standing building (+0x14C 1 .. 3): the attachment's frame at its storey's height
+   (0x30F690), plus the building's shake (0x2BAC50 at the step's start, while the shaker has started), WallOffset
+   out from the face by side (0 −x, 1 +x, 2 −y, 5 +z), then ClothOffset in that frame (0x101A90: Offset × the frame;
+   the offset's place turned by the frame's rows); the shake × 500 (0x44CA58) is a force on the cloth for the step
+   (0x1D6740). On a destroyed building (+0x14C 4 and up) or a gone one: its matrix as it was, 1/2 × 196.2 × step²
+   lower (0.109 a step, 3.27 a second: it sinks, with no speed kept).
+3. The wind (above), the frame (0x1D90E0 with the world's step).
+4. Unless the attachment's +0x14 is 5 (every roof flag: all have LocationOrigin 5), the wall's plane (0x1D6630, the
+   plane still): every free particle with n·x ≤ d is put on the plane, its velocity bounced (below).
+
+**A punch** (hitBuildingPt 0x2D54F0, after the building's hit, whenever a building took the point; twice in the rage
+as hitBuildingPt is called twice) with flags on the building (G+0xAC): 0x2CFB30 with a still sphere of radius 3.5 at
+the point on the face: each listed flag still there, the sphere's collision (0x1D6520), then a frame more under its
+kept matrix (0x1D90E0 with instance +0x1C and the world's step) [R]. 0x1D5E00 compares the squared distance with the
+sphere's radius (+0x10, its square being at +0xC) [R]: a particle within √3.5 = 1.87 of the point is put out at 3.5.
+The jump becomes velocity at the next frame (ADJUST_VEL reads it from the frame's start), so the flag is thrown off.
+
+**The bounce** (0x1D61D0, 0x1D5E00 alike) [R]: v relative to the collider's velocity, r; its part along n reversed,
+vn = −(r·n) n; the rest t = r + vn; v' = RESTITUTION × vn + F × t + the collider's velocity, F STATIC_FRICTION while
+|r|² < DYNAMIC_FRICTION_VEL², else DYNAMIC_FRICTION. Only free particles (state +0x40 bit 0 clear).
+
 ## The meshes
 
 A cloth is drawn from its model's own type 0 mesh. The model of `<Model>|cloth` (all 44 have one) holds a mesh
@@ -154,8 +201,13 @@ pins move with velocity 0, no sub-step runs, ADJUST_VEL zeroes the velocities [R
 axis: the game's rsqrt.s (0x1D6E30, 0x1D7F88) of 0 is the EE's +MAX (its FPU has no infinity) and 0 × MAX = 0, so the
 normal and the torque come out 0, as the port's guarded 0 [R]. The skin matrices come from the caller (the game
 builds them from the skeleton for the bone list only; the port's are the same matrices for those nodes). Left out:
-the collisions (no entry has a sphere: the count +0x44 is 0 on all 44 [R]), the bounding sphere (instance +0x4C ..
-+0x5C, the drawing's).
+the entry's own collision spheres (no entry has one: the count +0x44 is 0 on all 44 [R]), the bounding sphere
+(instance +0x4C .. +0x5C, the drawing's; a building's flag's deletion uses its particles' farthest from their middle
+instead [G]). The plane's and the sphere's collisions are `cloth_collide_plane` / `cloth_collide_sphere`, the punch's
+frame more `cloth_step_again`; city.c `building_flags` (made after the building's pieces, so not moved with them),
+`building_flags_update` (each world step) and `scene_building_flags_punch` (main.c `hit_building_front`). As the
+other flags, a building's is stepped once a drawn frame with the play time since (its push and the wind a force over
+that time), the plane after each step; the shake is the building's now, not at the step's start.
 
 The draw (0x1D5920) places the simulated particles with two settings of the monster's (0x2D6680, each frame of its
 draw 0x2FEFA0) [R]: the scale +0x8C (0x1D67A0: the monster's dynamic scale +0xA78 while +0xA74, else 1) and the offset

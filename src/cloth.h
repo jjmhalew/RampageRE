@@ -42,6 +42,14 @@ void cloth_reset(Cloth *c, const float (*skin)[16]);
  * comes from cloth_flag_wind, the monsters get none), may be NULL. dt <= 0 does nothing. */
 void cloth_step(Cloth *c, float dt, const float (*skin)[16], const float wind[3]);
 
+/* after a step, a flag's collisions (the entry's own spheres, 0x1D87F0, are none): every free particle on the far
+ * side of the plane n.x = d (n unit) is put on it (0x1D6630, a building's flag against its wall), or every one within
+ * sqrt(r) of the centre out to r (0x1D6520, the game's test [R]); its velocity bounced off the collider moving at vel.
+ * Remakes the normals as for a cloth without skin (a flag). The particles moved */
+int cloth_collide_plane(Cloth *c, const float n[3], float d, const float vel[3]);
+int cloth_collide_sphere(Cloth *c, const float centre[3], float r, const float vel[3]);
+void cloth_step_again(Cloth *c, float dt);           /* a frame more under the last frame's matrix, no wind */
+
 const float *cloth_positions(const Cloth *c);        /* xyz per particle */
 const float *cloth_normals(const Cloth *c);          /* xyz per particle, unit (0x1D6E30) */
 const float *cloth_bind_positions(const Cloth *c);   /* xyz per particle: the entry's, model space of the bind pose */

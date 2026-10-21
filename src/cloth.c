@@ -31,6 +31,7 @@ typedef struct {
     float max_dt;                                    /* +0x34 MAX_TIME_DELTA: the substep, 1/60 */
     float rel_vel;                                   /* +0x38 RELATIVE_VEL_SCALE: 0.85 */
     float extra_damp;                                /* +0x3C EXTRA_DAMP: 1 */
+    float restitution, static_fric, dynamic_fric, fric_vel;   /* +0x24 .. +0x30: the collisions' */
     float max_vel, max_vel_time;                     /* +0x44 MAX_VEL (100, 150), +0x48 MAX_VEL_TRANS_TIME (1/30) */
     float extra_damp_vel2;                           /* +0x58: EXTRA_DAMP_VEL (+0x40, 10) squared, stored (100) */
     uint32_t iters;                                  /* +0x4C NUM_INV_DYN_ITERS: 2 or 3 */
@@ -188,6 +189,8 @@ Cloth *cloth_new(const uint8_t *d, uint32_t size)
         p->max_dt = rdf(r + 0x34);
         p->rel_vel = rdf(r + 0x38);
         p->extra_damp = rdf(r + 0x3C);
+        p->restitution = rdf(r + 0x24); p->static_fric = rdf(r + 0x28);
+        p->dynamic_fric = rdf(r + 0x2C); p->fric_vel = rdf(r + 0x30);
         p->max_vel = rdf(r + 0x44);
         p->max_vel_time = rdf(r + 0x48);
         p->iters = rd32(r + 0x4C);
@@ -702,6 +705,73 @@ void cloth_step(Cloth *c, float dt, const float (*skin)[16], const float wind[3]
         c->acc[0] += wind[0]; c->acc[1] += wind[1]; c->acc[2] += wind[2];
     }
     update(c, skin, dt);
+}
+
+/* 0x1D61D0 / 0x1D5E00, after the push out along n: the velocity relative to the collider's, its part along n
+ * turned round x RESTITUTION, the rest x STATIC_FRICTION below DYNAMIC_FRICTION_VEL, else x DYNAMIC_FRICTION [R] */
+static void bounce(const Part *p, float *v, const float n[3], const float cv[3])
+{
+    float r[3] = { v[0] - cv[0], v[1] - cv[1], v[2] - cv[2] }, vn = -dot3(r, n);
+    float f = dot3(r, r) < p->fric_vel * p->fric_vel ? p->static_fric : p->dynamic_fric;
+    for (int j = 0; j < 3; j++) {
+        float t = r[j] + vn * n[j];
+        v[j] = p->restitution * vn * n[j] + f * t + cv[j];
+    }
+}
+
+int cloth_collide_plane(Cloth *c, const float n[3], float d, const float vel[3])
+{
+    int moved = 0;
+    if (!c)
+        return 0;
+    for (int k = 0; k < c->nparts; k++) {            /* 0x1D6630: every free particle of every part */
+        const Part *p = &c->parts[k];
+        for (int i = p->first; i < p->first + p->n; i++) {
+            float *x = c->pos + 3 * i, dist = dot3(n, x);
+            if (c->held[i] || dist > d)
+                continue;
+            for (int j = 0; j < 3; j++)
+                x[j] += (d - dist) * n[j];
+            bounce(p, c->vel + 3 * i, n, vel);
+            moved++;
+        }
+    }
+    particle_normals(c, NULL);                       /* the game's are made when drawn, after this */
+    return moved;
+}
+
+int cloth_collide_sphere(Cloth *c, const float centre[3], float r, const float vel[3])
+{
+    int moved = 0;
+    if (!c)
+        return 0;
+    for (int k = 0; k < c->nparts; k++) {            /* 0x1D6520 */
+        const Part *p = &c->parts[k];
+        for (int i = p->first; i < p->first + p->n; i++) {
+            float *x = c->pos + 3 * i, d[3] = { x[0] - centre[0], x[1] - centre[1], x[2] - centre[2] };
+            float l2 = dot3(d, d);
+            /* [R 0x1D5E7C] the squared distance against the radius itself (+0x10; its square is at +0xC): a
+             * particle within sqrt(r) is pushed out to r */
+            if (c->held[i] || l2 > r || l2 <= 0)
+                continue;
+            float l = sqrtf(l2), n[3] = { d[0] / l, d[1] / l, d[2] / l };
+            for (int j = 0; j < 3; j++)
+                x[j] += (r - l) * n[j];
+            bounce(p, c->vel + 3 * i, n, vel);
+            moved++;
+        }
+    }
+    particle_normals(c, NULL);
+    return moved;
+}
+
+/* the frame again under the same object matrix (0x2CFB30: 0x1D90E0 with the instance's own +0x1C) */
+void cloth_step_again(Cloth *c, float dt)
+{
+    if (!c)
+        return;
+    memcpy(c->world, c->m1c, sizeof c->world);
+    update(c, NULL, dt);
 }
 
 void cloth_to_local(const Cloth *c, float *pos_out, float *nrm_out)
