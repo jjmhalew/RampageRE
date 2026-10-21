@@ -1307,6 +1307,15 @@ int game_quitting(const Game *g) { return g ? g->quit : 0; }
 int game_choose_monster(const Game *g) { return g ? g->select : 0; }
 int game_world_done(const Game *g) { return g ? g->world_done : 0; }
 int game_par_score(const Game *g) { return g ? g->par_score : 0; }
+
+const char *game_block_str(const Game *g, const char *key)
+{
+    if (!g)
+        return NULL;
+    Group blk = block_def(g, g->cur), par = parent_of(g, blk);
+    const char *s = blk.at ? group_str(blk, key) : NULL;
+    return s ? s : par.at ? group_str(par, key) : NULL;
+}
 uint32_t game_city_flags(const Game *g) { return g ? g->city_flags : 0; }
 
 void game_set_city_status(Game *g, int total, uint32_t flags)

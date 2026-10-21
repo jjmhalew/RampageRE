@@ -3863,6 +3863,8 @@ static void game_step(Viewer *v, float dt)
                     r.par_score = game_par_score(v->game);
                     r.city_flags = game_city_flags(v->game) | (v->challenges_lost ? 0 : CITY_FLAG_CHALLENGES);
                     r.monster_revealed = reveal_was_revealed(&v->reveal);
+                    r.results_text = game_block_str(v->game, "ResultsNIText");   /* Results.scr:428 (NY10's
+                                                      * ChallengeBossDefeat) */
                     r.show_victory = game_world_done(v->game);   /* LevelResults.scr:228: getShowVictory (0x2C3180,
                                                       * 0x4D7E4F) hides Change Monster and Quit */
                     v->results_update = e->a == GR_SCREEN_RESULTS && r.play_type == GP_CAMPAIGN;

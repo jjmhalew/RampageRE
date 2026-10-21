@@ -242,6 +242,8 @@ int game_quitting(const Game *g);
 int game_choose_monster(const Game *g);
 int game_world_done(const Game *g);
 int game_par_score(const Game *g);                   /* gWorld.getParScore (WorldData ParScore) */
+/* gWorld.getCurrentBlockStringProp(key): the current block's string, else its ParentPropertySet's; NULL none */
+const char *game_block_str(const Game *g, const char *key);
 uint32_t game_city_flags(const Game *g);             /* 1 destroyed, 2 par beaten, 8 (all monsters ...) [R 0x4D7C3C] */
 /* the city's total (0x4D7C40) and flags (0x4D7C3C) as GameStatus has them at the city's start: 0x33DB90 clears them
  * (0x84, 0) only for a campaign city begun at its first block; one resumed keeps the checkpoint's (0x33D820 /

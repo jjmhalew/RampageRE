@@ -95,7 +95,8 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
   Monster / Quit fade in at 2.05, 2.15, 2.25 (+3 s when saving is allowed). `Slot_Jackpot` plays from the start.
 - **Scrolling title** (from 1.5 s): the block's name `format(localize("Results_CompletlyDestroyed"),
   localize(getBlockName(0)))` ("Downtown - COMPLETELY DESTROYED"), or, on the city's last block with buildings left,
-  the block's `ResultsNIText`; two copies 150 apart move left at 150 a second, wrapping between x 62 and 503. The
+  the block's `ResultsNIText` (`getCurrentBlockStringProp`: only NY10_Empire_State's `ChallengeBossDefeat`, "Dr.
+  Vector has been defeated."; main.c `game_block_str`); two copies 150 apart move left at 150 a second, wrapping between x 62 and 503. The
   layout's `M 0x310` boxes at the ends do **not** cut the title [R]: the box's shader is 0x17D100's depth-only one
   (TEST 0x52001: ATST NEVER, AFAIL ZB_ONLY, no colour; M 0x10 depth test, 0x100 depth write, 0x200 the depth-only
   shader and the bias) drawn with proj[3][2] −= −0.001 (0x17C180 .. 0x17C19C → 0x25B4D4): z_ndc + 0.001, farther.
