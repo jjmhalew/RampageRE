@@ -2202,10 +2202,13 @@ static void adornments_place(Scene *s, SceneBuilding *sb, Mat4 sway)
     const Building *b = &sb->b;
     for (int i = 0; i < sb->nadorn; i++) {
         Adornment *a = &sb->adorn[i];
-        if (!a->gone && a->side < 3) {               /* 0x2CFC20: its cell damaged enough, it falls off (flag 4 once
-                                                        the building's HP is gone) */
-            int ci = building_cell_index(b, a->side, a->cell);
-            int st = ci >= 0 && a->record < b->storeys ? b->cell[a->record][ci].state : 0;
+        if (!a->gone && (a->side < 3 || a->side == 5)) {
+            /* 0x2CFC20 (from every state set, 0x2CFDA0): its cell damaged enough, it falls off (flag 4 once the
+             * building's HP is gone), hidden from the next update (flag 8 -> 0x10, 0x2BDF78), no effect; a roof's
+             * (faces 4 and up: by the face alone, 0x2CFC38 ..) by the roof's state: the AC units (CellDetachDamage
+             * 2) go at the second stomp's TopDmg, or the sink's [R] */
+            int ci = a->side == 5 ? -1 : building_cell_index(b, a->side, a->cell);
+            int st = a->side == 5 ? b->roof : ci >= 0 && a->record < b->storeys ? b->cell[a->record][ci].state : 0;
             if (st > 0 && st >= a->detach && (!(a->flags & 4) || b->hp <= 0))
                 a->gone = 1;
         }
