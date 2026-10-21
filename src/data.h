@@ -74,6 +74,7 @@ uint32_t material_flags(const Bundle *b, uint32_t material);
  * dropped, its depth written (GS state 2, as the facade sheets: MeshPart.blend 2): the backdrops' fog masks, the
  * skylines, cloud bands, signs, trees. 1 = so */
 int material_blended(const Bundle *b, uint32_t material);
+int material_uncut(const Bundle *b, uint32_t material);   /* drawn without the alpha test (mesh.c) */
 /* a material's texture region (MAT_REGION: 78 materials, all kind 2: the taxis, the Ryder truck, the backdrops'
  * bricks, stucco and windows): the 16 bytes after its texture indices (by kind, 0x25F960), u0, v0, width, height in its
  * first texture, a tile of an atlas; the part's UVs run in it (render_gl.c region_rect). 0 none */

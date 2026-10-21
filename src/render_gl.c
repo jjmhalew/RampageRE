@@ -1027,7 +1027,10 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
      * reflection (written into the frame's alpha for the second pass; the blimp's envelope, not its lettering or
      * gondola). So it is drawn whole */
     uint32_t layer = p->nrm || skin ? material_env(sm->b, p->material) : 0;
-    GLboolean test_was = (layer || env_only) && !blend && !see_through ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
+    /* and any opaque material's (material_uncut: GS states 1 and 5, TEST 0x50002) [R]: drawn whole, its texture's or
+     * vertices' alpha cutting nothing (Chicago's Adornwindow panes at alpha 0, the rubble beams' foot) */
+    int uncut = layer || env_only || material_uncut(sm->b, p->material);
+    GLboolean test_was = uncut && !blend && !see_through ? glIsEnabled(GL_ALPHA_TEST) : GL_FALSE;
     if (test_was)
         glDisable(GL_ALPHA_TEST);
     GLboolean lit_was = env_only ? glIsEnabled(GL_LIGHTING) : GL_FALSE;

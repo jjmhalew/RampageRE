@@ -171,6 +171,17 @@ int material_blended(const Bundle *b, uint32_t material)
     return e && e->size >= 8 && e->data[2] == 2 && (rd32(e->data + 4) & 0x300000) == 0x100000;
 }
 
+/* the material's first pass in a GS state without an alpha test [R]: of the bundles' materials (0x16F030's shaders,
+ * their compiled records' first pass byte 1 into 0x3B4240) every one is in state 1 (textured) or 5 (untextured),
+ * TEST 0x50002: no alpha test, the texture's alpha cuts nothing (the reflective kind 5's and the damage blend's
+ * first passes too), but for those with flag 0x100000, states 2 and 7 (TEST 0x5000D: alpha > 0, blended). A part
+ * that names a texture directly (people, backdrops, props) is not a material: 0 */
+int material_uncut(const Bundle *b, uint32_t material)
+{
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    return e && e->size >= 8 && !(rd32(e->data + 4) & 0x100000);
+}
+
 /* 0x25F960 (its jump table 0x426940 by the kind at +0x2): kinds 0, 1 no texture, 2 one (the region at +0x3A), 3, 4,
  * 5, 7 two (+0x3C), 6 three and 8 two (+0x3E); with flag 0x100 it copies the 16 bytes there and, when the material has
  * a first texture, makes them its CLAMP_1 (material +0x80) */
