@@ -89,11 +89,8 @@ the left end to w (f − ½) (UV 0..f) **[R]**. Neither sprite is textured in th
   that does not show; the port clamps the HUD's pictures (render_gl.c `draw_hud`, GL_CLAMP_TO_EDGE for each quad and
   repeat again after it, the world's draws sharing the texture objects) [no PS2 meaning], as in a bigger window the
   outer pixels' bilinear taps reached a picture's other edge (up to v0.11.3: thin lines along the city cards' frame
-  and across their pictures, the frost tiles' seams in MonsterSelect). The world's shaders differ: of their
-  passes on a texture 434 repeat (0x11, 0x1, 0x21) and 254 clamp (0x10, 0x0, 0x20); the port repeats every world
-  texture [G for those]. San Francisco's skyline (`SanFran_Skyline`, kind 2, flags 0x100002: shader 8, record 8)
-  repeats, so its picture's bottom edge takes in its light, see-through top row on the PS2 too (the thin light line
-  across the skyline where it meets the backdrop, as in SF10).
+  and across their pictures, the frost tiles' seams in MonsterSelect). The world's materials clamp or repeat by their
+  flags (FORMAT_BDP.md "Repeat or clamp").
 - A text (`GuiText::draw` 0x234D30) multiplies the alpha of its colour and of its shadow by the fade, then calls the
   font's string draw with the object's matrix **[R]**.
 

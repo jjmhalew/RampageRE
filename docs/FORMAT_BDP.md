@@ -364,6 +364,25 @@ and scales the UVs by the texture matrix (texture size / tile size): the same te
 are the tile's own [G: the GS's REGION_REPEAT on the smaller levels not followed; the viewer draws one level unless
 mips= is on].
 
+**Repeat or clamp** [R]. Each pass of a shader sets its texture's wrap as it is drawn: the pass setup 0x265840, handed
+the compiled record (the shader + 0xD8 + 4), gives the pass's byte record + 0xF + 36 × pass (its texture slot at record
++ 4 + 36 × pass) to the texture's 0x26AA20, which stores it at +0x40 and rebuilds its CLAMP_1 (+0x90, register 8 at
++0x98): WMS = WMT = 0 (REPEAT) with bit 0 set, 1 (CLAMP) with it clear (a texture loads with 0x11, 0x26AA80 /
+0x26B0A0). That byte is the descriptor's: its pass triples from +0x8C (slot, repeat, …), the repeat at +0x8D for the
+first pass. Every shader 0x16F030 gives a bundle material repeats (+0x8D 1: 0x1 … 0x7B; checked on every city
+material), but the loader 0x16F540 makes a variant first (0x16F7D0 .. 0x16F930: the descriptor copied, +0x0 |= 0x80,
+built by 0x25C3D0, its record by the descriptor's sum in 0x3C73B0) and clears the first pass's repeat when the
+material has neither flag bit 2 nor 3 (0xC), no region flag (0x100) and a texture (the descriptor's +0x3): such a
+material's first texture is **clamped**. 0xC is the tiling one: the street and every model that repeats its picture
+have it; the rest (877 of the cities' materials: the skylines, fog masks, backdrops, the buildings' roofs, trims and
+interiors) have every UV inside 0 … 1 (checked: San Francisco's 149 and Chicago's 122). The same variant clears the
+first pass's +0x8E with flag 0x4000000, and with the material's byte +0x3 above 0 sets +0x1C = 7 and +0x20 = that byte.
+Of the descriptors only 0x7, 0x4E, 0x50, 0x55, 0x57, 0x64 and 0x71 clamp as they stand: the particles' 0x55 / 0x57
+(0x1F8870, FX_NOTES.md "Drawing") among them. render_gl.c `draw_part` sets the wrap for each part (mesh.c
+`material_clamped`; a region's tile and the EnvMap repeat); repeated, a clamped picture's edge took in its other
+edge by the bilinear taps (the thin light line along SF10's skyline, a green line across NY05's China Clipper
+building).
+
 **Flag 0x100000: blended** [R]. 0x16F030's kind 2 table (0x3B1680) reads bit 0, bit 1, 0x100000, 0x200000, 0x2000000
 and 0x8000000 of the u32 at +0x4; with 0x100000 (and not 0x200000) it gives shader 2, 4, 8 or 11 (117, 119, 76, 83
 with 0x8000000), every one a pass in GS state 2 (ALPHA 0x44, TEST 0x5000D: alpha GREATER 0, Z test GEQUAL, Z

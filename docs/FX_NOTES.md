@@ -248,6 +248,9 @@ fall: +0x1CC is the falling storey then). The spawner's start places every recor
 5. Air (0x2118E0, 0x210450): v ×= max(0, 1 − dt × air × |v|), or with +LinearAirResistance max(0, 1 − dt × air).
 
 ## Drawing (0x2214D0, 0x21C7E0)
+- A particle's texture is **clamped** at its edges [R]: the emitter's material (0x1F8870) is shader 0x57 or 0x55,
+  whose first pass's repeat (descriptor +0x8D) is 0 and record wrap 0x10, so the pass setup (0x265840 → 0x26AA20)
+  makes the texture's CLAMP_1 CLAMP (FORMAT_BDP.md "Repeat or clamp"; render_gl.c `draw_fx`).
 - t = age / lifetime. Size = size × size_mul(t), the quad's full width: its two axes are size × size_mul(t) times the
   current camera's right (+0x30) and up (+0x3C) (0x22233C … 0x2223D8), the corners (±0.5, ±0.5) (0x3B2480) [R]. The
   effect's matrix never reaches these axes, so a scaled effect's billboards keep their size (only their places

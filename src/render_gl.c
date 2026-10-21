@@ -952,6 +952,13 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     if (id) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, id);
+        /* its wrap [R 0x265840 -> 0x26AA20, set for each pass]: clamped by its material (material_clamped: the
+         * skylines, fog masks, backdrops, roofs, which do not tile; repeated, their bilinear taps took in the
+         * picture's other edge, the thin light line along SF10's skyline), else repeated; a region's tile and the
+         * EnvMap repeat */
+        GLint wrap = !rid && !env_only && material_clamped(sm->b, p->material) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
     } else {
         glDisable(GL_TEXTURE_2D);
     }
@@ -1395,6 +1402,10 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, f
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
+            /* [R] a particle's shader (the emitter's material, 0x1F8870: 0x57 or 0x55) clamps: its descriptor's
+             * first pass repeat byte (+0x8D) is 0, its record's wrap 0x10 (0x265840 -> 0x26AA20: CLAMP_1 CLAMP) */
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         } else {
             glDisable(GL_TEXTURE_2D);
         }

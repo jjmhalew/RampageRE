@@ -78,6 +78,11 @@ int material_blended(const Bundle *b, uint32_t material);
  * bricks, stucco and windows): the 16 bytes after its texture indices (by kind, 0x25F960), u0, v0, width, height in its
  * first texture, a tile of an atlas; the part's UVs run in it (render_gl.c region_rect). 0 none */
 int material_region(const Bundle *b, uint32_t material, float region[4]);
+/* a material's first texture drawn clamped at its edges, not repeated [R 0x16F890]: a textured one (kind 2 and up)
+ * with neither flag bit 2 nor bit 3 (0xC: the tiling ones, the street's) and no region (0x100): the skylines, the fog
+ * masks, the backdrops, the buildings' roofs, trims and interiors, every one of them with its UVs inside 0 .. 1.
+ * 1 = clamped */
+int material_clamped(const Bundle *b, uint32_t material);
 /* the material's diffuse colour (f32 rgba at +0x08): 218 materials have no texture and only this colour (the
  * saucer's orange blades, its green glass at alpha 0.38, flag poles, bumpers); every textured one is white. 0 when
  * the name is not a material (a texture named directly): white */

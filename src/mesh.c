@@ -174,6 +174,21 @@ int material_blended(const Bundle *b, uint32_t material)
 /* 0x25F960 (its jump table 0x426940 by the kind at +0x2): kinds 0, 1 no texture, 2 one (the region at +0x3A), 3, 4,
  * 5, 7 two (+0x3C), 6 three and 8 two (+0x3E); with flag 0x100 it copies the 16 bytes there and, when the material has
  * a first texture, makes them its CLAMP_1 (material +0x80) */
+/* 0x16F540 at 0x16F890 [R]: the shader 0x16F030 chose is copied (its 0xD8-byte descriptor, 0x40F910 + id x 0xD8) and,
+ * for a material with neither flag bit 2 nor 3, no region flag and a texture (the descriptor's +0x3), its first pass's
+ * repeat byte (+0x8D: the pass triples from +0x8C are slot, repeat, ...) cleared, the copy flagged modified (+0x0 |=
+ * 0x80) and built by 0x25C3D0; its compiled record's wrap byte (record + 0xF) then has bit 0 clear, which the pass
+ * setup (0x265840 -> 0x26AA20) makes the texture's CLAMP_1 WMS = WMT = 1, CLAMP. Every shader of the bundles'
+ * materials repeats (+0x8D 1) before that */
+int material_clamped(const Bundle *b, uint32_t material)
+{
+    const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
+    if (!e || e->size < 8 || e->data[2] < 2)
+        return 0;
+    uint32_t flags = rd32(e->data + 4);
+    return (flags & 0xC) == 0 && !(flags & MAT_REGION);
+}
+
 int material_region(const Bundle *b, uint32_t material, float region[4])
 {
     static const uint8_t at[9] = { 0, 0, 0x3A, 0x3C, 0x3C, 0x3C, 0x3E, 0x3C, 0x3E };
