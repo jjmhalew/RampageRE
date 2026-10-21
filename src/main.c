@@ -2011,8 +2011,16 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     float mirror = mo->mirror ? -1.0f : 1.0f;        /* Monster.getMirrorState */
     float w[3] = { 0, 0, 0 }, l[3] = { 0, 0, 0 };   /* world / relative velocity */
     int set = 0, add = 0, relative = 0;
-    if (e->type == 7) {                              /* 0x2E7DE0 */
+    if (e->type == 7) {                              /* 0x2E7DE0: the mode; any but the ground's lets both feet go with
+                                                      * foot IK (+0x258C): 0x33BE90, no anchor [R]. So the foot lock of a
+                                                      * standing monster (cancelFootStep) ends as it mounts a face or
+                                                      * leaves the ground, and never pulls it off its rail */
         mo->mode = (int)e->value;
+        if (mo->mode != MODE_GROUND && mo->feet.links) {
+            foot_step(&mo->feet, 0, 0);
+            foot_step(&mo->feet, 1, 0);
+            mo->feet.anchor = -1;
+        }
         return;
     }
     if (e->type == 15) {                             /* the record kept at +0xBA9C till the next clip (0x2E7F04,

@@ -170,6 +170,15 @@ the clip's first frame stands on it; the IK holds the foot meanwhile. Walking in
 the half stride: the walk's forward foot, 2.56 ahead of the place, against the idle's 0.27, so the monster eases 2.3
 forward over its planted foot and stays there.
 
+**A clip's mode event ends it** [R]: the event (type 7, 0x2E7DE0) sets the movement mode (+0xAD8) and, for any mode
+but 0 with a foot IK (+0x258C), calls 0x33BE90: both records lifted, no anchor. So a monster that gets onto a face
+(mode 5), leaves the ground (1) or goes down (4) takes no anchor along. Without it a punch's end on the street
+(Ground_Punch, 0x80, into Ground_Idle: cancelFootStep) with the stick already up mounts the front with the anchor
+planted on the street: the lock, which runs in every mode (0x2E0D20 branches past the face's hold to 0x2E0EF0),
+pulls the monster towards that foot each frame against the 0.4 to its rail, and none of the climbs (0x80000) travels,
+so it hung 2.6 off its column and 2.7 off the face for the whole climb, its blows and its hands on the rail it was
+not drawn on, until a hop (0x440) dropped the anchor and it jumped back.
+
 ### The foot object's update (0x33D450 = 0x33CF90 for 0 and 1, then 0x33D490 = 0x33CDE0 for 0 and 1) [R]
 Run only when the monster has a foot IK. 0x33CF90, per record:
 - once flag 0x10: +0x4 = weight × (1 − k) + +0x4 × k, k = +0x58 planted, else +0x60; then 0 within 0.001 of 0

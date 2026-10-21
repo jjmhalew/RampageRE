@@ -315,6 +315,14 @@ in this clip, whether it is coming down from the top.
   0x3F5938) 0x2DD710 finds the building across the alley, and both the height kept (0x2D5870) and canSpiderClimb's top
   are the lower of the two; Spider_Transition_Side_R transfers to the other side (and flips, so the side idle plays
   mirrored, facing the other way). canSpider asks for 6, which canClimb never answers.
+- **The mirror of a hop or swing** [R]: canHop, canSwing and canTransfer test the way of `getMirrorState`, the clip
+  now playing (+0xAA0, 0x2AB808), while the clip they lead to starts in the queued state (+0xAA1, 0x2E67E8), and
+  changeMountRail goes by that one. The climbs flip the queued state halfway through each cycle (Front_Climb_Up at
+  0.405 and 0.929, Front_Climb_Down at 0.17 and 0.787) and let the swing and the hop go at any time, so a swing taken
+  in the second half of a cycle at the face's end rail is tested towards the corner and played the other way: the
+  rail steps along the front and the side clips play there (Side_L_Idle on a front rail). Nothing in the game
+  guards the player's monster (no code stores +0xAA0 or +0xAA1 but the clip start, the flip event, queueMirrorState,
+  attachHand's flip and the spawn); the AI tests both bytes before it hops (0x2EF704 .. 0x2EF714). Kept as the game has it.
 - **The camera's reach** (−9, 0x336230): for a player, the place may be at most 70 high and 30 along x from the middle
   of the players' x (0x336360, kept at gp − 0x6C70; one player: its own x).
 
