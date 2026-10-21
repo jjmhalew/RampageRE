@@ -4562,9 +4562,9 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                 break;
             }
             case PAE_SOUND: obj_sound(v, OS_PARADE, e->obj, e->name, e->level, e->pos); break;   /* add3DSfx */
-            case PAE_MONSTER_SOUND: {
+            case PAE_MONSTER_SOUND: {                /* monster.add3DSfx(name, 0): on the monster (0x287860) */
                 float at[3] = { mo->mx, mo->my, mo->mz };
-                sound_play(e->name, at, 1);
+                obj_sound(v, OS_MONSTER, (int)(mo - v->mon), e->name, 0, at);
                 break;
             }
             case PAE_STATS:                          /* gCommon.addStats: the score through the army (its AE_SCORE
@@ -5406,8 +5406,8 @@ static void mon_function(Mon *mo, const char *name)
         mon_fart(mo);
     else if (!strcmp(name, "doBarf"))
         mon_fx_named(mo, "Barf", "fxNode_Belch");
-    else if (!strcmp(name, "doCatSound"))           /* add3DSfx("Cat_1", 0) */
-        sound_play("Cat_1", &mo->mx, 1);
+    else if (!strcmp(name, "doCatSound"))           /* add3DSfx("Cat_1", 0): on the monster, following it */
+        obj_sound(mo->v, OS_MONSTER, (int)(mo - mo->v->mon), "Cat_1", 0, &mo->mx);
 }
 
 /* installObjectTimer("Monsters::timedDoFart", delay) on the monster: one of eaten food in five (the people's,
