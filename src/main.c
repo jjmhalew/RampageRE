@@ -3243,21 +3243,31 @@ static void force_state(Mon *mo, const char *name)
 
 /* resetMonsterState (the Monster binding 0x97 -> 0x2DCB40) [R]: the scale 1 at once (+0xA78 = +0xA7C = 1, +0xA80 the
  * one before), the velocity 0 (+0xBD30), its goals cleared (0x2EE760, the caller's dir_ai_clear), and unless it is
- * defeated (+0xA59; +0xAA2, also asked, is always set in play) the graph's first state (+0xA54 -> +0x30, Ground_Idle)
- * started as a slot's is (+0x110 = its own entry at +0x118: 1, the state, flags 0), what it holds let go of
- * (0x2DA570(monster, 0)). Its respawn cancelled (0x2D36A0) and a building let go of (0x322EC0) are left out: EndBlockNI
- * and BeginBlockNI, which ask it, find the monsters on the street. So a taunt of the results (React_Victory, 3 s) stops
- * as the walk to the next block begins; let run, the walk ran past EndBlockNI's 5 s, and the monster was put at its
- * end facing pi as the next block began (a turn cut short, or one played on from there) */
+ * defeated (+0xA59; +0xAA2, also asked, is always set in play) nor shrunk below 0.3 (+0xA78) the graph's first state
+ * (+0xA54 -> +0x30, Ground_Idle) started as a slot's is (+0x110 = its own entry at +0x118: 1, the state, flags 0),
+ * what it holds let go of (0x2DA570(monster, 0)); then, with foot IK (+0x258C), both feet let go (0x33BE90: no anchor,
+ * no planted record), the mount cleared (+0xC644, +0xC645, the building +0xC640) and, with the arm IK (+0x2588), the
+ * hands let go of the face (0x322EC0, 0.1 s: hand_detach as the frame finds no building). Its respawn cancelled
+ * (0x2D36A0) is left out: EndBlockNI, BeginBlockNI and ResultsNI, which ask it, find the monsters alive. So a taunt of
+ * the results (React_Victory, 3 s) stops as the walk to the next block begins; let run, the walk ran past EndBlockNI's
+ * 5 s, and the monster was put at its end facing pi as the next block began (a turn cut short, or one played on from
+ * there); and a monster put at ResultsNI's place (13, -42) keeps no foot planted where it was before (its legs bent
+ * by the foot IK towards the old place, a foot off the street) */
 static void reset_monster_state(Mon *mo)
 {
     mo->scale = mo->scale_to = 1;
     mo->scale_left = 0;
     memset(mo->vel, 0, sizeof mo->vel);
-    if (!mo->defeated && mo->have_graph && mo->graph.n > 0) {
+    if (!mo->defeated && mo->have_graph && mo->graph.n > 0) {   /* (the scale was just set to 1: not below 0.3) */
         mo->force_to = 1;
         throw_held(mo, 0, 0, 10, 10);
     }
+    if (mo->feet.links) {
+        foot_step(&mo->feet, 0, 0);
+        foot_step(&mo->feet, 1, 0);
+        mo->feet.anchor = -1;
+    }
+    climb_unmount(&mo->mount);
 }
 
 /* the bosses' host: the army's weapons */
