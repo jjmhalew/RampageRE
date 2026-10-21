@@ -554,7 +554,14 @@ static void start_anim(Army *a, ArmyUnit *u, const char *name, int random_offset
             len = a->host.clip_seconds(a->host.ctx, u->clip, u->shape);
     }
     u->anim_len = len;
-    u->anim_time = random_offset ? frand(a) * len : 0;
+    u->anim_time = 0;
+    if (random_offset) {                             /* startAnimAtRandomOffset (0x2A9258): frand seconds into the
+                                                      * clip, wrapped by its length; startAnim(name, 1)'s 1 only keeps
+                                                      * the mover (0x2A8FA0 -> 0x30C820 with offset 0) [R] */
+        float r = frand(a);
+        if (r > 0.001f && len > 0)
+            u->anim_time = r - len * (float)(int)(r / len);
+    }
     u->anim_done = 0;
 }
 
@@ -2802,7 +2809,7 @@ static int troop_pulse(Army *a, ArmyUnit *u)
         float dir = m >= 0 && u->pos[0] < a->m[m].pos[0] ? -1.0f : 1.0f;
         float r = frand(a);
         float end[3] = { u->pos[0] + dir * r * 100, -10 - 50 * frand(a), 0 };
-        start_anim(a, u, "Running", 1);
+        start_anim(a, u, "Running", 1);      /* startAnimAtRandomOffset */
         line_init(u, u->pos, end, 10);
         u->mv.flags = 1 | 4;
         weapons_enable(u, 0);
@@ -2849,7 +2856,7 @@ static int troop_pulse(Army *a, ArmyUnit *u)
             dest[0] = dx >= 0 ? mp[0] - ideal : mp[0] + ideal;
             line_init(u, u->pos, dest, 10);
             u->mv.flags = 1 | 4;
-            start_anim(a, u, "Running", 1);
+            start_anim(a, u, "Running", 0);
             u->state = 4;
         } else if (!u->is_grenadier) {
             weapons_enable(u, 0);
@@ -2867,9 +2874,9 @@ static int troop_mover(Army *a, ArmyUnit *u, int state)
         troop_notify(a, u);
         return DELETE_ME;
     }
-    start_anim(a, u, frand(a) < 0.5f ? "StandingGroundFiringAngleU" : "CrouchingGroundFiringAngleU", 1);
+    start_anim(a, u, frand(a) < 0.5f ? "StandingGroundFiringAngleU" : "CrouchingGroundFiringAngleU", 0);
     if (u->is_grenadier)
-        start_anim(a, u, "Idle", 1);
+        start_anim(a, u, "Idle", 0);
     sound(a, u, ustr(u, "LoadGunSound"));
     line_init(u, u->pos, u->pos, 0);
     u->mv.flags = 8 | 4;
@@ -2881,7 +2888,7 @@ static void troop_anim_done(Army *a, ArmyUnit *u)
 {
     int m = u->mv.flags & 8 ? mover_target(a, u->pos) : -1;
     if (u->state == 2) {
-        start_anim(a, u, "Running", 1);
+        start_anim(a, u, "Running", 1);      /* startAnimAtRandomOffset */
         u->state = 4;
     } else if (u->state == 128) {
         if (u->is_grenadier && u->voice[1] < 0) {
@@ -2890,7 +2897,7 @@ static void troop_anim_done(Army *a, ArmyUnit *u)
         }
         u->target = m;
         weapons_enable(u, 1);
-        start_anim(a, u, "GroundThrowRecover", 1);
+        start_anim(a, u, "GroundThrowRecover", 0);
         u->state = 256;
     } else if (m >= 0) {
         const float *mp = a->m[m].pos;
@@ -2898,25 +2905,25 @@ static void troop_anim_done(Army *a, ArmyUnit *u)
         if (u->state == 256) {
             weapons_enable(u, 0);
             u->state = 16;
-            start_anim(a, u, "Idle", 1);
+            start_anim(a, u, "Idle", 0);
             if (dx < tnum(u, "ShootingRange", 20) && mp[2] < 10 && u->reload <= 0) {
                 u->reload = 3;
-                start_anim(a, u, "StandingGroundFiringAngleU", 1);
+                start_anim(a, u, "StandingGroundFiringAngleU", 0);
                 if (u->is_grenadier)
                     sound_kept(a, u, ustr(u, "VoiceArni"));
                 u->state = 128;
             } else {
-                start_anim(a, u, "Idle", 1);
+                start_anim(a, u, "Idle", 0);
                 u->state = 16;
             }
         } else if (u->is_grenadier && u->state == 16) {
             /* [R] `reloadDelay <= 0.0 && reloadDelay`: only a reload below 0 passes */
             if (dx < tnum(u, "ShootingRange", 20) && mp[2] < 10 && u->reload < 0) {
                 u->reload = 3;
-                start_anim(a, u, "StandingGroundFiringAngleU", 1);
+                start_anim(a, u, "StandingGroundFiringAngleU", 0);
                 u->state = 128;
             } else {
-                start_anim(a, u, "Idle", 1);
+                start_anim(a, u, "Idle", 0);
                 u->state = 16;
             }
         }
@@ -2936,7 +2943,7 @@ static void troop_pickup(Army *a, ArmyUnit *u)       /* onPickup */
 {
     if (u->state == 32)
         return;
-    start_anim(a, u, "PickedUp", 1);
+    start_anim(a, u, "PickedUp", 0);
     if (!u->is_cop)
         a->flee[group_of(u)] = 1;
     troop_notify(a, u);
@@ -2961,7 +2968,7 @@ static void troop_damage(Army *a, ArmyUnit *u, int monster)
      * and ChallengeEffect (goal_marker_off), not the script's onPickup; so the state stays 512 and the 3 s pulse
      * deletes the troop (as people.c's actor_on_pickup). Then PickedUp: the arms-up look it flies in */
     goal_marker_off(a, u);
-    start_anim(a, u, "PickedUp", 1);
+    start_anim(a, u, "PickedUp", 0);
 }
 
 /* ======== Military_Window.bsf: 1 emerging, 2 looking / firing, 3 going back in, 8 held, 9 smashed */
@@ -3060,7 +3067,7 @@ static void window_pickup(Army *a, ArmyUnit *u)
 {
     if (u->state == 8)
         return;
-    start_anim(a, u, "PickedUp", 1);
+    start_anim(a, u, "PickedUp", 0);
     sound_kept(a, u, tstr(u, "PickupSound"));
     u->state = 8;
     weapons_enable(u, 0);
@@ -3755,7 +3762,7 @@ static void unit_init(Army *a, ArmyUnit *u)
     default: {
         const char *def = tstr(u, "DefaultAnim");
         if (def)
-            start_anim(a, u, def, 1);
+            start_anim(a, u, def, 0);
     } break;
     }
     unit_matrix(u);
