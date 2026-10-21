@@ -199,7 +199,11 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
 - **A floor falls** (0x2BAE70 → 0x317A70 on the one list, 0x4D5F00): every slot of the fallen floor is retired
   (+0xD, +0xE = 0xFF) and its actors flagged 0x800, which the actor update (0x30CD20) answers with a delete: an
   occupant still in its window (a soldier, which never falls) is gone at once, its window left as it is. The
-  occupants of the storeys above come down with them (0x30CD20, soldiers as people).
+  occupants of the storeys above come down with them (0x30CD20, soldiers as people). The fallen floor's cells go to
+  state 3 by 0x2CFDA0, the state alone, not setCellDamage, and the blow that ends the floor's HP returns before its
+  own cell is written (0x2BBAE4 .. 0x2BBAF8), so no cell of it runs 0x317DC0: nobody in the storeys next to it falls
+  out [R]. (Up to 0.13.1 the port took those cells for broken windows, and every floor fall threw out the civilians
+  of the storeys either side.)
 
 ## The grab
 

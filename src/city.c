@@ -4435,6 +4435,10 @@ void scene_buildings_update(Scene *s, float dt)
                 if (st < 2 || st <= sb->broke[o][ci])
                     continue;
                 sb->broke[o][ci] = (uint8_t)st;
+                if (sb->b.collapse > 0 && ls == sb->b.collapse - 1)
+                    continue;                        /* [R] the falling floor's: 0x2BAE70 writes them with 0x2CFDA0,
+                                                      * not setCellDamage, and the blow that felled it returns before
+                                                      * its own cell (0x2BBAE4), so no 0x317DC0 (its slots: 0x317A70) */
                 scene_cell_broken(s, (int)i, o, col, st);
                 if (s->edibles && first)             /* its edible comes out (0x317BC0) */
                     edible_cell_broken(s->edibles, (int)i, o, col, st, sb->b.state);
