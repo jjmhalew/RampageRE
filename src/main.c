@@ -1306,11 +1306,15 @@ static void build(Viewer *v)
             building_set_one_hit((v->prof.cheats & PCH_40000000) != 0);
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
-                /* the city's total and flags from the status (profile_new_city cleared them for a campaign city
-                 * begun at its first block: "All Challenges Met" until one is not); a city resumed keeps its
-                 * checkpoint's: a challenge missed before stays missed [R 0x33DB90] */
-                game_set_city_status(v->game, v->prof.current.city_score, v->prof.current.city_flags);
-                v->challenges_lost = !(v->prof.current.city_flags & PC_CHALLENGES);
+                /* the city's total and flags [R 0x33DB90]: a campaign city resumed at a later block (the start block
+                 * the profile's status has) keeps its checkpoint's, a challenge missed before staying missed; any
+                 * other start begins at 0 and "All Challenges Met" until one is not (the world's start clears them
+                 * with the start block 0; the viewer's other starts, straight into a block, as a new city's) */
+                int resumed = play_type(v) == GP_CAMPAIGN && v->prof.current.start_block > 0 &&
+                              v->prof.current.start_block == game_start_block(v->game);
+                uint32_t cf = resumed ? v->prof.current.city_flags : PC_AVAILABLE | PC_CHALLENGES;
+                game_set_city_status(v->game, resumed ? v->prof.current.city_score : 0, cf);
+                v->challenges_lost = !(cf & PC_CHALLENGES);
                 /* [R] SinglePlayer's load (0x2B7F50) sets +0x610, so its first frame (0x2B7BC0) brings the music
                  * to the profile's volume over 250 ms (the loading screen stopped the menu's music, showLoading,
                  * and BeginBlock's music only starts at 0.05 or more, 0x323CE0) */
