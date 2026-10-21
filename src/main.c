@@ -979,12 +979,26 @@ static void build(Viewer *v)
         {                                            /* the game's next block: its goals and AI go on */
             DirAI ai = mo->ai;
             int is_ai = mo->is_ai;
+            float hp = mo->hp, energy = mo->energy;
+            EdiblePower power = mo->power;
             start_moves(mo);
             if (v->game_built) {
                 mo->ai = ai;
                 mo->is_ai = is_ai;
                 mo->ai.bot.target = mo->ai.bot.avoid = -1;   /* (the buildings are the new block's) */
                 mo->ai.bot.have_cell = mo->ai.bot.use_hit = 0;
+                /* the monster outlives the block (0x2B6580 does not touch it): its HP (+0xA4C, set only by the
+                 * world's start 0x2E98C0, a Continue 0x32528C, respawns, hits and stats), energy (+0xA50), rage and
+                 * speed go on in the next block [R] */
+                if (hp > 0) {
+                    mo->hp = hp;
+                    mo->energy = energy;
+                    power.abilities = mo->power.abilities;   /* (the profile's, read again: an upgrade learnt) */
+                    power.cheats = mo->power.cheats;
+                    mo->power = power;
+                    if (mo->power.rage)
+                        mon_rage_fx(mo, 1);
+                }
             }
         }
         if (getenv("RAMPAGE_TRACE") && mo->have_graph)
@@ -3365,6 +3379,9 @@ static void reset_monster_state(Mon *mo)
     mo->scale = mo->scale_to = 1;
     mo->scale_left = 0;
     memset(mo->vel, 0, sizeof mo->vel);
+    mo->power.speed = 1;                             /* 0x2DCBAC .. 0x2DCBB0: the speed scale 1, no time left (the
+                                                      * rage, if on, goes on) [R] */
+    mo->power.speed_time = 0;
     if (!mo->defeated && mo->have_graph && mo->graph.n > 0) {   /* (the scale was just set to 1: not below 0.3) */
         mo->force_to = 1;
         let_go(mo, 0);

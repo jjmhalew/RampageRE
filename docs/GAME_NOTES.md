@@ -128,8 +128,8 @@ All of them call `SetupNI(0.25)` on their first call: they run every 0.25 s.
   and `Ground_Idle`. The camera goes `TwoTilts` over 1.5 s. It ends when every turn-around has ended; after 5 s they
   are put at (0.7 x, −13.2) facing π. Its `resetMonsterState` first (binding 0x97 → 0x2DCB40) starts the graph's
   first state, `Ground_Idle`, as a slot's start (+0x110), unless the monster is defeated, so a taunt of the results
-  stops there and the walk (about 3.5 s, the turn 1 s) begins at once; it also sets the scale to 1 and the velocity
-  to 0, lets go of what is held and, with foot IK, of both feet (0x33BE90: no anchor, no planted record), clears the
+  stops there and the walk (about 3.5 s, the turn 1 s) begins at once; it also sets the scale to 1, the velocity
+  to 0 and the speed scale to 1 with no time left (0x2DCBAC: a rage goes on), lets go of what is held and, with foot IK, of both feet (0x33BE90: no anchor, no planted record), clears the
   mount and, with the arm IK, lets the hands go (0x322EC0) [R]. Up to v0.11.1 the port only cleared the goals: a `React_Victory` (3 s) playing
   when the results were left ran on, the walk ran past the 5 s, and the monster was put there facing π as the next
   block began, a snap (main.c `reset_monster_state`).
