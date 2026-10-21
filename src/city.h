@@ -356,9 +356,9 @@ void scene_block_left(Scene *s);
 int scene_street_shape(Scene *s, int k, const char *shape);
 /* instance inst's model node `name` (or, name NULL, node number id) in the world now (base x node); 0 = ok */
 int scene_instance_node(const Scene *s, int inst, const char *name, int id, float out[16]);
-/* RoyalGuardHut's TakeDamage: a monster's sphere (centre, radius) from the monster at `from` sends the huts it reaches
- * flying (people_hut_hit): an armed attack sphere, or any of its spheres touching it (TakeDamage 2.0, Collision, every
- * frame: the hut has no OnlyHitWithEffNodes, 0x2E22B0); what the monster gets, summed */
+/* RoyalGuardHut's TakeDamage: a monster's armed attack sphere (centre, radius) from the monster at `from` sends the
+ * huts it reaches flying (people_hut_hit); what the monster gets, summed. A touch does nothing: the hut's Construct
+ * sets 0x8000 OnlyHitWithEffNodes (setFlags(32768)), so 0x2E22B0 (0x2E256C) gives it only an armed sphere's blow [R] */
 PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3]);
 void scene_huts_update(Scene *s, float dt);         /* the flying huts move; a deleted one is no longer drawn */
 /* the huts as world objects (WSimpleObject: the guardshack's sphere, 0x28FD70) in the frame's collision world, between

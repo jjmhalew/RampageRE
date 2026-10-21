@@ -6061,17 +6061,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         scene_people_spawn(&v->scene, dt);
         people_set_world_state(v->scene.folk, v->game ? game_state(v->game) : GS_PLAY);   /* (the chains in play) */
         people_update(v->scene.folk, dt, pm, v->nmon);
-        for (int k = 0; k < v->nmon; k++) {         /* [R 0x2E22B0] a touch is a TakeDamage too: the huts fly */
-            Mon *mo = &v->mon[k];
-            float sp[64][4], from[3] = { mo->mx, mo->my, mo->mz };
-            int ns = monster_spheres(mo, sp, 64);
-            for (int j = 0; j < ns; j++) {
-                PeopleEaten got = scene_huts_hit(&v->scene, sp[j], sp[j][3], from);
-                if (got.health != 0 || got.energy != 0 || got.points != 0)
-                    monster_stats(mo, got.health, got.energy);
-            }
-        }
-        scene_huts_update(&v->scene, dt);
+        scene_huts_update(&v->scene, dt);           /* (no touch flies them: OnlyHitWithEffNodes, scene_huts_hit) */
         for (int k = 0; k < v->nmon; k++) {
             Mon *mo = &v->mon[k];
             Mat4 h;

@@ -219,7 +219,7 @@ a thrown object rests r above the street [R].
   meets, not the monster's nearest (only the FxWorldAdapter's ray passes its caller's flag); nothing in the port
   reads the index or asks with `any`.
 - The monster's touch damage (TakeDamage of type Collision, 2.0, every frame, to an object without
-  OnlyHitWithEffNodes; boss.c, rail.c, city.c's huts) [R]: the monster's object test 0x2E22B0, its unarmed spheres
+  OnlyHitWithEffNodes; boss.c, rail.c; not the guards' huts, which set it) [R]: the monster's object test 0x2E22B0, its unarmed spheres
   against each object's shape (0x280470), not 0x2E2C50.
 - `isSphereVisible` is the camera's, not the collision world's.
 - The other mover classes in the exchange (0x285E90) [R]: LineMover, SplineMover, RotationMover, HelicopterMover,
