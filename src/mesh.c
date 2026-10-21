@@ -119,8 +119,8 @@ void mesh_free(Mesh *m)
 uint32_t material_texture(const Bundle *b, uint32_t material)
 {
     const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
-    if (e && e->size >= 0x3A)
-        return rd16(e->data + 0x38);
+    if (e && e->size >= 0x3A)                        /* kinds 0 and 1 bind none (0x25F960's jump table 0x426940) [R] */
+        return e->data[2] >= 2 ? rd16(e->data + 0x38) : 0;
     return bdp_entry_of(b, material, ET_TEXTURE) ? material : 0;   /* 2,524 of the 6,292 parts name a texture */
 }
 
