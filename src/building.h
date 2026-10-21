@@ -106,6 +106,10 @@ typedef struct {
      * column's edge on the ground (0x3101C0 with key 0x38, the point {4: the ground, along 5 x 1, 3, ..} on the
      * front) and Building_Pre_Collapse.edf 5 before its place (0x30FD40); the host plays them and clears it */
     int pre_collapse;
+    /* each storey the destroyed building drops (0x2BD610, its sink too): Floor_Large at every other column's edge on
+     * the ground, as pre_collapse's (0x2BD740 .. 0x2BD798); a floor whose FloorHP runs out makes none (0x2BB950 ->
+     * 0x2BAE70) [R]. The host plays them and clears it */
+    int drop_dust;
     /* the Scoring calls its hits and falls made, in order: the host pays them to the attacker (+0x190) and sets nscore
      * to 0 */
     struct { uint8_t event, state; } score[BUILDING_SCORES]; int nscore;

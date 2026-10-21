@@ -3993,15 +3993,17 @@ void scene_buildings_update(Scene *s, float dt)
         }
         building_scoring(s, sb, (int)i);
         sb->b.nhit_debris = 0;
-        if (sb->b.pre_collapse) {                    /* about to fall: the dust at its foot [R 0x2BD890 .. 0x2BD934] */
+        if (sb->b.pre_collapse || sb->b.drop_dust) {   /* about to fall, or a storey down: the dust at its foot
+                                                      * [R 0x2BD890 .. 0x2BD934, 0x2BD740 .. 0x2BD798] */
             float in[3] = { 0, 1, 0 };
             for (int col = 1; col < sb->b.width; col += 2) {
                 float at[3] = { sb->b.min[0] + CELL * (float)col, sb->b.min[1], sb->b.min[2] };
                 scene_fx(s, sb->fx_floor, at, in);
             }
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, (sb->b.min[1] + sb->b.max[1]) / 2 - 5, 0 };
-            scene_fx(s, "Building_Pre_Collapse.edf", at, in);
-            sb->b.pre_collapse = 0;
+            if (sb->b.pre_collapse)
+                scene_fx(s, "Building_Pre_Collapse.edf", at, in);
+            sb->b.pre_collapse = sb->b.drop_dust = 0;
         }
         open_windows(s, sb);                         /* the open windows, as they now are (0x2BECC0) */
         if (!sb->b.dirty || sb->mesh < 0) {
@@ -4035,9 +4037,6 @@ void scene_buildings_update(Scene *s, float dt)
                                                       * can fell the next at the same k, the occupants and edibles
                                                       * of a missed one were left in the air) */
             int k = sb->b.collapse;
-            float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
-                            sb->b.min[2] + GROUND_FLOOR + STOREY * (float)(k - 1) }, in[3] = { 0, 1, 0 };
-            scene_fx(s, sb->fx_floor, at, in);
             if (s->edibles && k - 1 < BUILDING_STOREYS)   /* 0x317A70: its edibles gone, those next to it out */
                 edible_floor_fell(s->edibles, (int)i, sb->b.live[k - 1], k < sb->b.n ? sb->b.live[k] : -1,
                                   k >= 2 ? sb->b.live[k - 2] : -1);

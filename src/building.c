@@ -625,7 +625,8 @@ void building_update(Building *b, float dt)
         b->timer += dt;
         if (b->timer >= b->hesitation) {
             b->timer = 0.5f * b->hesitation * rnd01(b);
-            floor_falls(b, b->n >= 1 ? 1 : 0);       /* (Floor_Large dust along the front) */
+            floor_falls(b, b->n >= 1 ? 1 : 0);
+            b->drop_dust = 1;                        /* (Floor_Large dust along the front's foot) */
         }
         break;
     default:

@@ -368,7 +368,10 @@ key's index into the table 0x3F5990; `Glass_Small` 0x33 is never asked for) [R]:
   the world's Park-Miller number (gWorld +0x828, 0x106BD0) mod (gWorld +0x28 + 1) is 0 (0x2BDAA8, 0x2BDB68): that
   member is 1 (the world's init 0x285A20, from RWorld's 0x2B7800; its setter, vtable +0x14 0x284AF0, has no caller),
   so a cell gets it half the time [R] (`src/building.c` `crack_step`);
-- a floor's collapse (0x2BAE70) none per cell: `Floor_Large` for the floor (0x2BD610, 0x2BD7D0);
+- a floor's collapse (0x2BAE70) none per cell, and none at all when its FloorHP ran out (0x2BB950 → 0x2BAE70):
+  `Floor_Large` comes only from the destroyed building, at every other column's edge along its foot on the ground
+  (key 0x38, the point {4, storey 0, along 5 × 1, 3, …}), once as the front has cracked (0x2BD7D0 → 0x2BD8EC) and
+  again after every storey it drops, its sink too (0x2BD610 → 0x2BD784) [R] (`Building.pre_collapse`, `drop_dust`);
 - a hit on the ground floor (face 4) of radius 2 or more by an attacker not an Actor: `Wall_Small` at the hit's own
   point (0x2BC840 .. 0x2BC890, through 0x30FCB0 / 0x30FD40) [R] (`Building.hit_debris`; a monster's kick at z 3).
 They are placed in the cell's face frame (0x30F710: the matrix of the face from 0x430F10, the front's the identity) at
