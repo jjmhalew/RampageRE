@@ -686,10 +686,13 @@ static. It is widened in four ways:
   `shell_set_wide` handing the shell the window past each side ((480 × aspect − 640) / 2 in its pixels), shell.c
   `widen`:
   - an untextured quad over the whole 640 × 480 (the popup's `background_quad` dim, the fills) is drawn across it;
-  - a textured picture across the whole screen: a full-screen one (MonsterSelect's `background`, a smooth radial
+  - a textured picture across the whole screen, its edges at the screen's (within 10: not CitySelect's round
+    `Globe_Glow`, −75 … 725 about the globe): a full-screen one (MonsterSelect's `background`, a smooth radial
     gradient, green to black at its edges, nothing in it to show a stretch) is widened to the window, its dark edges
-    at the window's; a band (CitySelect's `Band_Red` and `Band_Dropshadow`) goes on by its edge columns (half a
-    texel in), its dark-red ends running off the window;
+    at the window's; a band (CitySelect's `Band_Red` and `Band_Dropshadow`: horizontal gradients 8 texels high,
+    nothing across them to show a stretch) too, the screen's x 0 … 640 onto the window's, so its bright part stays
+    under the title and its dark-red ends are at the window's edges (their edge columns drawn on made long streaked
+    slabs);
   - MonsterSelect's frost border (the `frost tiles …` 2D roots): the top and bottom rows of tiles repeat 640 along
     each way (the tiles are alike, so seamlessly), the side columns (turned 90°) move out to the window's edges, their
     ragged overhang (the left column's tiles overhang x = 0 by 4 … 9 pixels) off the window;

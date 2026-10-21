@@ -1367,21 +1367,18 @@ static void list_emit(Emit *e, const Gui *g, const Node *l, float ox, float oy, 
  * slider is centred (0x24A310): the bar (barColor) its whole size and the mask (maskColor) from the value's point to
  * its right end (hasMaskBar, flag 0x10), else the bar to the value's point; texts by text_emit. */
 /* the wider window [no PS2 meaning: the game's screen is 4:3]: a band of the screen's width (the results' red title
- * band and its shadow, Band_Red / Band_Dropshadow) goes on by its edge column (half a texel in) past each end that
- * is at the screen's edge, to the window's; one sliding in (WorldResults' title bars) so reaches back to the window's
- * edge it comes from, and has its other end once it is there. The pictures 636 or more of the 640 wide and under
+ * band and its shadow, Band_Red / Band_Dropshadow: horizontal gradients a few texels high, nothing across them to
+ * show a stretch) is drawn across the window: its x as the screen's 0 .. 640 onto the window's, so its dark-red ends
+ * are at the window's edges, and one sliding in from x -640 (the intro's title bars, WorldResults' titlebar1) starts
+ * just past the window's left edge as it did past the screen's. The pictures 636 or more of the 640 wide and under
  * 400 high (shell.c widen draws the front end's the same) */
-static void widen_band(Emit *e, const Node *nd, float x0, float y0, float x1, float y1, float vs, const float c[4],
-                       float z)
+static void widen_band(const Node *nd, float *x0, float y0, float *x1, float y1)
 {
-    if (g_side <= 0 || x1 - x0 < 636 || y1 - y0 >= 400)
+    if (g_side <= 0 || !nd->has_tex || nd->turned || *x1 - *x0 < 636 || *x1 - *x0 > 660 || y1 - y0 >= 400)
         return;
-    float us = nd->tex.us, half = nd->tex.w > 0 ? 0.5f * us / nd->tex.w : 0;
-    float left = -g_side - 1, right = HUD_SCREEN_W + g_side + 1;   /* the window's edges */
-    if (x0 <= 1 && x0 > left)
-        emit_quad(e, left, y0, x0, y1, half, 0, half, vs, c, nd->tex.b, nd->tex.name, z);
-    if (x1 >= HUD_SCREEN_W - 1 && x1 < right)
-        emit_quad(e, x1, y0, right, y1, us - half, 0, us - half, vs, c, nd->tex.b, nd->tex.name, z);
+    float k = (HUD_SCREEN_W + 2 * g_side) / HUD_SCREEN_W;
+    *x0 = -g_side + *x0 * k;
+    *x1 = -g_side + *x1 * k;
 }
 
 static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float oy, float sc, float z, float fade)
@@ -1414,12 +1411,11 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, float ox, float o
             float vs = nd->has_tex ? nd->tex.vs : 1;
             e->additive = (nd->M & 0x80) != 0;           /* [R 0x17D100] Pause's icons, ChallengeText's icon1 */
             if (drawn && w > 0 && h > 0) {
-                emit_quad(e, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h), 0, 0,
+                float bx0 = nox + nsc * x0, bx1 = nox + nsc * (x0 + w);
+                widen_band(nd, &bx0, noy + nsc * y0, &bx1, noy + nsc * (y0 + h));
+                emit_quad(e, bx0, noy + nsc * y0, bx1, noy + nsc * (y0 + h), 0, 0,
                           nd->has_tex ? nd->tex.us : 1, vs, c,
                           nd->has_tex ? nd->tex.b : NULL, nd->has_tex ? nd->tex.name : 0, nz);
-                if (nd->has_tex && !nd->turned)
-                    widen_band(e, nd, nox + nsc * x0, noy + nsc * y0, nox + nsc * (x0 + w), noy + nsc * (y0 + h),
-                               vs, c, nz);
             }
             e->additive = 0;
         } else if (nd->kind == N_SLIDER) {

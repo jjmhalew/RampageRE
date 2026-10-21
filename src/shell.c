@@ -1697,7 +1697,9 @@ static int list_stacked(const Node *l)
  * scissor of Scene.hud_clip]. A textured picture across the whole screen goes on past it: a full-screen one
  * (MonsterSelect's background: a smooth radial gradient, green to black at its edges, with nothing in it to show
  * a stretch) is widened to the window, its dark edges at the window's; a band (CitySelect's red title band and its
- * shadow) goes on by its edge columns. MonsterSelect's frost border: its top and bottom rows of tiles repeat 640
+ * shadow: a horizontal gradient 8 texels high, nothing across it to show a stretch) too, the screen's x 0 .. 640 onto
+ * the window's, so its bright part stays under the title and its dark-red ends are at the window's edges (drawn on
+ * by their edge columns they made long streaked slabs). MonsterSelect's frost border: its top and bottom rows of tiles repeat 640
  * along each way, its side columns move out to the window's edges (sf, the frame the picture itself is drawn in).
  * The copies and the moved pictures are wide: not cut. 1: the picture is drawn here */
 static int widen(Emit *e, const Node *nd, const Frame *df, Frame *sf, float x0, float y0, float w, float h,
@@ -1725,7 +1727,8 @@ static int widen(Emit *e, const Node *nd, const Frame *df, Frame *sf, float x0, 
     if (!nd->has_tex || !upright || df->d <= 0)
         return 0;
     float sx0 = df->x + df->a * x0, sx1 = df->x + df->a * (x0 + w);
-    if (sx0 > 1 || sx1 < 639)
+    if (sx0 > 1 || sx1 < 639 || sx0 < -10 || sx1 > 650)   /* the screen's: not a bigger one about a middle of its
+                                                      * own (CitySelect's Globe_Glow, -75 .. 725, round) */
         return 0;
     int was = e->wide, drawn = 0;
     e->wide = 1;
@@ -1733,11 +1736,12 @@ static int widen(Emit *e, const Node *nd, const Frame *df, Frame *sf, float x0, 
         float more = e->extra / df->a;
         emit_quad(e, df, x0 - more, y0, x0 + w + more, y0 + h, 0, 0, us, vs, c, tb, tn);
         drawn = 1;
-    } else {                                         /* a band: its edge columns drawn on (half a texel in) */
-        float half = nd->tex.w > 0 ? 0.5f * us / nd->tex.w : 0;
-        float span = 640.0f / df->a;
-        emit_quad(e, df, x0 - span, y0, x0, y0 + h, half, 0, half, vs, c, tb, tn);
-        emit_quad(e, df, x0 + w, y0, x0 + w + span, y0 + h, us - half, 0, us - half, vs, c, tb, tn);
+    } else {                                         /* a band: the whole of it across the window (the screen's x
+                                                      * 0 .. 640 onto the window's), its ends at the window's */
+        float k = (640 + 2 * e->extra) / 640;
+        float bx0 = (-e->extra + sx0 * k - df->x) / df->a, bx1 = (-e->extra + sx1 * k - df->x) / df->a;
+        emit_quad(e, df, bx0, y0, bx1, y0 + h, 0, 0, us, vs, c, tb, tn);
+        drawn = 1;
     }
     e->wide = was;
     return drawn;

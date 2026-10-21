@@ -107,10 +107,11 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
   title bars go on);
   "Live" blinks every 0.5 s.
 - **Widescreen** [no PS2 meaning: the game's screen is 4:3]: a band of the screen's width (the title bars,
-  `Band_Red` and `Band_Dropshadow`; the King and Timed Run results' and WorldResults' too) goes on by its edge
-  column, half a texel in, past each end that is at the screen's edge to the window's (hud.c `widen_band`): sliding
-  in from x −640 it reaches back to the window's left edge, and has its right end once it is there. A cut at the
-  screen's edges (the scrolling title's, `gGoal`) is at the window's. At 4:3 nothing changes.
+  `Band_Red` and `Band_Dropshadow`, horizontal gradients a few texels high; the King and Timed Run results' and
+  WorldResults' too) is drawn across the window, its x as the screen's 0 … 640 onto the window's (hud.c
+  `widen_band`): its dark-red ends at the window's edges, and sliding in from x −640 it starts just past the
+  window's left edge as it did past the screen's. A cut at the screen's edges (the scrolling title's, `gGoal`) is
+  at the window's. At 4:3 nothing changes.
 - **Count-up** (from 1.5 s): the lines destruction, people, vehicles, bonus, time bonus, challenge — the point
   categories 0..5 summed over the players — appear one by one, each counting from 0 in 0.5 s, the total with them
   (`%i,%03i` from 1000). People and vehicles show the kills. On the last block the challenge line reads "Boss
