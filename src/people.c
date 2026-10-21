@@ -378,8 +378,13 @@ static int mover_step(People *p, Person *q, float dt)
     if ((q->mv.flags & 1) && (b[0] != a[0] || b[1] != a[1]))
         q->heading = heading_of(b[0] - a[0], b[1] - a[1]);
     const PeopleMonster *m = mover_target(p, q->pos);
-    if ((q->mv.flags & 8) && m)
-        q->heading = heading_of(m->pos[0] - q->pos[0], m->pos[1] - q->pos[1]);
+    if ((q->mv.flags & 8) && m) {                    /* eased round, as army.c's (0x316258, +0x6C 0.85 a step: the
+                                                      * tourists' five-argument init) [R] */
+        float to = heading_of(m->pos[0] - q->pos[0], m->pos[1] - q->pos[1]), k = powf(0.85f, dt * 30);
+        if (to - q->heading > 180) to -= 360;
+        else if (to - q->heading < -180) to += 360;
+        q->heading = to + k * (q->heading - to);
+    }
     /* [R 0x316380 .. 0x3167B4] flag 4: past +0x68 of a segment (0.5, set by both inits, 0x3174E0 / 0x317770) the
      * facing turns towards the next segment's way (the first's when it loops; none on a last one that does not), by
      * smoothstep((t - 0.5) / 0.5), under 0.001 none and over 0.999 all of it: a slerp of the two facings (+0x70, the

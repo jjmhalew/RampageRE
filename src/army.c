@@ -1790,9 +1790,18 @@ static int mover_step(Army *a, ArmyUnit *u, float dt)
     if (face_path && (q[0] != p[0] || q[1] != p[1]))
         u->facing = facing_of(q[0] - p[0], q[1] - p[1]);
     if (u->mv.kind == 0 && (u->mv.flags & 8)) {
+        /* [R 0x316258 .. 0x3162D8] eased round: the target's angle, brought within pi of the facing, x 0.15 plus the
+         * facing x 0.85 (+0x6C, set by the scripts' five-argument init, 0x317788; SWAT.scr's every one) each world
+         * step: 0.85^(30 dt) of the facing kept */
         int m = mover_target(a, u->pos);
-        if (m >= 0)
-            u->facing = facing_of(a->m[m].pos[0] - u->pos[0], a->m[m].pos[1] - u->pos[1]);
+        if (m >= 0) {
+            float to = facing_of(a->m[m].pos[0] - u->pos[0], a->m[m].pos[1] - u->pos[1]), k = powf(0.85f, dt * 30);
+            if (to - u->facing > PI) to -= 2 * PI;
+            else if (to - u->facing < -PI) to += 2 * PI;
+            u->facing = to + k * (u->facing - to);
+            if (u->facing > PI) u->facing -= 2 * PI;
+            else if (u->facing < -PI) u->facing += 2 * PI;
+        }
     }
     if (r == 1 && u->mv.resp2 > 0)
         for (int i = 0; i < a->nm; i++) {

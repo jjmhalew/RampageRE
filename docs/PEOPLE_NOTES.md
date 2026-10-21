@@ -57,7 +57,10 @@ for a valid handle) [R].
   gives the actor another mover or none (`setMover`, `startAnim` with 0). A segment of length 0 (+0x50) does not move:
   callback 1 every frame (the tourists' mover that holds them in place).
 - **Facing**: flag 1 faces the way it moves (0x316E60), and flag 8 faces its target, the nearest monster with no limit (0x316060: from FLT_MAX; the scripts'
-  getNearestMonster, 0x2B26F0, none beyond 1000 by the distance itself, 0x2B27E8 being `sqrt.s`). The window
+  getNearestMonster, 0x2B26F0, none beyond 1000 by the distance itself, 0x2B27E8 being `sqrt.s`), eased round to
+  it: each world step the target's angle (brought within π of the facing) × (1 − +0x6C) plus the facing × +0x6C
+  (0x316258 … 0x3162D8), +0x6C being 0.85 from the five-argument init (0x317788), which every script uses
+  (Tourist.scr, SWAT.scr); here 0.85^(30 dt) for a frame of dt (people.c, army.c). Up to v0.11.4 it turned at once. The window
   occupants get no facing (0x318A44 … 0x318B14 sets the place, the `DefaultAnim` and +0xEC / +0xF4 only).
 - **Flag 4** [R 0x316380 … 0x3167B4]: past +0x68 of a segment (0.5, set by both inits, 0x3174E0 and 0x317770) the
   facing turns towards the next segment's way (the first's when it loops; none on a last segment that does not), by
