@@ -99,7 +99,9 @@ typedef struct {
      * owning unit). Without them the bosses do not fire */
     int (*weapon_make)(void *ctx, ArmyWeapon *w, Group weapon_group);
     void (*weapon_tick)(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3],
-                        const float frame[3][3], int target, float dt);   /* frame: the firing frame, or NULL */
+                        const float frame[3][3], int target, float dt, int part);   /* frame: the firing frame, or
+                                                      * NULL; part: the part firing it, whose body its shots pass (a
+                                                      * hit on the shot's owner is none, 0x293CD8) */
     void *ctx;
 } BossHost;
 

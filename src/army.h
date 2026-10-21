@@ -220,9 +220,10 @@ Army *army_new(const ArmyHost *host);
 /* the weapons for others (boss.c): one made over a template's Weapon| group, and one frame of it with no owning unit
  * (the shots, beams and hits stay the army's) */
 int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group);
-/* frame: the weapon's firing frame (rows x, y, z in the world), NULL: one made with its beam axis along dir */
+/* frame: the weapon's firing frame (rows x, y, z in the world), NULL: one made with its beam axis along dir; owner_tag
+ * the collision tag of the body firing it (a boss part's), which its shots and beams pass (0 none) */
 void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3],
-                      const float frame[3][3], int target, float dt);
+                      const float frame[3][3], int target, float dt, uint32_t owner_tag);
 /* a WeaponCluster (cl) on a weapon of it (army.c's units, boss.c's parts, the fire truck): its turn's ranges, rates,
  * Requires...ClearToFire, ReCenterWhenNoTarget and control nodes (0x299640) */
 void army_cluster_read(ArmyWeapon *w, Group cl);

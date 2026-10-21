@@ -262,7 +262,7 @@ Every 5 s, half the time (or when its monster is gone), it picks a random monste
 
 ### BossHelicopter ("Scumhawk", Boss_Helicopter)
 **The template:** HitPoints 3, Velocity 25, MaxMissiles 2, FiringDelay 3. Its weapons are `SmartMissile0` (15
-damage, homing, ReactionLevel 1) and `SmartMissile1` (0.5 damage), both from `Weapon_0`. `Scumhawk_Engine` plays on
+damage, homing, ReactionLevel 1) and `SmartMissile1` (0.5 damage), both from `Weapon_0`. A boss's shots pass its own body, as a shot's owner is no hit (0x293CD8) [R]: the weapons are the army's, run with the part's collision tag as their owner (`army_weapon_tick`'s `owner_tag`); up to v0.11.1 they had none, and a missile fired from inside the helicopter's own box could end there at once, at its muzzle. `Scumhawk_Engine` plays on
 both rotors.
 
 **Entry** [R]: at (±75, −15 or 25, 25). At its first pulse it takes one of its AIInstance's 4 paths:

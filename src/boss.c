@@ -949,7 +949,7 @@ static void weapons_enable(Boss *b, Obj *o, int on)
             if (w->firing && b->host.weapon_tick) {  /* the army ends the beam and its shot */
                 float down[3] = { 0, 0, -1 };
                 w->beam_left = 0;
-                b->host.weapon_tick(b->host.ctx, w, 0, o->p.pos, down, NULL, -1, 0);
+                b->host.weapon_tick(b->host.ctx, w, 0, o->p.pos, down, NULL, -1, 0, idx(b, o));
             }
             float t = w->charge_time + w->firing_offset;
             w->charging = 0;
@@ -1036,7 +1036,7 @@ static void obj_weapons_tick(Boss *b, Obj *o, float dt)
         }
         int may = has && aimed && dist3(from, tp) <= w->range;
         b->host.weapon_tick(b->host.ctx, w, may, from, dir, have_node ? (const float (*)[3])F : NULL,
-                            o->has_point ? -1 : o->target, dt);
+                            o->has_point ? -1 : o->target, dt, idx(b, o));
     }
 }
 

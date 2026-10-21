@@ -739,14 +739,23 @@ static float ray_hit(Army *a, const float p[3], const float d[3], float len, uin
     uint32_t keep = oo >= 0 ? w->o[oo].flags : 0;
     if (beam && oo >= 0)
         w->o[oo].flags |= COLLIDE_F_RAYSKIP;
+    uint32_t skipped[8];                             /* a beam of a person or a boss part: its own body around the cast */
+    int ns = 0;
+    for (int i = 0; beam && owner_tag && i < w->no && ns < 8; i++)
+        if (w->o[i].tag == (int)owner_tag && !(w->o[i].flags & COLLIDE_F_RAYSKIP)) {
+            skipped[ns++] = (uint32_t)i;
+            w->o[i].flags |= COLLIDE_F_RAYSKIP;
+        }
     CollideHit h;
     int got = collide_ray(w, p, d, len, include, exclude | COLLIDE_F_RAYSKIP, 0, &h);
+    for (int i = 0; i < ns; i++)
+        w->o[skipped[i]].flags &= ~(uint32_t)COLLIDE_F_RAYSKIP;
     if (oo >= 0)
         w->o[oo].flags = keep;
     if (!got || (!beam && oo >= 0 && h.obj == oo))
         return -1;
     if (!beam && owner_tag && h.obj >= 0 && w->o[h.obj].tag == (int)owner_tag)
-        return -1;                                   /* a person's shot: its own actor is no hit either */
+        return -1;                                   /* a person's or a boss part's shot: its own body is no hit either */
     memcpy(nrm, h.normal, sizeof h.normal);
     *obj = h.obj;
     if (h.obj >= 0 && COLLIDE_TAG_OWNER(w->o[h.obj].tag) == COLLIDE_OWN_MONSTER) {
@@ -971,7 +980,8 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     int mon, obj;
     float nrm[3];
     float t = head - tail > 0.001f ?
-              ray_hit(a, from_t, s->dir, head - tail, ~0u, 0, u ? who(a, u) : -1, 0, 1, &mon, &obj, nrm) : -1;
+              ray_hit(a, from_t, s->dir, head - tail, ~0u, 0, u ? who(a, u) : -1, u ? 0 : a->person_tag, 1, &mon, &obj,
+                      nrm) : -1;
     if (t >= 0)
         head = tail + t;                             /* [R 0x226DF0] the cut */
     s->head = head;
@@ -1578,9 +1588,11 @@ int army_load_block(Army *a, Group block_def)
 
 int army_weapon_make(Army *a, ArmyWeapon *w, Group weapon_group) { return weapon_make(a, w, weapon_group); }
 void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], const float dir[3],
-                      const float frame[3][3], int target, float dt)
+                      const float frame[3][3], int target, float dt, uint32_t owner_tag)
 {
+    a->person_tag = owner_tag;                       /* its shots and beams pass its own body (0x293CD8) */
     weapon_tick(a, NULL, w, may, from, dir, frame, target, dt);
+    a->person_tag = 0;
 }
 
 void army_activate(Army *a, int on) { a->active = on; }   /* [R] 0x2A6208: bit 8 of the manager's flags */

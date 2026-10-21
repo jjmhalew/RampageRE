@@ -698,7 +698,7 @@ static int edible_call(Mon *mo, const char *call, const float *xyz);
 static void monster_stats(Mon *mo, float health, float energy);
 static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g);
 static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3],
-                             const float frame[3][3], int target, float dt);
+                             const float frame[3][3], int target, float dt, int part);
 
 /* the army's host (army.h): books, clip lengths and model bounds from the city */
 static Group rubble_tmpl(void *ctx, const char *name)
@@ -3258,11 +3258,11 @@ static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g)
     return v->army ? army_weapon_make(v->army, w, g) : 0;
 }
 static void boss_weapon_tick(void *ctx, ArmyWeapon *w, int may, const float from[3], const float dir[3],
-                             const float frame[3][3], int target, float dt)
+                             const float frame[3][3], int target, float dt, int part)
 {
     Viewer *v = ctx;
     if (v->army)
-        army_weapon_tick(v->army, w, may, from, dir, frame, target, dt);
+        army_weapon_tick(v->army, w, may, from, dir, frame, target, dt, COLLIDE_TAG(COLLIDE_OWN_BOSS, part));
 }
 
 /* the monster an event names (its slot), else player 1's (a module's event for "the monster") */
