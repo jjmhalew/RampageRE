@@ -6,8 +6,8 @@
 1 ICON "rampagere.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     0,11,2,0
-PRODUCTVERSION  0,11,2,0
+FILEVERSION     0,11,3,0
+PRODUCTVERSION  0,11,3,0
 FILEOS          VOS_NT_WINDOWS32
 FILETYPE        VFT_APP
 BEGIN
@@ -17,10 +17,10 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "RampageRE contributors"
             VALUE "FileDescription",  "RampageRE - native port for the original game data"
-            VALUE "FileVersion",      "0.11.2"
+            VALUE "FileVersion",      "0.11.3"
             VALUE "LegalCopyright",   "GPL-3.0. Needs the original game disc; not affiliated with the rights holders."
             VALUE "ProductName",      "RampageRE"
-            VALUE "ProductVersion",   "0.11.2"
+            VALUE "ProductVersion",   "0.11.3"
         END
     END
     BLOCK "VarFileInfo"
