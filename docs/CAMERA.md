@@ -22,7 +22,7 @@ loader 0x3134E0 → 0x3134F0; `Free` → 0x4D5E60 (loader 0x311590); `Follow` �
 | +0x24 | `MinCamDist` | 75 | above: the least distance |
 | +0x28 | `MinCamHeight` | 10 | near: the least height |
 | +0x2C | `RepMonsterHeight` | 15 | the height a monster stands for |
-| +0x30 | `HeldObjMinCamDistOffset` | 5 | added to both minimums while a monster holds something |
+| +0x30 | `HeldObjMinCamDistOffset` | 5 | added to both minimums while a followed monster holds something not edible (0x2E5590: no flag 0x80000; a car, a tank, a street object, not a person) or threw something a second ago (+0xA94 = 1 at throwObject's throw, 0x2DA284, counted down in 0x2E1E88; 0x312CB0 .. 0x312D1C, the byte sp+0xC0 to 0x312950 and 0x312790) [R] |
 | +0x34 | `Yaw` | 0.4 | largest turn about Z, radians |
 | +0x38 | `ShowGroundHeight` | 30 | the lowest monster at or below this: the near state |
 

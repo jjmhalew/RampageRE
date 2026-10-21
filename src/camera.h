@@ -32,8 +32,9 @@ void cam_init(GameCamera *c, const CamSettings *s);
 /* 0x313A50, the mode (re)entered (gCameraMgr.setCamMode, director.c): the next frame is taken as it is (no
  * smoothing, the tilt at once), state 2 (neither near nor above) and its timer 1e20, so the first state counts at once */
 void cam_activate(GameCamera *c);
-/* follow the monsters (root positions); aspect_hw = the view's height / width */
-void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw);
+/* follow the monsters (root positions); held: one of them holds what is not edible or threw a second ago (the
+ * minimums HeldObjMinCamDistOffset further, 0x312B50's sp+0xC0); aspect_hw = the view's height / width */
+void cam_update(GameCamera *c, const float (*monsters)[3], int n, int held, float dt, float aspect_hw);
 /* [R 0x312B50, after the monsters' box] the camera manager's interest objects (army.h army_interest: a tank on screen)
  * added to the points after the n monsters' (pts has room for 2 more): each place held to x within 30 of the monsters'
  * middle, y -10 .. 21, z 0 .. 70. Returns the new count */

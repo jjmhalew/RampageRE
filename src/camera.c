@@ -195,7 +195,7 @@ int cam_interest(float (*pts)[3], int n, const float (*obj)[3], int nobj)
     return n;
 }
 
-void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, float aspect_hw)
+void cam_update(GameCamera *c, const float (*monsters)[3], int n, int held, float dt, float aspect_hw)
 {
     if (n <= 0)
         return;
@@ -231,9 +231,9 @@ void cam_update(GameCamera *c, const float (*monsters)[3], int n, float dt, floa
     float B[3][3] = { { 1, 0, 0 }, { 0, ct, st }, { 0, -st, ct } };   /* right, forward, up */
     float k = 1 + spread * (c->s.far_border_scale - 1), P[3];
     if (c->state == 1)
-        place_near(c, C, bmin, bmax, monsters, n, 0, k, P);
+        place_near(c, C, bmin, bmax, monsters, n, held, k, P);
     else
-        place_above(c, B, C, monsters, n, 0, k, P);
+        place_above(c, B, C, monsters, n, held, k, P);
     keep_in_street(c, B, k, P);
     float yaw = c->s.yaw * P[0] * (1.0f / 60);
     yaw = maxf(-c->s.yaw, minf(c->s.yaw, yaw));

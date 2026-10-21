@@ -175,6 +175,7 @@ typedef struct Mon {
      * doBarf's; Nick's fire and eyes): the effect and its node, kept on it while the effect lives */
     struct { int fx; char node[48]; } fx_named[MON_FX_NAMED]; int nfx_named;
     float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
+    float thrown_t;                                  /* +0xA94: 1 s from a throw (0x2DA28C), the camera's */
     char rage_fx_name[32]; int rage_fx, rage_on;     /* its book's MonsterFx RageFx (+0x164) and the one on (+0x168) */
     int nick, nick_fx[3];                            /* Nick's fire and eyes (+0x174 .. +0x17C): 0 not Nick, 1 to
                                                       * start, 2 on, 3 shut down (becomeHuman, till the respawn) */
@@ -1438,6 +1439,12 @@ static void mon_shape(const Mon *mo, float c[3], float *r);
  * army's soldiers (actors), the vehicles Vehicle.bsf flags Animates or Edible (its Construct's setFlags) and the
  * parade's carts and bikers (GroundCart.bsf, parade.c's PAF_EDIBLE); no rail object, parked car or army vehicle
  * (no script sets it on them) */
+static int held_anything(const Mon *mo)
+{
+    return mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 || mo->held_parade >= 0 ||
+           mo->held_sobj >= 0;
+}
+
 static int held_edible(const Mon *mo)
 {
     const Viewer *v = mo->v;
@@ -1577,9 +1584,7 @@ static int answer(void *ctx, const char *call, const float *a)
     if (strstr(call, "::canGrabPowerup") || strstr(call, "::checkForHazard"))
         return edible_call(mo, call, a + 1) > 0;
     if (!strcmp(call, "Monsters::pickupSuccess") || !strcmp(call, "Monsters::isHoldlingEdible"))
-        return call[10] == 'p' ? mo->held >= 0 || mo->held_unit >= 0 || mo->held_vehicle >= 0 || mo->held_rail >= 0 ||
-                                 mo->held_parade >= 0 || mo->held_sobj >= 0 :
-               held_edible(mo);                      /* hasGrabbedObject 2 (0x2E5590): the held object's flag 0x80000 */
+        return call[10] == 'p' ? held_anything(mo) : held_edible(mo);                      /* hasGrabbedObject 2 (0x2E5590): the held object's flag 0x80000 */
     if (!strcmp(call, "Monsters::isShaker"))         /* Ground_Grab_Down -> Ground_Hold_Shake */
         return held_shaker(mo) != 0;
     if (!strcmp(call, "Monsters::canTransfer"))      /* (right): mirrored the other way */
@@ -1925,6 +1930,9 @@ static void throw_held(Mon *mo, int eat, float x, float y, float z)
      * (0x2FC2D4); all 30 monsters have two (MONSTER_DATA +0xA14) [R] */
     float h = mo->heading / 57.2957795f, lx = mo->mirror ? -x : x;
     float vel[3] = { cosf(h) * lx - sinf(h) * y, sinf(h) * lx + cosf(h) * y, z };
+    if (!eat && held_anything(mo))                   /* thrown, not eaten: +0xA94 = 1 (0x2DA284), the camera keeps
+                                                      * its held object's distance a second more */
+        mo->thrown_t = 1;
     if (mo->held_unit >= 0 && v->army) {
         army_throw(v->army, mo->held_unit, mo->slot, eat, vel, mo->heading / 57.2957795f);
         mo->held_unit = -1;
@@ -5485,6 +5493,8 @@ static void mon_step(Mon *mo, float dt)
     static const uint8_t none[MV_COUNT];
     float lx = mo->pad.lx, ly = mo->pad.ly;
     const uint8_t *pressed = mo->pad.pressed, *held = mo->pad.held;
+    if (mo->thrown_t > 0)                            /* 0x2E1E88 .. 0x2E1EAC */
+        mo->thrown_t = mo->thrown_t > dt ? mo->thrown_t - dt : 0;
     if (mo->is_ai) {                                  /* the game drives the monster: no pad */
         lx = mo->ai.stick[0];
         ly = mo->ai.stick[1];
@@ -6126,7 +6136,7 @@ static void play_step(Viewer *v, float dt, float aspect)
     }
     float at[MONSTERS + 2][3];                       /* the camera's points: every monster's root (2 more: cam_interest) */
     DirObject me[MONSTERS];                          /* the script camera's objects: the monsters by slot */
-    int nat = 0;
+    int nat = 0, cam_held = 0;
     for (int k = 0; k < mon_world(v); k++) {
         Mon *mo = &v->mon[k];
         if (mo->have_graph) {                         /* the pose keeps what the monster did not take over (0x301080:
@@ -6144,11 +6154,13 @@ static void play_step(Viewer *v, float dt, float aspect)
         if (cam_follows(mo)) {
             at[nat][0] = mo->mx; at[nat][1] = mo->my; at[nat][2] = mo->mz;
             nat++;
+            /* [R 0x312CB0 .. 0x312D1C] holding what is not edible (0x2E5590), or a second from a throw (+0xA94) */
+            cam_held |= (held_anything(mo) && !held_edible(mo)) || mo->thrown_t > 0;
         }
     }
     float interest[2][3];                            /* and the camera manager's interest objects: a tank on screen */
     nat = cam_interest(at, nat, (const float (*)[3])interest, v->army ? army_interest(v->army, interest) : 0);
-    cam_update(&v->cam, (const float (*)[3])at, nat, dt, aspect);
+    cam_update(&v->cam, (const float (*)[3])at, nat, cam_held, dt, aspect);
     dircam_update(&v->cd, dt, me, v->nmon, &v->view);   /* the modes (the script camera) and their blend */
 }
 
