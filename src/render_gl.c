@@ -1272,6 +1272,13 @@ static void draw_hud(Renderer *r, const Scene *s, int width, int height, double 
         if (id) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, id);
+            /* [R] the GUI's shaders (GuiQuad::draw 0x2439E0 -> 0x17BCA0 -> 0x17A940 -> 0x25FF30 -> 0x265840: each
+             * pass's +0xF to the texture's 0x26AA20) all have 0 there (the templates copied by 0x17D100, 0x410918
+             * .. 0x415940), so a picture is drawn clamped (CLAMP_1 WMS = WMT = 1, its byte +0x40 bit 0 clear), not
+             * repeated as a texture loads (0x26AA80 / 0x26B0A0: +0x40 = 0x11): no bilinear tap from the other edge
+             * (the thin lines along the city cards' tops, the frost tiles' seams). The world's draws repeat */
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         } else
             glDisable(GL_TEXTURE_2D);
         glColor4fv(col);
@@ -1289,6 +1296,10 @@ static void draw_hud(Renderer *r, const Scene *s, int width, int height, double 
             glTexCoord2f(q->u0, q->v1); glVertex2f(q->x0, q->y1);
         }
         glEnd();
+        if (id) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        }
     }
     r->in_hud = 0;
     glDisable(GL_SCISSOR_TEST);

@@ -79,7 +79,15 @@ the left end to w (f − ½) (UV 0..f) **[R]**. Neither sprite is textured in th
 
 ### Quad, text and fade
 - A quad (`GuiQuad::draw` 0x2439E0) draws one sprite through the object's world matrix (0x240790). Its alpha is
-  multiplied by the fade **[R]**.
+  multiplied by the fade **[R]**. It is drawn **clamped** at its texture's edges **[R]**: the draw's pass setup
+  (0x2439E0 → 0x17BCA0 → 0x17A940 → 0x25FF30 → 0x265840) hands each pass's byte +0xF (a pass is 36 bytes from the
+  shader's +0x4, its texture slot at +0x4) to the texture's 0x26AA20, which stores it at +0x40 and rebuilds the
+  texture's CLAMP_1 (+0x90; register 8 at +0x98): WMS = WMT = 1 (CLAMP) when bit 0 is clear, 0 (REPEAT) when set,
+  the region fields 0. A texture loads repeating (0x26AA80 / 0x26B0A0: +0x40 = 0x11); every GUI shader template
+  (copied by 0x17D100: 0x410918 … 0x415940, 15 of them) has 0 in its passes' +0xF, so a picture's bilinear taps
+  never reach its other edge. render_gl.c `draw_hud` clamps (GL_CLAMP_TO_EDGE) for each HUD quad and repeats again
+  after it, the world's draws sharing the texture objects (up to v0.11.3 the pictures repeated: thin lines along the
+  city cards' frame and across their pictures, the frost tiles' seams in MonsterSelect).
 - A text (`GuiText::draw` 0x234D30) multiplies the alpha of its colour and of its shadow by the fade, then calls the
   font's string draw with the object's matrix **[R]**.
 
