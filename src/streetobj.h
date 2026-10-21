@@ -218,6 +218,9 @@ int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const fl
  * 0x280470): TakeDamage(who, 2, type 1) for each one without OnlyHitWithEffNodes, unless it took one this frame. How
  * many */
 int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const float centre[3], float radius);
+/* an army shot's or beam's TakeDamage on object i, no monster (0x292D20): Fountain.bsf's takes it from anything (a
+ * hydrant or fountain breaks off along dir); the other scripts ask for a monster */
+void streetobj_shot(StreetObjs *s, int i, const float dir[3]);
 /* a thrown object (a car, a person, a unit) reaching objects: StreetObject's TakeImpact (its HitEffect, deleted; no
  * score). RoofItem has none. How many */
 int streetobj_impact(StreetObjs *s, const float centre[3], float radius);

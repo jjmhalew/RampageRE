@@ -4998,6 +4998,14 @@ static void army_step(Viewer *v, float dt)
                     hud_float(v->hud, (int)e->amount, e->pos, e->level, 0.8f);
                 break;
             case AE_WINDOW_CLOSE: scene_window_close_at(&v->scene, e->pos); break;
+            case AE_OBJECT_HIT: {                    /* a shot's or beam's TakeDamage on another module's object */
+                int owner = COLLIDE_TAG_OWNER(e->id), idx = COLLIDE_TAG_INDEX(e->id);
+                if (owner == COLLIDE_OWN_VEHICLE && v->veh)
+                    vehicle_shot(v->veh, idx, e->dir);
+                else if (owner == COLLIDE_OWN_STREET && v->sobj)
+                    streetobj_shot(v->sobj, idx, e->dir);
+                break;
+            }
             case AE_BUILDING_HIT:                    /* a shot's or beam's Building::hit (0x2BC150), no one's */
                 if ((uint32_t)e->id < v->scene.nbuildings &&
                     v->scene.buildings[e->id].b.state == BUILDING_STANDING) {

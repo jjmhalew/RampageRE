@@ -177,6 +177,9 @@ int vehicle_events(Vehicles *v, VehicleEvent *out, int max);   /* takes the even
 int vehicle_hit(Vehicles *v, int monster, const float centre[3], float radius, float amount);
 /* TakeImpact: something flying hit obj (it is wrecked and explodes on its next pulse) */
 void vehicle_impact(Vehicles *v, int obj);
+/* an army shot's or beam's TakeDamage on obj, no monster (0x292D20): a car is wrecked and flies off along dir as a
+ * blow's (Vehicle.bsf does not ask for a monster), no score; the rest ask for one */
+void vehicle_shot(Vehicles *v, int obj, const float dir[3]);
 /* doGrabObject's search over the objects: Pickupable, not held, in front of root, nearest within radius of hand */
 int vehicle_nearest_pickup(const Vehicles *v, const float hand[3], const float root[3], const float forward[3],
                            float radius);

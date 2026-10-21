@@ -597,8 +597,11 @@ The building records each Scoring call as it makes it (building.c `Building.scor
   - flag 4 is every world object's, VolumeTriggers and held objects too (addObject 0x284CD0, COLLIDE_NOTES.md) [R],
     so a shell stops at a soldier, a passing car or a trigger's box; a shot's damage to what it hits other than a
     monster or a building (0x292D20: a thunk to the hit object's TakeDamage, vtable +0x34, with the shot's DamageType, its owner
-    unit, ImpactDamage, the point and the shot's direction, no knock [R]) is not ported: the scripts' TakeDamage
-    begin with coerceToMonster and ignore it, but Fountain.scr (ungated) and DamagingEffect.scr would not;
+    unit, ImpactDamage, the point and the shot's direction, no knock [R]; the beam's 0x33B440 -> 0x296C70 the same):
+    AE_OBJECT_HIT. Most scripts' TakeDamage begin with coerceToMonster and ignore it, but Vehicle.bsf's asks only its
+    flags (8, 1024, 32): a car hit is wrecked and flies off at 25 along the shot's way (z made positive) and explodes
+    on its next pulse, no score (vehicle.c `vehicle_shot`); Fountain.bsf (ungated) breaks a hydrant or fountain off
+    along it (streetobj.c `streetobj_shot`); DamagingEffect.scr's is not followed;
   - a unit has one shape by 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox, else
     the sphere the model keeps (0x184CB0, stored apart from its box, 0x184940) [R]; here the union of its meshes'
     header spheres, city.c `city_shape_sphere`), and the monster's spheres meet that one shape (0x2E22B0 ->

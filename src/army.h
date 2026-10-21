@@ -213,7 +213,11 @@ enum {
                        * amount (ImpactDamage x the damage scale; a beam's DamagePerSec x dt after its first touch),
                        * dir the shot's way. Its hitter is cleared (an army unit or a person: not a monster, +0x4C &
                        * 0x40 unset, 0x2BC190); type 8 (Nuclear: the airstrike's FinalBomberBomb) fells a standing one
-                       * at once (state 4), any other is the hit at that point with the amount as its radius */
+                       * at once (state 4), any other is the hit at that point with the amount as its radius */,
+    AE_OBJECT_HIT     /* a shot or a beam met another module's object (id its collision tag, collide.h COLLIDE_TAG) at
+                       * pos: its TakeDamage (0x292D20 / 0x296C70 -> vtable +0x34) with no monster, amount, type level,
+                       * dir the shot's way: Vehicle.bsf's (not asking for a monster) wrecks a car, Fountain.bsf's
+                       * breaks a hydrant; the others' ask coerceToMonster and do nothing */
 };
 /* node: AE_EFFECT's model node number of the unit it is on (createAndStartAttachedToNode), -1 none; die_with: it
  * stops when its unit goes (setTurnOffWhenObjectDies(1)), else it runs on where the unit was */

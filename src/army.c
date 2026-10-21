@@ -888,6 +888,17 @@ static void fire_projectile(Army *a, ArmyUnit *u, ArmyWeapon *w, const float fro
 }
 
 /* a shot or beam met building `building`: its Building::hit is the viewer's (AE_BUILDING_HIT) */
+/* a shot's or beam's object (not a building, not a monster): its TakeDamage, the host's to give */
+static void object_hit_event(Army *a, int tag, const char *weapon, int type, float amount, const float dir[3],
+                             const float at[3])
+{
+    ArmyEvent *e = emit(a, AE_OBJECT_HIT, -1, weapon, at);
+    e->id = tag;
+    e->level = type;
+    e->amount = amount;
+    memcpy(e->dir, dir, sizeof e->dir);
+}
+
 static void building_hit_event(Army *a, int building, const char *weapon, int type, float amount, const float dir[3],
                                const float at[3])
 {
@@ -958,6 +969,8 @@ static void shot_update(Army *a, ArmyShot *s, float dt)
                      COLLIDE_TAG_OWNER(a->cw->o[obj].tag) == COLLIDE_OWN_BUILDING)
                 building_hit_event(a, COLLIDE_TAG_INDEX(a->cw->o[obj].tag), s->weapon, s->damage_type, s->damage,
                                    s->dir, at);
+            else if (obj >= 0 && a->cw)               /* any other object's TakeDamage (0x33BCA0 -> 0x292D20) [R] */
+                object_hit_event(a, a->cw->o[obj].tag, s->weapon, s->damage_type, s->damage, s->dir, at);
             if (s->impact_fx) {
                 ArmyEvent *e = emit(a, AE_EFFECT, -1, s->impact_fx, at);
                 e->id = a->next_fx++;
@@ -1038,6 +1051,8 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
                         s->dir, at);
     } else if (obj >= 0 && a->cw && dmg > 0 && COLLIDE_TAG_OWNER(a->cw->o[obj].tag) == COLLIDE_OWN_BUILDING)
         building_hit_event(a, COLLIDE_TAG_INDEX(a->cw->o[obj].tag), w->name, w->damage_type, dmg, s->dir, at);
+    else if (obj >= 0 && a->cw && dmg > 0)           /* any other object's TakeDamage (0x33B440 -> 0x296C70) [R] */
+        object_hit_event(a, a->cw->o[obj].tag, w->name, w->damage_type, dmg, s->dir, at);
     /* [R 0x295A2C .. 0x295BF8] its ImpactEffect (+0x1A8): made at the first touch (0x208220), then put where it
      * touches every frame (vtable +0x8C / +0x90) while it touches; a touch after a frame of none makes a new one */
     if (!s->impact && w->impact_fx) {

@@ -1461,6 +1461,17 @@ void vehicle_update(Vehicles *v, float dt, const ArmyMonster *m, int nm, const A
 
 /* ---------------------------------------------------------------- the monster's side */
 
+void vehicle_shot(Vehicles *v, int obj, const float dir[3])
+{
+    if (obj < 0 || obj >= v->n)
+        return;
+    VehObj *o = &v->o[obj];
+    if (o->phase != VP_ALIVE || o->hidden || o->kind != VK_CAR || !car_damage(v, o, -1, dir))
+        return;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  vehicle %d (%s) wrecked by a shot\n", obj, o->name ? o->name : "?");
+}
+
 int vehicle_hit(Vehicles *v, int monster, const float centre[3], float radius, float amount)
 {
     (void)amount;                                    /* Vehicle.bsf and Rocket.bsf do not look at it */

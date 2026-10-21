@@ -2391,6 +2391,14 @@ int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const fl
     return n;
 }
 
+void streetobj_shot(StreetObjs *s, int i, const float dir[3])
+{
+    if (i < 0 || i >= s->n || !s->o[i].alive || s->o[i].kind != SK_FOUNTAIN || s->o[i].frame == s->frame)
+        return;
+    memcpy(s->dir, dir, sizeof s->dir);
+    take_damage(s, &s->o[i], -1, NULL, 0);
+}
+
 int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const float centre[3], float radius)
 {
     int n = 0;
