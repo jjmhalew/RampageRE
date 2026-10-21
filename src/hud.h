@@ -67,8 +67,11 @@ void hud_set(Hud *h, float hp, float hp_max, float energy, float energy_max, int
 /* the game clock (gWorld.isGameClockVisible / getGameClockTime): mm:ss at the top centre, fading in */
 void hud_set_clock(Hud *h, int visible, float seconds);
 /* game.h GE_HUD (a): the HUD's and the ChallengeStatus' fade, 1 shown, 0 hidden (BeginBlockNI / ResultsNI set it at
- * once [R Levels.scr]); the Hud starts shown */
+ * once [R Levels.scr]); the Hud starts shown (a city's start hides it: hud_hide) */
 void hud_show(Hud *h, float fade);
+/* the city's start (every <City>.scr onPostInit: Hud<i>.ifc loaded and setVisible(0) [R]): the player's HUD hidden till
+ * BeginBlockNI shows it (hud_show 1), through the level's intro; the ChallengeStatus is not touched */
+void hud_hide(Hud *h);
 
 /* where a world point lands: screen in the reference 640 x 480 pixels, *px_per_unit the pixels one world unit spans
  * there (for a perspective camera: focal_px / depth). Return 0 when it is behind the camera. */

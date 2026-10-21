@@ -1839,6 +1839,12 @@ void hud_show(Hud *h, float fade)
         h->cs.L->root->fade = fade;
 }
 
+void hud_hide(Hud *h)
+{
+    if (h && h->hud)
+        h->hud->root->fade = 0;
+}
+
 void hud_set_project(Hud *h, HudProject fn, void *ctx)
 {
     if (!h)

@@ -149,8 +149,9 @@ does a step (the police car's push) is scaled by 30 dt.
 ## The HUD fade
 
 `GuiInterface.setFade(f)` (GuiObject method 0x16, case 0x256F48 of the table 0x425750) stores f clamped to 0 … 1 at
-+0x5C at once: no fade over time [R; the dispatcher read as GuiObject's]. `BeginBlockNI` also `setVisible(1)`s each
-`Hud<n>`. The animated fades are the scripts' own (Clock.bsf, the results screens).
++0x5C at once: no fade over time [R; the dispatcher read as GuiObject's]. Every city's `onPostInit` loads each
+`Hud<n>` and `setVisible(0)`s it (Chicago.scr:80 and the others), so the level's intro (BeginLevelNI /
+ContinueLevelNI) shows no HUD; `BeginBlockNI` `setVisible(1)`s each `Hud<n>` (hud.c `hud_hide`, then GE_HUD). The animated fades are the scripts' own (Clock.bsf, the results screens).
 
 ## The rubble: findPointInRubble [R]
 

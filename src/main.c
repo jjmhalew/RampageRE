@@ -1356,6 +1356,8 @@ static void build(Viewer *v)
                 /* three lives: the campaign's start [G] */
                 hud_set(mo->hud, mo->hp, mon_hp_max(mo), mo->energy, 100, 0, 3, -1);
                 hud_set_project(mo->hud, hud_project, v);
+                if (v->game)                         /* the city's onPostInit: hidden till BeginBlockNI */
+                    hud_hide(mo->hud);
                 hud_set_language(mo->hud, v->lang);
                 hud_set_settings(mo->hud, profile_sound_volume(&v->prof), profile_music_volume(&v->prof),
                                  profile_rumble(&v->prof));
