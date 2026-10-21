@@ -139,8 +139,9 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   0x319570 copies a slot in), building by building, each building's soldiers, then its civilians, then its edibles'
   own slots (an edible in a cell with an occupant's slot takes that slot, +0xE), so either range can hold the other
   sort's slots and edible slots (+0xD 0xFF, passed over); what comes out is the slot's own occupant (+0xD, the kind
-  list's record at 0x318968) [R]. A range with no slots puts out no one (a block without soldier slots on a soldier's
-  turn). From the place at rand() % the range's count on, the first free slot (+0x14 empty, +0xD an occupant) whose
+  list's record at 0x318968) [R]. A soldier's turn with no soldiers' range (+0x40 = 0) is a civilian's: 0x318748
+  branches to the civilians' code at 0x318840 [R] (every block with `NonMilitaryRate` 1: SF01 .. 04, SF08, SF09 and a
+  few in Chicago, Las Vegas and Los Angeles); a range with slots but none free puts out no one. From the place at rand() % the range's count on, the first free slot (+0x14 empty, +0xD an occupant) whose
   building's x (+0x2C, its middle) lies in the monsters' range (0x318390: the lowest to the highest x of the players'
   monsters (gWorld +0x40, 0x4D7E28 of them), widened to 30 about their middle when less than 20 apart, then 10 more
   on each side: a lone monster's buildings within 25) and that 0x31AD00 allows [R]. The slots (0x31A540 calls

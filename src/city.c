@@ -1599,10 +1599,11 @@ void scene_people_spawn(Scene *s, float dt)
      * which holds each building's soldiers, civilians and edibles in turn, so either range can hold the other sort's
      * slots (the occupant is the slot's own: +0xD, 0x318968) and edible slots (+0xD 0xFF: passed over) [R 0x319570,
      * 0x3195C0, 0x3195E0]. From the one at rand() % the range's count on, the first free one in a building whose x
-     * (+0x2C, its middle) is within the monsters' range (0x318390). No slots in the range: no one */
+     * (+0x2C, its middle) is within the monsters' range (0x318390). A soldier's turn with no soldiers' range (+0x40
+     * 0) is a civilian's (0x318748 branches to the civilians' 0x318840); a range with slots but none free, no one */
     float f = s->military_range > 0 ? s->spawn_left / s->military_range : 1;
     float p = s->military_start + (f < 1 ? f : 1) * (s->military_end - s->military_start);
-    int want_mil = (float)wrand_lf() * 2.3283064e-10f <= p;
+    int want_mil = (float)wrand_lf() * 2.3283064e-10f <= p && s->order_mil > 0;
     int m = want_mil ? s->order_mil : s->order_civ, base = want_mil ? 0 : s->order_mil;
     if (m <= 0)
         return;
