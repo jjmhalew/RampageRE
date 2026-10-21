@@ -79,6 +79,8 @@ typedef struct {
     BuildingVert vert[BUILDING_STOREYS + 1][3][BUILDING_VCOLS];   /* by live row, face (FACE_*), column: the dents */
     int roof;                                        /* G+0x658: the roof's damage state 0 .. 3 (its TopFloorShapes model) */
     int collapse;                                    /* G+0x1CC: -1 none, k >= 1 live storey k-1 falls, 0 it sinks */
+    int falls;                                       /* the floors that have started to fall (k >= 1), counted: a
+                                                      * floor's landing can fell the next at the same k that frame */
     float progress;                                  /* G+0x1D0: storeys fallen (0 .. 1; 0 .. 7/3 sinking) */
     float timer;                                     /* the destruction's clock (+0x150) */
     float collapse_time, crack_time, hesitation;     /* CollapseTime 0.25, CrackSpreadTime 0.05, HesitationTime 0.4 */

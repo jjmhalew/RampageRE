@@ -139,6 +139,7 @@ static void floor_falls(Building *b, int k)
             }
     }
     b->collapse = k;                                 /* 0x2CE240 */
+    b->falls += k > 0;
     b->progress = 0;
     b->dirty = 1;
 }

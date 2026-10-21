@@ -360,8 +360,11 @@ at the first block's end.
 2. **Buildings:**
    - where `scene_buildings_update` calls `people_cell_broken` (a front cell reaching 2 or more), also call
      `edible_cell_broken(i, o, col, state, b.state)`;
-   - when a floor starts to fall (`b.collapse` = k changes), call `edible_floor_fell(i, live[k−1], live[k] or −1,
-     live[k−2] or −1)`.
+   - when a floor starts to fall (`b.falls` changes; `b.collapse` = k), call `edible_floor_fell(i, live[k−1], live[k]
+     or −1, live[k−2] or −1)`, live[k] only while k < `b.n`. Not `b.collapse` changing: a floor's landing can fell the
+     next one at the same k in the same frame (0x2BD3B0's crush), and up to v0.10.19 the port missed that fall, so
+     its edibles stayed where they were, in the air after the building had gone, till their 30 s were up, and the
+     fallen floor's window occupants stayed too (Chicago's autoplay, 18 blocks: 5 such edibles before, none after).
 3. **Each frame:** call `edible_update(dt)`. Then:
    - draw each edible that is not `EP_GONE` and has a `shape`, at `world`; the others are drawn by their effects;
    - move the attached effects to `pos` (`fx_move`);

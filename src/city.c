@@ -2373,7 +2373,7 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->moving = 0;
         sb->adorn = NULL;
         sb->nadorn = 0;
-        sb->seen_collapse = -1;
+        sb->seen_falls = 0;
         sb->props = t;
         sb->inst = inst;
         sb->seen_state = BUILDING_STANDING;
@@ -3984,13 +3984,15 @@ void scene_buildings_update(Scene *s, float dt)
             }
         }
         sb->b.ndebris = 0;
-        if (sb->b.collapse > 0 && sb->b.collapse != sb->seen_collapse) {   /* a floor comes down */
+        if (sb->b.collapse > 0 && sb->b.falls != sb->seen_falls) {   /* a floor comes down (counted: one landing
+                                                      * can fell the next at the same k, the occupants and edibles
+                                                      * of a missed one were left in the air) */
             int k = sb->b.collapse;
             float at[3] = { (sb->b.min[0] + sb->b.max[0]) / 2, sb->b.min[1],
                             sb->b.min[2] + GROUND_FLOOR + STOREY * (float)(k - 1) }, in[3] = { 0, 1, 0 };
             scene_fx(s, sb->fx_floor, at, in);
             if (s->edibles && k - 1 < BUILDING_STOREYS)   /* 0x317A70: its edibles gone, those next to it out */
-                edible_floor_fell(s->edibles, (int)i, sb->b.live[k - 1], k < sb->b.storeys ? sb->b.live[k] : -1,
+                edible_floor_fell(s->edibles, (int)i, sb->b.live[k - 1], k < sb->b.n ? sb->b.live[k] : -1,
                                   k >= 2 ? sb->b.live[k - 2] : -1);
             for (int n = 0; k - 1 < BUILDING_STOREYS && n < s->nslots; n++) {
                 /* [R 0x317A70] the occupants' slots of the fallen floor too (the one list): their actors flagged
@@ -4010,7 +4012,7 @@ void scene_buildings_update(Scene *s, float dt)
                 ws->unit = -1;
             }
         }
-        sb->seen_collapse = sb->b.collapse;
+        sb->seen_falls = sb->b.falls;
         if (s->traffic && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING)
             vehicle_building_gone(s->traffic, (int)i);   /* onBuildingDestruction: its roof rockets fly */
         sb->seen_state = sb->b.state;
