@@ -142,7 +142,8 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
 The city's name (Atrox60 × 1.5) and "DESTROYED" slide in, "TOTAL DAMAGES:" the city score and "PAR SCORE:" the par,
 four goals (All Blocks Destroyed, Par Points Gained, All Challenges Met, All Monsters Revealed) rise from below
 (0.5, 0.7, 0.9, 1.1 s); then a star (`Tank_Fire`) every 0.75 s for each of the city flags 1, 2, 4, 8. Continue →
-result 1, 5 s, fade, end. No walkout.
+result 1, 5 s, fade, end. No walkout. After the last city (`gCommon.getShowVictory()`, 0x2C3180: the world-done
+flag 0x4D7E4F) Change Monster and Quit are hidden before `setupButtons` (LevelResults.scr:228).
 
 ### GameOver [R GameOver.scr]
 A dark full-screen veil and a framed box: "GAME OVER" on a red band, the list Retry / Choose Monster / Quit (Choose
