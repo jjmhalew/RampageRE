@@ -198,6 +198,10 @@ otherwise.
   include −1 and exclude 8 (+ the fire's own, 0 here), its owner flagged 8 around the cast (0x2957E0).
 - On the beam's first touch it deals `ImpactDamage`. After that it deals `DamagePerSec` × dt per frame, if that is
   above 0.
+- Its `ImpactEffect` (+0x1A8, 0x295A2C … 0x295BF8): made at a touch (0x208220) and put where it touches every frame
+  (vtable +0x8C / +0x90) while it touches; stopped and freed (vtable +0x30, 0x207A40) on a frame it meets nothing
+  (0x295878 → 0x295B30) or as it stops firing (0x295B80), so a touch after that makes a new one. Up to v0.11.4 the
+  port made one at the stream's first touch, left where it was, and none after.
 - The beam's reach is its stream effect's (0x295750: the ray's maxt is 0x226950's head − tail, then the effect is cut
   at the hit, 0x226DF0) [R]. The stream (0x226CC0) grows its head by its speed (+0x1C) × dt up to its length
   (+0x20); its tail stays at 0 until its cycle runs out or it is shut down, then follows at the same speed [R]. Those

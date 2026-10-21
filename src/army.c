@@ -705,6 +705,26 @@ static void unit_weapons(Army *a, ArmyUnit *u)
 
 /* ---- the shots */
 
+/* a beam's ImpactEffect stopped and let go (0x295B30, 0x295B80: vtable +0x30, 0x207A40) [R] */
+static void beam_impact_stop(Army *a, ArmyShot *s)
+{
+    if (s->impact) {
+        emit(a, AE_EFFECT_STOP, -1, NULL, s->pos)->id = s->impact;
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  %.2f: %s touches no more\n", a->now, s->weapon ? s->weapon : "?");
+    }
+    s->impact = 0;
+}
+
+static void beam_end(Army *a, int shot)
+{
+    for (int i = 0; i < a->nshots; i++)
+        if (a->shot[i].alive && a->shot[i].id == shot) {
+            beam_impact_stop(a, &a->shot[i]);
+            a->shot[i].alive = 0;
+        }
+}
+
 static ArmyShot *new_shot(Army *a)
 {
     for (int i = 0; i < a->nshots; i++)
@@ -987,8 +1007,10 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     s->head = head;
     s->tail = tail;
     s->length = head;
-    if (t < 0)
+    if (t < 0) {                                     /* touching nothing: its ImpactEffect goes (0x295878 -> 0x295B30) */
+        beam_impact_stop(a, s);
         return;
+    }
     /* [R 0x2958CC] the impact at the weapon's place + t along: the tail not added */
     float at[3] = { s->pos[0] + s->dir[0] * t, s->pos[1] + s->dir[1] * t, s->pos[2] + s->dir[2] * t };
     float dmg = w->first ? w->scale * w->damage : w->dps > 0 ? w->scale * w->dps * dt : 0;
@@ -998,11 +1020,19 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
                         s->dir, at);
     } else if (obj >= 0 && a->cw && dmg > 0 && COLLIDE_TAG_OWNER(a->cw->o[obj].tag) == COLLIDE_OWN_BUILDING)
         building_hit_event(a, COLLIDE_TAG_INDEX(a->cw->o[obj].tag), w->name, w->damage_type, dmg, s->dir, at);
-    if (w->first && w->impact_fx) {
+    /* [R 0x295A2C .. 0x295BF8] its ImpactEffect (+0x1A8): made at the first touch (0x208220), then put where it
+     * touches every frame (vtable +0x8C / +0x90) while it touches; a touch after a frame of none makes a new one */
+    if (!s->impact && w->impact_fx) {
         ArmyEvent *e = emit(a, AE_EFFECT, -1, w->impact_fx, at);
-        e->id = a->next_fx++;
+        if (!a->next_fx)                             /* (0 is no handle) */
+            a->next_fx = 1;
+        e->id = s->impact = a->next_fx++;
         memcpy(e->dir, nrm, sizeof e->dir);
-    }
+        if (getenv("RAMPAGE_TRACE"))
+            printf("  %.2f: %s touches at %.1f %.1f %.1f: %s\n", a->now, w->name ? w->name : "?", at[0], at[1], at[2],
+                   w->impact_fx);
+    } else if (s->impact)
+        emit(a, AE_EFFECT_MOVE, -1, NULL, at)->id = s->impact;
     w->first = 0;
 }
 
@@ -1025,9 +1055,7 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
         if (w->beam_left <= 0) {
             w->timer = fmaxf(w->refire, w->charge_time);
             w->firing = w->charging = 0;
-            for (int i = 0; i < a->nshots; i++)
-                if (a->shot[i].alive && a->shot[i].id == w->shot)
-                    a->shot[i].alive = 0;
+            beam_end(a, w->shot);
             w->shot = -1;
         } else
             beam_update(a, u, w, from, dir, frame, dt);
@@ -1267,9 +1295,7 @@ static void beam_hold(Army *a, ArmyWeapon *w)
         return;
     if (getenv("RAMPAGE_TRACE"))
         printf("  %.2f: %s held, %.2f s of its beam left\n", a->now, w->name ? w->name : "?", w->beam_left);
-    for (int i = 0; i < a->nshots; i++)
-        if (a->shot[i].alive && a->shot[i].id == w->shot)
-            a->shot[i].alive = 0;
+    beam_end(a, w->shot);
     w->shot = -1;
     w->firing = w->charging = 0;
     w->beam_left = 0;
@@ -2054,9 +2080,7 @@ static void unit_remove(Army *a, ArmyUnit *u)        /* requestDelete */
         printf("  %.2f: unit %d gone: %s\n", a->now, who(a, u), u->name ? u->name : "?");
     for (int i = 0; i < u->nw; i++)
         if (u->w[i].shot >= 0)
-            for (int s = 0; s < a->nshots; s++)
-                if (a->shot[s].alive && a->shot[s].id == u->w[i].shot)
-                    a->shot[s].alive = 0;
+            beam_end(a, u->w[i].shot);
     emit(a, AE_REMOVED, who(a, u), u->name, u->pos);
 }
 

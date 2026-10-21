@@ -172,6 +172,7 @@ typedef struct {                                     /* a shot in the air, or a 
     uint32_t owner_tag;                              /* a person's: its actor's collision tag, no hit (0 none) */
     float pos[3], dir[3], speed, age, length;        /* a beam: from pos along dir, length long */
     float head, tail;                                /* a beam's stream (0x226CC0's +0x30 / +0x34) */
+    int impact;                                      /* a beam's ImpactEffect handle while it touches (+0x1A8), 0 none */
     float R[3][3];                                   /* a beam: the weapon's firing frame (rows x, y, z), its effect's */
     float damage, gravity, duration, mobility, accel, velocity, h_knock, v_knock, vis_range, impact_delay;   /* +0xF0 .. */
     int damage_type, reaction, target;
@@ -188,6 +189,7 @@ enum {
                        * the unit's ChallengeEffect, only when its template is one of the block's challenge goals
                        * (the host's to decide, challenge_is_goal: the world object's init 0x30D280 -> 0x3466A0) */
     AE_EFFECT_STOP,   /* the effect with handle id stops */
+    AE_EFFECT_MOVE,   /* the effect with handle id is moved to pos (a beam's ImpactEffect where it touches) */
     AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads) */
     AE_HIT,           /* a weapon reached monster `monster`: amount damage, id the DamageType, level the ReactionLevel
                        * (-1: none, through TakeDamage 0x2D9680, which picks the level by the amount), v the knock

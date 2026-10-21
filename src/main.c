@@ -4853,6 +4853,13 @@ static void army_step(Viewer *v, float dt)
                     }
                 }
                 break;
+            case AE_EFFECT_MOVE:
+                for (int k = 0; v->fxw && k < v->nfxa; k++)
+                    if (v->fxa[k].id == e->id) {
+                        fx_move(v->fxw, v->fxa[k].fx, e->pos);
+                        break;
+                    }
+                break;
             case AE_EFFECT_STOP:
                 for (int k = 0; k < v->nfxa; k++)
                     if (v->fxa[k].id == e->id) {
