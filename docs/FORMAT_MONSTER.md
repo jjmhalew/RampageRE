@@ -304,7 +304,10 @@ in this clip, whether it is coming down from the top.
   eased into over a few frames [R]. A frame of the monster's update is a world step, 1/30 s (FLOW_NOTES.md): main.c
   takes 1 − 0.6^(30 dt) of the way a drawn frame (taken as 0.4 a drawn frame, a 60 Hz screen eased in twice as fast). The place is re-checked every frame: failing it, the monster is knocked off (slot
   31, or 73 when the building falls, or, braced across the alley in a spider state, the building across falls: 0x2DD710,
-  +0x14C ≥ 6; the storey is held to that building's top one too, 0x2E15EC).
+  +0x14C ≥ 6; the storey is held to that building's top one too, 0x2E15EC). The knock-off (0x2E1680 .. 0x2E1888) only
+  posts the slot's state (unless it is the one playing, the monster defeated or shrunk below 0.3) and lets go
+  (0x2DA570): the mount and mode 5 stay, the reaction clip holds on the face till its `unmountBuilding` and sets its
+  own modes; slot 31 also has the AI keep off the building (0x2ED720) [R].
 - **On a roof that falls**: not mounted (0x2E14F4 → 0x2E18D0), outside modes 1 and 2, a monster whose building under
   it (0x2D6150) is falling (+0x14C ≥ 6) slips off: slot 73 of its column (George's `React_Ground_Slip_Heavy`, which
   ends in addVelocity(0, −20, 15) into `Jump_Air_Borne_Fall`), unless that state is already playing (+0x10C), taken as

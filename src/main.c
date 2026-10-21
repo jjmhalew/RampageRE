@@ -5748,14 +5748,18 @@ static void mon_step(Mon *mo, float dt)
                     ev = 0;
                 }
             }
-            if (slot >= 0 && mo->is_ai)              /* knocked off: the AI keeps off it a while (0x2EEBE0) */
-                dir_ai_avoid(&mo->ai, was, NULL);
-            if (to >= 0) {                           /* (0x2E176C, 0x2E185C, 0x2E19EC: let go) */
-                let_go(mo, 0);
-                climb_unmount(&mo->mount);
-                moves_force(&mo->run, to);
-                mo->mode = MODE_AIRBORNE;
-                ev = 0;
+            /* knocked off (0x2E1680 .. 0x2E1888) [R]: the slot's state unless it is the one playing (+0x10C), taken
+             * as setReaction does (not defeated, not shrunk below 0.3) and let go (0x2E176C, 0x2E185C); the mount and
+             * the mode stay: the clip lets go of the face (unmountBuilding) and sets its own modes. Slot 31 (not
+             * the falling building's) also has the AI keep off the building a while (0x2ED720 -> 0x2EEBE0) */
+            if (to >= 0 && to != mo->run.state) {
+                if (slot == 31 && mo->is_ai)
+                    dir_ai_avoid(&mo->ai, was, NULL);
+                if (!mo->defeated && mo->scale >= 0.3f) {
+                    let_go(mo, 0);
+                    moves_force(&mo->run, to);
+                    ev = 0;
+                }
             }
         }
         if (mo->dropping && mo->mode != MODE_AIRBORNE)   /* 0x2E19F8 .. 0x2E1A14: dropping in only while in the air */
