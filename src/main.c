@@ -3321,12 +3321,15 @@ static void shadow_frame(Viewer *v, float dt)
     }
 }
 
-/* an emitter's sounds (fx.c): add3DSfx at the effect's place as it starts, moved with it, killed as it ends */
+/* an emitter's sounds (fx.c): add3DSfx at the effect's place as it starts, moved with it, killed as it ends. Its id is
+ * the emitter's (0x1F84F8 / 0x1F8544 -> 0x26D560: the emitter's pointer, + 1 for the second sound), not one the list
+ * makes (0x274840 counts its own down from 0xFFFFFFFF), so out of range it is kept and starts again on coming back
+ * (0x273CF0: 0x274218 drops only the list's own ids) [R] */
 static int fx_sound(void *ctx, int event, const char *name, const float pos[3], int handle)
 {
     (void)ctx;
     if (event == FXS_START)
-        return sound_add3d(name, pos, 0, 0, 1);
+        return sound_add3d(name, pos, 0, 1, 1);
     if (event == FXS_MOVE)
         sound_move(handle, pos);
     else
@@ -4420,8 +4423,8 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                         break;
                     }
                 break;
-            case RE_SOUND: {
-                int h = sound_add3d(e->name, e->pos, 0, 0, 1);
+            case RE_SOUND: {                         /* (an object's add3DSfx: kept out of range, as obj_sound's) */
+                int h = sound_add3d(e->name, e->pos, 0, 1, 1);
                 if (h && v->nrsnd < 64) {
                     v->rsnd[v->nrsnd].id = e->id;
                     v->rsnd[v->nrsnd].h = h;
