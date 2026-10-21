@@ -32,6 +32,7 @@ struct StreetObjs {
     float acc;
     int next_id, frame;
     float amount;                                    /* the blow's damage, for a TakeDamage that reads it (Crane) */
+    float dir[3];                                    /* the blow's direction, TakeDamage's (the fountain's) */
     uint32_t seed;
     CollideWorld *cw;                                /* the frame's collision world (streetobj_collide_add) */
 };
@@ -1427,6 +1428,9 @@ static void fountain_break(StreetObjs *s, StreetObj *o, int mi, const float dir[
     o->cm.vel[0] = dir[0] * 10;
     o->cm.vel[1] = dir[1] * 10;
     o->cm.vel[2] = 25;
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  fountain %s at %.1f %.1f breaks off along %.2f %.2f %.2f\n", o->name ? o->name : "?", o->world[12],
+               o->world[13], dir[0], dir[1], dir[2]);
     collide_matrix_from16(o->cmat, o->world);
     o->flying = 1;
     o->moved = 1;
@@ -2315,12 +2319,22 @@ static void as_collide(const StreetObj *o, CollideObj *c)
 }
 
 /* the sphere against the object's shape (0x280470: the shape's sphere test, collide_obj_sphere) */
-static int sphere_meets(const StreetObj *o, const float c[3], float radius)
+/* the sphere against the object's shape; dir (when given) TakeDamage's direction: the push that moves the sphere out,
+ * from the object towards the blow, made 1 long, (1, 0, 0) below 1e-6 (0x2E22B0: 0x280470's output, 0x2E25F8 ..
+ * 0x2E267C) [R] */
+static int sphere_meets(const StreetObj *o, const float c[3], float radius, float dir[3])
 {
     CollideObj co;
     float n[3], pt[3], push[3];
     as_collide(o, &co);
-    return collide_obj_sphere(&co, c, radius, n, pt, push);
+    if (!collide_obj_sphere(&co, c, radius, n, pt, push))
+        return 0;
+    if (dir) {
+        float l = sqrtf(push[0] * push[0] + push[1] * push[1] + push[2] * push[2]);
+        for (int k = 0; k < 3; k++)
+            dir[k] = l < 1e-6f ? (k == 0) : push[k] / l;
+    }
+    return 1;
 }
 static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who, int type)
 {
@@ -2351,10 +2365,8 @@ static void take_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster
         kite_fly(o);
     else if (o->kind == SK_FORK)
         fork_damage(s, o, mi, who);
-    else if (o->kind == SK_FOUNTAIN) {               /* the blow's way [G: the monster's facing] */
-        float d[3] = { who ? -sinf(who->facing) : 0, who ? cosf(who->facing) : 0, 0 };
-        fountain_break(s, o, who ? mi : -1, d);
-    }
+    else if (o->kind == SK_FOUNTAIN)                 /* Fountain.bsf: TakeDamage's direction x 10 across, 25 up */
+        fountain_break(s, o, who ? mi : -1, s->dir);
     if (s->deleting[idx(s, o)])
         delete_now(s, o);
 }
@@ -2367,7 +2379,7 @@ int streetobj_hit(StreetObjs *s, int monster, const StreetMonster *who, const fl
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
         if (!o->alive || o->frame == s->frame || o->kind == SK_ATTACH || o->kind == SK_2PART ||
-            !sphere_meets(o, centre, radius))
+            !sphere_meets(o, centre, radius, s->dir))
             continue;                                /* (an object without a TakeDamage is not hit) */
         if ((o->oflags & SF_EFF_NODES) && !collide_hit_once(&o->hits, monster, record))
             continue;                                /* [R] 0x2E33A0: on the record's hit list */
@@ -2385,7 +2397,7 @@ int streetobj_touch(StreetObjs *s, int monster, const StreetMonster *who, const 
     for (int i = 0; i < s->n; i++) {
         StreetObj *o = &s->o[i];
         if (!o->alive || (o->oflags & SF_EFF_NODES) || o->frame == s->frame || o->kind == SK_ATTACH ||
-            o->kind == SK_2PART || !sphere_meets(o, centre, radius))
+            o->kind == SK_2PART || !sphere_meets(o, centre, radius, s->dir))
             continue;
         if (getenv("RAMPAGE_TRACE"))
             printf("  street object %d (%s) touched\n", i, o->name ? o->name : "?");
@@ -2456,7 +2468,7 @@ int streetobj_impact(StreetObjs *s, const float centre[3], float radius)
     int n = 0;
     for (int i = 0; i < s->n; i++) {                 /* TakeImpact [R] */
         StreetObj *o = &s->o[i];
-        if (!o->alive || o->kind != SK_STREET || (o->oflags & SF_HELD) || !sphere_meets(o, centre, radius))
+        if (!o->alive || o->kind != SK_STREET || (o->oflags & SF_HELD) || !sphere_meets(o, centre, radius, NULL))
             continue;
         effect(s, o, ostr(o, "HitEffect"), NULL, 1, NULL, NULL, 0, 0);
         delete_now(s, o);

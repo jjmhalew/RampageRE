@@ -74,7 +74,9 @@ the monster's bound meets the object's, each of the monster's collision spheres 
 - Otherwise the sphere meeting the object's shape (0x280470) is a touch; an armed, unlisted one is a blow and ends
   the search.
 - Touched: **TakeDamage(who the monster, amount, type, direction)**, type **0** for a blow with the attack's damage
-  (+0x2C: 5 a punch, 20 a kick), type **1** otherwise with 2.0; direction the way from the monster, made 1 long.
+  (+0x2C: 5 a punch, 20 a kick), type **1** otherwise with 2.0; direction the push that moves the monster's sphere
+  out of the object (0x280470's: from the object towards the sphere, 0x2813F0 / 0x2815F0), made 1 long, (1, 0, 0)
+  below 1e-6 (0x2E25F8 .. 0x2E267C) [R].
 - After a blow on an 0x8000 object the object goes on the attack's list (0x2E33A0, for each body part of the
   attack; after the 8th id the bone is disarmed). The list is emptied when the attack is armed.
 - It runs in the monster's update, a world step (1/30 s, FLOW_NOTES.md): at most one TakeDamage an object a step.
@@ -402,8 +404,9 @@ actor any building places; city.c places it with the building's objects. Its own
   `AttachFountainFX` its `fountain` effect at its model's nodes 1 .. 4. The first TakeDamage (from anything) or
   TakeImpact: its `Geyser` (`OTRef|`, `Fountain3`) made where it stood (`gWorld.createScriptObject`); it is put 3 up
   and off on a SphereMover at the blow's way × 10 along x and y (a thrown object's: none) and 25 up, a pulse a second;
-  a monster's blow counts. At the fourth pulse `Impact_concrete_Big` where it is, and it goes. The blow's way is the
-  monster's facing here [G].
+  a monster's blow counts. At the fourth pulse `Impact_concrete_Big` where it is, and it goes. The blow's way is
+  TakeDamage's direction: towards the fist, so it pops up and back at the monster, nearly straight up from a blow
+  from above [R].
 - **DamagingEffect.bsf** (the geysers: Las Vegas' `Fountain2`, `Fountain2_silent` in Nero's pool, and `Fountain3`;
   the puddles `PukePuddle`, `SoapPuddle`, `ChocolatePuddle`): Construct a pulse after `DeleteSelfTime` (none: it
   stays), which deletes it, and its `Effect` (the `Geyser` jet) on it. TakeDamage, any type (the touch every frame),
