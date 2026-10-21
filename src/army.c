@@ -2357,6 +2357,7 @@ static void heli_init(Army *a, ArmyUnit *u)          /* onInit (is_cop = bIsFrie
                 f->side = pos[0] < 0;
                 f->friend_of = who(a, u);
                 u->friend_of = k;
+                u->friend_serial = f->serial;
                 heli_init(a, f);                     /* callOnInit */
             }
         }
@@ -2376,8 +2377,8 @@ static int heli_pulse(Army *a, ArmyUnit *u)
     }
     u->state_time += tic;
     ArmyUnit *f = u->friend_of >= 0 && !u->is_cop ? &a->u[u->friend_of] : NULL;   /* the wingman, if this leads */
-    if (f && (f->phase == AU_GONE || f->kind != AK_HELI))
-        f = NULL;
+    if (f && (f->phase == AU_GONE || f->kind != AK_HELI || f->serial != u->friend_serial))
+        f = NULL;                                    /* friend.isValid(): gone once deleted, its slot another's */
     if (u->state == 0) {
         if (u->is_cop && u->sub == 2) {              /* the leader found a monster */
             u->state = 2;

@@ -158,6 +158,7 @@ struct ArmyUnit {
     int weapons_on;
     uint32_t oflags;                                 /* object flags: 0x4000 PushOutMonsters, 0x8000 OnlyHitWithEffNodes, 0x10000 Pickupable, 0x20000 BeingHeld */
     int spawner, counted, friend_of, person;
+    int friend_serial;                               /* the wingman's serial when this leads (friend.isValid) */
     /* the SpherePhysicsMover of a flight (mv.kind 2: a wreck, a smashed actor, a thrown vehicle; collide.c) */
     CollideMover cm; float cmat[12]; int cm_on;
     int cobj;                                        /* its object in the frame's collision world, -1 none */
