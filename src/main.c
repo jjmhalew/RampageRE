@@ -1304,9 +1304,13 @@ static void build(Viewer *v)
             memcpy(gc.cities_won, v->cities_won, sizeof gc.cities_won);   /* King of the World's so far */
             v->game = game_new(&gh, &gc);
             building_set_one_hit((v->prof.cheats & PCH_40000000) != 0);
-            v->challenges_lost = 0;                  /* a new city: "All Challenges Met" until one is not */
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
+                /* the city's total and flags from the status (profile_new_city cleared them for a campaign city
+                 * begun at its first block: "All Challenges Met" until one is not); a city resumed keeps its
+                 * checkpoint's: a challenge missed before stays missed [R 0x33DB90] */
+                game_set_city_status(v->game, v->prof.current.city_score, v->prof.current.city_flags);
+                v->challenges_lost = !(v->prof.current.city_flags & PC_CHALLENGES);
                 /* [R] SinglePlayer's load (0x2B7F50) sets +0x610, so its first frame (0x2B7BC0) brings the music
                  * to the profile's volume over 250 ms (the loading screen stopped the menu's music, showLoading,
                  * and BeginBlock's music only starts at 0.05 or more, 0x323CE0) */

@@ -1309,6 +1309,14 @@ int game_world_done(const Game *g) { return g ? g->world_done : 0; }
 int game_par_score(const Game *g) { return g ? g->par_score : 0; }
 uint32_t game_city_flags(const Game *g) { return g ? g->city_flags : 0; }
 
+void game_set_city_status(Game *g, int total, uint32_t flags)
+{
+    if (!g)
+        return;
+    g->city_total = total;
+    g->city_flags = flags & 0xB;                     /* the game's own: 1, 2, 8 (4 is the host's challenges) */
+}
+
 int game_start_block(const Game *g) { return g ? g->start_block : 0; }
 
 int game_block(const Game *g, const char **name)

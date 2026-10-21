@@ -311,7 +311,9 @@ starts again from 0 whenever the block is loaded again (a Continue, a King tie).
   set, and so does 0x80: the "city available" bit of the profile's city flags, which the city's destruction ORs the
   checkpoint's flags into (0x33DE10 at 0x33DF04), so it changes nothing there; flag 4 becomes the challenge star [R].
   A city started at a later block keeps the record's flags as restored or checkpointed, so a challenge missed earlier
-  stays missed [R].
+  stays missed [R]; its total (+0x2B0) too, so LevelResults' city score and par star count the blocks won before.
+  main.c hands game.c both at the city's start (`game_set_city_status`, `challenges_lost` from flag 4); up to v0.11.4
+  the port started every city at 0 and "all challenges met".
 - **The checkpoint.** Restoring it (0x33D820 / 0x33D910, a Continue) copies them back from +0x1F4. Saving it at
   each block won (0x33E290) stores them.
 - **The block won** (0x3255B0, entering state 7) runs in this order:
