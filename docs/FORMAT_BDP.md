@@ -581,7 +581,8 @@ The building's update (vtable +0x10, 0x2BDC70) runs a falling storey and then it
   `MinCollapseCrackLevel`, now and then glass or wall debris); then state 5, it shakes for 2 s
   (`Building_Pre_Collapse.edf`, a rumble for the monsters on it); then state 6 (0x2BD610): every `HesitationTime`
   less up to half of it at random, its lowest storey falls as above (without the crush), until only the ground
-  floor is left, which sinks 7 units into the ground over 7/3 × `CollapseTime` while the rubble shows; then only
+  floor is left, which sinks 7 units into the ground over 7/3 × `CollapseTime` while the rubble shows (its roof
+  set to state 3 as it starts, TopDmg's model: 0x2BB138 .. 0x2BB150, 0x2CFDA0 on face 5 [R]); then only
   the rubble is drawn (0x2CD394) and the building is inert (state 0).
 - **The shaker** (+0x8AC, from `ShakerDef`: `MasterAmp` 0.05, `ShakeLength` 0.5, and (period, phase, amp) triples
   (0.05, 1, 3), (0.25, 2, 0.25), (0.33, 3, 0.25), (0.61, 4, 0.25)) sways the building along x: MasterAmp × the sum

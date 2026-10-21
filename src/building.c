@@ -121,7 +121,8 @@ static void set_state(Building *b, int o, int col, int state)
 
 /* 0x2BAE70: live storey k-1 falls (k = 0: the building sinks into the ground): its cells to state 3, and on the live
  * storeys below (k-2) and above (k) it every face's cell still intact whose sheet column has an Outline (0x2D0500)
- * cracked, state 1 (0x2BAF24 .. 0x2BAFD4: 0x2CFDA0, the state alone) [R] */
+ * cracked, state 1 (0x2BAF24 .. 0x2BAFD4: 0x2CFDA0, the state alone); the sink makes the roof TopDmg's, state 3
+ * (0x2BB138 .. 0x2BB150: 0x2CFDA0 on face 5) [R] */
 static void floor_falls(Building *b, int k)
 {
     if (b->state == BUILDING_FLOOR_FALLING)
@@ -150,6 +151,8 @@ static void floor_falls(Building *b, int k)
                     building_set_level(b, f, k, c, 3);
             }
     }
+    if (k <= 0)
+        b->roof = 3;
     b->collapse = k;                                 /* 0x2CE240 */
     b->falls += k > 0;
     b->progress = 0;
