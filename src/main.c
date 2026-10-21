@@ -5669,8 +5669,16 @@ static void mon_step(Mon *mo, float dt)
                 mo->mode = MODE_PRONE;
                 memset(mo->vel, 0, sizeof mo->vel);
             }
-        } else if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {
-            memset(mo->vel, 0, sizeof mo->vel);        /* on a face: held there, no gravity, no ground */
+        } else if (mo->mode == MODE_BUILDING) {
+            /* 0x2E03A8 (mode 5 of the switch, 0x431290 [R]): the velocity 0 unless a state was posted (+0x110), no
+             * gravity and no ground follow, mounted or not (a knock-off's clip holds it where it is till its own
+             * mode event, after unmountBuilding); only below a ground at or under the street it is lifted, 0.4 x
+             * ground + 0.6 x z a world step (0x2E06E0 .. 0x2E0730) */
+            if (ev != 0)
+                memset(mo->vel, 0, sizeof mo->vel);
+            float g = ground_at(mo);
+            if (mo->mz < g && g <= 0)
+                mo->mz = g + (mo->mz - g) * powf(0.6f, dt * 30);
         } else {                                     /* 0x2DF6F0 (modes 0, 2 and 4 of the switch, 0x431290 [R]:
                                                       * taking off it is on the ground till a velocity event sets
                                                       * mode 1): a knock slides it, friction stops it */

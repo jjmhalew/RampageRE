@@ -144,7 +144,9 @@ The monster update (vtable +0x10, 0x2DE530) switches on the movement mode (+0xAD
   off) is a ground mode here: no gravity, the up velocity dropped, the friction on.
 - **Mode 1** (0x2DEBD8): with |v|² ≥ 1e-6, a drag v −= d × 0.002 × |v|² × dt on all three axes; the place moves by v ×
   dt; then gravity, 60 × dt off z, unless `setDisableGravity` (+0xAB8).
-- **Mode 5** (0x2E03A8): the velocity is 0 unless a slot is waiting.
+- **Mode 5** (0x2E03A8): the velocity is 0 unless a slot is waiting; no gravity and no ground follow, mounted or not
+  (a knock-off's clip after its `unmountBuilding` holds the monster where it is till its own mode event); only below a
+  ground at or under the street (z < ground ≤ 0) z goes 0.4 × ground + 0.6 × z a step (0x2E06E0 .. 0x2E0730) [R].
 
 F (+0xF4) is 50 at spawn (0x2E98C0). A hit (0x2D6A50) sets it:
 
