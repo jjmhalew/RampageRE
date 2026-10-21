@@ -83,6 +83,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (w && wp < 256) { if (!w->keys[wp]) w->pressed[wp] = 1; w->keys[wp] = 1; }
         return 0;
     case WM_KEYUP: case WM_SYSKEYUP: if (w && wp < 256) w->keys[wp] = 0; return 0;
+    case WM_SYSCHAR: if (wp == '\r') return 0; break;   /* Alt+Enter (fullscreen, settings_keys): no beep */
     case WM_RBUTTONDOWN: if (w) { w->mouse_right = 1; last_x = (short)LOWORD(lp); last_y = (short)HIWORD(lp); SetCapture(hwnd); } return 0;
     case WM_RBUTTONUP: if (w) w->mouse_right = 0; ReleaseCapture(); return 0;
     case WM_MOUSEMOVE:

@@ -68,7 +68,7 @@ disc as on a PAL console. The game's own steps are the NTSC ones either way (30 
 
 Keys: W A S D move, Q E down and up, Shift faster, right mouse button to look around, the wheel changes the speed;
 Page Up / Page Down the block, 1-7 the city, N day or night, F fog, H the armed attack spheres, M the next monster (none, then all 30), K / L
-the monster's clips, G play or the free camera, F5 .. F9 the graphics settings and F11 fullscreen ("Graphics
+the monster's clips, G play or the free camera, F5 .. F9 the graphics settings and F11 or Alt+Enter fullscreen ("Graphics
 settings"), F12 a screenshot, Esc quit (in a game: the Pause menu; in the menus: back). In play (the default with `--monster`)
 the keys are a pad: W A S D the left stick, the arrows the right stick (the head), Space Cross (jump), J Square
 (punch), K Triangle (kick), L Circle (grab), R R2 (roar), P or Enter Start (the Pause menu: the arrows choose, Enter
@@ -418,7 +418,7 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | Setting | `rampage.cfg` | Flag | Environment | Key | What it does |
 |---|---|---|---|---|---|
 | window size | `window=1280x720` | `--window WxH` | `RAMPAGE_WINDOW` | | the inside of the window, centred on the screen (shrunk to fit, its shape kept); a `--shot` is drawn at that size too |
-| fullscreen | `fullscreen=0` | `--fullscreen`, `--windowed` | `RAMPAGE_FULLSCREEN` | F11 | borderless over the whole monitor at the desktop's resolution (no mode switch) |
+| fullscreen | `fullscreen=0` | `--fullscreen`, `--windowed` | `RAMPAGE_FULLSCREEN` | F11, Alt+Enter | borderless over the whole monitor at the desktop's resolution (no mode switch) |
 | vsync | `vsync=1` | `--vsync 0\|1` | `RAMPAGE_VSYNC` | | the swap interval (`wglSwapIntervalEXT`, SDL's) |
 | ambient occlusion | `ao=0` | `--ao`, `--noao` | `RAMPAGE_AO` | F5 | GTAO: contact shadows where surfaces meet (building bases, ledges, under the monster's feet) |
 | its radius | `ao_radius=4` | `--ao-radius R` | `RAMPAGE_AO_RADIUS` | | how far (world units; a monster is about 25 tall) a surface looks for what hides the sky |

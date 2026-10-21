@@ -8213,7 +8213,7 @@ static int viewer_main(int argc, char **argv)
                 w.quit = 1;
 #endif
         }
-        settings_keys(&gfx, &w);                     /* F5 .. F9 the graphics, F11 fullscreen */
+        settings_keys(&gfx, &w);                     /* F5 .. F9 the graphics, F11 / Alt+Enter fullscreen */
         if (v.shell) {                               /* the front end has the screen and the pad */
             if (v.shell_go) {                        /* the loading screen was drawn: the game */
                 v.shell_go = 0;

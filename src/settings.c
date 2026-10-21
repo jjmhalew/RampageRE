@@ -199,7 +199,8 @@ int settings_keys(Settings *s, Window *w)
             s->aniso = 1;
     } else if (w->pressed[VK_F9])
         s->mips = !s->mips;
-    else if (w->pressed[VK_F11]) {
+    else if (w->pressed[VK_F11] || (w->pressed[VK_RETURN] && w->keys[VK_MENU])) {   /* Alt+Enter too, as on PC */
+        w->pressed[VK_RETURN] = 0;                   /* not also Enter (the menus' accept, Start) */
         s->fullscreen = !s->fullscreen;
         win_mode(w, s->width, s->height, s->fullscreen);
         return 1;
