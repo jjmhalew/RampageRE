@@ -1008,9 +1008,11 @@ static void bot_hunt(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
     float dx = o->pos[0] - v->pos[0], dy = o->pos[1] - v->pos[1], l = sqrtf(bd);
     if (bd >= 225)
         bot_walk(ai, ag, r, v, o->pos, 0, o->mounted, call, ctx);
-    else if (o->mounted >= 0 && o->mounted < v->nb && v->pos[1] > v->b[o->mounted].min[1] - 10) {
-        float back[3] = { v->pos[0], v->pos[1] - 10, v->pos[2] };   /* under a climber: back off */
-        bot_walk(ai, ag, r, v, back, 0, o->mounted, call, ctx);
+    else if (o->mounted >= 0 && o->mounted < v->nb && v->pos[1] < v->b[o->mounted].min[1]) {
+        /* [R 0x2F1900 .. 0x2F19B4] in front of a climber's building (its y below the front's, +0x1E0), however close:
+         * back off 10 towards the street (0x40A018: (0, 1, 0) x -10), the walk with no building */
+        float back[3] = { v->pos[0], v->pos[1] - 10, v->pos[2] };
+        bot_walk(ai, ag, r, v, back, 0, -1, call, ctx);
     } else if (l > 1e-6f && (v->fwd[0] * dx + v->fwd[1] * dy) / l < 0.95f)
         bot_walk(ai, ag, r, v, o->pos, 0, o->mounted, call, ctx);
     else
