@@ -5348,14 +5348,15 @@ static int rage_fx_at(Mon *mo, float at[3])
     return 0;
 }
 
-/* the rage's effect, on (startRage 0x2D4360 -> 0x2F4710) or off (stopRage 0x2D4340 -> 0x2F46D0: released) [R]:
- * the book's RageFx (Rage.edf: Rage_enter, Rage_loop and camshake_collapse) in the world's frame, started outside
- * the effects budget and only when none is on; addStats' restart stops the old one first */
+/* the rage's effect, on (startRage 0x2D4360 -> 0x2F4710) or off (stopRage 0x2D4340 -> 0x2F46D0, and the update's
+ * 0x2DE96C / 0x2DE9B0) [R]: the book's RageFx (Rage.edf: Rage_enter, Rage_loop and camshake_collapse) in the world's
+ * frame, started outside the effects budget and only when none is on; addStats' restart stops the old one first. Off,
+ * it is handed straight back to the FxManager (0x207A40, no shutdown first): gone at once, its particles too */
 static void mon_rage_fx(Mon *mo, int on)
 {
     Viewer *v = mo->v;
     if (mo->rage_on && v->fxw)
-        fx_stop(v->fxw, mo->rage_fx);
+        fx_kill(v->fxw, mo->rage_fx);
     mo->rage_on = 0;
     float at[3];
     if (on && v->fxw && mo->rage_fx_name[0] && rage_fx_at(mo, at) == 0 &&
