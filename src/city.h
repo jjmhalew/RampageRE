@@ -141,6 +141,11 @@ typedef struct {                                      /* a building's cells and 
     /* its place in the work queue (0x4D7870) for a relight: the frame it was queued + 1 (0 not queued), and a change
      * of its own still waiting to be served (+0x154, kept until a grant) */
     int light_queued, light_pending;
+    /* the ground floor's crack overlay (G+0x674, city.c ground_cracks_make / ground_cracks): the ground model's draw
+     * item whose (lit) mesh carries it as its part gf_part (-1 none), its triangles while shown (+0x61), per vertex
+     * the bottom-row grid vertex it follows, its height factor and its damage (+0x58: 3 bytes each), and its own place
+     * in the work queue (+0x16C) */
+    int gf_item, gf_part, gf_ntris, gf_queued; uint8_t (*gf_vert)[3];
 } SceneBuilding;
 
 struct IkFeet;

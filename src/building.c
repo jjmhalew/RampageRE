@@ -35,6 +35,7 @@ void building_init(Building *b, const float min[3], const float max[3], int widt
     static const float SHAKE[4][3] = { { 0.05f, 1, 3 }, { 0.25f, 2, 0.25f }, { 0.33f, 3, 0.25f }, { 0.61f, 4, 0.25f } };
     memcpy(b->shake, SHAKE, sizeof b->shake);
     b->seed = 1;
+    b->ground_due = 1;                               /* 0x2D2820 */
 }
 
 int building_cell_index(const Building *b, int face, int column)
@@ -164,6 +165,8 @@ void building_set_level(Building *b, int face, int row, int col, int level)
     int ncol = face == FACE_FRONT ? b->width : b->depth;
     if (face < 0 || face > 2 || row < 0 || row > b->n || col < 0 || col > ncol || col >= BUILDING_VCOLS)
         return;
+    if (row == 0)                                    /* [R 0x2CEB48]: the ground floor's cracks follow row 0 */
+        b->ground_due = 1;
     BuildingVert *v = &b->vert[row][face][col];
     int old = v->level, lc = level < 3 ? level : 3;
     if (old == level)
@@ -370,7 +373,12 @@ int building_hit(Building *b, const float p[3], float radius)
         /* [R 0x2BC5C4, 0x2BC6F4, 0x2BC840 .. 0x2BC890] the ground floor (face 4) takes no cell damage and no dents; a
          * hit of radius 2 or more by an attacker that is not an Actor (0x2842F0 with 0x4D5BF0) gives Wall_Small (0x35)
          * at the hit's own point. Every hit here is a monster's or a flying object's (an actor's Mass is 1: radius
-         * 0.001), so none is an Actor's */
+         * 0.001), so none is an Actor's. Before that, whoever hit it, 0x2CF680 cracks the ground floor's overlay
+         * there (+102 alpha within 3.55: building.h ground_hit) */
+        if (radius >= 2.0f) {
+            b->ground_hit = b->ground_due = 1;
+            memcpy(b->ground_at, p, sizeof b->ground_at);
+        }
         if (radius >= 2.0f && b->nhit_debris < 8)
             memcpy(b->hit_debris[b->nhit_debris++], p, 3 * sizeof(float));
         return 0;

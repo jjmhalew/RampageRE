@@ -2058,16 +2058,17 @@ static void facade_passes(Scene *s, SceneBuilding *sb)
     }
 }
 
-/* the work queue (0x2BF270(Q, item, 4)) a relight goes through: the first request of a frame is granted, a later one
- * once it has waited 4 frames [R]; a grant takes it off the queue */
-static int light_grant(Scene *s, SceneBuilding *sb)
+/* the work queue (0x2BF270(Q, item, 4)) a relight (the building's item +0x158) and the ground floor's cracks (+0x16C)
+ * go through: the first request of a frame is granted, a later one once it has waited 4 frames [R]; a grant takes it
+ * off the queue. *queued: the item's frame + 1, 0 not queued */
+static int light_grant(Scene *s, int *queued)
 {
-    if (!sb->light_queued)
-        sb->light_queued = s->light_frame + 1;
-    if (s->light_granted && s->light_frame - (sb->light_queued - 1) < 4)
+    if (!*queued)
+        *queued = s->light_frame + 1;
+    if (s->light_granted && s->light_frame - (*queued - 1) < 4)
         return 0;
     s->light_granted = 1;
-    sb->light_queued = 0;
+    *queued = 0;
     return 1;
 }
 
@@ -2469,6 +2470,9 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         memset(&sb->shade, 0, sizeof sb->shade);
         memset(sb->shade_faces, 1, sizeof sb->shade_faces);   /* G+0x1EC: 0xFF at the grid's making (0x2D2824) */
         sb->nlit_items = 0;
+        sb->gf_item = sb->gf_part = -1;
+        sb->gf_ntris = sb->gf_queued = 0;
+        sb->gf_vert = NULL;
         int32_t v = 0;
         for (int st = 0; st < nst && st < BUILDING_STOREYS; st++) {
             sb->floor_tint[st][0] = group_num(floors[st], "FloorTintR", 1);   /* the cells' tint (0x2CBC78) */
@@ -2787,6 +2791,148 @@ static void light_items_make(Scene *s, SceneBuilding *sb)
     }
 }
 
+/* 0x33A920: the bottom-row grid vertex a ground-floor vertex follows, as an index into the row as the game keeps it
+ * (left 0 .. 2 back to front, right 3 .. 5 front to back, front 6 .. 6 + W left to right: the depth taken as 2), by
+ * where the vertex stands on the footprint (x, y from its left front corner; w5, d5 its width and depth) [R]: the left
+ * tenth by y, the right tenth by y, the middle (the back's too) by x; a front corner (the front tenth) is the front's
+ * or the side's end vertex by the way it faces */
+static int ground_zone(const float p[3], const float n[3], float w5, float d5)
+{
+    float x = p[0] + 0.5f * w5, y = p[1] + 0.5f * d5, t;
+    int base, zone = (x < 0.1f * w5 ? 0 : x <= 0.9f * w5 ? 1 : 2) + (y < 0.1f * d5 ? 3 : 0);
+    switch (zone) {
+    case 3: return n[1] <= n[0] ? 6 : 2;
+    case 5: return -n[1] < n[0] ? 3 : ((int)(0.5f + w5 / 5) & 0xFF) + 6;
+    case 0: base = 0; t = d5 - (y < 0 ? 0 : y > d5 ? d5 : y); break;
+    case 2: base = 3; t = y < 0 ? 0 : y > d5 ? d5 : y; break;
+    default: base = 6; t = x < 0 ? 0 : x > w5 ? w5 : x; break;
+    }
+    return (base + (int)(0.5f + 0.2f * t)) & 0xFF;
+}
+
+static float fixed_412(float u)                     /* a UV as the game stores it: the s16 of (int)(u x 4096) */
+{
+    return (float)(int16_t)(int32_t)(u * 4096) / 4096;
+}
+
+/* 0x33A2A0 (made at the overlay's first update, 0x2CE2C0 when G+0x6D0 is 0; here at the block's end, nothing it reads
+ * changes after): the ground floor's crack overlay, a copy of the ground model's (G+0x66C) first part of format 0x112
+ * (its material's shader's, 0x260530; here the section's own, which every ground model's parts share with their
+ * materials [G]) whose strip wrapper (+0x4C) is of type 4 (every part's), as format 0x142: the same strip, coloured,
+ * CrackTexture (G+0xB4) by shader 0x4C (0x25C4F0, 0x260040), as the facade's cracks. Per vertex (+0x58, 3 bytes) the
+ * bottom-row grid vertex it follows (ground_zone), its height factor clamp((int)(42.5 z + 0.5), 0, 255) (0 at the
+ * street, 255 from 6 up: the storey above's foot) and its damage, 0; its UVs at k = 1 / CrackScale (G+0xC0), W and D
+ * the grid's width and depth (+0x4, +0x8) [R]:
+ * - facing up or down (|nz| > 0.9): u = k (x + 5D), v = 1 - k (y + 2.5D + 3);
+ * - else v = 1 - k z, and u = k (x + 5D) facing the front or the back (|ny| > |nx|), k (5W + y + 2.5D) on the right
+ *   (x > 0), k (2.5D - y) on the left.
+ * Drawn (0x339E40, from the grid's draw 0x2CD530 right after the lit ground model, with its place and its sink) only
+ * once ground_cracks has shown it (+0x61): here a part of the ground model's lit mesh, so it goes where that goes */
+static void ground_cracks_make(Scene *s, SceneBuilding *sb)
+{
+    sb->gf_item = sb->gf_part = -1;
+    int k = 0;
+    while (k < sb->nlit_items && (sb->ground < 0 || s->items[sb->lit_item[k]].instance != sb->ground))
+        k++;
+    if (k == sb->nlit_items || sb->mesh < 0 || s->meshes[sb->mesh].mesh.nparts < 3)
+        return;
+    const Mesh *src = &s->meshes[sb->lit_src[k]].mesh;
+    uint32_t pi = 0;
+    while (pi < src->nparts && !(src->parts[pi].nrm && src->parts[pi].uv && !src->parts[pi].col))
+        pi++;
+    if (pi == src->nparts)
+        return;
+    const MeshPart *sp = &src->parts[pi];
+    Mesh *m = &s->meshes[s->items[sb->lit_item[k]].mesh].mesh;
+    MeshPart *parts = realloc(m->parts, sizeof *parts * (m->nparts + 1));
+    if (!parts)
+        return;
+    m->parts = parts;
+    MeshPart *p = &parts[m->nparts];
+    memset(p, 0, sizeof *p);
+    size_t nv = sp->nverts ? sp->nverts : 1, nt = sp->ntris ? sp->ntris : 1;
+    p->material = s->meshes[sb->mesh].mesh.parts[2].material;   /* the facade's cracks' CrackTexture */
+    p->blend = 1;
+    p->nverts = sp->nverts;
+    p->pos = malloc(12 * nv);
+    memcpy(p->pos, sp->pos, 12 * (size_t)sp->nverts);
+    p->tris = malloc(12 * nt);
+    memcpy(p->tris, sp->tris, 12 * (size_t)sp->ntris);
+    p->uv = malloc(8 * nv);
+    p->col = calloc(4 * nv, sizeof *p->col);
+    sb->gf_vert = calloc(nv, sizeof *sb->gf_vert);
+    float w5 = CELL * (float)sb->b.width, d5 = CELL * (float)sb->b.depth, ck = sb->crack_k;
+    for (uint32_t v = 0; v < sp->nverts; v++) {
+        const float *x = sp->pos + 3 * v, *n = sp->nrm + 3 * v;
+        int f = (int)(42.5f * x[2] + 0.5f);
+        sb->gf_vert[v][0] = (uint8_t)ground_zone(x, n, w5, d5);
+        sb->gf_vert[v][1] = (uint8_t)(f < 0 ? 0 : f > 255 ? 255 : f);
+        float u, t;
+        if (fabsf(n[2]) > 0.9f) {
+            u = ck * (x[0] + d5);
+            t = 1 - ck * (x[1] + 0.5f * d5 + 3);
+        } else {
+            t = 1 - ck * x[2];
+            u = fabsf(n[1]) > fabsf(n[0]) ? ck * (x[0] + d5) : x[0] > 0 ? ck * (w5 + x[1] + 0.5f * d5) :
+                ck * (0.5f * d5 - x[1]);
+        }
+        p->uv[2 * v] = fixed_412(u);
+        p->uv[2 * v + 1] = fixed_412(t);
+    }
+    sb->gf_part = (int)m->nparts++;
+    sb->gf_item = sb->lit_item[k];
+    sb->gf_ntris = (int)sp->ntris;
+}
+
+/* 0x339F20: the overlay's colours, when the work queue grants its item (0x2BF210: G+0x670 set) [R]. The bottom vertex
+ * row (the lowest standing storey's foot, G+0x48[0]): each vertex's colour, the building light times CrackTint, and its
+ * alpha, the dent level x 85 (the grid vertex's +0x0, 0x2CE7B8). With none of them dented and never a ground-floor hit
+ * (+0x60) it is not shown (+0x61 0). Otherwise each vertex takes its grid vertex's colour and the alpha
+ * (level x 85 x its height factor >> 8) + its damage (up to 255), halved as the GS reads it (0x80 = 1); its damage
+ * first grows by 102 (up to 255) if it lies within 3.55 of the last ground-floor hit (its point less the building's
+ * place, G+0x0's +0x24), on every update, as nothing clears that hit */
+static void ground_cracks(Scene *s, SceneBuilding *sb)
+{
+    if (sb->gf_item < 0)
+        return;
+    MeshPart *p = &s->meshes[s->items[sb->gf_item].mesh].mesh.parts[sb->gf_part];
+    const Building *b = &sb->b;
+    int n = b->width + 7, any = 0, alpha[BUILDING_VCOLS + 6];
+    float rgb[BUILDING_VCOLS + 6][3];
+    if (n > BUILDING_VCOLS + 6)
+        n = BUILDING_VCOLS + 6;
+    for (int k = 0; k < n; k++) {
+        int face = k < 3 ? FACE_LEFT : k < 6 ? FACE_RIGHT : FACE_FRONT, col = k < 3 ? k : k < 6 ? k - 3 : k - 6;
+        int lv = col <= (face == FACE_FRONT ? b->width : b->depth) ? b->vert[0][face][col].level : 0;
+        alpha[k] = lv * 85 < 255 ? lv * 85 : 255;
+        any |= alpha[k];
+        for (int c = 0; c < 3; c++) {
+            float v = (sb->light ? sb->light[0][face][col][c] : 1) * sb->crack_tint[c];
+            rgb[k][c] = v < 0 ? 0 : v > 1 ? 1 : v;
+        }
+    }
+    if (!b->ground_hit && !any) {
+        if (p->ntris) {
+            p->ntris = 0;
+            p->rev++;
+        }
+        return;
+    }
+    float at[3] = { b->ground_at[0] - sb->node.m[12], b->ground_at[1] - sb->node.m[13], b->ground_at[2] - sb->node.m[14] };
+    for (uint32_t v = 0; v < p->nverts; v++) {
+        uint8_t *g = sb->gf_vert[v];
+        const float *x = p->pos + 3 * v;
+        float dx = x[0] - at[0], dy = x[1] - at[1], dz = x[2] - at[2];
+        if (b->ground_hit && dx * dx + dy * dy + dz * dz < 3.55f * 3.55f)
+            g[2] = (uint8_t)(g[2] + 102 < 255 ? g[2] + 102 : 255);
+        int z = g[0] < n ? g[0] : n - 1, a = (alpha[z] * g[1] >> 8) + g[2];
+        memcpy(p->col + 4 * v, rgb[z], sizeof rgb[z]);
+        p->col[4 * v + 3] = (float)((a < 255 ? a : 255) >> 1) / 128;
+    }
+    p->ntris = (uint32_t)sb->gf_ntris;
+    p->rev++;
+}
+
 /* 0x31CCA0: the ground-floor and top models' vertices lit where they are (the light at the vertex, its normal turned
  * into the world), less the neighbours' shadows (0x31D560: the front's planes where p.y <= front y + 0.1, the right
  * face's boxes where p.x > max x - 1) */
@@ -2848,6 +2994,7 @@ static void light_buildings(Scene *s)
     for (uint32_t i = 0; i < s->nbuildings; i++) {
         shade_neighbours(s, i);
         light_items_make(s, &s->buildings[i]);
+        ground_cracks_make(s, &s->buildings[i]);
     }
     for (uint32_t i = 0; i < s->nscenery; i++)
         light_items_make(s, &s->scenery[i]);
@@ -3995,10 +4142,16 @@ void scene_buildings_update(Scene *s, float dt)
         if (moving || sb->moving || sb->b.dirty)
             sb->light_pending = 1;
         int asked = shade_changed(s, sb) || sb->light_pending;
-        int relit = asked && light_grant(s, sb);
+        int relit = asked && light_grant(s, &sb->light_queued);
         if (relit) {
             light_building(s, sb, 1);
             sb->light_pending = 0;
+            sb->b.ground_due = 1;                    /* [R 0x2CE344] */
+        }
+        /* the ground floor's cracks (0x2BF210 .. 0x2BF258): due (G+0x670), their own item through the same queue */
+        if (sb->b.ground_due && light_grant(s, &sb->gf_queued)) {
+            sb->b.ground_due = 0;                    /* 0x2CE2CC */
+            ground_cracks(s, sb);
         }
         sb->moving = moving;
         for (int k = 0; k < sb->b.nhit_debris; k++) {   /* a ground floor hit's Wall_Small at its point (0x2BC88C) */
@@ -4352,6 +4505,7 @@ void scene_free(Scene *s)
         free(s->buildings[i].rest);
         free(s->buildings[i].adorn);
         free(s->buildings[i].light);
+        free(s->buildings[i].gf_vert);
     }
     free(s->buildings);
     for (uint32_t i = 0; i < s->nscenery; i++) {

@@ -102,6 +102,12 @@ typedef struct {
     /* and the ground floor's: Wall_Small at a hit's own point (0x2BC88C -> 0x30FCB0 -> 0x30FD40); the host plays them
      * and sets nhit_debris to 0 */
     float hit_debris[8][3]; int nhit_debris;
+    /* the ground floor's crack overlay (G+0x674, docs/FORMAT_BDP.md "Damage"; city.c ground_cracks): due an update
+     * (G+0x670: set at the grid's making 0x2D2820, by a level set on vertex row 0 0x2CEB50 and a ground-floor hit
+     * 0x2CF690; the host's relight sets it too, 0x2CE344), and the last ground-floor hit of radius 2 or more
+     * (0x2BC85C -> 0x2CF680 -> 0x339DF0: its point in the world, +102 alpha within 3.55 of it). Nothing clears the
+     * hit (+0x60, +0x74): every update of the overlay adds its damage again [R] */
+    int ground_due, ground_hit; float ground_at[3];
     /* the front has cracked, it shakes (0x2BD7D0 into state 5): the dust at its foot, Floor_Large at every other
      * column's edge on the ground (0x3101C0 with key 0x38, the point {4: the ground, along 5 x 1, 3, ..} on the
      * front) and Building_Pre_Collapse.edf 5 before its place (0x30FD40); the host plays them and clears it */

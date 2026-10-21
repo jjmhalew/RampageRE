@@ -1024,6 +1024,11 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
                                                           * GS states 2 and 7: ALPHA 0x44, TEST 0x5000D (alpha > 0),
                                                           * Z written] */
             glDepthMask(GL_FALSE);
+        if (blend == 1)                                  /* the cracks: Z test GEQUAL, the GS's z growing nearer [R
+                                                          * shader 0x4C, GS state 2], so the ground floor's, on the
+                                                          * very triangles of its model (city.c ground_cracks_make),
+                                                          * show on them */
+            glDepthFunc(GL_LEQUAL);
     }
     /* a reflective material (kind 5: shader 0x1A, record 26 at 0x3B5C10; 0x19 with flag 2, set on none) [R]: its first
      * pass is GS state 1, TEST 0x50002, no alpha test: the texture's alpha is not a cut-out but the share of the
@@ -1062,6 +1067,7 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
         glDisable(GL_BLEND);
         glAlphaFunc(GL_GREATER, 0.5f);
         glDepthMask(GL_TRUE);
+        glDepthFunc(GL_LESS);
     }
     if (dmg) {                                           /* the second pass: the layer over the part, (Cs - Cd) x Ad + Cd,
                                                           * Ad the alpha of the first: its opaque texture's x the vertex's */

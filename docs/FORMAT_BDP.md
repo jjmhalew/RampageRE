@@ -541,6 +541,30 @@ units of where it was, hits the building (vtable +0x34, 0x2BC150) with radius 2.
    colour per grid vertex times the storey's `FloorTintR/G/B` (the cells' tint): see
    [BUILDING_LIGHT_NOTES.md](BUILDING_LIGHT_NOTES.md).
 
+**The ground floor's cracks** [R]. The ground floor has no cells, but its model (`ShapeSet|GroundFloorShapes`,
+G+0x66C) cracks too, through an overlay the grid keeps at G+0x674 (city.c `ground_cracks_make`, `ground_cracks`):
+- **Made** (0x33A2A0, at its first update) from the model's first part whose material's shader takes format 0x112
+  (normals and UVs; every ground model's first part) and whose strip wrapper is of type 4 (all of them): its
+  positions and strip in a buffer of format 0x142 (colours instead of normals), with `CrackTexture` by shader 0x4C,
+  the facade cracks'. Each vertex keeps three bytes: the grid vertex of the bottom vertex row it follows (0x33A920:
+  the left and the right tenth of the footprint by y, the middle, the back's too, by x, a front corner by the way it
+  faces; as an index into the row as the grid keeps it, left 0 … 2, right 3 … 5, front from 6), a height factor
+  clamp((int)(42.5 z + 0.5), 0, 255) (0 at the street, full from 6 up) and its damage, 0. Its UVs run at 1 /
+  `CrackScale`: facing up or down u = k (x + 5D), v = 1 − k (y + 2.5D + 3), else v = 1 − k z and u = k (x + 5D) on
+  the front and the back, k (5W + y + 2.5D) on the right, k (2.5D − y) on the left.
+- **Hit**: a ground-floor hit of radius 2 or more (Building::hit's face 4, 0x2BC85C → 0x2CF680 → 0x339DF0) keeps its
+  point (less the building's place), 3.55 and 2 × 51 = 102.
+- **Updated** (0x339F20) whenever its item (+0x16C) passes the relight's work queue (0x2BF210, 0x2BF270) with
+  G+0x670 set: at the grid's making, by every relight (0x2CE300), by a dent level set on vertex row 0 (0x2CEAD0) and by
+  a ground-floor hit. With no vertex of the bottom row dented and never a hit it is not drawn; otherwise each vertex
+  within 3.55 of the last hit has its damage raised by 102 (up to 255), and takes its grid vertex's colour (the
+  building light × `CrackTint`) and the alpha (level × 85 × its height factor >> 8) + its damage, up to 255. Nothing
+  clears the hit, so every later update adds its 102 again.
+- **Drawn** (0x339E40) by the grid's draw right after the lit ground model (0x2CD530), with its place and its sink.
+
+So the ground floor cracks from the top down as the storey above is dented (a punch's ring reaches row 0, the
+cracking of a destroyed building starts there), and around a low hit (a kick, `hitBuildingFront(2, 0.5, 6, 3)`).
+
 **The roof stomp** [R]. `Monsters.bsf`'s `damageRoof` ignores its four arguments and calls
 `monster.hitBuildingRoof("Bip01 R Foot", 1, 2.0)` (the monsters with a `damageRoof` of their own, Cal, Eyegore, Jill,
 Natalie and Venus, pass `"Bip01 Spine"`). George's graph fires it in `Ground_Punch_Down` (Square with the stick down,
