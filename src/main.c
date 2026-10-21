@@ -3351,7 +3351,8 @@ static int boss_fx_frame(Viewer *v, int part, const char *node, int node_id, con
 }
 
 /* the bosses' frame: what they see of the monsters and the buildings, then what they did */
-/* NewYork.scr's centre building (findBuildingByPosition(0, 10, 1)) falling or down */
+/* NewYork.scr's centre building (findBuildingByPosition(0, 10, 1)) isFalling() || isDestroyed(): a storey coming
+ * down (0x2CE230) or the building gone (+0x14C 0) [R] */
 static int ny_centre_down(Viewer *v)
 {
     float cy = 10 + v->block_shift;
@@ -3359,7 +3360,7 @@ static int ny_centre_down(Viewer *v)
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *bb = &v->scene.buildings[i].b;
         if (bb->min[0] <= 0 && bb->max[0] >= 0 && bb->min[1] <= cy && bb->max[1] >= cy)
-            down = bb->state != BUILDING_STANDING && bb->state != BUILDING_FLOOR_FALLING;
+            down = bb->collapse >= 0 || bb->state == BUILDING_GONE;
     }
     return down;
 }
@@ -3394,8 +3395,12 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
         o->width = b->width;
         o->storeys = b->storeys;
         o->height = b->max[2];
-        o->destroyed = b->state == BUILDING_GONE || b->state >= BUILDING_CRACKING;
-        o->falling = b->state >= BUILDING_CRACKING;
+        /* [R] isDestroyed (0x2AD780): +0x14C 0, gone; isFalling (0x2ADE10 -> 0x2CE230): a storey coming down
+         * (G+0x1CC set: a floor dropping off a standing building too, not the cracking or the shaking);
+         * findBuildingNearMonster (0x318320) and getRandomBuilding (0x2AECF8) take any with +0x14C not 0, one coming
+         * down too */
+        o->destroyed = b->state == BUILDING_GONE;
+        o->falling = b->collapse >= 0;
         o->standing = !o->destroyed;
         o->hp_frac = b->hp_max > 0 ? (float)b->hp / (float)b->hp_max : 0;
         o->inst = sb->inst;

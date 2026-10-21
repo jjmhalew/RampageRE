@@ -123,7 +123,15 @@ last leg's pitch, and `setFacing` / `setFacingZ` change only their part (boss.c 
 
 **Other natives** [R]:
 - `gWorld.getPlayValue / setPlayValue`: a table of ints. The generators write it and the blimp reads it.
-- `Monster.isClimbing`: +0xB9C0 ≠ 0.
+- `Monster.isClimbing` (0x2AAAD8): mode 5 (+0xAD8) and mounted (+0xC644). A monster only getting on (its mount
+  prepared, +0xC640 set) is not climbing.
+- `Building.isFalling` (0x2ADE10 → 0x2CE230): a storey of it coming down, G+0x1CC set (a floor dropping off a
+  standing building too; not while it cracks or shakes, nor between its storeys). `isDestroyed` (0x2AD780): +0x14C 0,
+  gone. `findBuildingNearMonster` (0x318320) and `getRandomBuilding` (0x2AECF8) take any building with +0x14C not 0,
+  one cracking, shaking or falling too [R]. Up to v0.11.4 the port had isFalling and isDestroyed from the cracking
+  on, so HK10's Leeper on a roof did not leap off as a storey went from under it, NY10's generator died and the back
+  barriers dropped as the centre building began to crack (not as its first storey fell), and the Leeper never
+  picked a building coming down.
 - `Monster.playReaction(name)`: the move state of that name (0x2D9890), started through 0x2D9710.
 
 **The AttackObject's oscillation** (vtable 0x44B470; its init 0x304FA0 → 0x315330, its update 0x314EF0) [R]:

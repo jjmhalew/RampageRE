@@ -124,9 +124,9 @@ typedef struct {
     float min[3], max[3];   /* its box in the world */
     int width, storeys;     /* getSizeX (cells along the front), getSizeZ (the template's storeys) */
     float height;       /* getCurrentHeight: the top of what stands now */
-    int standing;       /* still there (+0x14C): neither destroyed nor gone */
-    int falling;        /* isFalling: its collapse has started */
-    int destroyed;      /* isDestroyed */
+    int standing;       /* still there (+0x14C not 0): not gone, coming down or not */
+    int falling;        /* isFalling: a storey of it coming down (G+0x1CC set, 0x2CE230) */
+    int destroyed;      /* isDestroyed: gone (+0x14C 0) */
     float hp_frac;      /* getDestructionFrac: the share of its BuildingHP left, 1 .. 0 */
     Group inst;         /* its BuildingInstance| group (the NY barriers' VolumeTrigger| groups) */
 } BossBuilding;
