@@ -3121,7 +3121,9 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
         hit += parade_hit(v->parade, mo->slot, c, r, rec);
     upgrade_touch(mo, c, r);
     if (v->sobj) {
-        StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f };
+        StreetMonster me = { { mo->mx, mo->my, mo->mz }, mo->heading / 57.2957795f,   /* (getMoveName: the roar's
+                                                      * state, "Ground..." for MerryGoRound / DamagingEffect) */
+                             mo->graph.states[mo->run.state].name };
         hit += streetobj_hit(v->sobj, mo->slot, &me, c, r, amount, rec);
     }
     if (v->scene.folk) {
