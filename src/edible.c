@@ -916,6 +916,9 @@ int edible_power_update(EdiblePower *p, float dt, float hp)
             return 1;
         }
     }
+    if (hp <= 0)                                     /* [R 0x2DE980 .. 0x2DE9B4] at 0 HP, raging or not, each frame:
+                                                      * the energy, rage and speed 0, 0 and 1 */
+        stop_rage(p);
     return 0;
 }
 

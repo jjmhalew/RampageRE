@@ -183,7 +183,8 @@ The substitutes have no look record; they exist only to be eaten.
 - **The update** (0x2E1CB0):
   - the speed clock runs down, then the scale goes back to 1;
   - while raging, the rage clock runs down and the energy falls by 100 × dt / 25 (×3 once the clock is out);
-  - 0x2DE530 ends the rage when both are out, or at 0 HP.
+  - 0x2DE530 ends the rage when both are out; at 0 HP, raging or not, it clears the energy, the rage and the speed
+    every frame (0x2DE980), so a monster defeated comes back with no energy.
 - **Across blocks**: the monster outlives the block (activateNextBlock 0x2B6580 does not touch it): its HP, energy,
   rage and speed go on; HP is set only by the world's start (0x2E98C0), a Continue (0x32528C), the respawns, hits and
   stats [R].
