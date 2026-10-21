@@ -939,14 +939,18 @@ static void bot_with_target(DirAI *ai, const DirGraph *ag, MoveRunner *r, const 
             return;
         }
         bot_update_cell(bt, v);
-        if ((bt->cooldown <= 0 || bt->cur_storey == bt->cell_storey) && bt->cur_storey < b->storeys &&
+        /* [R 0x2F0928 .. 0x2F0994] the punch: the target cell's storey (+0x50) below the top, the current cell
+         * (+0x58) intact */
+        if ((bt->cooldown <= 0 || bt->cur_storey == bt->cell_storey) && bt->cell_storey < b->storeys &&
             bot_cell(v, bt->target, bt->cur_storey, bt->cur_col) < 3) {
             bt->have_cell = 0;
             bot_action(r, ag, DA_ATTACK, 1, call, ctx);   /* the cell in front */
             return;
         }
-        if (!bt->have_cell || bt->cell_storey >= b->storeys ||
-            bot_cell(v, bt->target, bt->cell_storey, bt->cell_col) >= 3) {
+        /* [R 0x2F09A8 .. 0x2F0A14] the target kept while it is above no top and, below the roof, intact; the roof
+         * (its storey the building's storeys) is kept: the bot climbs straight to it */
+        if (!bt->have_cell || bt->cell_storey > b->storeys ||
+            (bt->cell_storey < b->storeys && bot_cell(v, bt->target, bt->cell_storey, bt->cell_col) >= 3)) {
             int s = bt->cur_storey, c = bt->cur_col, found = 0;
             if (!(b->width < 3 && v->rail == 1)) {
                 int dl = bot_dist(v, bt->target, s, c, -1), dr = bot_dist(v, bt->target, s, c, 1);
