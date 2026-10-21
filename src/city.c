@@ -1369,6 +1369,12 @@ static void army_sync(Scene *s, double t)
         Instance *in = &s->instances[show];
         in->hidden = 0;
         memcpy(in->base.m, u->world, sizeof in->base.m);
+        /* the template's RenderScale, a WorldObject property (the name table 0x3F3CD0, with Shape, MajorAxis and
+         * HoldOffset) [R]: the soldiers', cops' and SWATs' 0.65 from DefActorProps, as the people's */
+        float rs = u->tmpl.at ? group_num(u->tmpl, "RenderScale", 1) : 1;
+        for (int k = 0; k < 12; k++)
+            if ((k & 3) != 3)
+                in->base.m[k] *= rs;
         instance_turns(in, u->w, u->nw);             /* a wreck's DestShape has no control nodes */
         /* at the play's time, its clip's or the shape's own (Police_US_Window_Emerge, _Firing_D: no AnimName, the
          * model's animation is the play): else that one runs on the block's clock, the soldier popping up mid-way */

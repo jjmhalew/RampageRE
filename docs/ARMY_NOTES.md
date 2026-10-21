@@ -616,6 +616,11 @@ The building records each Scoring call as it makes it (building.c `Building.scor
 - **The camera's place** [R]: Bomber's `getCameraPos().x` (id 0x41, 0x2AF220) is gWorld +0x684, the eye the
   objects' render distance is taken from (0x290FBC); the host sets the view about its camera's x
   (`army_set_view`). The x range is also what is seen for a host without `visible`.
+- **The size** [R]: `RenderScale` is a WorldObject property (the name table at 0x3F3CD0: Type, XForm, Location,
+  ZRotation, Name, TemplateName, u, v, Flags, Shape, RenderScale, Radius, Scale, ..., MajorAxis, HoldOffset), so the
+  units' looks take it as the people's do: `DefActorProps`' 0.65 for every soldier, cop and SWAT (no army vehicle sets
+  one). Up to v0.11.1 city.c's `army_sync` drew them at 1, half as big again as the people around them, and a window
+  soldier in the hand hung off the fingers by his larger body.
 - **The hold** [R] (the HeldObjectMover, init 0x310ED0, held 0x3109E0, as people.c's): `MajorAxis` (default 2)
   along the hand's z, the next along its y, the last their cross product, at the hand plus `HoldOffset`
   (`MirroredHoldOffset` while the monster plays mirrored) in the hand's frame (`army_hold`). It blends in from
