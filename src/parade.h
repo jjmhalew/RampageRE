@@ -114,6 +114,9 @@ enum {
                        * fxNode_Fart, the monster's velocity + 20 up) */
     PAE_WEAPON,       /* obj's Weapon|RifleWeapon on (name its WeaponName, monster its target) or off (name NULL) */
     PAE_REMOVED,      /* obj is gone (requestDelete, or eaten) */
+    PAE_CHALLENGE_FX, /* level 1: obj's ChallengeEffect `name` (an actor's: the biker's NPC_Target, from DefActorProps)
+                       * on it, attached (it follows obj), only when tmpl is a goal of the block's challenge (the
+                       * host's to say: 0x3466A0); level 0: stopped (onPickup, the grab, the Actor's destructor) */
     PAE_IMPACT        /* obj flying met an object of another module (0x287430): that object's TakeImpact is the
                        * caller's (no script here has one of its own). id its collision tag (collide.h), level its
                        * kind, pos where, v the normal, amount obj's Mass (a building: hit with radius Mass / 1000) */

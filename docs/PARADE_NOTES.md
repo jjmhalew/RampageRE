@@ -76,6 +76,12 @@ There is no state guard: each TakeDamage takes a hit point, also while it is kno
 clip; `HasThrow` 1, `WalkSpeed` 10, `ThrowingRange` 15 (the script's defaults 1, 4, 5); its weapon off;
 `flyingDuration` 3; its x becomes −80 (x < 0) or 80; pulsing every frame; state 0.
 
+**The goal marker** [R]: a biker is an actor, so the world object's init (0x30D280) gives it its template's
+`Effect|ChallengeEffect`, `NPC_Target` from `DefActorProps`, attached, while `Biker` is a goal of the block's challenge
+(SF04's "Eat 6 Bikers"); `this.actor.onPickup()` in TakeDamage, the grab (0x2DA45C → 0x30C5E0, any actor) and the
+Actor's destructor stop it. Up to v0.11.1 parade.c gave the bikers none: SF04's six rode without their red ring
+(parade.c `challenge_fx`, the viewer's `PAE_CHALLENGE_FX`).
+
 **onWalkIn** [R]: the pulse delay is the instance's `DelayedSpawn` (30 on the spawned ones), else a frame; state 0.
 So a biker made by a chain waits 30 s at its end of the street (x = ±80) before it rides.
 

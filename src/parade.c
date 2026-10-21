@@ -97,6 +97,20 @@ static void effect_on(Parade *p, ParadeObj *o, const char *name)
         emit(p, PAE_EFFECT, idx(p, o), name, o->pos);
 }
 
+/* [R] the world object's init (0x30D280): its Effect|ChallengeEffect (DefActorProps' NPC_Target for an actor) on it,
+ * attached (0x291ED0(effect, actor, node -1)), kept at +0x110, when its template is a goal of the block's challenge
+ * (0x3466A0: the host decides); the Actor binding onPickup (0x30C5E0, from TakeDamage), the grab (0x2DA45C: any
+ * actor) and the Actor's destructor (0x30DF80) stop it */
+static void challenge_fx(Parade *p, ParadeObj *o, int on)
+{
+    const char *name = tstr(o, "Effect|ChallengeEffect");
+    if (name) {
+        ParadeEvent *e = emit(p, PAE_CHALLENGE_FX, idx(p, o), name, o->pos);
+        e->level = on;
+        e->tmpl = o->tmpl;
+    }
+}
+
 static const ArmyMonster *monster(const Parade *p, int i) { return i >= 0 && i < p->nm ? &p->m[i] : NULL; }
 
 /* getNearestMonster (0x2B26F0) [R]: the nearest of the players' monsters by 3D distance (0x2B27E8 is sqrt.s),
@@ -479,6 +493,8 @@ static void obj_delete(Parade *p, ParadeObj *o)
     o->oflags = 0;
     p->gone_age[idx(p, o)] = 0;
     emit(p, PAE_REMOVED, idx(p, o), o->name, o->pos);
+    if (o->kind == PAK_BIKER)
+        challenge_fx(p, o, 0);
     if (o->kind != PAK_BIKER || !o->instance.at || !p->block.at || p->not_in_play)
         return;
     Group inst = o->instance;
@@ -699,6 +715,7 @@ static void make_biker(Parade *p, Group inst, int walk_in)
         return;
     p->o[i].instance = inst;
     biker_construct(p, &p->o[i]);
+    challenge_fx(p, &p->o[i], 1);
     if (walk_in)
         biker_walk_in(&p->o[i]);
 }
@@ -775,6 +792,7 @@ static int biker_damage(Parade *p, ParadeObj *o, int m)
     if (!monster(p, m) || o->state == 5)
         return 0;
     biker_smash(p, o, m);
+    challenge_fx(p, o, 0);                           /* this.actor.onPickup() */
     start_anim(p, o, "PickedUp", 0);
     if (alive(p, o->partner) && p->o[o->partner].kind == PAK_BIKE)
         bike_hit(p, &p->o[o->partner]);
@@ -1014,7 +1032,7 @@ int parade_spawn(Parade *p, const char *tmpl_name, const float pos[3], float fac
     ParadeObj *o = &p->o[i];
     switch (kind) {
     case PAK_BALLOON: balloon_construct(p, o); break;
-    case PAK_BIKER: biker_construct(p, o); break;
+    case PAK_BIKER: biker_construct(p, o); challenge_fx(p, o, 1); break;
     case PAK_BIKE: set_pulse(o, 1.0f); o->fly_duration = 1.5f; break;
     case PAK_CART: cart_construct(p, i); break;
     default: break;
@@ -1148,9 +1166,10 @@ void parade_grab(Parade *p, int obj, int monster_i, float blend)
     mat_quat(o->world, o->from_q);
     memcpy(o->from_p, &o->world[12], sizeof o->from_p);
     o->rel = 0;
-    if (o->kind == PAK_BIKER)
+    if (o->kind == PAK_BIKER) {
+        challenge_fx(p, o, 0);                       /* the grab's onPickup of an actor (0x2DA45C -> 0x30C5E0) */
         biker_pickup(p, o);
-    else if (o->kind == PAK_CART)
+    } else if (o->kind == PAK_CART)
         cart_pickup(p, o);
 }
 

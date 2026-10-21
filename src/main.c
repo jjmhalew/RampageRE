@@ -199,7 +199,8 @@ typedef struct Viewer {
     uint32_t shake_seed;
     int last_collapse[64];                           /* per building: its collapse when last looked at */
     Parade *parade;                                  /* the balloons, bikers and food carts (parade.c) */
-    struct { int fx, obj; float off[3]; } pfx[32]; int npfx;   /* the parade's effects that follow their object */
+    struct { int fx, obj, marker; float off[3]; } pfx[32]; int npfx;   /* the parade's effects that follow their object
+                                                                         * (marker: a ChallengeEffect, stopped with it) */
     Vehicles *veh;                                   /* the traffic, the fire truck and the rockets (vehicle.c) */
     Rail *rail;                                      /* the trains, cable cars and freighters (rail.c) */
     struct { int id, fx, obj; float off[3]; } rfx[64]; int nrfx;   /* their effects (following them; off in its frame) */
@@ -4345,12 +4346,35 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
                     if (id >= 0 && o && v->npfx < 32) {
                         v->pfx[v->npfx].fx = id;
                         v->pfx[v->npfx].obj = e->obj;
+                        v->pfx[v->npfx].marker = 0;
                         for (int k = 0; k < 3; k++)
                             v->pfx[v->npfx].off[k] = e->pos[k] - o->pos[k];
                         v->npfx++;
                     }
                 }
                 break;
+            case PAE_CHALLENGE_FX: {                 /* the ChallengeEffect only on a goal, on the object where it is */
+                const ParadeObj *o = parade_obj(v->parade, e->obj);
+                if (e->level && v->fxw && o && o->phase != PAP_GONE && challenge_is_goal(&v->challenge, o->name) && v->npfx < 32) {
+                    float R[3][3];
+                    parade_fx_frame(o, R);
+                    int id = fx_spawn_frame(v->fxw, e->name, o->pos, (const float (*)[3])R, 1);
+                    if (id >= 0) {
+                        v->pfx[v->npfx].fx = id;
+                        v->pfx[v->npfx].obj = e->obj;
+                        v->pfx[v->npfx].marker = 1;
+                        memset(v->pfx[v->npfx].off, 0, sizeof v->pfx[v->npfx].off);
+                        v->npfx++;
+                    }
+                } else if (!e->level)
+                    for (int k = 0; k < v->npfx; k++)
+                        if (v->pfx[k].obj == e->obj && v->pfx[k].marker) {
+                            if (v->fxw)
+                                fx_stop(v->fxw, v->pfx[k].fx);
+                            v->pfx[k--] = v->pfx[--v->npfx];
+                        }
+                break;
+            }
             case PAE_SOUND: obj_sound(v, OS_PARADE, e->obj, e->name, e->level, e->pos); break;   /* add3DSfx */
             case PAE_MONSTER_SOUND: {
                 float at[3] = { mo->mx, mo->my, mo->mz };
@@ -4398,6 +4422,8 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
     for (int k = 0; k < v->npfx; k++) {              /* the effects that follow their object, while it is there */
         const ParadeObj *o = parade_obj(v->parade, v->pfx[k].obj);
         if (!o || o->phase == PAP_GONE || !fx_alive(v->fxw, v->pfx[k].fx)) {
+            if (v->pfx[k].marker && v->fxw)          /* a ChallengeEffect goes with its actor (0x30DF80) */
+                fx_stop(v->fxw, v->pfx[k].fx);
             v->pfx[k--] = v->pfx[--v->npfx];
             continue;
         }
