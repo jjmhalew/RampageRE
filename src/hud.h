@@ -78,8 +78,9 @@ void hud_hide(Hud *h);
 typedef int (*HudProject)(void *ctx, const float world[3], float screen[2], float *px_per_unit);
 void hud_set_project(Hud *h, HudProject fn, void *ctx);
 /* a floating score number (a PointsBanner): amount at pos (world, Z up; army AE_FLOAT's pos, already 5 towards the
- * street), building = 1 for a whole building's award (yellow), 0 for the rest (white); scale 0.8 for the army's
- * awards [R 0x2BAB2C], 1.0 for an edible's [R Edible.scr]. Without a projection, pos[0], pos[1] are a screen point
+ * street), building = 1 for a whole building's award (yellow 0xFF00F0F0), 0 for the army's rest (0xFFF0F0F0), 2 an
+ * edible's (white, Edible.scr's colour (1, 1, 1, 1) x 255 [R 0x2A6A40 case 0x2B]); scale 0.8 for the army's awards
+ * [R 0x2BAB2C], 1.0 for an edible's [R Edible.scr]. Without a projection, pos[0], pos[1] are a screen point
  * and the number's motion and size are drawn at 8 pixels per world unit (a viewer's fallback: the game always has
  * its camera). */
 void hud_float(Hud *h, int amount, const float pos[3], int building, float scale);

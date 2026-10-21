@@ -4108,7 +4108,7 @@ static void edible_step(Viewer *v, float dt)
                 break;
             case EE_BANNER:
                 if (v->hud)
-                    hud_float(v->hud, (int)e->amount, e->pos, 0, 1.0f);
+                    hud_float(v->hud, (int)e->amount, e->pos, 2, 1.0f);
                 break;
             case EE_MESSAGE:                         /* "Instant Rampage", "Speed Increase", ... (Rage.ifc) */
                 if (v->hud)

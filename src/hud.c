@@ -1877,9 +1877,10 @@ void hud_float(Hud *h, int amount, const float pos[3], int building, float scale
     Banner *b = &h->banners[h->nbanners++];
     memset(b, 0, sizeof *b);
     /* PointsBanner::start 0x331D50 [R]: the text is sprintf("%d", min(amount, 99999999)), the colour 0xFF00F0F0
-     * (yellow) for a building and 0xFFF0F0F0 for the rest (the caller, 0x2BAAE0), the scale 0.8 there */
+     * (yellow) for a building and 0xFFF0F0F0 for the rest (the caller, 0x2BAAE0), the scale 0.8 there; an edible's
+     * (Edible.scr: banner.createAndStart(points, pos, (1, 1, 1, 1), 1.0)) white */
     snprintf(b->text, sizeof b->text, "%d", amount < 99999999 ? amount : 99999999);
-    b->col = building ? 0xFF00F0F0u : 0xFFF0F0F0u;
+    b->col = building == 2 ? 0xFFFFFFFFu : building ? 0xFF00F0F0u : 0xFFF0F0F0u;
     b->scale = scale > 0 ? scale : 0.8f;
     memcpy(b->start, pos, sizeof b->start);
     banner_place(b);
