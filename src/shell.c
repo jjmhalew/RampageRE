@@ -496,6 +496,7 @@ typedef struct Node {
     TexRef hl_tex, endcap; int has_hl_tex, has_endcap;
     float hl_d[2];
     int sel, pulse, top;        /* list box: the selection, setHighlightPulse, the first item shown */
+    unsigned la; float lsp;     /* list: <a> its flags (8 across), <sp> its spacing (setExtraSpacing replaces it) */
     float growth[3];            /* <growth> (a count, then +0x13C the selected item's scale, +0x14C its rate up,
                                  * +0x150 down) */
     float grow, go[2];          /* an item's: its growth record (+0x50: +0x4 the scale, +0xC / +0x10 the offset) */
@@ -797,7 +798,9 @@ static void apply_prop(Gui *g, Node *nd, const char *tag, const char *text, cons
         float v[4] = { 0, nd->growth[0], nd->growth[1], nd->growth[2] };
         parse_floats(text, v, 4);
         memcpy(nd->growth, v + 1, sizeof nd->growth);
-    } else if (strcmp(tag, "sflags") == 0) nd->sflags = (unsigned)strtoul(text, NULL, 0);
+    } else if (strcmp(tag, "a") == 0) nd->la = (unsigned)strtoul(text, NULL, 0);
+    else if (strcmp(tag, "sp") == 0) nd->lsp = strtof(text, NULL);
+    else if (strcmp(tag, "sflags") == 0) nd->sflags = (unsigned)strtoul(text, NULL, 0);
     else if (strcmp(tag, "stretch") == 0) nd->stretch = strtof(text, NULL);
     else if (strcmp(tag, "si") == 0) {
         parse_floats(text, nd->si, 2);
@@ -1234,6 +1237,17 @@ static void layouts_lay(const Gui *g, Node *nd, float dt)
             list_settle(nd);
             list_colours(nd);
             list_grow(g, nd, dt);
+        }
+        if (nd->kind == N_LIST && (nd->la & 8)) {     /* across: each shown text item at a running place by its
+                                                      * justify, stepping its width + <sp> [R 0x23CF60, as hud.c] */
+            float place = 0;
+            for (Node *c = nd->child; c; c = c->next) {
+                if (!c->visible || c->kind != N_TEXT)
+                    continue;
+                float w = text_w(g, c) * c->m;
+                c->p[0] = place + (c->justify == 1 ? 0.5f * w : c->justify == 2 ? w : 0.0f);
+                place += w + nd->lsp;
+            }
         }
         layouts_lay(g, nd->child, dt);
     }
@@ -4087,6 +4101,7 @@ static void op_event(Shell *s, int ev, int button, int pad, float dt)
             Node *on = find(o->rumble, "ON"), *off = find(o->rumble, "OFF");
             if (on) on->tscale = 0.6f;
             if (off) off->tscale = 0.6f;
+            o->rumble->lsp = 30;                         /* glb.setExtraSpacing(30.0) */
         }
         op_graphics_build(s, r);
         op_setup(s);

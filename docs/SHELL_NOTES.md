@@ -396,7 +396,10 @@ and no card (5, state 10).
 English version only: `gApp.getPlatform() == 2 && gApp.getLanguage() == 1 && gApp.getRegion() == 0` [R]. The
 language is gApp +0x70 (0x28B268), the .loc column (1 English, 2 English 2, 3 Japanese, 4 French, 5 German, 6
 Italian, 7 Spanish, 8 Dutch, 9 Portuguese; the port's `--lang` + 1; `== 7`, Spanish, moves the main menu's buttons
-5 down and the Options' rumble list); the region 0x28B200 is SYSTEM.CNF's BOOT2: SLUS 0, SLES 1, else 2
+5 down and the Options' rumble list, its ON / OFF at 0.6 and `setExtraSpacing(30.0)`); the lists across (`<a>` & 8)
+are laid out every frame as hud.c's are (0x23CF60: each shown text at a running place by its justify, stepping its
+width + `<sp>`), so the Spanish ACTIVAR / DESACTIVAR stand apart (up to v0.11.4 they kept the English places and ran
+into each other); the region 0x28B200 is SYSTEM.CNF's BOOT2: SLUS 0, SLES 1, else 2
 (0x10D290): 1 for the European disc, so no Ballers box and cheat video 3 is the credits; 0 for the USA disc (the same
 ELF and data, SLUS_213.23), whose English shell has the Ballers box and plays `ballers` for cheat video 3 (the port takes
 the disc's region, iso.c `data_region`). Cross starts `gShell.startEmulator(n)` after 0.25 s:
