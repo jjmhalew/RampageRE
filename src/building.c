@@ -553,7 +553,9 @@ static int crack_step(Building *b)
                     if (ci >= 0 && b->cell[b->live[j - 1]][ci].state < b->min_crack) {
                         if (rnd(b) % (1 + 1) == 0)
                             debris(b, b->live[j - 1], c, DEBRIS_CRACK, 0);
-                        set_state(b, b->live[j - 1], c, b->min_crack);
+                        /* setCellDamage (0x2BDB1C, 0x2BDBDC -> 0x2BB580): the one front cell; the corner's
+                         * twin on the side (0x2BB410's) only by a hit's damage [R] */
+                        building_set_cell(b, FACE_FRONT, b->live[j - 1], c, b->min_crack);
                     }
                 }
             return 1;
