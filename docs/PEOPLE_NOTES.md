@@ -38,6 +38,11 @@ for a valid handle) [R].
 - **The scripts' own**: StationaryPerson's `IdleEffect` (the balloon seller's `balloons_hold`, 5 above it, left
   there) stops in `playEffect`; a kid tourist's `KidBalloonHoldingFX` (attached) stops when it runs off.
 - In the port they are `PE_FX_ON` / `PE_FX_OFF` events, which main.c turns into effects that follow their person.
+  An attached one follows the actor's whole matrix, its turn too (0x290F60 → 0x291440: the offset × the object's
+  matrix) [R], so the effect's own offsets turn with the person: `Singer_Highlight` and `Doomsayer_Highlight` put
+  their rings at em_pt_offset (0, 1, 3), 3 up and 1 along the actor's facing, in front of its mouth (main.c starts
+  them in the person's frame, `fx_spawn_frame`, and places them so each frame, `fx_place`). (Up to v0.10.19 the port
+  kept the world's axes: the Singer, facing the street, had its rings 1 behind its head.)
 - **getStringProp** reads the instance book first, then the template (0x27C230, VEHICLE_NOTES.md);
   **getTemplateStringProp** only the template [R]. No `ActorInstance|` sets a key the people scripts read (they hold
   only `Location`, `Name`, `ZRotation`, `SpawnsItem0`, `SpawnedItem`, `DelayedSpawn`, `SpawnDelay`), so the port reads

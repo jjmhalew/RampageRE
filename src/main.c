@@ -5871,15 +5871,22 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
             if (ev[i].type == PE_FX_ON && v->fxw && ev[i].name &&   /* the ChallengeEffect only on a goal */
                 (ev[i].on != PFX_CHALLENGE || challenge_is_goal(&v->challenge, people_get(v->scene.folk, ev[i].who)->name))) {
-                /* attached (0x291ED0(effect, actor, node -1)): on the person where it is now, offset 0; the place it was
-                 * started at may be stale (a SpawnsItem mime is made at its spot, then sent to walk in from x -80
-                 * before the host sees this: its NPC_Target ran 40 ahead of it) [R] */
+                /* attached (0x291ED0(effect, actor, node -1)): on the person where it is now, in its whole frame (the
+                 * effect's offsets turn with it: the Singer's and the Doomsayer's em_pt_offset (0, 1, 3) is 1 in front
+                 * of the mouth, 0x290F60 -> 0x291440); the place it was started at may be stale (a SpawnsItem mime is
+                 * made at its spot, then sent to walk in from x -80 before the host sees this: its NPC_Target ran 40
+                 * ahead of it) [R] */
                 const Person *p = people_get(v->scene.folk, ev[i].who);
                 int follow = ev[i].amount != 0 && p;
-                float at[3] = { ev[i].v[0], ev[i].v[1], ev[i].v[2] };
-                if (follow)
+                float at[3] = { ev[i].v[0], ev[i].v[1], ev[i].v[2] }, R[3][3];
+                if (follow) {
                     memcpy(at, &p->world[12], sizeof at);
-                int id = fx_spawn(v->fxw, ev[i].name, at, NULL, 1);
+                    for (int a = 0; a < 3; a++)
+                        for (int c = 0; c < 3; c++)
+                            R[a][c] = p->world[4 * a + c];
+                }
+                int id = follow ? fx_spawn_frame(v->fxw, ev[i].name, at, (const float (*)[3])R, 1) :
+                                  fx_spawn(v->fxw, ev[i].name, at, NULL, 1);
                 if (id >= 0 && p && v->nppfx < 64) {
                     v->ppfx[v->nppfx].fx = id;
                     v->ppfx[v->nppfx].who = ev[i].who;
@@ -5913,10 +5920,13 @@ static void play_step(Viewer *v, float dt, float aspect)
                 v->ppfx[k--] = v->ppfx[--v->nppfx];
                 continue;
             }
-            if (v->ppfx[k].follow) {
+            if (v->ppfx[k].follow) {                 /* in the person's frame as it turns */
                 float at[3] = { p->world[12] + v->ppfx[k].off[0], p->world[13] + v->ppfx[k].off[1],
-                                p->world[14] + v->ppfx[k].off[2] };
-                fx_move(v->fxw, v->ppfx[k].fx, at);
+                                p->world[14] + v->ppfx[k].off[2] }, R[3][3];
+                for (int a = 0; a < 3; a++)
+                    for (int c = 0; c < 3; c++)
+                        R[a][c] = p->world[4 * a + c];
+                fx_place(v->fxw, v->ppfx[k].fx, at, (const float (*)[3])R);
             }
         }
     }
