@@ -188,12 +188,25 @@ int climb_can_climb(const Mount *m, const Scene *s, const Climber *c, int dv, in
         int to = m->at.rail + dh, kind = rail_kind(b, to);
         if ((kind & (dh < 0 ? 3 : 5)) == 0)
             return -7;
-        for (uint32_t i = 0; i < s->nbuildings; i++) {   /* a building tall enough close beside: -5 */
+        /* a building close beside that way: -5 [R 0x2DD160 .. 0x2DD198, 0x2DD298 .. 0x2DD2D0 -> 0x2A3BA0]: a ray
+         * along x from the place, 1 towards the street (1 into the building when the step turns onto the end rail),
+         * meets the first building whose y range holds it; it counts when its top is at least 4.5 below the place,
+         * its gap within 8: from the place, or round a corner from this building's own edge */
+        int corner = (kind & (dh < 0 ? 2 : 4)) != 0, near = -1;
+        float y = pt[1] + (corner ? 1.0f : -1.0f), nx = dh < 0 ? -1e30f : 1e30f;
+        for (uint32_t i = 0; i < s->nbuildings; i++) {
             const Building *o = &s->buildings[i].b;
-            if ((int)i == m->at.building || !standing(o) || o->max[2] < pt[2] || pt[1] < o->min[1] - 8 ||
-                pt[1] > o->max[1] + 8)
+            if ((int)i == m->at.building || !standing(o) || y < o->min[1] || y > o->max[1])
                 continue;
-            if (dh < 0 ? o->max[0] <= pt[0] && o->max[0] > pt[0] - 8 : o->min[0] >= pt[0] && o->min[0] < pt[0] + 8)
+            if (dh < 0 ? o->min[0] < pt[0] && o->max[0] > nx : o->max[0] > pt[0] && o->min[0] < nx) {   /* (one the
+                                                      * ray starts in: met at once, its gap below 0) */
+                nx = dh < 0 ? o->max[0] : o->min[0];
+                near = (int)i;
+            }
+        }
+        if (near >= 0 && s->buildings[near].b.max[2] >= pt[2] - 4.5f) {
+            float from = corner ? (dh < 0 ? b->min[0] : b->max[0]) : pt[0];
+            if ((dh < 0 ? from - nx : nx - from) < 8)
                 return -5;
         }
         pt[0] += RAIL * (float)dh;
