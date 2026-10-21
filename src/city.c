@@ -1494,6 +1494,40 @@ void scene_window_soldier_take(Scene *s, int unit)
         }
 }
 
+/* 0x317DC0(mgr, building, storey, column), from setCellDamage (0x2BB580) each time a front cell is set to 2 or more
+ * [R]: the cell's slot (+0x0 building, +0x4 column, +0x8 storey) with an occupant (+0xD): at 3 it has none any more
+ * (0xFF); at 2 a soldier's (its kind's +0x8 1) is another soldier kind, (rand() & 0xFF) % the soldier kinds (+0x38),
+ * and stays, a civilian's has none. Then every slot in the civilians' places of the list (+0x40 .. +0x40 + +0x3C)
+ * with an actor (+0x14) in that building, a civilian occupant and its storey within 1 of the cell's has none any more
+ * and its actor falls (0x30C4D0: onFallFromWindow), whatever its column; the broken window's own occupant, just made
+ * none, does not */
+static void scene_cell_broken(Scene *s, int building, int o, int col, int state)
+{
+    for (int i = 0; i < s->nslots; i++) {
+        struct WindowSlot *ws = &s->slots[i];
+        if (ws->building != building || ws->storey != o || ws->column != col)
+            continue;
+        if (!ws->retired) {
+            if (state == 2 && ws->military && s->nmilitary > 0)
+                ws->occupant = (int)((wrand_lf() & 0xFF) % (uint32_t)s->nmilitary);
+            else
+                ws->retired = 1;
+        }
+        break;
+    }
+    for (int at_pos = s->order_mil; s->folk && at_pos < s->order_mil + s->order_civ && at_pos < s->norder; at_pos++) {
+        int k = s->order[at_pos], who;
+        if (k < 0)
+            continue;
+        struct WindowSlot *ws = &s->slots[k];
+        if (ws->building != building || ws->retired || ws->military || ws->storey < o - 1 || ws->storey > o + 1 ||
+            (who = people_window_at(s->folk, ws->building, ws->storey, ws->column)) < 0)
+            continue;
+        ws->retired = 1;
+        people_window_fall(s->folk, who);
+    }
+}
+
 static void order_add(Scene *s, int slot)            /* 0x3195E0: one more at the list's end */
 {
     s->order = realloc(s->order, sizeof *s->order * (size_t)(s->norder + 1));
@@ -1620,8 +1654,10 @@ void scene_people_spawn(Scene *s, float dt)
         float bx = (b->min[0] + b->max[0]) / 2;
         if (!(bx >= s->view_lo && bx <= s->view_hi))
             continue;
+        /* [R 0x318650, 0x31AD00] neither the cell's damage nor the building's state is asked: a cracked window, a
+         * cracking or shaking building still put out an occupant; the damage is the slot's own (scene_cell_broken) */
         int ls = building_live_of(b, ws->storey), ci = building_cell_index(b, FACE_FRONT, ws->column);
-        if (b->state != BUILDING_STANDING || ls <= 0 || ci < 0 || b->cell[ws->storey][ci].state != 0 ||
+        if (ls <= 0 || ci < 0 ||
             people_window_at(s->folk, ws->building, ws->storey, ws->column) >= 0 ||
             scene_window_soldier(s, ws->building, ws->storey, ws->column) >= 0 ||
             people_window_retired(s->folk, ws->building, ws->storey, ws->column))   /* its occupant grabbed: retired */
@@ -4023,17 +4059,16 @@ void scene_buildings_update(Scene *s, float dt)
         if (s->traffic && sb->b.state == BUILDING_CRACKING && sb->seen_state != BUILDING_CRACKING)
             vehicle_building_gone(s->traffic, (int)i);   /* onBuildingDestruction: its roof rockets fly */
         sb->seen_state = sb->b.state;
-        for (int ls = 0; (s->folk || s->edibles) && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell at 2 or more */
+        for (int ls = 0; (s->folk || s->edibles) && ls < sb->b.n; ls++)   /* 0x317DC0: a front cell set to 2 or more */
             for (int col = 0; col < sb->b.width; col++) {
                 int ci = building_cell_index(&sb->b, FACE_FRONT, col), o = sb->b.live[ls];
-                if (ci < 0 || sb->b.cell[o][ci].state < 2 || sb->broke[o][ci])
+                int st = ci < 0 ? 0 : sb->b.cell[o][ci].state, first = !sb->broke[o][ci];
+                if (st < 2 || st <= sb->broke[o][ci])
                     continue;
-                sb->broke[o][ci] = 1;
-                if (s->folk)
-                    people_cell_broken(s->folk, (int)i, ls > 0 ? sb->b.live[ls - 1] : -1, o,
-                                       ls + 1 < sb->b.n ? sb->b.live[ls + 1] : -1);
-                if (s->edibles)                      /* its edible comes out (0x317BC0) */
-                    edible_cell_broken(s->edibles, (int)i, o, col, sb->b.cell[o][ci].state, sb->b.state);
+                sb->broke[o][ci] = (uint8_t)st;
+                scene_cell_broken(s, (int)i, o, col, st);
+                if (s->edibles && first)             /* its edible comes out (0x317BC0) */
+                    edible_cell_broken(s->edibles, (int)i, o, col, st, sb->b.state);
             }
         MeshPart *p = &s->meshes[sb->mesh].mesh.parts[0];
         for (int st = 0; st < sb->b.storeys; st++)

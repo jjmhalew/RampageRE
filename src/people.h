@@ -182,10 +182,9 @@ const Person *people_get(const People *p, int who);
 int people_object(const People *p, int o, float pos[3]);
 int people_events(People *p, PeopleEvent *out, int max);   /* takes the events since the last call */
 
-/* a front cell of a building broke (state 2 or more; 0x317DC0): the window people of that building within a storey
- * of it fall (onFallFromWindow). The storeys are as built (the game's floor ids, +0x200), as a window person's is:
- * the broken one and the standing ones below and above it (-1 none) */
-void people_cell_broken(People *p, int building, int below, int storey, int above);
+/* a window person falls out (onFallFromWindow, 0x30C4D0): city.c's scene_cell_broken (0x317DC0) for the civilians
+ * of the slots within a storey of a front cell set to 2 or more */
+void people_window_fall(People *p, int who);
 
 /* ---- the monster's grab */
 typedef struct { float min[3], max[3]; int width; int gone; const int *live; int n; } PeopleBox;   /* a building's

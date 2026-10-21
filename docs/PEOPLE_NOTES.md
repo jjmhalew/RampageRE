@@ -176,8 +176,18 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   fall's 0x30C510 and the actor's end (0x30DF80) only
   empty the slot: that window stays open. Damage to the cell drops it at once (0x2BB580). The edibles' slots (+0x10)
   never open a window.
-- **The fall** (0x317DC0, from cell damage 0x2BB580): when a front cell's state is 2 or more, every non-military
-  window person in that building within ±1 storey of it falls (`onFallFromWindow`), whatever its column.
+- **A cell breaks** (0x317DC0, from setCellDamage 0x2BB580 each time a front cell is set to 2 or more) [R]:
+  - the cell's own slot (+0x0 building, +0x4 column, +0x8 storey), when it has an occupant (+0xD): at 3 it has none
+    any more (0xFF); at 2 a soldier's (the kind's +0x8 1) becomes another soldier kind, (rand() & 0xFF) % the soldier
+    kinds (+0x38: 0x31A540 makes the soldier kinds first), and stays; a civilian's has none;
+  - then every slot in the civilians' places of the list (+0x40 .. +0x40 + +0x3C) that has an actor (+0x14) in that
+    building, a civilian occupant and its storey within 1 of the cell's loses its occupant, and its actor falls
+    (0x30C4D0: `onFallFromWindow`), whatever its column. The broken window's own occupant, just made none, does not
+    fall: it plays on and goes back in. A soldier never falls.
+  - The spawner (0x318650, 0x31AD00) asks neither the cell's damage nor the building's state, so an occupant still
+    comes to a cracked window, and soldiers to broken ones, and to a building that is cracking or shaking. Up to
+    v0.11.4 the port refused a damaged cell or a building not standing, let everyone within a storey fall (the broken
+    window's own too) and never retired those slots, so the windows were filled again.
 - **A floor falls** (0x2BAE70 → 0x317A70 on the one list, 0x4D5F00): every slot of the fallen floor is retired
   (+0xD, +0xE = 0xFF) and its actors flagged 0x800, which the actor update (0x30CD20) answers with a delete: an
   occupant still in its window (a soldier, which never falls) is gone at once, its window left as it is. The

@@ -1816,14 +1816,13 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
     people_spawn_chain(p);                           /* the chains of the ones gone this frame (or since the last) */
 }
 
-void people_cell_broken(People *p, int building, int below, int storey, int above)
+void people_window_fall(People *p, int who)
 {
-    for (int i = 0; i < p->n; i++) {
-        Person *q = &p->v[i];
-        if (q->phase == PP_SCRIPT && q->kind == PK_WINDOW && q->building == building && q->building >= 0 &&
-            (q->storey == storey || (below >= 0 && q->storey == below) || (above >= 0 && q->storey == above)))
-            window_fall(p, q);
-    }
+    if (who < 0 || who >= p->n)
+        return;
+    Person *q = &p->v[who];
+    if (q->phase == PP_SCRIPT && q->kind == PK_WINDOW && q->building >= 0)
+        window_fall(p, q);
 }
 
 /* ---------------------------------------------------------------- the monster's grab */
