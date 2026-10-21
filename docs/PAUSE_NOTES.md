@@ -175,6 +175,10 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   menu already shows. It loads its own copy of `Pause.ifc` (drawn last, over everything) and runs the 8192 setup.
   - The challenge data come from the last `hud_challenge()` (`last_block`, `identifier`, `icon`, `icon_scale`,
     `pause_scale`, `icon_shift`, `upgrade`) and `hud_challenge_items()`.
+  - The icon is a texture by name: the city's bundle has the `Pause_*` pictures, fx.bdp the powerups' and the other
+    20 blocks' (`Chocolate_bar`, `Powerup_HotDog`, `moneybag`, `Ace_Sp`, `King_Card`, `Gong` ...). The viewer gives the
+    HUD both (`hud_add_bundle`); up to v0.11.1 it had only the city's, so those 20 blocks showed no icon here, in
+    ChallengeText or in ChallengeStatus.
   - The language comes from `hud_set_language` (> 2: the foreign boss card; 7: the Dutch rumble list), the viewer's
     `--lang`.
 - `hud_input` / `hud_input_pad` go to the menu while it shows. `hud_pad_held` gives pad 0's held stick x and left /

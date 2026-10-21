@@ -1338,6 +1338,9 @@ static void build(Viewer *v)
                 if (k == 0)                          /* the pads vibrate as the profile says [G] */
                     v->vibrate = profile_set_rumble(&v->prof, profile_rumble(&v->prof), 0);
                 hud_add_bundle(mo->hud, v->scene.city);   /* <City>.loc: the block names, the challenge texts */
+                if (v->have_fx_bundle)               /* the challenge icons that are fx.bdp's pictures (Chocolate_bar,
+                                                      * Powerup_HotDog, moneybag, Ace_Sp ...: 20 of the 63 blocks') */
+                    hud_add_bundle(mo->hud, &v->fx_bundle);
                 hud_results_auto(mo->hud, v->unattended ? 2.0f : 0);
             }
         }
