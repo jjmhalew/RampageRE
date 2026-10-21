@@ -3211,12 +3211,18 @@ static void fx_shake(void *ctx, const char *name, const float pos[3])
 /* a move state of the monster by name, now (playReaction) */
 /* playReaction(name) from a module (a geyser, the merry-go-round, a boss): the state, started at the monster's next
  * step as a slot's start is (0x2C0DC0 .. 0x2C0E78), so the new state's events from its start fire (React_Geyser's
- * mode 1 and addVelocity(0, 0, 18) at 0); started here, between the steps, they were passed over */
+ * mode 1 and addVelocity(0, 0, 18) at 0); started here, between the steps, they were passed over. The binding
+ * (0x2ABB18: the state by name, 0x2D9890, none found nothing) goes through 0x2D9710(monster, state, 0, 0), which takes
+ * it as setReaction does (not defeated, not shrunk below 0.3) and lets go of what is held, not eaten (0x2DA570(monster,
+ * 0)) [R]: the garbage truck's last shake (React_Ground_Heavy_Back) drops the truck */
 static void force_state(Mon *mo, const char *name)
 {
+    if (mo->defeated || mo->scale < 0.3f)
+        return;
     for (int k = 0; name && mo->have_graph && k < mo->graph.n; k++)
         if (!_stricmp(mo->graph.states[k].name, name)) {
             mo->force_to = k + 1;
+            throw_held(mo, 0, 0, 10, 10);
             return;
         }
 }
