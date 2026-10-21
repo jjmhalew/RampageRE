@@ -1703,6 +1703,9 @@ static int list_stacked(const Node *l)
 static int widen(Emit *e, const Node *nd, const Frame *df, Frame *sf, float x0, float y0, float w, float h,
                  float us, float vs, const float c[4], const Bundle *tb, uint32_t tn)
 {
+    if (e->extra <= 0)                               /* a 4:3 window: the screen as it is (the frost border's bottom
+                                                      * row leaves its last pixel column open) */
+        return 0;
     int upright = fabsf(df->b) < 1e-3f && fabsf(df->c) < 1e-3f && df->a > 0;
     if (e->frost) {
         float cx, cy;
