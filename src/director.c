@@ -829,8 +829,10 @@ static void bot_street_punch(DirAI *ai, const DirGraph *ag, MoveRunner *r, const
     bt->side = 2;
     int best = -1;
     float bd = 1e30f;
-    for (int c = 1; c < b->width; c++)
-        if (bot_cell(v, bt->target, 0, c) < 3 || bot_cell(v, bt->target, 0, c - 1) < 3) {
+    /* [R 0x2EF8F0 .. 0x2EFA48] the inner rails c = 1 .. width - 1 whose ground cell (storey 0, column c) is intact,
+     * the nearest; with none, or no storeys, sidePoint of the front (0x2EEF30) */
+    for (int c = 1; c < b->width && b->storeys > 0; c++)
+        if (bot_cell(v, bt->target, 0, c) < 3) {
             float x = b->min[0] + 5 * (float)c, d = fabsf(x - v->pos[0]);
             if (d < bd) {
                 bd = d;
@@ -838,11 +840,13 @@ static void bot_street_punch(DirAI *ai, const DirGraph *ag, MoveRunner *r, const
             }
         }
     float pt[3] = { best >= 0 ? b->min[0] + 5 * (float)best : b->pos[0], b->min[1] - v->half_width, 0 };
+    if (best < 0)
+        side_point(v, b, 2, pt);
     memcpy(bt->walk, pt, sizeof pt);
     float dx = pt[0] - v->pos[0], dy = pt[1] - v->pos[1];
     if (dx * dx + dy * dy <= v->half_width * v->half_width) {
-        if (!bot_facing(v, 0, 1))
-            bot_walk(ai, ag, r, v, (float[3]){ pt[0], b->min[1], 0 }, 0, bt->target, call, ctx);
+        if (!bot_facing(v, 0, 1))                    /* turning to the front: the walk to the point (0x2F0EEC) */
+            bot_walk(ai, ag, r, v, pt, 0, bt->target, call, ctx);
         else
             bot_action(r, ag, DA_ATTACK, 1, call, ctx);
     } else
