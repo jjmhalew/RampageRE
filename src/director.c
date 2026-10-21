@@ -899,6 +899,7 @@ static void bot_on_roof(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirB
 {
     DirBot *bt = &ai->bot;
     const DirBuilding *b = &v->b[u];
+    bt->use_hit = bt->have_cell = 0;                 /* [R 0x2F0160 .. 0x2F0164]: +0x38 and +0x48 */
     float c[3] = { b->pos[0], (b->min[1] + b->max[1]) / 2, b->max[2] };
     if (b->state >= 4) {                             /* falling: off it */
         if (bt->target >= 0 && bt->target != u) {
@@ -915,8 +916,8 @@ static void bot_on_roof(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirB
     if (!v->smash) {
         if (d2 <= hw * hw)
             bot_go_state(r, ag, bt->st_punch_down, call, ctx);
-        else
-            bot_walk(ai, ag, r, v, c, 0, -1, call, ctx);
+        else                                         /* with the roof's building (0x2F0464): its monster checks */
+            bot_walk(ai, ag, r, v, c, 0, u, call, ctx);
     } else if (bot_in_air(v)) {
         if (d2 > 2.25f * hw * hw)
             bot_walk(ai, ag, r, v, c, 1, -1, call, ctx);
