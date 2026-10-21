@@ -1307,8 +1307,8 @@ static void build(Viewer *v)
             if (v->game && game_load_city(v->game, CITIES[v->city_index]) == 0) {
                 game_start(v->game);
                 /* [R] SinglePlayer's load (0x2B7F50) sets +0x610, so its first frame (0x2B7BC0) brings the music
-                 * back to the profile's volume over 250 ms: the loading screen took it to 0 (showLoading), and
-                 * BeginBlock's music only starts at 0.05 or more (0x323CE0) */
+                 * to the profile's volume over 250 ms (the loading screen stopped the menu's music, showLoading,
+                 * and BeginBlock's music only starts at 0.05 or more, 0x323CE0) */
                 v->music_now = v->music_vol = profile_music_volume(&v->prof) / 0.75f;
                 sound_settings(v->sfx_vol * 0.75f, v->music_now * 0.75f, 250);
             } else {

@@ -2958,13 +2958,14 @@ static void boot_check(Shell *s)
 
 /* ---------------------------------------------------------------- the loading screen (0x4D8250, Loading.scr) */
 /* gShell.showLoading() (0x3485E0 with 0): Loading.ifc of loading_<city>.BDP, or loading_shell.ifc of loading.BDP
- * when that is not there; the music fades out over 0.5 s [R] */
+ * when that is not there; the music fades out over 0.5 s and is stopped [R 0x348634: 0x26BE90(0.0, 500, 1) sends both
+ * music slots down to 0 with their stop byte set; group 3's volume is left as it is] */
 static void show_loading(Shell *s, int shell)
 {
     Loading *l = &s->ld;
     if (l->on)
         return;
-    event(s, SHELL_EVT_MUSIC_VOLUME, NULL, 500, 0);
+    music(s, "");
     char name[64];
     snprintf(name, sizeof name, "Loading_%s.bdp", s->gs.city);
     uint32_t size = 0;

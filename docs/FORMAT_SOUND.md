@@ -107,8 +107,10 @@ group's byte to (int)(127 v); for group 3 the music slots go to it over ms (at o
 group's running instances fade to it (0x2724B0; group 0 would be all). The profile's and the Options page's volumes
 (0 .. 0.75, default sound 0.75, music 0.25) go in as setSfxVolume on groups 1, 9, 10 and 11 and setMusicVolume
 (0x33EFD8 at a profile's load, music over 500 ms; 0x2C2FA4 from the Options page; and SinglePlayer's first frame,
-0x2B7BC0 with the +0x610 its load 0x2B7F50 sets: the music back from the loading screen's 0 over 250 ms, before
-BeginBlock's replaceMusic, which nothing starts under 0.05): every event is in group 0, so
+0x2B7BC0 with the +0x610 its load 0x2B7F50 sets: to the profile's volume over 250 ms, before BeginBlock's
+replaceMusic, which nothing starts under 0.05). The loading screen does not touch group 3: showLoading (0x3485E0)
+calls 0x26BE90(0.0, 500, 1), which sends both music slots down to 0 over 500 ms with their stop byte (+0xC) set, so
+the menu's music fades out and is stopped, and the level's intro is silent until BeginBlock's music. Every event is in group 0, so
 the sound effects' slider changes nothing, while the music's byte is 127 × the setting (31 by default). MultiStream and the SPU2 take a volume
 of 0x4000..0x7FFF as negative (phase-inverted): so for a 2D sound a byte over 127 (0D with more than ~0x9A on a
 fresh instance: `Gong`, the announcer at 0xFF) plays inverted and quieter; the 3D path scales the raw value first
