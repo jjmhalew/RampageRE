@@ -3374,7 +3374,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
         memcpy(m[k].pos, am[k].pos, sizeof m[k].pos);
         m[k].heading = am[k].heading;
         m[k].move = am[k].move;
-        m[k].climbing = v->mon[k].mount.at.building >= 0;
+        m[k].climbing = v->mon[k].mode == MODE_BUILDING && v->mon[k].mount.mounted;   /* [R 0x2AAAD8] */
         m[k].spheres = am[k].spheres;
         m[k].nspheres = am[k].nspheres;
         memcpy(m[k].box_min, am[k].box_min, sizeof m[k].box_min);

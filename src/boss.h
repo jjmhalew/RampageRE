@@ -110,7 +110,8 @@ typedef struct {
     float pos[3];
     float heading;                                   /* the game's facing z */
     const char *move;                                /* its state: "Ground...", "Jump...", "...Side...", ... */
-    int climbing;                                    /* Monster.isClimbing: +0xB9C0 != 0, on a building's wall */
+    int climbing;                                    /* Monster.isClimbing (0x2AAAD8): mode 5 (+0xAD8) and mounted
+                                                      * (+0xC644), on a building's wall */
     const float (*spheres)[4]; int nspheres;         /* its collision spheres in the world */
     float box_min[3], box_max[3];                    /* its collision box in the world (used without spheres) */
     float target[3];                                 /* where the weapons aim (0x2DB030): ArmyMonster.target */
