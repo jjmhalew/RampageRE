@@ -190,11 +190,16 @@ int material_uncut(const Bundle *b, uint32_t material)
  * repeat byte (+0x8D: the pass triples from +0x8C are slot, repeat, ...) cleared, the copy flagged modified (+0x0 |=
  * 0x80) and built by 0x25C3D0; its compiled record's wrap byte (record + 0xF) then has bit 0 clear, which the pass
  * setup (0x265840 -> 0x26AA20) makes the texture's CLAMP_1 WMS = WMT = 1, CLAMP. Every shader of the bundles'
- * materials repeats (+0x8D 1) before that */
+ * materials repeats (+0x8D 1) before that. The copy is only what it is when its compiled record is there: the lookup
+ * (0x265C30 -> 0x265D00, by checksum and the bytes in 0x3C73B0) falls back to the shader as it stands (byte 0 & 0x7F)
+ * on a miss, which repeats. A material whose byte +0x3 is set (128 on 89 of them, 150 on one) also has +0x1C = 7 and
+ * +0x20 = that byte in its copy (0x16F900 .. 0x16F914), which no record holds: the signs (Diner_sign and 34 more),
+ * NewsChopper_props, PirateShip_Hull, the seven Tree_01_Art, TV_Antenna_Main repeat; and no record holds a kind 8's
+ * (shader 0x7A, citybus_damagedBlend, CableCarDestroyedMat). So a kind 2 material alone is clamped */
 int material_clamped(const Bundle *b, uint32_t material)
 {
     const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
-    if (!e || e->size < 8 || e->data[2] < 2)
+    if (!e || e->size < 8 || e->data[2] != 2 || e->data[3])
         return 0;
     uint32_t flags = rd32(e->data + 4);
     return (flags & 0xC) == 0 && !(flags & MAT_REGION);

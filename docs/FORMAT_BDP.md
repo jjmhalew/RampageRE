@@ -380,6 +380,12 @@ material's first texture is **clamped**. 0xC is the tiling one: the street and e
 have it; the rest (877 of the cities' materials: the skylines, fog masks, backdrops, the buildings' roofs, trims and
 interiors) have every UV inside 0 … 1 (checked: San Francisco's 149 and Chicago's 122). The same variant clears the
 first pass's +0x8E with flag 0x4000000, and with the material's byte +0x3 above 0 sets +0x1C = 7 and +0x20 = that byte.
+The variant is only what it is when its compiled record is there: on a miss the lookup (0x265C30 → 0x265D00) takes
+the shader as it stands (byte 0 & 0x7F), which repeats. No record has +0x1C = 7, so the 90 materials with byte +0x3
+set repeat (35 signs, `Diner_sign` …, `NewsChopper_props`, `PirateShip_Hull` / `Sails`, the seven `Tree_01_Art`,
+`TV_Antenna_Main`), and none holds the kind 8 damage blend's clamped 0x7A (`citybus_damagedBlend`,
+`CableCarDestroyedMat`): only kind 2 materials with byte +0x3 at 0 are clamped (worked out for every material the
+bundles' meshes use).
 Of the descriptors only 0x7, 0x4E, 0x50, 0x55, 0x57, 0x64 and 0x71 clamp as they stand: the particles' 0x55 / 0x57
 (0x1F8870, FX_NOTES.md "Drawing") among them. render_gl.c `draw_part` sets the wrap for each part (mesh.c
 `material_clamped`; a region's tile and the EnvMap repeat); repeated, a clamped picture's edge took in its other
