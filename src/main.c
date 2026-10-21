@@ -1213,19 +1213,22 @@ static void build(Viewer *v)
                 scene_occupant_slots(&v->scene, (int)i);
                 edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
                 for (int k = before; k < edible_slots(v->edibles); k++) {   /* its edibles' new slots: those in a
-                                                      * cell of no occupant's slot are slots of their own */
+                                                      * cell of no occupant's slot are slots of their own; the first
+                                                      * occupant's slot of its cell takes its kind (+0xE, 0x319EAC) */
                     const EdibleSlot *es = edible_slot(v->edibles, k);
                     int shared = 0;
                     for (int j = 0; j < v->scene.nslots && !shared; j++) {
-                        const struct WindowSlot *ws = &v->scene.slots[j];
+                        struct WindowSlot *ws = &v->scene.slots[j];
                         shared = ws->building == (int)i && ws->column == es->column &&
                                  building_live_of(&sb->b, ws->storey) == es->storey;
+                        if (shared)
+                            ws->edible = es->kind;
                     }
                     own += !shared;
                 }
                 scene_occupant_pad(&v->scene, own);
             }
-            v->scene.slots_made = 1;
+            scene_occupant_sort(&v->scene);          /* 0x31A540: then the list sorted (0x31AE20) */            v->scene.slots_made = 1;
             if (getenv("RAMPAGE_TRACE")) {
                 int nm = 0;
                 for (int k = 0; k < v->scene.nslots; k++)

@@ -245,14 +245,16 @@ typedef struct {
     struct PersonLook *looks; int nlooks;
     Group occupant[16]; float occupant_freq[16]; int noccupants; float fill_rate, spawn_timer, spawn_rate;
     /* a slot: its front cell (template storey, column), the Openable it opens (LRPos, +0xC), its occupant's kind */
-    struct WindowSlot { int building, storey, column, occupant, military, unit, lr, retired; float win_x, win_floor; }
+    struct WindowSlot { int building, storey, column, occupant, military, unit, lr, retired; float win_x, win_floor;
+                        int edible; }
         *slots;                                      /* retired: its soldier grabbed (0x318140 with 1: +0xD = 0xFF) or
      * its floor fallen (0x317A70), never filled again; win_x, win_floor: its soldier's window x and its storey's floor
-     * when last placed (the soldier follows it as people_window_move's people do) */
+     * when last placed (the soldier follows it as people_window_move's people do); edible: the kind of the edible
+     * behind its window (+0xE), -1 none */
     int nslots, slots_made;
-    /* the game's one list of slots (+0xC, 0x3195E0 appends) in its order: per building its soldiers' slots, its
-     * civilians', then the edibles' own (here -1: the edibles keep theirs in edible.c); order_mil (+0x40) and
-     * order_civ (+0x3C) the soldiers' and civilians' counts, the spawn's two ranges of it (scene_occupant_pad) */
+    /* the game's one list of slots (+0xC, 0x3195E0 appends): made per building, its soldiers' slots, its civilians',
+     * then the edibles' own (here -1: the edibles keep theirs in edible.c), then sorted (scene_occupant_sort);
+     * order_mil (+0x40) and order_civ (+0x3C) the soldiers' and civilians' counts, the spawn's two ranges of it */
     int *order, norder, order_mil, order_civ;
     /* the Occupants group's soldiers (MilitaryInstance|: Military_Window.bsf templates, the army's window soldiers)
      * and its rates (0x31A540: +0x48 MilitaryStartRate 0.1, +0x4C MilitaryEndRate 0.9, +0x50 MilitaryTimeRange 240) */
@@ -381,6 +383,10 @@ void scene_occupant_slots(Scene *s, int bi);
 /* n slots of the building's edibles made after its occupants' (where no occupant's slot was in the cell: 0x3196F0 has
  * an edible take an occupant's slot of its cell, else a new one), in the game's list as edible slots */
 void scene_occupant_pad(Scene *s, int n);
+/* 0x31A540 after every building's slots (0x31AE20, a quicksort finished by 0x31B7A0's selection sort): the list by
+ * its occupant's kind (+0xD: the soldiers' kinds, then the civilians' after them, the edibles' own 0xFF last), so the
+ * soldiers' range holds the soldiers' slots and the civilians' the civilians' */
+void scene_occupant_sort(Scene *s);
 void scene_people_spawn(Scene *s, float dt);
 /* closeWindow (Actor binding, 0x30C3F0): the window an occupant came out of shuts over 0.5 s (openWindow(.., 0,
  * 0.5)), the slot's Openable; building and storey as people_add_window got them (the live storey then), or, _at, the

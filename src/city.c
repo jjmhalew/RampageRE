@@ -1614,9 +1614,39 @@ void scene_occupant_slots(Scene *s, int bi)
             continue;
         int q = (int)(wrand_lf() % (uint32_t)kinds);
         s->slots = realloc(s->slots, sizeof *s->slots * (size_t)(s->nslots + 1));
-        struct WindowSlot ws = { bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2], 0, 0, 0 };
+        struct WindowSlot ws = { bi, win[k][0], win[k][1], q, is_mil, -1, win[k][2], 0, 0, 0, -1 };
         order_add(s, s->nslots);
         s->slots[s->nslots++] = ws;
+    }
+}
+
+/* [R 0x31B7A0, 0x31AE20's comparison] one place before another: its +0xD (the occupant's kind, the civilians' after
+ * the +0x38 soldiers' kinds; 0xFF none) less, or the same and its +0xE (the edible's kind, 0xFF none) more, then its
+ * building (+0x0, [G] the building made later at the higher address), its storey (+0x8), its column (+0x4) more */
+static int order_before(const Scene *s, int a, int b)
+{
+    int ka[5], kb[5], *k[2] = { ka, kb }, at[2] = { a, b };
+    for (int i = 0; i < 2; i++) {
+        const struct WindowSlot *ws = at[i] >= 0 ? &s->slots[at[i]] : NULL;
+        k[i][0] = !ws ? 0xFF : ws->military ? ws->occupant : s->nmilitary + ws->occupant;
+        k[i][1] = ws && ws->edible >= 0 ? -ws->edible : -0xFF;
+        k[i][2] = ws ? -ws->building : 0;
+        k[i][3] = ws ? -ws->storey : 0;
+        k[i][4] = ws ? -ws->column : 0;
+    }
+    for (int i = 0; i < 5; i++)
+        if (ka[i] != kb[i])
+            return ka[i] < kb[i];
+    return 0;
+}
+
+void scene_occupant_sort(Scene *s)
+{
+    for (int i = 1; i < s->norder; i++) {
+        int x = s->order[i], j = i;
+        for (; j > 0 && order_before(s, x, s->order[j - 1]); j--)
+            s->order[j] = s->order[j - 1];
+        s->order[j] = x;
     }
 }
 
@@ -1628,6 +1658,7 @@ void scene_people_spawn(Scene *s, float dt)
         s->slots_made = 1;
         for (uint32_t bi = 0; bi < s->nbuildings; bi++)
             scene_occupant_slots(s, (int)bi);
+        scene_occupant_sort(s);
         if (getenv("RAMPAGE_TRACE")) {
             int nm = 0;
             for (int k = 0; k < s->nslots; k++)
@@ -1642,10 +1673,10 @@ void scene_people_spawn(Scene *s, float dt)
     /* [R 0x318650] a soldier's turn when rand() x 2^-32 <= MilitaryStartRate + min(1, t / MilitaryTimeRange) x (End -
      * Start), t the clock's time left (0x347DC0: in the campaign it runs down from the largest bonus time, 480, so for
      * the first 240 s it is End's 0.9, then falls to Start's 0.1), else a civilian's. The soldier's turn looks at the
-     * list's first +0x40 (the soldiers' count) slots, the civilian's at the +0x3C after them: places in the one list,
-     * which holds each building's soldiers, civilians and edibles in turn, so either range can hold the other sort's
-     * slots (the occupant is the slot's own: +0xD, 0x318968) and edible slots (+0xD 0xFF: passed over) [R 0x319570,
-     * 0x3195C0, 0x3195E0]. From the one at rand() % the range's count on, the first free one in a building whose x
+     * list's first +0x40 (the soldiers' count) slots, the civilian's at the +0x3C after them: the list sorted by the
+     * occupant's kind (scene_occupant_sort), so the soldiers' slots and then the civilians', the edibles' own after
+     * both; a slot emptied since (+0xD 0xFF: retired) is passed over [R 0x319570, 0x3195C0, 0x3195E0, 0x31AE20]. From
+     * the one at rand() % the range's count on, the first free one in a building whose x
      * (+0x2C, its middle) is within the monsters' range (0x318390). A soldier's turn with no soldiers' range (+0x40
      * 0) is a civilian's (0x318748 branches to the civilians' 0x318840); a range with slots but none free, no one */
     float f = s->military_range > 0 ? s->spawn_left / s->military_range : 1;

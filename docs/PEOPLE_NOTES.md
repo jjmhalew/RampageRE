@@ -138,11 +138,16 @@ window person, 3.5 s a runner, 4 s a walker or a mime, ...). StationaryPerson's 
   0x4D7E48 less the time run; in the campaign it counts down from the largest bonus time, 480, so the chance is 0.9
   for the first 240 s and falls to 0.1 at 480; in a Timed Run from 180, 0.7 falling), it looks at the slot list's
   first +0x40 places (the soldiers' count), otherwise at the +0x3C after them (the civilians'). Those are places in
-  the one list, not sorts: 0x3196F0 appends every slot to it (0x3195E0 grows it by one, 0x3195C0 is its last,
-  0x319570 copies a slot in), building by building, each building's soldiers, then its civilians, then its edibles'
-  own slots (an edible in a cell with an occupant's slot takes that slot, +0xE), so either range can hold the other
-  sort's slots and edible slots (+0xD 0xFF, passed over); what comes out is the slot's own occupant (+0xD, the kind
-  list's record at 0x318968) [R]. A soldier's turn with no soldiers' range (+0x40 = 0) is a civilian's: 0x318748
+  the one list: 0x3196F0 appends every slot to it (0x3195E0 grows it by one, 0x3195C0 is its last, 0x319570 copies a
+  slot in), building by building, each building's soldiers, then its civilians, then its edibles' own slots (an
+  edible in a cell with an occupant's slot takes that slot, +0xE); then, all the buildings done, 0x31A540 sorts it
+  (0x31ABA0: 0x31AE20, a quicksort that leaves runs under 9 to 0x31B7A0's selection sort): by +0xD rising (the
+  soldiers' kinds 0 .. +0x38 - 1, the civilians' after them, the edibles' own 0xFF last), then +0xE, the building
+  (+0x0), its storey (+0x8) and column (+0x4) falling. So the soldiers' range is the soldiers' slots and the
+  civilians' the civilians', every occupant's slot in one of them; a slot emptied since (+0xD 0xFF) is passed over;
+  what comes out is the slot's own occupant (+0xD, the kind list's record at 0x318968) [R]. (Unsorted, as the port
+  had it up to 0.13.0, the ranges ran over the buildings from the left: LA03's soldiers' turn only ever looked at the
+  three left-hand buildings and the last building's slots, behind the edibles' own, were never filled.) A soldier's turn with no soldiers' range (+0x40 = 0) is a civilian's: 0x318748
   branches to the civilians' code at 0x318840 [R] (every block with `NonMilitaryRate` 1: SF01 .. 04, SF08, SF09 and a
   few in Chicago, Las Vegas and Los Angeles); a range with slots but none free puts out no one. From the place at rand() % the range's count on, the first free slot (+0x14 empty, +0xD an occupant) whose
   building's x (+0x2C, its middle) lies in the monsters' range (0x318390: the lowest to the highest x of the players'
