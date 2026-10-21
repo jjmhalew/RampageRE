@@ -177,7 +177,7 @@ typedef struct Mon {
     float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
     char rage_fx_name[32]; int rage_fx, rage_on;     /* its book's MonsterFx RageFx (+0x164) and the one on (+0x168) */
     int nick, nick_fx[3];                            /* Nick's fire and eyes (+0x174 .. +0x17C): 0 not Nick, 1 to
-                                                      * start, 2 on, 3 shut down (becomeHuman) */
+                                                      * start, 2 on, 3 shut down (becomeHuman, till the respawn) */
     float face_ev;                                   /* the face's event player's time (+0x7DE8 +0x8), a share */
 } Mon;
 
@@ -2180,6 +2180,9 @@ static void clip_event(Mon *mo, const MoveEvent *e)
                                                         or dropping in from the view */
         mo->hp = mon_hp_max(mo);
         mo->defeated = 0;
+        if (mo->nick == 3)                           /* Nick's fire and eyes on again (0x2D3D44 .. 0x2D3D58: the name
+                                                      * +0xC89C is "Nick", 0x2F4FC0 starts the three) [R] */
+            mo->nick = 1;
         if (!v->game) {                              /* (no game to place it: as dropping in) */
             mo->scale = mo->scale_to = 1;
             mo->scale_left = 0;
