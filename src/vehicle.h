@@ -164,6 +164,9 @@ void vehicle_update(Vehicles *v, float dt, const ArmyMonster *m, int nm, const A
 void vehicle_set_collide(Vehicles *v, CollideWorld *w);
 void vehicle_collide_add(Vehicles *v, CollideWorld *w);
 
+/* the seconds of the last vehicle_update's world steps whose gAIMgr update the traffic ended (a release, the first
+ * fill: 0x3333F0 skips the army's spawners and the airstrike then): army_ai_cut's */
+float vehicle_ai_cut(const Vehicles *v);
 int vehicle_count(const Vehicles *v);                /* objects (skip VP_GONE) */
 const VehObj *vehicle_obj(const Vehicles *v, int i);
 /* where it is drawn this frame: between its last two steps (1/30 s) by the time since the last, so it moves as

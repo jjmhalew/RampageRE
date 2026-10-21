@@ -43,6 +43,8 @@ struct Vehicles {
     const ArmyMonster *m; int nm;
     const ArmyBox *b; int nb;
     float acc;
+    int ai_cut;                                      /* the world steps of the last update whose gAIMgr update the
+                                                      * traffic ended (vehicle_ai_cut) */
     CollideWorld *cw;                                /* the frame's collision world (vehicle_set_collide), NULL none */
 };
 
@@ -588,8 +590,10 @@ static void release(Vehicles *v, int s, float share)
  *    last one can land on the rear lane's start: a share of 1 or more); then nothing else that frame;
  *  - after that, for each slot in turn both timers fall by dt; the front's at 0 starts again at 2 + 3 rand and
  *    releases on the front lane, else the rear's does the same on the rear lane; one release ends the whole update
- *    for that frame (the later slots' timers wait). MaxVehicles plays no part here: each type stops at 5 alive */
-static void traffic_update(Vehicles *v, float dt)
+ *    for that frame (the later slots' timers wait), the army's spawners and the airstrike too (0x333960 / 0x333A08
+ *    -> 0x334200, the epilogue; the first fill 0x33355C): 1 then. MaxVehicles plays no part here: each type stops at
+ *    5 alive */
+static int traffic_update(Vehicles *v, float dt)
 {
     if (!v->filled) {
         v->filled = 1;
@@ -603,7 +607,7 @@ static void traffic_update(Vehicles *v, float dt)
                 release(v, s, share);
             }
         }
-        return;
+        return 1;
     }
     for (int s = 0; s < v->nslots; s++) {
         TrafficSlot *ts = &v->slot[s];
@@ -615,15 +619,16 @@ static void traffic_update(Vehicles *v, float dt)
             ts->front = 2 + 3 * frand(v);
             if (!(ts->lanes_off & 1))
                 release(v, s, -1);
-            return;
+            return 1;
         }
         if (ts->rear <= 0) {
             ts->rear = 2 + 3 * frand(v);
             if (!(ts->lanes_off & 2))
                 release(v, s, 1);
-            return;
+            return 1;
         }
     }
+    return 0;
 }
 
 int vehicle_load_traffic(Vehicles *v, int s, Group block_def)
@@ -1447,13 +1452,14 @@ void vehicle_update(Vehicles *v, float dt, const ArmyMonster *m, int nm, const A
     v->acc += dt;
     if (v->acc > 0.25f)
         v->acc = 0.25f;
+    v->ai_cut = 0;
     while (v->acc >= TIMESTEP) {                     /* the scripts count in frames: run them at the game's step */
         v->acc -= TIMESTEP;
         for (int i = 0; i < v->n; i++) {             /* (for the drawing between the steps) */
             memcpy(v->o[i].prev, v->o[i].world, sizeof v->o[i].prev);
             v->o[i].prev_ok = 1;
         }
-        traffic_update(v, TIMESTEP);
+        v->ai_cut += traffic_update(v, TIMESTEP);
         for (int i = 0; i < v->n; i++)
             obj_step(v, &v->o[i]);
     }
@@ -1663,6 +1669,8 @@ void vehicle_clear(Vehicles *v)
     v->block_vehicles = 0;
     v->acc = 0;
 }
+
+float vehicle_ai_cut(const Vehicles *v) { return v ? (float)v->ai_cut * TIMESTEP : 0; }
 
 int vehicle_count(const Vehicles *v) { return v->n; }
 const VehObj *vehicle_obj(const Vehicles *v, int i) { return i >= 0 && i < v->n ? &v->o[i] : NULL; }

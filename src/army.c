@@ -44,6 +44,7 @@ struct Army {
     ArmyShot shot[MAX_SHOTS]; int nshots, next_shot;
     ArmyEvent ev[MAX_EVENTS]; int nev, next_fx;
     Spawner sp[MAX_SPAWN]; int nsp, active;
+    float ai_cut;                                    /* army_ai_cut: seconds of this frame the spawners skip */
     const char *saved_name;                          /* gAIMgr +0x54 */
     /* Swat.bsf's globals, per GroupIndex */
     int flee[4], instances[4], fallback_played[4], fire_played[4], move_played[4];
@@ -3994,6 +3995,7 @@ void army_free(Army *a)
 void army_set_view(Army *a, float xmin, float xmax) { a->view[0] = xmin; a->view[1] = xmax; }
 
 void army_set_collide(Army *a, CollideWorld *w) { a->cw = w; }
+void army_ai_cut(Army *a, float seconds) { if (a) a->ai_cut = seconds; }
 
 void army_collide_add(Army *a, CollideWorld *w)
 {
@@ -4192,8 +4194,13 @@ void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox 
     frame_inputs(a, m, nm, b, nb);
     a->dt = dt;
     a->now += dt;
-    spawner_update(a, dt);
-    airstrike_update(a);
+    /* [R 0x333960 / 0x333A08 -> 0x334200] the gAIMgr's steps the traffic ended run no spawner and no airstrike */
+    float cut = a->ai_cut < dt ? a->ai_cut : dt;
+    a->ai_cut = 0;
+    if (dt - cut > 0) {
+        spawner_update(a, dt - cut);
+        airstrike_update(a);
+    }
     for (int i = 0; i < a->n; i++)                   /* (units made this frame are run too) */
         unit_update(a, i, dt);
     persons_update(a, dt);

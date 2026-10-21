@@ -4894,6 +4894,7 @@ static void army_step(Viewer *v, float dt)
     army_set_weapons(v->army, game_weapons_on(v->game));   /* the army's and the bosses' weapons (gp-0x772C) */
     army_airstrike(v->army, v->force_strike || (v->game && game_time_up(v->game)));   /* the time-up airstrike
                                                       * (gAIMgr 0x3320F0) */
+    army_ai_cut(v->army, vehicle_ai_cut(v->veh));     /* (the traffic's release ends gAIMgr's update) */
     army_update(v->army, dt, m, nm, boxes, nb);
     vehicle_step(v, dt, m, nm, boxes, nb);
     parade_step(v, dt, m, nm);

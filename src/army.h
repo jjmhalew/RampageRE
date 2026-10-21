@@ -306,6 +306,9 @@ void army_update(Army *a, float dt, const ArmyMonster *m, int nm, const ArmyBox 
  * unit), kind 0; flags 4, PushOutMonsters, IsObstacle as its own). The caller adds the monsters' spheres (flag
  * COLLIDE_F_MONSTER, tag COLLIDE_TAG(COLLIDE_OWN_MONSTER, slot)): a ray meeting one hits that monster */
 void army_set_collide(Army *a, CollideWorld *w);
+/* the seconds of this frame's world steps whose gAIMgr update the traffic ended (vehicle_ai_cut): the next
+ * army_update's spawners and airstrike skip them */
+void army_ai_cut(Army *a, float seconds);
 void army_collide_add(Army *a, CollideWorld *w);
 void army_impact(Army *a, int unit);                 /* TakeImpact: another module's flying object met the unit */
 
