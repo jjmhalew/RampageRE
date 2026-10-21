@@ -182,9 +182,12 @@ those (and every building effect) faded out over the Results.
 bytes, a list at +0x0 / +0x4, next +0x4C) per effect: the flags (+0x0), the key (three words, +0x4: face, storey,
 column), the cell's place (+0x10, 0x30F710: the face's rotation, the place +0x34, 1.5 up the storey +0x40, the storey
 +0x44), the effect (+0x54); the building goes on the world's update list (0x4D17F0 / 0x4D17F4) and its update
-(0x2BDC70 → 0x310660) advances them, releasing each that is done. The cells' hits (0x2BBBA4, 0x2BBCB0, 0x2BBE3C) pass
-flags −1; the front's crack (0x2BDB08, 0x2BDBC8), the floor's and the pre-collapse dust (0x2BD784, 0x2BD8EC) 0; the
-hit debris (0x30FD40) makes its record itself with flags 0 (0x31007C). Flag 2: a new effect, once made (0x208220),
+(0x2BDC70 → 0x310660) advances them, releasing each that is done. Every building caller passes flags 0: the cells'
+hits (0x2BBBA4, 0x2BBCB0, 0x2BBE3C: `daddu a3, zero, zero` in the delay slot, which 0x3101C0 hands on as 0x310260's
+a3, stored at +0x0 by 0x3104F8; up to v0.12.1 read as −1), the front's crack (0x2BDB08, 0x2BDBC8), the floor's and
+the pre-collapse dust (0x2BD784, 0x2BD8EC); the hit debris (0x30FD40) makes its record itself with flags 0
+(0x31007C). So the two flags below are never set on a building's records: each debris effect plays out where it was
+made. Flag 2: a new effect, once made (0x208220),
 shuts down (vtable +0x30) the flag-2 ones of the same key still on the list (0x3103D0 .. 0x31044C), so one hit's
 first crack, Wall_Small and Wall_Large leave the last one going. Flag 1: while the building is not falling (grid
 +0x1CC = INT_MAX, 0x2CE230) the effect is put back on its storey each update (0x30F690, z alone: the record's storey,

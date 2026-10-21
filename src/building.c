@@ -313,7 +313,7 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
     int st = c->state;
     if (st <= 0) {
         set_state(b, o, col, 1);                     /* cracked: glass (0x34) or wall (0x35) debris */
-        debris(b, o, col, DEBRIS_CRACK, -1);
+        debris(b, o, col, DEBRIS_CRACK, 0);
     }
     if (now >= 7)
         return 1;
@@ -327,7 +327,7 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
         return 1;
     if (st < 2) {
         set_state(b, o, col, 2);
-        debris(b, o, col, DEBRIS_WALL_SMALL, -1);
+        debris(b, o, col, DEBRIS_WALL_SMALL, 0);
     }
     if (now >= 3)
         return 1;
@@ -342,7 +342,7 @@ static int cell_damage(Building *b, int s, int col, int amt, int spread, float f
         return 1;
     if (st < 3) {
         set_state(b, o, col, 3);                     /* destroyed: heavy debris (0x36) */
-        debris(b, o, col, DEBRIS_WALL_LARGE, -1);
+        debris(b, o, col, DEBRIS_WALL_LARGE, 0);
     }
     return 1;
 }
