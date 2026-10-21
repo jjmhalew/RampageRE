@@ -3232,6 +3232,25 @@ static void force_state(Mon *mo, const char *name)
         }
 }
 
+/* resetMonsterState (the Monster binding 0x97 -> 0x2DCB40) [R]: the scale 1 at once (+0xA78 = +0xA7C = 1, +0xA80 the
+ * one before), the velocity 0 (+0xBD30), its goals cleared (0x2EE760, the caller's dir_ai_clear), and unless it is
+ * defeated (+0xA59; +0xAA2, also asked, is always set in play) the graph's first state (+0xA54 -> +0x30, Ground_Idle)
+ * started as a slot's is (+0x110 = its own entry at +0x118: 1, the state, flags 0), what it holds let go of
+ * (0x2DA570(monster, 0)). Its respawn cancelled (0x2D36A0) and a building let go of (0x322EC0) are left out: EndBlockNI
+ * and BeginBlockNI, which ask it, find the monsters on the street. So a taunt of the results (React_Victory, 3 s) stops
+ * as the walk to the next block begins; let run, the walk ran past EndBlockNI's 5 s, and the monster was put at its
+ * end facing pi as the next block began (a turn cut short, or one played on from there) */
+static void reset_monster_state(Mon *mo)
+{
+    mo->scale = mo->scale_to = 1;
+    mo->scale_left = 0;
+    memset(mo->vel, 0, sizeof mo->vel);
+    if (!mo->defeated && mo->have_graph && mo->graph.n > 0) {
+        mo->force_to = 1;
+        throw_held(mo, 0, 0, 10, 10);
+    }
+}
+
 /* the bosses' host: the army's weapons */
 static int boss_weapon_make(void *ctx, ArmyWeapon *w, Group g)
 {
@@ -3617,8 +3636,10 @@ static void game_step(Viewer *v, float dt)
                 break;
             }
             case GE_RESET:
-                if (e->type == GE_RESET)
+                if (e->type == GE_RESET) {
                     dir_ai_clear(&mo->ai);            /* clearAllGoals */
+                    reset_monster_state(mo);          /* resetMonsterState */
+                }
                 /* fall through */
             case GE_PLACE:
                 if (e->a == 1 && e->type == GE_PLACE) {  /* SkipResultsNI's -41: the block left; here it stays */
