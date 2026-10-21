@@ -169,6 +169,10 @@ int edible_events(Edibles *e, EdibleEvent *out, int max);   /* takes the events 
 enum { EDIBLE_NONE = 0, EDIBLE_POWERUP = 2, EDIBLE_HAZARD = 3 };
 /* [R] 0x2B37C0's item part: 2 or 3 once the cell is broken (state 2 or more) and its edible has appeared, else 0 */
 int edible_occupant(const Edibles *e, int building, int storey, int column);
+/* [R] 0x2B3900 (the cell lookup of getBuildingOccupant, its name and grabBuildingOccupant): a slot whose edible is
+ * out (+0x10) while its cell is not broken (0x2CF7C0 < 2: out from a floor falling next to it, 0x317A70) answers no
+ * slot, so its person too is none of theirs */
+int edible_hides(const Edibles *e, int building, int storey, int column);
 /* [R] 0x2B3510: the edible's kind name there (whatever the cell's state), NULL none */
 const char *edible_occupant_name(const Edibles *e, int building, int storey, int column);
 /* [R] grabBuildingOccupant(loc, eat) / grabBuildingOccupantAsType(loc, as_type, eat) on an edible (0x2B3350): only

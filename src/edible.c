@@ -729,6 +729,12 @@ int edible_occupant(const Edibles *e, int building, int storey, int column)
     return e->kind[e->slot[s].kind].hazard ? EDIBLE_HAZARD : EDIBLE_POWERUP;
 }
 
+int edible_hides(const Edibles *e, int building, int storey, int column)
+{
+    int s = find_slot(e, building, storey, column);
+    return s >= 0 && e->slot[s].item >= 0 && !cell_broken(e, &e->slot[s]);
+}
+
 const char *edible_occupant_name(const Edibles *e, int building, int storey, int column)
 {
     int s = find_slot(e, building, storey, column);

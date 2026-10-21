@@ -217,6 +217,10 @@ The monster.py printout shows only three of them; the fourth is in the data.
 3. **The cell** (0x2B3900): column = trunc((x − min x) / 5), storey = trunc((z − foot − 6) / 3).
 4. **The answer**: the occupant in that cell. An actor answers 1 (`canGrabPerson`). An item answers 2
    (`canGrabPowerup`), but only once the cell is broken (state 2 or more), or 3 if its type is a hazard.
+   0x2B3900 itself answers no slot at all when the slot's edible is out (+0x10) and the cell is not broken (an
+   edible brought out by a floor falling next to it, 0x317A70), so a person at that window can be neither grabbed
+   nor stops a punch, for the occupant (0x2B37C0), its name (0x2B3510) and the grab (0x2B3350) alike [R]. (Up to
+   0.13.2 the port looked at the person first and let it be grabbed.)
 
 `grabBuildingOccupant(loc, 1)` (0x2B3350) then:
 - stops the actor's effects (0x30C5E0);

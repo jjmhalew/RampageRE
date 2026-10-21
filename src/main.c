@@ -4054,6 +4054,8 @@ static int edible_call(Mon *mo, const char *call, const float *xyz)
     float at[3] = { mo->mx, mo->my, mo->mz };
     int found = people_probe(boxes, nb, at, xyz, mo->mirror, &b, &ls, &col);
     int o = found && b >= 0 && ls >= 0 && ls < v->scene.buildings[b].b.n ? v->scene.buildings[b].b.live[ls] : -1;
+    if (o >= 0 && edible_hides(v->edibles, b, o, col))
+        o = -1;                                      /* 0x2B3900: no slot, neither its person nor its edible */
     int person = o >= 0 && ((v->scene.folk && people_window_at(v->scene.folk, b, o, col) >= 0) ||
                             scene_window_soldier(&v->scene, b, o, col) >= 0);   /* an occupant actor, either sort */
     return edible_monster_call(v->edibles, call, o >= 0 ? b : -1, o, col, person, mo->slot,
@@ -5471,6 +5473,8 @@ static int window_soldier(Mon *mo, const float *xyz)   /* the army unit at that 
     float at[3] = { mo->mx, mo->my, mo->mz };
     if (!v->army || !people_probe(boxes, nb, at, xyz, mo->mirror, &b, &st, &col) || !boxes[b].live || st >= boxes[b].n)
         return -1;
+    if (v->edibles && edible_hides(v->edibles, b, boxes[b].live[st], col))
+        return -1;                                   /* 0x2B3900: an edible out behind its unbroken window */
     return scene_window_soldier(&v->scene, b, boxes[b].live[st], col);
 }
 
@@ -5478,8 +5482,11 @@ static int window_person(Mon *mo, const float *xyz)
 {
     Viewer *v = mo->v;
     PeopleBox boxes[64];
-    int nb = scene_people_boxes(&v->scene, boxes, 64);
+    int nb = scene_people_boxes(&v->scene, boxes, 64), b, st, col;
     float at[3] = { mo->mx, mo->my, mo->mz };
+    if (v->edibles && people_probe(boxes, nb, at, xyz, mo->mirror, &b, &st, &col) && boxes[b].live &&
+        st < boxes[b].n && edible_hides(v->edibles, b, boxes[b].live[st], col))
+        return -1;                                   /* 0x2B3900: an edible out behind its unbroken window */
     return v->scene.folk ? people_can_grab(v->scene.folk, boxes, nb, at, xyz, mo->mirror) : -1;
 }
 
