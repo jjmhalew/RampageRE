@@ -8262,6 +8262,7 @@ static int viewer_main(int argc, char **argv)
                 shell_frame(&v, &w, dt > 0.1f ? 0.1f : dt);
             static HudQuad sq[4096];
             v.shell_scene->hud = sq;
+            shell_set_wide(v.shell, w.height ? (480.0f * (float)w.width / (float)w.height - 640) / 2 : 0);
             v.shell_scene->nhud = shell_quads(v.shell, sq, 4096);
             gui3d_layers(&v, v.shell, v.shell_scene);
             Camera none = { { 0, 0, 0 }, 0, 0, 60 };

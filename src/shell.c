@@ -241,6 +241,9 @@ typedef struct {
     float skew;                                      /* the top edge moved along x (a slanted glyph) */
     int additive;                                    /* M 0x80: the additive shader [R 0x17D100] */
     int wide;                                        /* the quad is a widened fill */
+    float extra;                                     /* the window past each side of the 640 x 480 screen, in its
+                                                      * pixels (shell_set_wide) */
+    int frost;                                       /* in MonsterSelect's frost border (`frost tiles ...`) */
 } Emit;
 
 /* a picture: the rectangle (x0, y0) .. (x1, y1) of frame f with the texture's (u0, v0) .. (u1, v1) on it */
@@ -1690,6 +1693,53 @@ static int list_stacked(const Node *l)
     return 1;
 }
 
+/* the wider window [no PS2 meaning: the game's screen is 4:3; what is not widened is cut at its edges, the
+ * scissor of Scene.hud_clip]. A textured picture across the whole screen goes on past it: a full-screen one
+ * (MonsterSelect's background: a smooth radial gradient, green to black at its edges, with nothing in it to show
+ * a stretch) is widened to the window, its dark edges at the window's; a band (CitySelect's red title band and its
+ * shadow) goes on by its edge columns. MonsterSelect's frost border: its top and bottom rows of tiles repeat 640
+ * along each way, its side columns move out to the window's edges (sf, the frame the picture itself is drawn in).
+ * The copies and the moved pictures are wide: not cut. 1: the picture is drawn here */
+static int widen(Emit *e, const Node *nd, const Frame *df, Frame *sf, float x0, float y0, float w, float h,
+                 float us, float vs, const float c[4], const Bundle *tb, uint32_t tn)
+{
+    int upright = fabsf(df->b) < 1e-3f && fabsf(df->c) < 1e-3f && df->a > 0;
+    if (e->frost) {
+        float cx, cy;
+        fr_apply(df, x0 + 0.5f * w, y0 + 0.5f * h, &cx, &cy);
+        e->wide = 1;
+        if (!upright) {                              /* a side column (turned 90 degrees) */
+            sf->x += cx < 320 ? -e->extra : e->extra;
+            return 0;
+        }
+        for (int k = -1; k <= 1; k += 2) {           /* a row: the tiles are alike, so 640 on is seamless */
+            Frame cf = *df;
+            cf.x += 640.0f * (float)k;
+            emit_quad(e, &cf, x0, y0, x0 + w, y0 + h, 0, 0, us, vs, c, tb, tn);
+        }
+        return 0;
+    }
+    if (!nd->has_tex || !upright || df->d <= 0)
+        return 0;
+    float sx0 = df->x + df->a * x0, sx1 = df->x + df->a * (x0 + w);
+    if (sx0 > 1 || sx1 < 639)
+        return 0;
+    int was = e->wide, drawn = 0;
+    e->wide = 1;
+    if (df->d * h >= 400) {                          /* the screen's picture: to the window's edges */
+        float more = e->extra / df->a;
+        emit_quad(e, df, x0 - more, y0, x0 + w + more, y0 + h, 0, 0, us, vs, c, tb, tn);
+        drawn = 1;
+    } else {                                         /* a band: its edge columns drawn on (half a texel in) */
+        float half = nd->tex.w > 0 ? 0.5f * us / nd->tex.w : 0;
+        float span = 640.0f / df->a;
+        emit_quad(e, df, x0 - span, y0, x0, y0 + h, half, 0, half, vs, c, tb, tn);
+        emit_quad(e, df, x0 + w, y0, x0 + w + span, y0 + h, us - half, 0, us - half, vs, c, tb, tn);
+    }
+    e->wide = was;
+    return drawn;
+}
+
 static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, int in2d, float fade, const Node *only)
 {
     for (; nd; nd = nd->next) {
@@ -1697,6 +1747,9 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             continue;
         Frame local = node_local(nd), f;
         int c2d = in2d;
+        int frost = e->frost;
+        if (nd->kind == N_2D && !_strnicmp(nd->name, "frost tiles", 11))
+            e->frost = 1;
         if (!in2d && nd->kind == N_2D) {
             Frame pix = unit_to_pixels(pf);
             f = fr_mul(&local, &pix);
@@ -1711,8 +1764,14 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             if (nf > 0.01f && nd->res[0]) {
                 static const float white[4] = { 1, 1, 1, 1 };
                 int at = e->n;
+                /* the backdrop's effects (the interface's own: MainMenu's fires, CitySelect's shockwave; the
+                 * `Background` object's: MonsterSelect's lava lamp) across the wider window, the rest cut at the
+                 * screen [no PS2 meaning] */
+                e->wide = nd->fx == FX_EFFECT && nd->parent &&
+                          (!nd->parent->parent || !_stricmp(nd->parent->name, "Background"));
                 if (!e->d3 || e->n3 < e->max3)
                     emit_quad(e, &f, 0, 0, 0, 0, 0, 0, 0, 0, white, NULL, HUD_TEX_3D);
+                e->wide = 0;
                 if (e->n > at && e->d3) {
                     e->d3[e->n3] = nd;
                     e->l3[e->n3++] = e->layout;
@@ -1748,9 +1807,12 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
                     e->wide = 1;
                 }
                 e->additive = (nd->M & 0x80) != 0;       /* CitySelect's `basic` glow over the globe */
-                emit_quad(e, &df, x0, y0, x0 + w, y0 + h, 0, 0, nd->has_tex ? nd->tex.us : 1,
-                          nd->has_tex ? nd->tex.vs : 1, c, nd->has_tex ? nd->tex.b : NULL,
-                          nd->has_tex ? nd->tex.name : 0);
+                float us = nd->has_tex ? nd->tex.us : 1, vs = nd->has_tex ? nd->tex.vs : 1;
+                const Bundle *tb = nd->has_tex ? nd->tex.b : NULL;
+                uint32_t tn = nd->has_tex ? nd->tex.name : 0;
+                Frame sf = df;
+                if (e->wide || !widen(e, nd, &df, &sf, x0, y0, w, h, us, vs, c, tb, tn))
+                    emit_quad(e, &sf, x0, y0, x0 + w, y0 + h, 0, 0, us, vs, c, tb, tn);
                 e->additive = e->wide = 0;
             }
         } else if (nd->kind == N_SLIDER) {
@@ -1797,6 +1859,7 @@ static void layout_emit(Emit *e, const Gui *g, const Node *nd, const Frame *pf, 
             list_emit(e, g, nd, &df, nf);
         const Node *one = nd->kind == N_LIST && list_stacked(nd) ? list_item((Node *)nd, nd->sel < 0 ? 0 : nd->sel) : NULL;
         layout_emit(e, g, nd->child, &f, c2d, nf, one);
+        e->frost = frost;
     }
 }
 
@@ -2008,6 +2071,7 @@ typedef struct {
 
 struct Shell {
     const Vol *vol;
+    float wide_extra;                                /* shell_set_wide */
     Bundle b_shell, b_vshell, b_data, b_common, b_mc, b_loading;
     int have_shell, have_vshell, have_data, have_common, have_mc, have_loading;
     Gui gui;
@@ -5825,6 +5889,7 @@ int shell_3d(Shell *s, Shell3D *out, int max)
     const Node *d3[64];
     const void *l3[64];
     Emit e = { s->quads, 0, MAX_QUADS, d3, l3, 0, max < 64 ? max : 64, NULL };
+    e.extra = s->wide_extra;
     emit_all(s, &e);
     int n = 0;
     for (int k = 0; k < e.n3; k++) {
@@ -5902,6 +5967,7 @@ int shell_quads_turned(const Shell *s, ShellQuad *out, int max)
     if (!s || !out || max <= 0)
         return 0;
     Emit e = { out, 0, max, NULL, NULL, 0, 0, NULL };
+    e.extra = s->wide_extra;
     if (s->vi.on) {
         emit_layout(&e, &s->gui, s->vi.L);
         return e.n;
@@ -5918,6 +5984,12 @@ int shell_quads_turned(const Shell *s, ShellQuad *out, int max)
 
 /* the same as HudQuads: each one's bounds, the texture coordinates of the corners nearest the bounds' top-left and
  * bottom-right, and its own four corners (drawn from them, so a turned picture keeps its turn) */
+void shell_set_wide(Shell *s, float extra)
+{
+    if (s)
+        s->wide_extra = extra > 0 ? extra : 0;
+}
+
 int shell_quads(const Shell *s, HudQuad *out, int max)
 {
     if (!s || !out)

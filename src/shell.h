@@ -250,6 +250,9 @@ typedef struct {
     int wide;                       /* a fill widened across the window (HudQuad's) */
 } ShellQuad;
 int shell_quads(const Shell *s, HudQuad *out, int max);
+/* the window past each side of the 640 x 480 screen, in its pixels ((480 x aspect - 640) / 2): MonsterSelect's
+ * frost border moves out to the window's edges (shell.c widen) */
+void shell_set_wide(Shell *s, float extra);
 
 /* ---- the 3D objects: GuiShape (<s>, a model) and GuiEffect (<e>, an .edf). They are drawn through the GUI camera: eye
  * at (0, -1, 0) of its world looking along +y, z up, a vertical field of view of 2 atan(0.375) (41.1 degrees), near 1,
