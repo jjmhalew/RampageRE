@@ -235,6 +235,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
     g->probe[0] = rdf(d + 0x1A0);
     g->probe[1] = rdf(d + 0x1A4);
     g->bot_r = rdf(d + 0x188);
+    g->bot_h = rdf(d + 0x18C);
     g->bot_off[0] = rdf(d + 0x190);
     g->bot_off[1] = rdf(d + 0x194);
     uint32_t nsh = rd32(d + 0xA44), sh = rd32(d + 0xA48);

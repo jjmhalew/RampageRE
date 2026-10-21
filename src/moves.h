@@ -85,7 +85,8 @@ typedef struct {
     float probe[2];                                  /* +0x1A0, +0x1A4: where canMount looks for a face (0, 2.5) */
     float bot_r, bot_off[2];                         /* +0x188, +0x190, +0x194: the radius and the reference point's
                                                       * offset (its x, its y) the bots keep apart by (0x2E4FA0,
-                                                      * 0x2E4E90) */
+                                                      * 0x2E4E90) and the monsters push each other off by (0x2E4660) */
+    float bot_h;                                     /* +0x18C: half the height of that cylinder (0x2E4660) */
     /* the body parts (+0xA74: Arm L, Arm R, Body, Head, Leg L, Leg R) and their bones, which an attack event (type 0)
      * arms: a shape whose bone is armed can hit */
     const char *part_name[MOVES_PARTS]; int nparts;

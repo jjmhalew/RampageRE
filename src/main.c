@@ -1439,6 +1439,7 @@ static float players_mid_x(const Viewer *v)
 static float mon_radius(const Mon *mo);
 static float mon_half_height(const Mon *mo);
 static void mon_shape(const Mon *mo, float c[3], float *r);
+static void mon_cyl(const Mon *mo, float c[3], float *r, float *h);
 /* isHoldlingEdible: hasGrabbedObject is 2 (0x2E5590) when the held object has flag 0x80000 [R]: the people and the
  * army's soldiers (actors), the vehicles Vehicle.bsf flags Animates or Edible (its Construct's setFlags) and the
  * parade's carts and bikers (GroundCart.bsf, parade.c's PAF_EDIBLE); no rail object, parked car or army vehicle
@@ -2637,6 +2638,54 @@ static void impact_route(Viewer *v, int tag, int kind, const float at[3], float 
  * VolumeTriggers (their touches go to their owner: boss.c's barriers), then the buildings (fronts, alley walls and
  * corners), held on a roof, the street's limits; on a building's face (mode 5) only the triggers. Roofs are landed on
  * by ground_at */
+/* 0x2E4660, before the box test (0x2E11A4) [R]: a player's monster (its slot under the players' count, 0x4D7E28),
+ * not in mode 3 or 5, is pushed off every other player's monster it overlaps (not one hidden, +0x109, nor one it
+ * holds or is held by: none here): each is a cylinder about its reference point (0x2DA900: its place + (+0x190 +
+ * the type-15 record's +0xC, +0x194 + its +0x10) x its scale along its x and y axes), MONSTER_DATA +0x188 + the
+ * record's +0x8 x its scale across, from its feet 2 x +0x18C up (in mode 1 or 2 about +0xB20 x its scale instead
+ * [G: +0xB20 not traced: the feet's cylinder kept]); overlapping in z and nearer in x, y than the two radii, it is
+ * moved away along their x, y by half of what they overlap, that overlap at most 50 x the frame's time (straight
+ * along a default way when they are within 0.001), and with foot IK both its feet let go (0x33BE90) */
+static void push_apart(Mon *mo, float dt)
+{
+    Viewer *v = mo->v;
+    if (mo->slot >= v->nmon || mo->mode == 3 || mo->mode == MODE_BUILDING || !mo->have_graph)
+        return;
+    float a[3], ar, ah;
+    mon_cyl(mo, a, &ar, &ah);
+    for (int k = 0; k < v->nmon; k++) {
+        Mon *o = &v->mon[k];
+        if (o == mo || !o->have_graph || (mon_in(o) && mon_in(o)->hidden))
+            continue;
+        float b[3], br, bh;
+        mon_cyl(o, b, &br, &bh);
+        if (!(a[2] <= b[2] + 2 * bh && !(a[2] + 2 * ah < b[2])))
+            continue;
+        float d[2] = { a[0] - b[0], a[1] - b[1] }, r = ar + br, l2 = d[0] * d[0] + d[1] * d[1];
+        if (l2 >= r * r)
+            continue;
+        float l = sqrtf(l2);
+        if (l <= 0.001f) {                           /* the default way (0x40A008) [G: its value not read] */
+            d[0] = 1;
+            d[1] = 0;
+        } else {
+            d[0] /= l;
+            d[1] /= l;
+        }
+        float push = r - l, most = 50 * dt;
+        push = 0.5f * (push < most ? push : most);
+        mo->mx += d[0] * push;
+        mo->my += d[1] * push;
+        a[0] += d[0] * push;
+        a[1] += d[1] * push;
+        if (mo->feet.links) {
+            foot_step(&mo->feet, 0, 0);
+            foot_step(&mo->feet, 1, 0);
+            mo->feet.anchor = -1;
+        }
+    }
+}
+
 static void push_out(Mon *mo)
 {
     Viewer *v = mo->v;
@@ -2781,6 +2830,19 @@ static int mon_spheres(const Mon *mo, float out[][4], int max)
 
 /* the monster's WCISpheres bound (0x29A880: sphere 0 merged with the rest, over the entries 0x2DA9E0 fills, their
  * radii x the dynamic scale, 0x2DAB60): r -1 without a shape [R] */
+/* the cylinder the monsters push each other off by (0x2E4660): about its reference point (0x2DA900), its radius
+ * and half height (MONSTER_DATA +0x188 + the type-15 record's +0x8, +0x18C), x its scale; c[2] its feet */
+static void mon_cyl(const Mon *mo, float c[3], float *r, float *h)
+{
+    float s = mo->scale > 0 ? mo->scale : 1, hd = mo->heading / 57.2957795f;
+    float fx = (mo->graph.bot_off[0] + mo->ev15x) * s, fy = (mo->graph.bot_off[1] + mo->ev15) * s;
+    c[0] = mo->mx + cosf(hd) * fx - sinf(hd) * fy;
+    c[1] = mo->my + sinf(hd) * fx + cosf(hd) * fy;
+    c[2] = mo->mz;
+    *r = (mo->graph.bot_r + mo->ev15r) * s;
+    *h = mo->graph.bot_h * s;
+}
+
 static void mon_shape(const Mon *mo, float c[3], float *r)
 {
     float sp[64][4], s = mo->scale > 0 ? mo->scale : 1;
@@ -5805,6 +5867,7 @@ static void mon_step(Mon *mo, float dt)
             if (mo->mx < -75) mo->mx = -75;
             if (mo->mx > 75) mo->mx = 75;
         }
+        push_apart(mo, dt);
         push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
         if (!mo->is_ai && !mo->mount.mounted) {   /* the camera's reach (0x336290): a player off a face stays
                                                       * at most 70 up and 30 along x from the players' middle */

@@ -80,6 +80,15 @@ with its +0xA2).
 
 ## The monster (0x2E2C50, from its update) [R]
 
+**The other monsters** are not in the box query (exclude 0x40). Just before it (0x2E11A4) 0x2E4660 pushes a player's
+monster (its slot under the players' count, not in mode 3 or 5) off each other player's monster it overlaps, not one
+hidden (+0x109) nor one it holds or is held by: each a cylinder about its reference point (0x2DA900: its place +
+(+0x190 + the type-15 record's +0xC, +0x194 + its +0x10) × its scale along its axes), MONSTER_DATA +0x188 + the
+record's +0x8 across, 2 × +0x18C up from the feet (in mode 1 or 2 about +0xB20 instead), × the scale. Overlapping
+in z and nearer in x, y than the two radii, it moves away along x, y by half of the overlap, the overlap at most 50 ×
+the frame's time (0x4D17A4), and with foot IK its feet let go (0x33BE90). main.c `push_apart` (up to v0.11.4 nothing
+kept them apart: in a game of two or more they walked into each other).
+
 The box: around its feet ±(MONSTER_DATA +0x198) across, ±(+0x19C) up, both × the scale (+0xA78) when +0xA74;
 its centre +0x19C up. On a building (mode 5), or in the air (mode 1) more than 3 up, the box and centre are 3
 higher (0x2E2E18: `c.le.s z, 3` then `bc1f`, the compiler's z > 3; the jump clips carry the body about 3 above the
