@@ -118,7 +118,8 @@ A news flash: "RAMPAGE ALERT", "CHANNEL 3", a grey data field, an orange band, a
   Defeated", and "No" when its points are 0. `Slot_Jackpot` stops at the end.
 - "Monster Revealed" fades in between 1 and 5 s after the intro when a monster was revealed (not on the last block).
 - **Buttons** (once the intro is done): Continue (X / Start) — "MOVING ON TO <next block>" in the title, then the
-  walkout (the field, list, total, band and buttons slide away in 0.5 s); Change Monster (button 0) — result 3; Quit
+  walkout (the field, list, total, band and buttons slide away in 0.5 s); Change Monster (button 0) — result 3 (the city is left for Monster Select, which starts it again at GameStatus' start
+  block +0x210, the shell's too: the block after the one won); Quit
   (Back) — the ConfirmQuit dialog, Yes → result 4. Change Monster and Quit are hidden once the city is destroyed.
 - **Save** (Results.scr:215, 354): at 1.5 s `updateProfile`, `saveProfile` and `bTrackSave`; from then on each frame
   the Save button ("Autosave", button 1) shows while `hasLoadedProfile() && !getAllowSave()` (a profile created

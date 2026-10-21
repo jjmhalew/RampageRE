@@ -3716,7 +3716,10 @@ static void game_step(Viewer *v, float dt)
                     v->last_game.city_index = e->b;
                     v->last_game.city[0] = 0;
                     v->last_game.start_block = 0;
-                }
+                } else                               /* GameStatus' start block (+0x210) is the shell's too: the
+                                                      * block after the one won (activateNextBlock), the checkpoint's
+                                                      * after a game over; Change Monster starts the city there */
+                    v->last_game.start_block = game_start_block(v->game);
                 break;
             case GE_RUBBLE_FX: {                     /* findPointInRubble(pos, 8): a point in the block left's
                                                       * rubble, 1.5 up; none, no effect */
