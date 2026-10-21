@@ -79,15 +79,21 @@ the left end to w (f − ½) (UV 0..f) **[R]**. Neither sprite is textured in th
 
 ### Quad, text and fade
 - A quad (`GuiQuad::draw` 0x2439E0) draws one sprite through the object's world matrix (0x240790). Its alpha is
-  multiplied by the fade **[R]**. It is drawn **clamped** at its texture's edges **[R]**: the draw's pass setup
-  (0x2439E0 → 0x17BCA0 → 0x17A940 → 0x25FF30 → 0x265840) hands each pass's byte +0xF (a pass is 36 bytes from the
-  shader's +0x4, its texture slot at +0x4) to the texture's 0x26AA20, which stores it at +0x40 and rebuilds the
-  texture's CLAMP_1 (+0x90; register 8 at +0x98): WMS = WMT = 1 (CLAMP) when bit 0 is clear, 0 (REPEAT) when set,
-  the region fields 0. A texture loads repeating (0x26AA80 / 0x26B0A0: +0x40 = 0x11); every GUI shader template
-  (copied by 0x17D100: 0x410918 … 0x415940, 15 of them) has 0 in its passes' +0xF, so a picture's bilinear taps
-  never reach its other edge. render_gl.c `draw_hud` clamps (GL_CLAMP_TO_EDGE) for each HUD quad and repeats again
-  after it, the world's draws sharing the texture objects (up to v0.11.3 the pictures repeated: thin lines along the
-  city cards' frame and across their pictures, the frost tiles' seams in MonsterSelect).
+  multiplied by the fade **[R]**. Its texture **repeats** at its edges **[R]**: the draw's pass setup (0x2439E0 →
+  0x17BCA0 → 0x17A940 → 0x25FF30 → 0x265840, handed the shader's compiled record, shader + 0xD8 + 4) gives each
+  pass's wrap byte (record + 0xF + 36 × pass; the texture slot at record + 4 + 36 × pass) to the texture's 0x26AA20,
+  which stores it at +0x40 and rebuilds the texture's CLAMP_1 (+0x90; register 8 at +0x98): WMS = WMT = 1 (CLAMP)
+  when bit 0 is clear, 0 (REPEAT) when set, the region fields 0. A texture loads repeating (0x26AA80 / 0x26B0A0:
+  +0x40 = 0x11), and the GUI's shaders (0x17D100's descriptors 0x13 … 0x72, their records found by the descriptor's
+  sum in 0x3C73B0) have 0x11 or 0x1: repeat. On the PS2's screen a picture is drawn at about a texel a pixel, where
+  that does not show; the port clamps the HUD's pictures (render_gl.c `draw_hud`, GL_CLAMP_TO_EDGE for each quad and
+  repeat again after it, the world's draws sharing the texture objects) [no PS2 meaning], as in a bigger window the
+  outer pixels' bilinear taps reached a picture's other edge (up to v0.11.3: thin lines along the city cards' frame
+  and across their pictures, the frost tiles' seams in MonsterSelect). The world's shaders differ: of their
+  passes on a texture 434 repeat (0x11, 0x1, 0x21) and 254 clamp (0x10, 0x0, 0x20); the port repeats every world
+  texture [G for those]. San Francisco's skyline (`SanFran_Skyline`, kind 2, flags 0x100002: shader 8, record 8)
+  repeats, so its picture's bottom edge takes in its light, see-through top row on the PS2 too (the thin light line
+  across the skyline where it meets the backdrop, as in SF10).
 - A text (`GuiText::draw` 0x234D30) multiplies the alpha of its colour and of its shadow by the fade, then calls the
   font's string draw with the object's matrix **[R]**.
 
