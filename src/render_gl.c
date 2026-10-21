@@ -81,6 +81,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE: if (w) { w->width = LOWORD(lp); w->height = HIWORD(lp); } return 0;
     case WM_KEYDOWN: case WM_SYSKEYDOWN:
         if (w && wp < 256) { if (!w->keys[wp]) w->pressed[wp] = 1; w->keys[wp] = 1; }
+        if (w && msg == WM_SYSKEYDOWN && wp == VK_F4)
+            w->quit = 1;                             /* Alt+F4: as the window's close (WM_CLOSE) */
         return 0;
     case WM_KEYUP: case WM_SYSKEYUP: if (w && wp < 256) w->keys[wp] = 0; return 0;
     case WM_SYSCHAR: if (wp == '\r') return 0; break;   /* Alt+Enter (fullscreen, settings_keys): no beep */
