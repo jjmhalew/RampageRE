@@ -83,9 +83,10 @@ int material_region(const Bundle *b, uint32_t material, float region[4]);
  * masks, the backdrops, the buildings' roofs, trims and interiors, every one of them with its UVs inside 0 .. 1.
  * 1 = clamped */
 int material_clamped(const Bundle *b, uint32_t material);
-/* the material's diffuse colour (f32 rgba at +0x08): 218 materials have no texture and only this colour (the
- * saucer's orange blades, its green glass at alpha 0.38, flag poles, bumpers); every textured one is white. 0 when
- * the name is not a material (a texture named directly): white */
+/* the material's colour (f32 rgba at +0x18, the one 0x25F960 packs to bytes for the shader's colour mode 3; +0x08 is
+ * never read): 218 materials have no texture and only this colour (the saucer's orange blades, its green glass at
+ * alpha 0.38, flag poles, bumpers, the tanks' olive green); every textured one is white. 0 when the name is not a
+ * material (a texture named directly): white */
 int material_color(const Bundle *b, uint32_t material, float rgba[4]);
 /* a material's second layer: its texture is the u16 at +0x3A, its kind the byte at +0x2 (0x16F030 picks the shader by
  * it, docs/FORMAT_BDP.md "Materials") */

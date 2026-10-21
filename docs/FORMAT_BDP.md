@@ -254,15 +254,18 @@ Every vertex of the cloth mesh sits exactly on a particle (checked on five monst
 weights skin the mesh at rest. A flag's particles have no bones.
 
 ## Materials (type 6)
-0x90 bytes: u16 own name index, u8 kind, u8 ?, u32 flags, ..., f32 colours from 0x08 (diffuse, ambient,
-specular, ...), u16 name index of the texture at 0x38 (0 = no texture). 1,412 of the 1,695 materials name a
+0x90 bytes: u16 own name index, u8 kind, u8 ?, u32 flags, ..., f32 colours from 0x08 (rgba at 0x08, 0x18 and 0x28),
+u16 name index of the texture at 0x38 (0 = no texture). 1,412 of the 1,695 materials name a
 texture; the rest have none or name an `.ifl` animation or another material. An `.ifl` is a text entry (type 2):
 one line per frame, its image's name (`Parking00.bmp`: the texture `Parking00`) and how many frames it shows
 (taken as 3ds Max's 30 per second; 20 of them, 9 in Las Vegas: neon signs, fans).
 
-The colour at 0x08 (diffuse rgba) is all a material without a texture has: 218 of them (the saucer's orange
+The colour at 0x18 (rgba) is all a material without a texture has: 218 of them (the saucer's orange
 `saucer_blades`, its green `Saucer_glass` at alpha 0.38, flag poles, bumpers, cloth); every textured material's is
-white. Alpha below 1 is see-through glass (9 materials: the saucer's, the hover tank's, the helicopter's canopy).
+white. 0x25F960 packs it (and the one at 0x28) to bytes, × 255 + 0.5 (0x25FAA8 .. 0x25FBB8), and 0x25F570 puts it in
+the material object's +0x10, which colour mode 3 sends (0x265A48) [R]; the floats at 0x08 are never read. They are
+the same but on two: `tankpartGREEN` (the Sherman's body, kind 1, shader 0xC) is olive (0.17, 0.26, 0.15) at 0x18
+and dark navy (0, 0.05, 0.2) at 0x08, and `Object_Shadows` black against white. Up to v0.11.4 the port read 0x08. Alpha below 1 is see-through glass (9 materials: the saucer's, the hover tank's, the helicopter's canopy).
 The byte at +0x2 is the material's kind (how many textures it binds, below): 1 none (222 materials), 2 one
 (1,621), 5 and 8 a second layer named by the u16 at +0x3A (the byte at +0x3 is 0, or 128 on 90 and 150 on one of
 kind 2): 5 a reflection, the sphere map `cubemap` (12 materials: the saucer's top `SB_shinyNOTreflective`, the

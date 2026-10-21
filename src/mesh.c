@@ -128,9 +128,9 @@ int material_color(const Bundle *b, uint32_t material, float rgba[4])
 {
     const BdpEntry *e = bdp_entry_of(b, material, ET_MATERIAL);
     rgba[0] = rgba[1] = rgba[2] = rgba[3] = 1;
-    if (!e || e->size < 0x18)
+    if (!e || e->size < 0x28)
         return 0;
-    memcpy(rgba, e->data + 0x08, 4 * sizeof(float));
+    memcpy(rgba, e->data + 0x18, 4 * sizeof(float));   /* [R 0x25FAA8: +0x18 packed to bytes, 0x25F570] */
     for (int k = 0; k < 4; k++)
         rgba[k] = rgba[k] < 0 ? 0 : rgba[k] > 1 ? 1 : rgba[k];
     return 1;
