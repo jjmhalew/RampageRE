@@ -440,7 +440,7 @@ the pack's axis (`pad_axis`); the keys' menu presses are the port's own.
 | 011235 | Flag 8 |
 | 000020 | Flag 1 << 29 |
 | 66730n | Movie n through the attract mode's CheatVideo |
-| 24902n | Start at block n + 1 |
+| 24902n | Taken (Cheat_valid), but dead: setCheatFlagsI stores neither n nor the flag (PROFILE_NOTES.md) |
 | 314159 | Shows the version text |
 
 The port reports the cheats as `SHELL_EVT_CHEATS`. What the flags do: [PROFILE_NOTES.md](PROFILE_NOTES.md) "The

@@ -3486,9 +3486,9 @@ static void mm_activate_cheat(Shell *s)
         m->state = 0;
         fader_init(&m->fd, m->icons, 1);
         fader_init(&m->fd, m->cheat, 0);
-    } else if (strncmp(code, "24902", 5) == 0) {         /* the start block: setCheatFlagsI(0x80000000, digit) */
-        s->cheat_param_block = code[5] - '0';
-        f |= 0x80000000u;
+    } else if (strncmp(code, "24902", 5) == 0) {
+        /* the start block: setCheatFlagsI(0x80000000, digit), which stores neither the digit nor the flag (0x2C3350
+         * branches past both to 0x2C3388) [R]: the code is taken (Cheat_valid) and does nothing */
     } else if (strcmp(code, "314159") == 0) {
         Node *t = find(ifc_root(s, IF_MAINMENU), "versionInfo");
         if (t) show(t, 1);                               /* its own text: "Version: 1.0.16 / Date: 10-15-04" */
