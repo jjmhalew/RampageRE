@@ -145,9 +145,13 @@ neighbour's top changes, before its facade passes. The facade quads and cracks c
 Differences (the game's side read: 0x2CD220, 0x31CB10, 0x2CD060, 0x2CD470) [R]:
 - the viewer lights the ground floor and top always per vertex (the game: only while a shadow can reach them, else
   the GS with the ramp at their foot, 0x31CC00 → 0x2B8AD0), and the blocks behind's models too (the game: the GS);
-- the adornments keep the GL lights without the ramp (the game: the GS lights and the ramp at each one's height,
-  0x2CD060); the rubble too (the game: with a shadow object as the ground floor, without one no ambient call of its
-  own, so the last one set).
+- the rubble keeps the GL lights without the ramp (the game: with a shadow object as the ground floor, without one
+  no ambient call of its own, so the last one set).
+
+The adornments are drawn with the GS lights and, as their ambient, the light's ambient plus the ramp at each one's
+matrix height, clamped 0 .. 1 (0x2CD060 → 0x2B8AD0, then 0x25B0C0) [R]: by day a fire escape at 21 up gets 0.28, at
+35 and above 0.45 (0.1 + 0.35); by night (0, 0, 0.3) with the −0.5 ramp its blue is gone above about 15 (city.c
+`adornments_place`, `Instance.own_ambient`; up to v0.12.1 the scene's one ambient).
 
 The window glass behind an InnerWindowTexture (one colour G+0x6F0 at every corner, format 0x142: 0x2C92F0, 0x2D2700)
 and the inner corner walls (0xFF808080 halved, 0x2C63A0) have no normals, and are drawn unlit here too [R].

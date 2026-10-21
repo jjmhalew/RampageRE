@@ -1613,13 +1613,19 @@ void rnd_frame(Renderer *r, const Window *w, const Camera *cam, double t, int fo
                                                           * street's lie on it, darkened as it is) */
         for (uint32_t i = 0; i < s->nitems; i++) {
             const DrawItem *it = &s->items[i];
-            if (s->instances[it->instance].hidden || it->instance == s->sky || (it->instance == s->ground_inst) != !pass ||
+            const Instance *in = &s->instances[it->instance];
+            if (in->hidden || it->instance == s->sky || (it->instance == s->ground_inst) != !pass ||
                 !item_seen(r, it, view_mv, tx, ty))
                 continue;
+            int own = in->own_ambient && s->nlights;   /* an adornment's ambient (0x2CD060), the scene's after it */
+            if (own)
+                glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (float[4]){ in->ambient[0], in->ambient[1], in->ambient[2], 1 });
             glPushMatrix();
             glMultMatrixf(it->world.m);
             draw_mesh(r, &s->meshes[it->mesh], it->skin, t);
             glPopMatrix();
+            if (own)
+                glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
         }
         if (!pass && s->shadows)
             draw_shadows(r, SHADOW_PASS_GROUND);

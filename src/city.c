@@ -2216,6 +2216,10 @@ static void adornments_place(Scene *s, SceneBuilding *sb, Mat4 sway)
         in->dynamic = 1;
         in->hidden = a->gone || b->state == BUILDING_GONE;
         in->base = mat_mul(sway, mat_mul(sb->node, mat_trs_z(a->x, a->y, adornment_z(b, a), a->deg)));
+        /* [R 0x2CD060 -> 0x2B8AD0, 0x25B0C0] the GS's ambient for each: the light's ambient plus the ramp at its
+         * matrix's height, 0 .. 1 (the lights the scene's): brighter higher up by day, the night's blue gone up high */
+        in->own_ambient = 1;
+        building_light_ambient(&s->building_light, in->base.m[14], in->ambient);
     }
 }
 

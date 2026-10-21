@@ -62,6 +62,8 @@ typedef struct {
     int dynamic;                                      /* its base moves (a building falling): refreshed every frame */
     int mirrored;                                     /* skinned mirror-wise: left and right swapped, x reflected */
     Group shadow;                                     /* its template's ShadowData (shadow.c), at NULL: casts none */
+    int own_ambient; float ambient[3];                /* drawn with this ambient, not the scene's (an adornment's: the
+                                                       * building light's ramp at its height, 0x2CD060) */
 } Instance;
 
 typedef struct {
