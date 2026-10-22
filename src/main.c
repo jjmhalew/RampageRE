@@ -2165,7 +2165,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
     else if (!strcmp(n, "Monsters::jumpDrop"))   { w[2] = -10; set = 1; }
     else if (!strcmp(n, "Monsters::jumpHighMonster")) { l[1] = e->p[0]; l[2] = 32; set = relative = 1; }
     else if (!strcmp(n, "Monsters::addVelocity")) {
-        relative = e->p[0] != 0;
+        relative = (int)e->p[0] != 0;               /* [R] Monsters.scr: (int) param0 */
         float *dst = relative ? l : w;
         dst[0] = e->p[1]; dst[1] = e->p[2]; dst[2] = e->p[3];
         add = 1;
