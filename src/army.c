@@ -1070,6 +1070,8 @@ static void beam_update(Army *a, ArmyUnit *u, ArmyWeapon *w, const float from[3]
     w->first = 0;
 }
 
+static void beam_hold(Army *a, ArmyWeapon *w);
+
 /* a weapon each frame (the common countdown 0x2971A0, the charge 0x297760 and the fire 0x2963C0 / 0x295C70) [R]:
  *  - the countdown falls by the rate x dt while the weapon has ammo or does not count it (+0x4 & 2); while it may not
  *    fire it stops at ChargeTime + FiringOffset, so from a permission to the shot is FiringOffset + ChargeTime;
@@ -1094,11 +1096,15 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
         } else
             beam_update(a, u, w, from, dir, frame, dt);
     }
-    if (a->weapons_off)                              /* [R 0x297398, 0x2977BC, 0x2963EC, 0x295CC0] no countdown, no
-                                                      * charge, no shot; a beam on runs its Duration out [G: the hold,
-                                                      * vtable +0x7C, comes only with the owner's state +0x5C at 2, 3
-                                                      * or 7, which the army's units are not traced in] */
+    if (a->weapons_off) {                            /* [R 0x297398, 0x2977BC, 0x2963EC, 0x295CC0] no countdown, no
+                                                      * charge, no shot; and with the owner's state +0x5C at 2, 3 or 7
+                                                      * (3 from the WorldObject's constructor 0x288228, the cluster's 4
+                                                      * once out of ammo) the hold, vtable +0x7C (0x2973A4 .. 0x2973DC):
+                                                      * a beam on stops at once [R] */
+        if (!u->ammo_out)
+            beam_hold(a, w);
         return;
+    }
     if (w->ammo > 0 || !(w->def_flags & 2)) {
         w->timer -= w->scale * dt;
         float floor = may ? 0 : w->charge_time + w->firing_offset;
@@ -1373,6 +1379,12 @@ static void unit_weapons_tick(Army *a, ArmyUnit *u, float dt, const float *point
                                                       * latches it (0x2991CC .. 0x2991F0) */
             w->latched = w->ammo < ammo ? 0 : w->fire_once;
     }
+    int out = u->kind != AK_TROOP && u->kind != AK_WINDOW;   /* [R 0x299380 .. 0x2993DC] a cluster with every
+                                                              * weapon's ammo 0: state 4, kept */
+    for (int i = 0; out && i < u->nw; i++)
+        out = u->w[i].ammo <= 0;
+    if (out && u->nw > 0)
+        u->ammo_out = 1;
 }
 
 static void weapons_enable(ArmyUnit *u, int on)      /* enableWeapons / enableWeapon */

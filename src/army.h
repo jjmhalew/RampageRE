@@ -155,6 +155,8 @@ struct ArmyUnit {
     int target;                                      /* the monster its weapons aim at, -1 none */
     float lock[3];                                   /* StationaryAttackObject's lTarget */
     ArmyWeapon w[ARMY_WEAPONS]; int nw;
+    int ammo_out;            /* the cluster's state 4 (+0x5C): every weapon's ammo (+0xEC) has been 0 (0x299380 ..
+                              * 0x2993DC), which no hold answers while the weapons are off */
     int weapons_on;
     uint32_t oflags;                                 /* object flags: 0x4000 PushOutMonsters, 0x8000 OnlyHitWithEffNodes, 0x10000 Pickupable, 0x20000 BeingHeld */
     int spawner, counted, friend_of, person;
