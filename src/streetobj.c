@@ -1936,11 +1936,15 @@ static void fork_pulse(StreetObjs *s, StreetObj *o)
             request_delete(s, o);
     }
 }
-static void fork_die(StreetObj *o)                   /* onThrow, OnHitGround, TakeImpact */
+/* onThrow, OnHitGround, TakeImpact [R]: setPulseDelay(0.1), state 11; the LineMover is left as it is, so one hit on the
+ * street by a thrown object drives on for its last 1.5 s (state 11's mover callbacks do nothing); thrown, its flight
+ * has the mover's place (stop: the port's line off) */
+static void fork_die(StreetObj *o, int stop)
 {
     set_pulse(o, 0.1f);
     o->state = 11;
-    o->lm_on = 0;
+    if (stop)
+        o->lm_on = 0;
 }
 static void fork_damage(StreetObjs *s, StreetObj *o, int mi, const StreetMonster *who)
 {
@@ -2193,7 +2197,7 @@ static void fly_step(StreetObjs *s, StreetObj *o)
     else if (c.ground && o->kind == SK_STREET && o->alive)
         streetobj_hit_ground(s, i);
     else if ((c.nmet || c.ground) && o->kind == SK_FORK && o->state != 11)
-        fork_die(o);                                 /* ForkLift's TakeImpact, OnHitGround */
+        fork_die(o, 1);                              /* ForkLift's TakeImpact, OnHitGround */
 }
 
 static void step(StreetObjs *s)
@@ -2439,7 +2443,7 @@ int streetobj_take_impact(StreetObjs *s, int i)
         return 1;
     }
     if (o->alive && o->kind == SK_FORK && !(o->oflags & SF_HELD)) {   /* ForkLift.bsf's: going */
-        fork_die(o);
+        fork_die(o, 0);
         return 1;
     }
     if (o->alive && o->kind == SK_TOWER) {           /* WaterTower.bsf's: as a blow, no score */
@@ -2658,7 +2662,7 @@ void streetobj_fly(StreetObjs *s, int i, int monster, int eat, const float vel[3
     if (o->kind == SK_STREET)
         streetobj_throw(s, i, monster);
     else if (o->kind == SK_FORK && monster >= 0)    /* onThrow (not the flight its last blow starts) */
-        fork_die(o);
+        fork_die(o, 1);
 }
 
 void streetobj_place(StreetObjs *s, int i, const float world[16])
