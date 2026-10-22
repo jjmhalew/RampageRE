@@ -679,12 +679,13 @@ static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
                 }
             }
         }
-        /* [R 0x2EE150 .. 0x2EE374] round bld's front corner: with the point at or behind its front and the bot
+        /* [R 0x2EE150 .. 0x2EE374] round bld's front corner: with the point at or before its front (0x2EE160:
+         * pt.y <= the front, +0x1E0) and the bot
          * reaching past that line (y + R > the point's y), D = R + sqrt(2) A (R the half width, A the probe); going
          * right with its left side D or more to the right, or left with its right side D or more to the left, the
          * stick less (0, 1), made 1 long ((1, 0) when nothing is left) */
         const DirBuilding *b = bld < v->nb ? &v->b[bld] : NULL;
-        if (b && pt[1] >= b->min[1] && v->pos[1] + v->half_width > pt[1]) {
+        if (b && pt[1] <= b->min[1] && v->pos[1] + v->half_width > pt[1]) {
             float D = v->half_width + sqrtf(2 * v->probe * v->probe);
             if (dx > 0 ? b->min[0] - v->pos[0] >= D : b->max[0] - v->pos[0] <= -D) {
                 st[1] -= 1;

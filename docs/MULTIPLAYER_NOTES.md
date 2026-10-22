@@ -246,8 +246,8 @@ Stand-ins and gaps:
   The ray (0x2ED990) runs from the bot along the flat way to the point without end, against the buildings (include
   0x2000): a first building other than bld sends it out into the street and walks at once [R]. The cooldown +0x64 is
   set (0x2EEBD0) when the monster's foot lock moved it (0x2E0F54) or its hands lifted it (0x2E1044) [R].
-- The front-corner rule of the walk (0x2EE150 … 0x2EE374) [R]: with the point at or behind bld's front (its y ≥ the
-  box's +0x1E0) and the monster reaching past it (y + R > the point's y), D = R + √2 A, R = MONSTER_DATA +0x198 and
+- The front-corner rule of the walk (0x2EE150 … 0x2EE374) [R]: with the point at or before bld's front (its y ≤ the
+  box's +0x1E0, 0x2EE160 `c.le.s pt.y, front`) and the monster reaching past it (y + R > the point's y), D = R + √2 A, R = MONSTER_DATA +0x198 and
   A = MONSTER_DATA +0x1A4 plus the kept type-16 event record's +0x10 (+0xBAA0: only the Transition_Ground clips and
   Spider_Jump have one, and a clip's start drops it), both × the scale when +0xA74 is set (0x2E4D00, 0x2E4E40);
   going right (the point's x > the monster's) with the box's left side D or more to its right, or left with the
