@@ -884,6 +884,7 @@ static int on_mover(People *p, Person *q, int st)
             q->state = 16;
         } else if (q->state == 16) {
             q->heading = 180;
+            (void)frand(p);                          /* [R RoyalGuard.scr] float rand = gWorld.frand(), unused */
             q->reps = 2;
             start_anim(p, q, "Perform", 0, 1);
             q->state = 512;
