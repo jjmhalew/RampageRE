@@ -241,7 +241,8 @@ The search (0x2D99C0) finds the nearest object to pick up:
 - **Where it looks**: within `MONSTER_DATA` +0x1B8 (15 for George), times the monster's scale (×4 when +0xBAB0 is
   set; no monster sets it), of the hand node. Add 10 if an earlier `canGrabObject` search found something.
 - **Which objects count**: flagged 0x10000 and not 0x20840.
-- **Where it must be**: in front of the root (dot product with the monster's +y axis > 0).
+- **Where it must be**: in front of the root, node 0 (Bip01) as posed, which the same node getter gives as the hand
+  (vtable +0x4C(0), 0x2D9AF8): dot product with the monster's +y axis > 0.
 
 It holds the result with a 0.1 s blend (0x2DA4A0). `pickupSuccess` / `hasGrabbedObject` answers 2 for an actor
 (0x2E5590: flag 0x80000), so `isHoldlingEdible` lets every person be eaten.

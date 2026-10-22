@@ -2381,6 +2381,12 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         if (mo->held >= 0 || !v->scene.folk || attach_world(mo, "Helper R Hand", &h) != 0)
             return;
         float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { mo->mx, mo->my, mo->mz };
+        Mat4 n0;                                     /* in front of node 0 (Bip01) as posed, by the node getter that
+                                                      * gives the hand (vtable +0x4C(0): 0x2D9AF8 .. 0x2D9B30) [R] */
+        const Instance *rin = mon_in(mo);
+        if (rin && rin->tree.n && scene_monster_node(&v->scene, mo->slot, rin->tree.nodes[0].name, &n0) == 0) {
+            root[0] = n0.m[12]; root[1] = n0.m[13]; root[2] = n0.m[14];
+        }
         float fwd[3] = { -sinf(mo->heading / 57.2957795f), cosf(mo->heading / 57.2957795f), 0 };
         /* [R] one query of the object manager (0x4D0900's +0x20: within the reach, flags 0x20840, at most 64) and
          * the nearest of them to the hand, of whatever kind: a cop beside a tourist is taken when he is nearer */
