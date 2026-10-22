@@ -4095,10 +4095,8 @@ void army_window_remove(Army *a, int unit)
         unit_remove(a, &a->u[unit]);
 }
 
-int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b,
-              int nb)
+int army_drop(Army *a, const char *tmpl_name, const float from[3])
 {
-    frame_inputs(a, m, nm, b, nb);
     return army_spawn(a, tmpl_name, from, 0);
 }
 

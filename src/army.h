@@ -290,8 +290,9 @@ void army_window_place(Army *a, int unit, const float pos[3]);
 /* the window soldier `unit` gone at once, its window left as it is: its floor fell (0x317A70 flags the slot's actor
  * 0x800, which the actor update 0x30CD20 answers with 4 | 8 | 16, the delete) */
 void army_window_remove(Army *a, int unit);
-/* PE_DROP: the block's droppable template falls from a window at from (Droppable.bsf onInit) */
-int army_drop(Army *a, const char *tmpl_name, const float from[3], const ArmyMonster *m, int nm, const ArmyBox *b, int nb);
+/* Person_Window's drop: the block's droppable template falls from a window at from (Droppable.bsf onInit), with the
+ * monsters and buildings of the last army_update */
+int army_drop(Army *a, const char *tmpl_name, const float from[3]);
 /* PE_WEAPON from people.c (PAE_WEAPON from parade.c): person `who`'s weapon on, weapon its template's own
  * Weapon|RifleWeapon group (its WeaponName, at its world matrix, at target_monster), or off (weapon.at NULL) */
 void army_person_weapon(Army *a, int who, Group weapon, const float person_world[16], int target_monster);

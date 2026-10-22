@@ -91,7 +91,8 @@ enum {
                                                       * looping sound of that name, remove3DSfx); amount 1: kept,
                                                       * it plays on once the person is gone (add3DSfx's keep) */
     PE_EFFECT,                                       /* name at v (node: on person who's node, by that name) */
-    PE_DROP,                                         /* a droppable, the template name, falls from v */
+    PE_DROP,                                         /* a droppable, the template name, falls from v (without a
+                                                      * people_set_drop hook) */
     PE_WEAPON,                                       /* the grenadier's weapon (name: WeaponName) on / off at the monster */
     PE_MONSTER_KNOCK,                                /* the monster: setVel(v, world) and setReaction(2) */
     PE_MONSTER_HP,                                   /* the monster: addHitPoints(amount) */
@@ -143,6 +144,9 @@ void people_window_emptied(People *p, int who);
 void people_set_block(People *p, Group block);
 void people_set_instance(People *p, int who, Group inst);
 void people_set_world_state(People *p, int state);   /* game.h GS_*: the chains only at 6 (a block in play) */
+/* Person_Window's drop made at once: createScriptObject(droppable) and its callOnInit inside the occupant's update,
+ * where the droppable's onInit draws from the world's stream [R Person_Window.scr 202 .. 206]; NULL: PE_DROP */
+void people_set_drop(People *p, void (*drop)(void *ctx, const char *name, const float pos[3]), void *ctx);
 
 /* a person as the block or a script creates it (ActorInstance|, createActor): its script's Construct */
 int people_add(People *p, Group tmpl, const float pos[3], float heading_deg);

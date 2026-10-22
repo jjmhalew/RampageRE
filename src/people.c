@@ -27,6 +27,8 @@ struct People {
     float droppable_rate;
     const char *drop_names[16];
     int ndrop;
+    void (*drop)(void *ctx, const char *name, const float pos[3]);   /* people_set_drop */
+    void *drop_ctx;
     const PeopleMonster *m;                         /* this frame's monsters */
     int nm;
     PeopleEvent ev[MAX_EVENTS];
@@ -512,7 +514,11 @@ static int window_anim_done(People *p, Person *q)
          * (0x30C110): one of the block's names at trunc(n x frand) (0x106BD0), none drawn without names [R] */
         if (drop && (q->slot_empty ? 0.0f : p->droppable_rate) >= frand(p) && p->ndrop > 0) {
             int k = (int)((float)p->ndrop * frand(p));
-            emit(p, PE_DROP, who_of(p, q), p->drop_names[k < p->ndrop ? k : p->ndrop - 1], NULL, q->pos, 0, 1);
+            const char *name = p->drop_names[k < p->ndrop ? k : p->ndrop - 1];
+            if (p->drop)
+                p->drop(p->drop_ctx, name, q->pos);
+            else
+                emit(p, PE_DROP, who_of(p, q), name, NULL, q->pos, 0, 1);
         }
         return DELETE_ME;
     } else if (q->state == 6) {
@@ -1789,6 +1795,13 @@ static void people_spawn_chain(People *p)
 void people_set_block(People *p, Group block) { if (p) p->block = block; }
 void people_set_instance(People *p, int who, Group inst) { if (p && who >= 0 && who < p->n) p->v[who].inst = inst; }
 void people_set_world_state(People *p, int state) { if (p) p->not_in_play = state != 6; }
+void people_set_drop(People *p, void (*drop)(void *ctx, const char *name, const float pos[3]), void *ctx)
+{
+    if (p) {
+        p->drop = drop;
+        p->drop_ctx = ctx;
+    }
+}
 
 void people_remove(People *p, int who)
 {

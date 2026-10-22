@@ -529,7 +529,8 @@ the SWAT's and troops' aim, the facing) is not that: 0x316060 takes the nearest 
   restarted (not here). `setWeaponAmmo` (+0x84, 0x296F50) is ammo = min(n, Ammo).
 
 ## Droppables
-`Droppable.bsf` [R], `army_drop` for people.c's `PE_DROP`:
+`Droppable.bsf` [R], `army_drop` from people.c's `people_set_drop` hook, inside the occupant's update as
+`Person_Window.scr` makes it (its onInit's draw there), with the army's last monsters and buildings:
 - **The path:** a SplineMover at 12 from the window, through a point 0.6 of the way across, 3 out and 1.5 up, to 5
   in front of the wall at z = 1. If a building stands there, the end is on its roof (storeys × 3 + 1.5 + 6).
   The building there is findBuildingByPosition's (0x2A3D20, no direction): the last in the world's list whose
@@ -673,7 +674,8 @@ The building records each Scoring call as it makes it (building.c `Building.scor
      tagged `COLLIDE_TAG(COLLIDE_OWN_MONSTER, slot)` (main.c `world_build`).
 3. **Monster attacks:** an armed attack sphere calls `army_hit`. The grab uses `army_nearest_pickup`, `army_grab`,
    `army_hold` each frame and `army_throw`.
-4. **People:** `PE_DROP` goes to `army_drop` with the block's `DroppableDef` template, and `PE_WEAPON` goes to
+4. **People:** the drop hook (`people_set_drop`) calls `army_drop` with the block's `DroppableDef` template, and
+   `PE_WEAPON` goes to
    `army_person_weapon` (on with its name, off without: both), with `army_person_moved` while the person is on and
    `army_person_forget` when it is gone.
 5. **Buildings:** building damage calls `army_score_building`.

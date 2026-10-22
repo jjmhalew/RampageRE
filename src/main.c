@@ -6061,6 +6061,15 @@ static void soak_step(Viewer *v)
 }
 
 /* one frame of play: the monsters (each from its pad: Mon.pad), then the world around them, the HUDs and the camera */
+/* a window occupant's droppable (people_set_drop), with the army's last frame of monsters and buildings: the people
+ * go before the army in the port's frame [G: the game's object order] */
+static void people_drop(void *ctx, const char *name, const float pos[3])
+{
+    Viewer *v = ctx;
+    if (v->army && name)
+        army_drop(v->army, name, pos);
+}
+
 static void play_step(Viewer *v, float dt, float aspect)
 {
     soak_step(v);
@@ -6112,6 +6121,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         }
         scene_people_spawn(&v->scene, dt);
         people_set_world_state(v->scene.folk, v->game ? game_state(v->game) : GS_PLAY);   /* (the chains in play) */
+        people_set_drop(v->scene.folk, people_drop, v);
         people_update(v->scene.folk, dt, pm, v->nmon);
         scene_huts_update(&v->scene, dt);           /* (no touch flies them: OnlyHitWithEffNodes, scene_huts_hit) */
         for (int k = 0; k < v->nmon; k++) {
@@ -6124,14 +6134,11 @@ static void play_step(Viewer *v, float dt, float aspect)
         }
         PeopleEvent ev[32];
         int ne = people_events(v->scene.folk, ev, 32);
-        for (int i = 0; i < ne; i++) {               /* what the army takes over: droppables, the punks' bottles */
+        for (int i = 0; i < ne; i++) {               /* what the army takes over: the punks' bottles */
             const Person *p = people_get(v->scene.folk, ev[i].who);
             if (!v->army || !p)
                 continue;
-            if (ev[i].type == PE_DROP) {             /* getDroppableName's pick (people.c) */
-                if (ev[i].name)
-                    army_drop(v->army, ev[i].name, ev[i].v, NULL, 0, NULL, 0);
-            } else if (ev[i].type == PE_WEAPON) {            /* enableWeapon(1) with its name, enableWeapon(0) without */
+            if (ev[i].type == PE_WEAPON) {            /* enableWeapon(1) with its name, enableWeapon(0) without */
                 int on = ev[i].on && ev[i].name, k;
                 army_person_weapon(v->army, ev[i].who, on ? group_sub(p->tmpl, "Weapon|RifleWeapon") : (Group){ 0 },
                                    p->world, 0);
