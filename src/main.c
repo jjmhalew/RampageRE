@@ -6291,7 +6291,7 @@ static void play_step(Viewer *v, float dt, float aspect)
                 v->army ? (int)army_stats(v->army, k)->points[6] : 0, v->game ? game_lives(v->game, k) : -1,
                 v->game && (game_play_type(v->game) == GP_KING_CITY || game_play_type(v->game) == GP_KING_WORLD) ?
                 game_blocks_won(v->game, k) : -1);   /* (the King modes: the blocks won by the block icon) */
-        hud_set_clock(mo->hud, vis, clock);
+        hud_set_clock(mo->hud, k == 0 && vis, clock);   /* one Clock for the screen (WorldGuiDriver's) [R] */
         if (k == 0 && hud_challenge_items(mo->hud, challenge_collected(&v->challenge), challenge_required(&v->challenge)))
             challenge_points_all(v, challenge_points(&v->challenge));   /* CHALLENGE MET!: ChallengeDef.Points / players */
         hud_update(mo->hud, dt);
