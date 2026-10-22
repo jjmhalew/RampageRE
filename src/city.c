@@ -878,9 +878,9 @@ Group city_template(City *c, const char *name) { return template_of(c, name); }
 static float people_clip_seconds(void *ctx, const char *anim, const char *shape);
 float city_clip_seconds(City *c, const char *anim, const char *shape) { return people_clip_seconds(c, anim, shape); }
 
-PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3])
+int scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3], Group *hit, int max)
 {
-    PeopleEaten sum = { 0, 0, 0, 0 };
+    int n = 0;
     for (int k = 0; k < s->nscripted && s->folk; k++) {
         if (!s->scripted[k].hut || s->scripted[k].hut_id < 0 || people_hut_state(s->folk, s->scripted[k].hut_id) != 0)
             continue;
@@ -904,9 +904,10 @@ PeopleEaten scene_huts_hit(Scene *s, const float centre[3], float radius, const 
         if (getenv("RAMPAGE_TRACE"))
             printf("  a guard's hut hit: %.0f points, flying at %.1f %.1f\n", e.points, s->scripted[k].vel[0],
                    s->scripted[k].vel[1]);
-        sum.health += e.health; sum.energy += e.energy; sum.points += e.points;
+        if (n < max)
+            hit[n++] = s->scripted[k].t;             /* gCommon.addStats(hut, slot, 0) */
     }
-    return sum;
+    return n;
 }
 
 void scene_huts_update(Scene *s, float dt)

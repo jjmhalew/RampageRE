@@ -2914,6 +2914,21 @@ static int shape_part(const Mon *mo, int i)
 
 /* the collision spheres an armed attack can hit with, in the world (0x2DA9E0: the shape's offset by its bone's
  * matrix, then by the monster's), into the scene's overlay */
+/* RoyalGuardHut.bsf's TakeDamage ends gCommon.addStats(this.object, m.getSlot(), 0): the hut's Health, Energy and
+ * Points (DefObjectProps' 10) for the monster whose blow sent it flying [R] */
+static void hut_stats(Mon *mo, const float c[3], float r, const float from[3])
+{
+    Viewer *v = mo->v;
+    Group hit[8];
+    int n = scene_huts_hit(&v->scene, c, r, from, hit, 8);
+    for (int i = 0; i < n; i++)
+        if (v->army)
+            army_add_stats(v->army, mo->slot, hit[i], 0);
+        else
+            monster_stats(mo, hit[i].at ? group_num(hit[i], "Health", 0) : 0,
+                          hit[i].at ? group_num(hit[i], "Energy", 0) : 0);
+}
+
 static void hit_spheres(Mon *mo)
 {
     Viewer *v = mo->v;
@@ -2959,9 +2974,7 @@ static void hit_spheres(Mon *mo)
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, mo->slot, c, c[3], mo->heading, mo->graph.states[mo->run.state].name);
             float from[3] = { mo->mx, mo->my, mo->mz };
-            PeopleEaten got = scene_huts_hit(&v->scene, c, c[3], from);
-            if (got.health != 0 || got.energy != 0 || got.points != 0)
-                monster_stats(mo, got.health, got.energy);
+            hut_stats(mo, c, c[3], from);
         }
     }
 }
@@ -3155,9 +3168,7 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
     if (v->scene.folk) {
         hit += people_hit(v->scene.folk, mo->slot, c, r, mo->heading, mo->graph.states[mo->run.state].name);
         float from[3] = { mo->mx, mo->my, mo->mz };
-        PeopleEaten got = scene_huts_hit(&v->scene, c, r, from);
-        if (got.health != 0 || got.energy != 0 || got.points != 0)
-            monster_stats(mo, got.health, got.energy);
+        hut_stats(mo, c, r, from);
     }
     if (getenv("RAMPAGE_TRACE"))
         printf("  %s's %s burst at %.1f %.1f %.1f (radius %g, %g): %d hit\n", name, w->key, c[0], c[1], c[2], r, amount,
