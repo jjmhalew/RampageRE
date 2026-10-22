@@ -358,6 +358,8 @@ static void activate_next_block(Game *g, int in_game)
     e->a = g->cur;
     e->b = in_game;                                  /* a1: 1 in the game (the old block torn down), 0 the reset */
     e->name = g->cur >= 0 && g->cur < g->nblocks ? g->blocks[g->cur] : NULL;
+    if (g->host.block_rubble)                        /* now: the results' NI may look in it this step */
+        g->host.block_rubble(g->host.ctx, e->name);
 }
 
 /* ---------------------------------------------------------------- Levels.bsf [R Levels.scr] */
@@ -494,11 +496,17 @@ static float results_ni(Game *g, float last)         /* ResultsNI: the winners p
             reset_at(g, w[3], -28, -24, PI * 1.25f);
             emit(g, GE_AI, w[3])->a = 1;
         }
-        for (int i = 0; i < 3; i++) {                /* fires in the rubble around (0, -21): findPointInRubble(8); */
-            GameEvent *e = emit(g, GE_RUBBLE_FX, -1);   /* the host draws (int)(2 frand) once a point is found */
-            e->a = i;                                /* (Levels.scr 355 .. 358), from game_rng's state */
-            e->pos[1] = 20.0f - 41.0f;
-            e->f = 8;
+        for (int i = 0; i < 3; i++) {                /* fires in the rubble around (0, -21): findPointInRubble(8)
+                                                      * and, once a point is found, (int)(2 frand), all before the
+                                                      * poses' draws below (Levels.scr 353 .. 376) [R] */
+            float c[3] = { 0, 20.0f - 41.0f, 0 }, loc[3];
+            if (!g->host.rubble_point || !g->host.rubble_point(g->host.ctx, c, 8, loc))
+                continue;
+            int fx = (int)(2.0f * frand(g));
+            GameEvent *e = emit(g, GE_RUBBLE_FX, -1);
+            e->a = i;
+            memcpy(e->pos, loc, sizeof loc);
+            e->name = fx < 1 && loc[1] > 18.0f - 41.0f ? "Rubble_Smolder" : "Fire_Loop";
         }
         emit(g, GE_HUD, -1)->a = 0;
         for (int i = 0; i < np(g); i++) {

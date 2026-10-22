@@ -732,6 +732,30 @@ static int game_all_revealed(void *ctx)
     Viewer *v = ctx;
     return reveal_all_revealed(world_data(v), &v->roster);
 }
+static void game_block_rubble(void *ctx, const char *name)   /* the block left's rubble (0x303C90) */
+{
+    Viewer *v = ctx;
+    int k = -1;
+    for (uint32_t i = 0; name && i < v->nblocks; i++)
+        if (!_stricmp(v->blocks[i], name))
+            k = (int)i;
+    static RubbleHost rh;
+    rh.tmpl = rubble_tmpl;
+    rh.shape_box = rubble_box;
+    rh.ctx = v;
+    rubble_load(&v->rubble, v->scene.block, k >= 0 && k != (int)v->block, &rh);
+}
+static int game_rubble_point(void *ctx, const float pos[3], float radius, float out[3])
+{
+    Viewer *v = ctx;
+    uint32_t *rng = game_rng(v->game);
+    if (rng)                                         /* the world's one state (gWorld +0x828) */
+        v->rubble.seed = *rng;
+    int found = rubble_find_point(&v->rubble, pos, radius, out);
+    if (rng)
+        *rng = v->rubble.seed;
+    return found;
+}
 /* the cryotubes of the block: the edibles get them in their cells */
 static void add_tubes(Viewer *v)
 {
@@ -1316,6 +1340,8 @@ static void build(Viewer *v)
             static GameHost gh;
             gh.find = army_find;
             gh.all_revealed = game_all_revealed;
+            gh.block_rubble = game_block_rubble;
+            gh.rubble_point = game_rubble_point;
             gh.ctx = v;
             if (v->roster.n == 0) {                  /* ShellData's MonsterData: the 30, the profile's flags */
                 reveal_roster_load(&v->roster, city_book_group(v->city, "ShellData", "MonsterData"));
@@ -3720,11 +3746,6 @@ static void game_step(Viewer *v, float dt)
                 v->ntubes = reveal_block(&v->reveal, e->a, 1 << 30, v->tubes, REVEAL_LOCS);
                 if (k == (int)v->block)
                     add_tubes(v);
-                static RubbleHost rh;                /* the block left's rubble (0x303C90) */
-                rh.tmpl = rubble_tmpl;
-                rh.shape_box = rubble_box;
-                rh.ctx = v;
-                rubble_load(&v->rubble, v->scene.block, k >= 0 && k != (int)v->block, &rh);
                 if (k >= 0 && k != (int)v->block && e->b) {
                     /* [R 0x2B66C0, 0x302AF0] in the game the block left is torn down and the new one laid out at
                      * once, as the results start: built at slot 0 once this frame is over (the monsters and the
@@ -3782,27 +3803,18 @@ static void game_step(Viewer *v, float dt)
                                                       * after a game over; Change Monster starts the city there */
                     v->last_game.start_block = game_start_block(v->game);
                 break;
-            case GE_RUBBLE_FX: {                     /* findPointInRubble(pos, 8): a point in the block left's
-                                                      * rubble, 1.5 up; none, no effect */
-                float loc[3];
-                uint32_t *rng = game_rng(v->game);
-                if (rng)                             /* the world's one state (gWorld +0x828) */
-                    v->rubble.seed = *rng;
-                int found = v->fxw && e->a >= 0 && e->a < 3 && rubble_find_point(&v->rubble, e->pos, e->f, loc);
-                if (rng)
-                    *rng = v->rubble.seed;
-                if (found) {
+            case GE_RUBBLE_FX:                       /* at the point game_rubble_point found, 1.5 up */
+                if (v->fxw && e->a >= 0 && e->a < 3) {
                     /* (the new block's frame already when the scene is rebuilt at this frame's end: the effects
                      * are not carried with it) */
-                    float at[3] = { loc[0], loc[1] + (v->game_block >= 0 ? 0 : v->block_shift), loc[2] + 1.5f };
-                    int fx = (int)(2.0f * game_frand(v->game));   /* Levels.scr: drawn after the point is found */
-                    const char *name = fx < 1 && loc[1] > -23 ? "Rubble_Smolder" : "Fire_Loop";
+                    float at[3] = { e->pos[0], e->pos[1] + (v->game_block >= 0 ? 0 : v->block_shift), e->pos[2] + 1.5f };
                     if (v->rubble_fx[e->a] >= 0)
                         fx_stop(v->fxw, v->rubble_fx[e->a]);
-                    v->rubble_fx[e->a] = fx_spawn(v->fxw, name, at, NULL, 1);
+                    v->rubble_fx[e->a] = fx_spawn(v->fxw, e->name, at, NULL, 1);
+                    if (getenv("RAMPAGE_TRACE"))
+                        printf("  rubble effect %d: %s at %.1f %.1f %.1f\n", e->a, e->name, at[0], at[1], at[2]);
                 }
                 break;
-            }
             case GE_RUBBLE_FX_STOP:
                 for (int k = 0; k < 3; k++) {
                     if (v->fxw && v->rubble_fx[k] >= 0)

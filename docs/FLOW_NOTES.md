@@ -159,6 +159,10 @@ ContinueLevelNI) shows no HUD; `BeginBlockNI` `setVisible(1)`s each `Hud<n>` (hu
 `gWorld.findPointInRubble((0, −21, 0), 8, &loc)` (World id 0x38, case 0x2AEFE8 → 0x303670). For each point found:
 `Rubble_Smolder` when `(int)(2 × frand) < 1` and loc.y > −23, otherwise `Fire_Loop`; it goes at loc + (0, 0, 1.5).
 Ported in `src/reveal.c` (`rubble_load`, `rubble_find_point`).
+The three searches and their effect draws come before the poses' `NIMoveStep` draws (Levels.scr 353 … 376), and
+activateNextBlock loads the list in the same step that first calls `ResultsNI`; so `game.c` asks its host for both as it
+runs (`GameHost.block_rubble` from `activate_next_block`, `GameHost.rubble_point` from `results_ni`), and only the
+effects go out as `GE_RUBBLE_FX`.
 
 **The list** (the block manager's +0x18, 0x4D4E98: a count, then 16-byte slots of a place +4 … +0xC and a shape at
 +0x10, room for 16):

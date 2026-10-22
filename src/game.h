@@ -88,6 +88,12 @@ typedef struct {
     /* 0x323240 at the block's end: every monster of the city's MonsterRevealDef unlocked (city flag 8, "All Monsters
      * Revealed"); NULL: never */
     int (*all_revealed)(void *ctx);
+    /* activateNextBlock's 0x303C90, as block `name` becomes the current one (GE_BLOCK): the rubble of the block left
+     * behind, for findPointInRubble. NULL: none */
+    void (*block_rubble)(void *ctx, const char *name);
+    /* findPointInRubble(pos, radius) (ResultsNI): a point in the block left's rubble into out, its draws from game_rng's
+     * state as it searches; 0 none. NULL: none */
+    int (*rubble_point)(void *ctx, const float pos[3], float radius, float out[3]);
     void *ctx;
 } GameHost;
 
@@ -136,9 +142,8 @@ enum {
     GE_HUD,            /* the players' HUDs (and ChallengeStatus) fade to a (1 shown, 0 hidden) */
     GE_GUI,            /* screen.loadInterface(name) ("ChallengeText") */
     GE_AI_ACTIVATE,    /* gAIMgr.activate(1): the block's attackers start (army_activate) */
-    GE_RUBBLE_FX,      /* ResultsNI: effect `name` at a point found in the rubble within f of pos (findPointInRubble),
-                        * 1.5 above it; a = the index (0 .. 2). The game uses Fire_Loop instead of Rubble_Smolder when the
-                        * point found has y <= -23 */
+    GE_RUBBLE_FX,      /* ResultsNI: effect `name` 1.5 above pos, the point the host's rubble_point found; a = the
+                        * index (0 .. 2) */
     GE_RUBBLE_FX_STOP, /* BeginBlockNI: the three effects stop */
     GE_RESULTS,        /* WorldGuiDriver::startResults(a): show results screen a (GR_SCREEN_*), answer with
                         * game_set_result; GR_SCREEN_GAME_OVER is the game over */
