@@ -1987,7 +1987,10 @@ static void hud_stats(Hud *h, float dt)
             }
         }
     }
-    /* the floating numbers */
+    /* the floating numbers: world objects (PointsBanner, its advance 0x331B00 in the world's object pass 0x284E40),
+     * so they hold still while the game is paused (0x2B6AF0 runs no object pass) [R] */
+    if (hud_paused(h))
+        return;
     int n = 0;
     for (int i = 0; i < h->nbanners; i++) {
         Banner *b = &h->banners[i];
