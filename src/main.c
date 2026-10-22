@@ -3909,8 +3909,8 @@ static void game_step(Viewer *v, float dt)
                     r.block_played = game_block_name(v->game, 0);
                     r.block_current = game_block_name(v->game, 1);
                     for (uint32_t k = 0; k < v->scene.nbuildings; k++)
-                        r.buildings += v->scene.buildings[k].b.state == BUILDING_STANDING ||
-                                       v->scene.buildings[k].b.state == BUILDING_FLOOR_FALLING;
+                        r.buildings += v->scene.buildings[k].b.state != BUILDING_GONE;   /* [R 0x2AEE00: +0x14C not
+                                                      * 0, its fall included] */
                     r.city_destroyed = game_city_destroyed(v->game);
                     r.city = CITIES[v->city_index];
                     r.city_score = game_city_total(v->game);
