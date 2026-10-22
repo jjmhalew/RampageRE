@@ -361,9 +361,9 @@ static void sound_kept(Army *a, ArmyUnit *u, const char *name)
 
 /* getNearestMonster [R: the Actor binding 0x42 (0x2A8FA0 -> 0x2B26F0) and the RScriptObject / AttackObject one 0x37
  * (0x2AA080 -> 0x2B2CC0) are the same code]: the nearest player monster by 3D distance (0x2B27E8 is sqrt.s), starting at
- * 1000: none farther than 1000, so in a block any; -1 with none [G: the game then hands the script gWorld +0x3C (0x4D17DC, the
- * monsters' count to 0x2BD940) as the monster, read by the result's setter 0x27C8D0; what the script sees is not
- * followed] */
+ * 1000: none farther than 1000, so in a block any; -1 with none [R: the game then hands the script gWorld +0x3C (0x4D17DC, the
+ * monsters' count) as the monster's pointer (the setter 0x27C8D0): with none an invalid Monster, as here; with one or two
+ * none can be farther than 1000 in a block (with one it would read address 5)] */
 static int nearest_monster(const Army *a, const float pos[3])
 {
     int best = -1;

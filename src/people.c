@@ -155,8 +155,8 @@ static void actor_on_pickup(People *p, Person *q)
 }
 
 /* getNearestMonster [R 0x2B26F0, the Actor binding 0x42 of 0x2A8FA0]: the nearest player monster by 3D distance
- * (0x2B27E8 is sqrt.s), starting at 1000: none farther than 1000, so in a block any; NULL with none [G: the game then hands the
- * script gWorld +0x3C (0x4D17DC) as the monster; what the script sees is not followed] */
+ * (0x2B27E8 is sqrt.s), starting at 1000: none farther than 1000, so in a block any; NULL with none [R: the game then hands the
+ * script gWorld +0x3C (0x4D17DC, the monsters' count) as the monster's pointer: with none an invalid Monster, as here] */
 static const PeopleMonster *nearest_monster(const People *p, const float pos[3])
 {
     const PeopleMonster *best = NULL;

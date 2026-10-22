@@ -1422,7 +1422,9 @@ static void build(Viewer *v)
     }
     challenge_init(&v->challenge);                   /* the block's challenge (0x3468F0, at its activation) */
     challenge_upgrade_props(&v->challenge, city_template(v->city, "MonsterUpgrade"));
-    if (v->have_scene && have_monster(v))           /* (player 1's monster: its upgrades [G with more players]) */
+    if (v->have_scene && have_monster(v))           /* player 1's monster and its upgrades whoever plays [R 0x346D34:
+                                                      * gCommon +0x214, the current record's monster 0; 0x346D9C its
+                                                      * flags at +0x234] */
         challenge_load(&v->challenge, v->scene.block, v->game ? game_play_type(v->game) : GP_CAMPAIGN, v->boss_block,
                        v->monsters[v->mon[0].monster], v->upgrades[v->mon[0].monster & 63]);
     if (v->hud) {                                    /* Levels::onActivateBlock: ChallengeStatus (the count, or the
