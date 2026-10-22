@@ -1675,6 +1675,8 @@ int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float
     if (who < 0)
         return -1;
     Person *q = &p->v[who];
+    (void)frand(p);                                  /* [R Monsters.scr createStreaker] dir = -1 + 2 (frand > 0.5),
+                                                      * then set by the camera's side all the same */
     start_anim(p, q, "StreakOut", 1, 0);
     mover_init(q, start, out, 2.241f);
     mover_add(q, end);
