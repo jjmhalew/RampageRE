@@ -2333,6 +2333,10 @@ void rail_throw(Rail *r, int obj, int monster, int eat, const float vel[3])
     float v[3] = { 0, 0, 0 };
     if (vel)
         copy3(v, vel);
+    CollideShape sh;                                 /* [R 0x2DA088 .. 0x2DA1E8] no edible flag: throwObject's sphere
+                                                      * at its origin (collide_shape_flight), as the vehicles' */
+    obj_shape(r, o, &sh);
+    collide_shape_flight(&o->cshape);
     sphere_init(o, v, NULL);
     if (o->kind == RK_ETRAIN)
         et_throw(r, o, monster);
