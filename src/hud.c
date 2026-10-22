@@ -3918,7 +3918,10 @@ static void pause_boss(Hud *h, Screen *s)
     }
     pause_icon(h, layout_find(head->child, "boss_icon"));
     int goal = h->ch_required, count = h->ch_collected < goal ? h->ch_collected : goal;
-    show(layout_find(head->child, "boss_completed"), goal == count);
+    Node *bdone = layout_find(head->child, "boss_completed");
+    show(bdone, goal == count);
+    if (bdone && goal == count)
+        bdone->F |= 0x400;                               /* setFlags(1024): the pulse [R Pause.scr 316 .. 318] */
     show(head, 1);
     if (foreign) {
         show(layout_find(r, "boss_group"), 0);
