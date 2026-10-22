@@ -6081,6 +6081,11 @@ static void play_step(Viewer *v, float dt, float aspect)
     soak_step(v);
     if (v->hud && hud_paused(v->hud)) {              /* GameOver's pauseGame(1): only the screen runs */
         hud_update(v->hud, dt);
+        for (int k = 0; k < v->nmon; k++)            /* and every Hud<n>'s frame event (2048: its full-rage flash)
+                                                      * through the pause [R Hud.scr]; the floating numbers are
+                                                      * player 1's HUD's, held by hud_paused */
+            if (v->mon[k].hud && v->mon[k].hud != v->hud)
+                hud_update(v->mon[k].hud, dt);
         hud_frame(v, 1);
         popup_step(v, dt);
         return;
