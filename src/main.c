@@ -276,6 +276,7 @@ typedef struct Viewer {
     Rubble rubble;                                   /* findPointInRubble's slots: the block left's buildings */
     Profile prof;                                    /* the player's profile (profile.c): unlocks, moves, settings */
     int prof_on_card;                                /* its file exists (the shell's profile list) */
+    int prof_gen;                                    /* the profiles loaded or created (ShellProfile.load_gen) */
     char card_name[16];                              /* the name in it */
     int card_free_kb;                                /* --card-free-kb: the "card"'s free room; -1: the drive's */
     float card_poll;                                 /* seconds to the next look at the drive */
@@ -6961,6 +6962,16 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->rumble = profile_rumble(&v->prof);
     sp->cheats = profile_cheat_flags(&v->prof);
     sp->changed = profile_needs_save(&v->prof);
+    const ProfileStatus *rec[3] = { &v->prof.block.status, &v->prof.checkpoint, &v->prof.current };
+    for (int r = 0; r < 3; r++) {                    /* saved, checkpoint, current */
+        ShellStatus *o = r == 0 ? &sp->saved : r == 1 ? &sp->checkpoint : &sp->current;
+        o->city = rec[r]->city;
+        o->night = rec[r]->night != 0;
+        o->start_block = rec[r]->start_block;
+        for (int i = 0; i < 4; i++)
+            o->monster[i] = rec[r]->monster[i];
+    }
+    sp->load_gen = v->prof_gen;
     sp->nprofiles = v->prof_on_card ? 1 : 0;         /* one profile file: the "card" holds it or nothing */
     if (sp->nprofiles)
         snprintf(sp->profiles[0], sizeof sp->profiles[0], "%s", v->card_name[0] ? v->card_name : "Profile");
@@ -7355,6 +7366,7 @@ static int card_job(Viewer *v, Shell *sh, const ShellEvent *e)
             v->prof.loaded = 1;
             v->prof.allow_save = v->prof.was_saving = 1;   /* [R 0x34559C: close(1) in op 3] */
             profile_restore_checkpoint(&v->prof);
+            v->prof_gen++;                           /* the shell's game status is its current game */
         }
     } else if (e->kind == SHELL_EVT_PROFILE_CREATE) {
         Profile p = v->prof;
@@ -7364,6 +7376,7 @@ static int card_job(Viewer *v, Shell *sh, const ShellEvent *e)
             st = card_status(profile_write(&p, v->prof_path, 1, now));
         if (st == SHELL_CARD_OK) {
             v->prof = p;
+            v->prof_gen++;
             if (v->prof_write) {
                 v->prof_on_card = 1;
                 snprintf(v->card_name, sizeof v->card_name, "%s", v->prof.block.name);
@@ -7490,6 +7503,16 @@ static int shell_answer(Viewer *v)
                 break;
             case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
             case SHELL_EVT_VICTORY_SHOWN: profile_set_victory_shown(&v->prof); break;
+            case SHELL_EVT_RESTORE: {                /* the shell's game status took it: the profile's records too */
+                if (e->arg)
+                    profile_restore_checkpoint(&v->prof);
+                else
+                    profile_restore(&v->prof);
+                ShellProfile sp;
+                shell_profile(v, &sp);
+                shell_set_profile(v->shell, &sp);
+                break;
+            }
             case SHELL_EVT_ATTRACT_GAME:             /* the demo (shell_game(), play type 0): its loading screen,
                                                       * then SHELL_EVT_START as any game */
                 printf("attract mode demo %d: %s\n", e->arg, e->name);

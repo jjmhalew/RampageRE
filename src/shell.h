@@ -40,6 +40,8 @@
                                      * NewYork (the campaign's order) */
 #define SHELL_PROFILES 16           /* profiles on the "memory card" the popup lists */
 
+typedef struct { int city, night, start_block, monster[4]; } ShellStatus;   /* a profile status record's menu part */
+
 /* the profile, as the viewer knows it (src/profile.c fills it; the shell keeps a copy). The layout of the game's
  * profile is not needed here [R the bindings that read it: gCommon.getMonsterFlags 0x33D760, Profile.getCityFlags,
  * getStartBlock, gCommon.getSoundVolume / getMusicVolume / getEnableRumble, getCheatFlags, hasLoadedProfile,
@@ -69,6 +71,12 @@ typedef struct {
     int language;                   /* hud.h's languages: 0 English .. 8 Portuguese */
     int region;                     /* gApp.getRegion(): the disc's, SYSTEM.CNF's BOOT2 (iso.c data_region): 0 the
                                      * USA disc (SLUS), 1 the European one (SLES), 2 another */
+    /* the profile's status records as the menus read them (getCityIdx, getNight, getStartBlock, getMonsterIdx, in
+     * MonsterData's and the campaign's order): the saved one (restoreProfile's), the checkpoint (restoreCheckpoint's)
+     * and the current game; load_gen goes on by one at each profile loaded or created, whose current game (its
+     * checkpoint, 0x33F120) then is the shell's game status */
+    ShellStatus saved, checkpoint, current;
+    int load_gen;
 } ShellProfile;
 
 /* gCommon's play state and gCommon.getGameStatus() as the shell hands them to the game [R GameStatus bindings, lookup
@@ -186,6 +194,9 @@ enum {
     SHELL_EVT_MOVIE,                /* a .pss would play here (name: "midway", "pipeworks", "digital", "intro",
                                      * "Victory", "Credits", "victory", "credits", "ballers") */
     SHELL_EVT_VICTORY_SHOWN,        /* gCommon.setVictoryShown() (0x2C3610): Victory.scr, as its first movie starts */
+    SHELL_EVT_RESTORE,              /* arg 1: gCommon.restoreCheckpoint() (0x33D820, MainMenu's campaign), 0:
+                                     * restoreProfile() (0x33D910, its focus without saving): the shell's game status
+                                     * took it already; the viewer's profile does the same */
     SHELL_EVT_EMULATOR,             /* gShell.startEmulator(arg): 0 Rampage, 1 Rampage World Tour (skipped) */
     SHELL_EVT_ATTRACT_GAME,         /* gShell.startAttractGame() (0x308460): the attract mode's demo game, chosen at
                                      * random into shell_game() (play type 0, every player the computer's); the

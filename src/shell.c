@@ -3578,6 +3578,20 @@ static void mm_to_monster_select(Shell *s)
     cr_show(s, IF_MONSTERSELECT);
 }
 
+/* the game status (gCommon +0x200) from one of the profile's records: its city, night, start block and monsters */
+static void gs_from(Shell *s, int city, int night, int start_block, const int monster[4])
+{
+    s->gs.city_index = city >= 0 && city < SHELL_CITIES ? city : 0;
+    snprintf(s->gs.city, sizeof s->gs.city, "%s", city_name(s, s->gs.city_index));
+    s->gs.night = night != 0;
+    s->gs.start_block = start_block;
+    for (int i = 0; i < 4; i++) {
+        s->gs.monster[i] = monster[i] >= 0 && monster[i] < SHELL_MONSTERS ? monster[i] : 0;
+        snprintf(s->gs.monster_name[i], sizeof s->gs.monster_name[i], "%s", monster_name(s, s->gs.monster[i]));
+    }
+}
+#define GS_FROM(s, r) gs_from(s, (r).city, (r).night, (r).start_block, (r).monster)
+
 static void mm_num_player_select(Shell *s)             /* processNumPlayerSelect */
 {
     MainMenu *m = &s->mm;
@@ -3587,8 +3601,12 @@ static void mm_num_player_select(Shell *s)             /* processNumPlayerSelect
     m->num_bots = m->num_players - sel;
     if (m->num_players == 1 || m->play_mode == 2) {
         m->num_bots = 0;
-        /* campaign: gCommon.restoreCheckpoint() (GameStatus 0x33D820: the profile's checkpoint), the viewer's
-         * (profile.c `profile_restore`) */
+        if (m->play_mode == 2) {                         /* gCommon.restoreCheckpoint() (0x33D820): the current game
+                                                          * is the checkpoint's, which MonsterSelect and CitySelect
+                                                          * read (the monsters, the city, the night) [R] */
+            GS_FROM(s, s->prof.checkpoint);
+            event(s, SHELL_EVT_RESTORE, NULL, 1, 0);
+        }
         s->gs.num_players = m->num_players;
         s->gs.num_bots = m->num_bots;
         mm_to_monster_select(s);
@@ -3722,8 +3740,12 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
                     mc_error(s, 11);
                 else
                     mc_open_keyboard(s);
+            } else {                                     /* gCommon.restoreProfile() (0x33D910): the checkpoint and
+                                                          * the current game the saved one's [R] */
+                s->prof.checkpoint = s->prof.saved;
+                GS_FROM(s, s->prof.saved);
+                event(s, SHELL_EVT_RESTORE, NULL, 0, 0);
             }
-            /* else gCommon.restoreProfile(): the viewer's copy stays */
         }
         m->start_retro = 0;
         m->retro_delay = 0.25f;
@@ -5452,6 +5474,9 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
         for (int i = 0; i < 4; i++) s->gs.monster[i] = i;   /* [G: GameStatus' first monsters; its constructor
                                                               * not traced, and MonsterSelect picks again] */
     }
+    if (s->st.from == SHELL_FROM_BOOT && p && p->loaded)   /* [port extra, profile_autoload] loaded at launch: as
+                                                             * the popup's load, its current game */
+        GS_FROM(s, p->current);
     if (!s->gs.city[0])
         snprintf(s->gs.city, sizeof s->gs.city, "%s", city_name(s, s->gs.city_index));
     s->attract_state = -1;
@@ -5583,7 +5608,10 @@ void shell_set_profile(Shell *s, const ShellProfile *p)
 {
     if (!s || !p)
         return;
+    int loaded = p->load_gen != s->prof.load_gen;    /* a profile loaded or created: its current game (0x33F120) */
     s->prof = *p;
+    if (loaded)
+        GS_FROM(s, p->current);
     s->gui.lang = p->language;
     s->cheats = p->cheats;
 }

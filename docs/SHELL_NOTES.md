@@ -380,7 +380,11 @@ and no card (5, state 10).
 - The box `NumPlayers` lists "1 Player" (shown for the campaign and the Timed Run) and "2 Player". "3 Player" and
   "4 Player" show only on platforms 1, 4 and 8, never on the PS2 (2).
 - With one player, or in the campaign, the shell sets the players and bots (bots 0) and goes to MonsterSelect:
-  - `restoreCheckpoint`, campaign only (left to the viewer);
+  - `restoreCheckpoint`, campaign only: the current game (GameStatus, gCommon +0x200) becomes the checkpoint, so
+    MonsterSelect and CitySelect open on its monsters, city and night. The shell takes it from its
+    `ShellProfile.checkpoint` and sends `SHELL_EVT_RESTORE` for the viewer's profile. The main menu's focus with the
+    profile shown does `restoreProfile` (the saved record) when it may not save, and a profile loaded or created
+    makes the shell's game status its current game (`ShellProfile.load_gen`);
   - `setupControllerTable(-1)`;
   - `MonsterSelect::setupFromMainMenu`.
 - With two or more in another mode, the box `NumBots` asks for "Human: n / Computer: m". Its title is
