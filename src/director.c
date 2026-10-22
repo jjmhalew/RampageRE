@@ -407,21 +407,24 @@ void dir_ai_on_mount(DirAI *ai, int b, int rail, int width)   /* +0x34 0x2EEC40 
     ai->bot.side = rail == 0 ? 0 : rail == width ? 1 : 2;
 }
 
-/* the point in front of a side's middle the bot walks to (sidePoint 0x2EEF30): off = its half width, or 0 when it
- * is on that side's half-space already [R] */
+/* the point in front of a side's middle the bot walks to (sidePoint 0x2EEF30) [R]: off = its half width r, or 0
+ * when the bot is past that side by half of r already (0x2EEF64 .. 0x2EEFD4): the left side with x + r/2 at or left
+ * of the box's left (+0x1DC), the right with x - r/2 at or right of its right (+0x1E8), the front with x within
+ * them (x + r/2 past the left and x - r/2 short of the right); z 0 */
 static void side_point(const DirBotView *v, const DirBuilding *b, int side, float out[3])
 {
-    float hw = v->half_width;
-    out[2] = b->min[2];
+    float hw = v->half_width, x = v->pos[0];
+    int left = x + 0.5f * hw <= b->min[0], right = !left && x - 0.5f * hw >= b->max[0];
+    out[2] = 0;
     if (side == 0) {
-        out[0] = b->min[0] - (v->pos[0] < b->min[0] ? 0 : hw);
+        out[0] = b->min[0] - (left ? 0 : hw);
         out[1] = b->pos[1];
     } else if (side == 1) {
-        out[0] = b->max[0] + (v->pos[0] > b->max[0] ? 0 : hw);
+        out[0] = b->max[0] + (right ? 0 : hw);
         out[1] = b->pos[1];
     } else {
         out[0] = b->pos[0];
-        out[1] = b->min[1] - (v->pos[1] < b->min[1] ? 0 : hw);
+        out[1] = b->min[1] - (!left && !right ? 0 : hw);
     }
 }
 
