@@ -534,7 +534,7 @@ the SWAT's and troops' aim, the facing) is not that: 0x316060 takes the nearest 
   in front of the wall at z = 1. If a building stands there, the end is on its roof (storeys × 3 + 1.5 + 6).
   The building there is findBuildingByPosition's (0x2A3D20, no direction): the last in the world's list whose
   footprint holds the point, rubble too; its place is its box's middle (the box is laid about it) [R].
-- **The landing x:** the column edge at or right of the drop (getCellCenter), ± 2.5 towards the monster below.
+- **The landing x:** the column edge at or right of the drop (getCellCenter), ± 2.5 towards the last monster of the players (the script's loop sets mpos for each one before its "nearest below" test, so the nearest is not the one used) [R].
 - **The turn:** a quarter turn about y over the fall.
 - **On the ground:** the `GroundEffect`, and it is gone.
 - **On the monster:** when the monster takes it (within 2.5 along x) it plays `HitEffect` and `HitMonsterSound`,

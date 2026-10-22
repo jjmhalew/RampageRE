@@ -3566,14 +3566,12 @@ static void drop_init(Army *a, ArmyUnit *u)          /* onInit + createDropPath 
     const ArmyBox *b = building_at(a, look);
     spline_init(u, 12);
     u->mv.flags = 0;
-    float best = 1000, mp[3] = { 0, 0, 0 };
-    for (int i = 0; i < a->nm; i++) {
-        float d = fabsf(a->m[i].pos[0] - start[0]);
-        if (d < best && a->m[i].pos[2] < start[2]) {
-            best = d;
-            memcpy(mp, a->m[i].pos, sizeof mp);
-        }
-    }
+    /* [R] the loop over the players takes mpos = m.getPosition() for every monster before its test for the nearest
+     * one below, so mpos ends as the last monster's, below or not (the one it found is only tested for being valid,
+     * and both its branches are the same) */
+    float mp[3] = { 0, 0, 0 };
+    if (a->nm > 0)
+        memcpy(mp, a->m[a->nm - 1].pos, sizeof mp);
     /* getCellCenter: the first column edge (left + 5 i, left = the building's x - columns x 5 / 2) at or right of
      * the drop, else the drop's own x [R]; the building's place is its box's middle (as above) [R] */
     float cell = start[0];
@@ -3585,7 +3583,7 @@ static void drop_init(Army *a, ArmyUnit *u)          /* onInit + createDropPath 
                 break;
             }
     }
-    /* [R] the monster side picks + or - half a column; with no monster below, mp is (0, 0, 0) */
+    /* [R] that monster's side picks + or - half a column */
     float end[3] = { mp[0] > start[0] ? cell + 2.5f : cell - 2.5f, start[1] - 5, 1 };
     const ArmyBox *front = building_at(a, end);
     if (front)                                       /* a building in front: it lands on its roof */
