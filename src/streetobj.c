@@ -917,7 +917,9 @@ static StreetObj *attachment(StreetObjs *s, const StreetObj *o, int i)   /* atta
 }
 
 /* onInit [R]: the pigeons on its top (one gWorld.frand(), always above -0.33: with useBirdFx 1, any case of the key),
- * 0.5 behind its place; the attachments were made by the caller (streetobj_add_attachment) */
+ * 0.5 behind its place; then its attachments are made (createScriptObject), which the caller did
+ * (streetobj_add_attachment), so here a Billboard_2Part front's Construct draws its fRotDir (+1 when
+ * gWorld.frand() < 0.5), after the birds' and in attachment order */
 static void billboard_init(StreetObjs *s, StreetObj *o)
 {
     float at[3] = { o->world[12], o->world[13] + 0.5f, o->world[14] + shape_top(s, o) };
@@ -925,6 +927,9 @@ static void billboard_init(StreetObjs *s, StreetObj *o)
         o->bird_fx = effect(s, o, "Pigeon_walk", at, 0, NULL, NULL, 0, 0);
         memcpy(o->bird_at, at, sizeof at);
     }
+    for (int i = 0; i < o->nattach; i++)
+        if (o->attach[i] >= 0 && o->attach[i] < s->n && s->o[o->attach[i]].kind == SK_2PART)
+            s->o[o->attach[i]].rot_dir = frand(s) < 0.5f ? 1.0f : -1.0f;
 }
 
 /* the birds fly off (birdEffect.stop(), Pigeon_fly where they sat, or [the hit] on its top now) */
@@ -2053,7 +2058,7 @@ static int add_kind(StreetObjs *s, int kind, Group tmpl, Group inst, const float
     else if (kind == SK_GEORGE)
         george_construct(o);
     else if (kind == SK_2PART)
-        o->rot_dir = frand(s) < 0.5f ? 1.0f : -1.0f;
+        o->rot_dir = 1;                              /* its Construct's draw: billboard_init, which makes it */
     else if (kind == SK_ANIMSIGN)
         (void)frand(s);                              /* fallRot.x's sign, unused */
     else if (kind == SK_FOUNTAIN)
