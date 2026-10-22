@@ -857,7 +857,8 @@ static void bot_street_punch(DirAI *ai, const DirGraph *ag, MoveRunner *r, const
     if (best < 0)
         side_point(v, b, 2, pt);
     memcpy(bt->walk, pt, sizeof pt);
-    float dx = pt[0] - v->pos[0], dy = pt[1] - v->pos[1];
+    /* [R 0x2F0E78 .. 0x2F0EB8, 0x2EFFF0 .. 0x2F0030] there when the body centre (0x2E4D30) is within r of it */
+    float dx = pt[0] - v->centre[0], dy = pt[1] - v->centre[1];
     if (dx * dx + dy * dy <= v->half_width * v->half_width) {
         if (!bot_facing(v, 0, 1))                    /* turning to the front: the walk to the point (0x2F0EEC) */
             bot_walk(ai, ag, r, v, pt, 0, bt->target, call, ctx);

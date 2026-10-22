@@ -5686,6 +5686,7 @@ static void bot_views(Viewer *v, DirBuilding *db, DirMonster *dm, DirBotView *bv
         b->probe = ((mo->graph.probe[1]) + mo->ev16) * (mo->scale > 0 ? mo->scale : 1);
         b->self = k;
         b->ni = game_ni_on(v->game);
+        mon_body_centre(mo, b->centre);
         b->b = db;
         b->nb = nb;
         b->m = dm;

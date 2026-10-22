@@ -74,6 +74,8 @@ typedef struct {
 typedef struct {
     /* the bot itself */
     float pos[3], fwd[2];    /* its place and its forward axis, flat */
+    float centre[3];         /* its body centre (0x2E4D30: the place + MONSTER_DATA +0x1A0 / +0x1A4 and the kept
+                              * type-16 record's along its axes, x its scale): 2.5 ahead for George */
     int mirror, mirror_queued;
     int mode;                /* +0xAD8 (1, 2: in the air) */
     int mounted, rail, storey;   /* its building's face: the building (-1 none), the rail and storey there */
