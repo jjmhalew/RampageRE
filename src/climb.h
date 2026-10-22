@@ -78,11 +78,11 @@ float hand_weight(const Hand *h);                    /* now: a smoothstep from s
 /* time <= 0: 0.2, or nothing while it already grips; pos (snapped) and q where the clip puts the hand; 1 if taken */
 int hand_attach(Hand *h, float time, const float pos[3], const float q[4]);
 void hand_detach(Hand *h, float time);
-/* 0x322680: the hand's place held to the mount's face (0.75 off it; on a side one hand at the corner, the other 2.5
- * along), between the building's foot and top less 1.5 */
-void climb_hand_snap(const Mount *m, const Scene *s, int hand, float pos[3]);
+/* 0x322680: the hand's place held to the mount's face (thick off it: the hands' +0x4, 0.75 unless set; on a side one
+ * hand at the corner, the other 2.5 along), between the building's foot and top less 1.5 */
+void climb_hand_snap(const Mount *m, const Scene *s, int hand, float thick, float pos[3]);
 /* each frame: the timer, the target following the clip's hand while it attaches (anim) and held to the face, then
  * the smoothing (0.7 of the target, 0.3 of the last place, a world step of 1/30 s: 0.3^(dt x 30) a frame) */
-void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float anim[3], float dt);
+void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, float thick, const float anim[3], float dt);
 
 #endif

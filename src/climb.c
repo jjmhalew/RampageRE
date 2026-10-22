@@ -434,8 +434,6 @@ int climb_check(Mount *m, const Scene *s, const Climber *c, int mode)
 
 /* ---------------------------------------------------------------- the hands */
 
-#define HAND_OFF 0.75f                               /* the hand object's +0x4 */
-
 float hand_weight(const Hand *h)
 {
     if (h->remaining <= 0)
@@ -470,21 +468,21 @@ void hand_detach(Hand *h, float time)
     h->remaining = h->duration = h->start <= 0 ? 0 : time;
 }
 
-void climb_hand_snap(const Mount *m, const Scene *s, int hand, float pos[3])
+void climb_hand_snap(const Mount *m, const Scene *s, int hand, float thick, float pos[3])
 {
     const Building *b = building_of(s, m->at.building);
     if (!b)
         return;
     const float *M = m->at.pt;
     if (m->at.rail == 0) {
-        pos[0] = hand == 1 ? M[0] : M[0] - HAND_OFF;
+        pos[0] = hand == 1 ? M[0] : M[0] - thick;
         pos[1] = hand == 1 ? M[1] : M[1] + 2.5f;
     } else if (m->at.rail == b->width) {
-        pos[0] = hand == 0 ? M[0] : M[0] + HAND_OFF;
+        pos[0] = hand == 0 ? M[0] : M[0] + thick;
         pos[1] = hand == 0 ? M[1] : M[1] + 2.5f;
     } else {
-        pos[1] = M[1] - HAND_OFF;
-        pos[0] = fmaxf(b->min[0] + 2 * HAND_OFF, fminf(pos[0], b->max[0] - 2 * HAND_OFF));
+        pos[1] = M[1] - thick;
+        pos[0] = fmaxf(b->min[0] + 2 * thick, fminf(pos[0], b->max[0] - 2 * thick));
     }
     float lo = b->min[2], hi = b->max[2];
     const Building *o = across(m, s);
@@ -495,7 +493,7 @@ void climb_hand_snap(const Mount *m, const Scene *s, int hand, float pos[3])
     pos[2] = fmaxf(lo + 1.5f, fminf(pos[2], hi - 1.5f));
 }
 
-void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float anim[3], float dt)
+void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, float thick, const float anim[3], float dt)
 {
     int follow = 0;
     if (h->remaining > 0) {
@@ -512,10 +510,10 @@ void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, const float 
         follow = h->target == 1 && h->attaching;
     if (follow) {
         memcpy(h->tp, anim, sizeof h->tp);
-        climb_hand_snap(m, s, hand, h->tp);
+        climb_hand_snap(m, s, hand, thick, h->tp);
     }
     if (h->planted)
-        climb_hand_snap(m, s, hand, h->tp);
+        climb_hand_snap(m, s, hand, thick, h->tp);
     if (h->valid) {                                  /* 0.3 (gp - 0x7130) of the last place stays, a frame of the
                                                       * monster's update: a world step, 1/30 s [R 0x2B7800] */
         float keep = powf(0.3f, dt * 30);

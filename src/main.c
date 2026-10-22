@@ -108,6 +108,7 @@ typedef struct Mon {
     int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
     Mount mount;                                     /* on a building's face (climb.c) */
     Hand hand[2];                                    /* its hands on the wall (0 left, 1 right, as seen) */
+    float hand_thick;                                /* the hands' +0x4 (monster +0xC780): off the face they grip */
     int held;                                        /* the person in its hand (people.c), -1 none */
     int held_unit;                                   /* or the army unit (army.c), -1 none */
     int force_to;                                    /* a state played from outside (playReaction), + 1, taken in at
@@ -605,6 +606,10 @@ static void start_moves(Mon *mo)
     mo->friction = MONSTER_FRICTION;
     mo->air_hits = 0;                                /* (0x2E9D90, the setup's only) */
     face_default(mo);                                 /* Monsters::PostInit */
+    /* [R 0x323180] the hands' +0x4 is 0.75; Lizzie.bsf's own PostInit (0x2E75C0 asks "<monster>::PostInit" first)
+     * sets setHandThickness(0.5) (binding 95, 0x2AB330: +0xC780) in place of Monsters' setMaxJumpSpinCount(2), whose
+     * +0xABC nothing reads */
+    mo->hand_thick = mo->monster >= 0 && !_stricmp(v->monsters[mo->monster], "Lizzie") ? 0.5f : 0.75f;
     memset(&mo->input, 0, sizeof mo->input);
     memset(mo->vel, 0, sizeof mo->vel);
     mo->mirror = mo->mirror_queued = 0;
@@ -2237,7 +2242,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             for (int k = 0; k < 3; k++)
                 r[3 * c + k] = w.m[4 * c + k];
         ik_quat_of(r, q);
-        climb_hand_snap(&mo->mount, &v->scene, h, pos);
+        climb_hand_snap(&mo->mount, &v->scene, h, mo->hand_thick, pos);
         if (hand_attach(&mo->hand[h], e->p[1], pos, q) && e->p[2] != 0)
             mo->mirror_queued = !mo->mirror_queued;
         return;
@@ -6364,7 +6369,7 @@ static void hands_step(Mon *mo, float dt)
             anim[1] = w.m[13];
             anim[2] = w.m[14];
         }
-        hand_update(hd, h, &mo->mount, &v->scene, anim, dt);
+        hand_update(hd, h, &mo->mount, &v->scene, mo->hand_thick, anim, dt);
         float wt = hand_weight(hd);
         if (getenv("RAMPAGE_HANDS") && (wt > 0 || hd->target > 0))
             printf("  hand %d: w %.2f%s%s, clip's at %.2f %.2f %.2f, held at %.2f %.2f %.2f\n", h, wt,
