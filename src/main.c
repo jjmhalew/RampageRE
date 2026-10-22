@@ -6312,6 +6312,14 @@ static void play_step(Viewer *v, float dt, float aspect)
     nat = cam_interest(at, nat, (const float (*)[3])interest, v->army ? army_interest(v->army, interest) : 0);
     cam_update(&v->cam, (const float (*)[3])at, nat, cam_held, dt, aspect);
     dircam_update(&v->cd, dt, me, v->nmon, &v->view);   /* the modes (the script camera) and their blend */
+    /* [R Traffic.scr onEndFrame] the world's tick (WorldBase +0x28, 0x284DA0) ends in WorldScript +0x38 (0x284E20:
+     * slot 4), after its objects' update (+0x24): fNextExitTime less the step, and a new 5 + 5 frand when it is out,
+     * which nothing uses (createRunners is never called) but the world's stream */
+    for (v->traffic_acc += v->have_scene ? dt : 0; v->traffic_acc >= TIMESTEP; v->traffic_acc -= TIMESTEP) {
+        v->traffic_exit -= TIMESTEP;
+        if (v->traffic_exit < 0)
+            v->traffic_exit = 5.0f + wrand_frand() * 5.0f;
+    }
 }
 
 /* the hands each frame (0x323130, 0x3230F0): let go off a building (unmountBuilding's 0x322EC0, 0.1 s), the timers and
