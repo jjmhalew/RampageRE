@@ -36,6 +36,7 @@ struct City {
     char template_books[4][64]; int ntemplate_books;
     char (*model_key)[64];                           /* per city entry: model name of a mesh entry ("model|object") */
     int create_crowd;                                /* Traffic.bsf's bCreateCrowd (city_new_world) */
+    Group runners[16]; int nrunners;                 /* Traffic.bsf's runners: the first activated block's, the world's */
 };
 
 /* ---------------------------------------------------------------- matrices */
@@ -189,8 +190,10 @@ City *city_open(const Vol *vol, const char *name)
 
 void city_new_world(City *c)
 {
-    if (c)
+    if (c) {
         c->create_crowd = 1;                         /* [R] Traffic::onInit: bCreateCrowd = 1 */
+        c->nrunners = 0;                             /* (the script loaded again: its runners empty) */
+    }
 }
 
 void city_close(City *c)
@@ -3703,7 +3706,7 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         s->people++;
     }
     people_set_block(s->folk, block);                /* the SpawnedItem ones come by the chains (people.h) */
-    Group occ = group_sub(block, "Occupants"), runners[16];
+    Group occ = group_sub(block, "Occupants");
     s->music = group_str(block, "Music");
     s->block = block;
     s->occ_setup = occ.at && group_sub(block, "Edibles").at;   /* [R 0x31A604] */
@@ -3722,7 +3725,9 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         s->military[s->nmilitary] = name;
         s->military_freq[s->nmilitary++] = group_num(mi, "Frequency", 1);
     }
-    int nrun = 0;
+    /* [R Traffic.scr onActivateBlock] runners (occupant + "Runner") is made only while it is empty: from the first
+     * block with occupants, crowd or not (HK03's crowd runs HK01's), and kept for the world */
+    int fill = c->nrunners == 0;
     n = occ.at ? group_values(occ, "OccupantInstance|", &where, r, MAX_REC) : 0;
     for (uint32_t i = 0; i < n && s->noccupants < 16; i++) {
         Group oi = record_group(where, r[i]);
@@ -3735,18 +3740,18 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         char rn[96];
         snprintf(rn, sizeof rn, "%sRunner", name);
         Group rt = template_of(c, rn);
-        if (rt.at && nrun < 16)
-            runners[nrun++] = rt;
+        if (fill && rt.at && c->nrunners < 16)
+            c->runners[c->nrunners++] = rt;
     }
     /* [R] Traffic::onActivateBlock: the crowds come once a world (bCreateCrowd, set by its onInit), on the first block
-     * with occupants whose CreateCrowd (1 unless set; 0 in HK01, HK02, SF10) is not 0; with them the 3D sound
+     * with runners whose CreateCrowd (1 unless set; 0 in HK01, HK02, SF10) is not 0; with them the 3D sound
      * Crowd_Panic at the block's origin (SoundEffect.start(name, 1): it goes when it has played, sound.c) */
-    if (c->create_crowd && s->noccupants && group_num(block, "CreateCrowd", 1) != 0) {
+    if (c->create_crowd && c->nrunners && group_num(block, "CreateCrowd", 1) != 0) {
         static const float CROWD[2][3] = { { -14, 0.5f, 0 }, { 8, -3, 0 } };
         static const float ORIGIN[3] = { 0, 0, 0 };
         c->create_crowd = 0;
-        for (int k = 0; k < 2 && nrun; k++)
-            s->people += people_crowd(s->folk, runners, nrun, CROWD[k]);
+        for (int k = 0; k < 2 && c->nrunners; k++)
+            s->people += people_crowd(s->folk, c->runners, c->nrunners, CROWD[k]);
         int se = sound_effect_start("Crowd_Panic", 1);
         if (se >= 0)                                 /* (sfx.isValid()) */
             sound_effect_set_point(se, ORIGIN);
