@@ -2135,7 +2135,9 @@ static void grab_nearest(Mon *mo)
     float fwd[3] = { -sinf(mo->heading / 57.2957795f), cosf(mo->heading / 57.2957795f), 0 };
     /* [R] one query of the object manager (0x4D0900's +0x20: within the reach, flags 0x20840, at most 64) and
      * the nearest of them to the hand, of whatever kind: a cop beside a tourist is taken when he is nearer */
-    float r = 15;                                /* each kind asked within the nearest so far */
+    float r = 15 * (mo->scale > 0 ? mo->scale : 1);   /* MONSTER_DATA +0x1B8 (15 in all 30) x the scale (+0xA78
+                                                      * while +0xA74) [R 0x2D9A48 .. 0x2D9B44]; each kind asked
+                                                      * within the nearest so far */
     int kind = -1, who = -1, k;
     if ((k = people_nearest(v->scene.folk, hand, root, fwd, r)) >= 0)
         kind = 0, who = k, r = dist_to(people_get(v->scene.folk, k)->world + 12, hand);
