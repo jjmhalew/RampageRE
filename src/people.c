@@ -31,7 +31,7 @@ struct People {
     int nm;
     PeopleEvent ev[MAX_EVENTS];
     int nev;
-    struct { float left; PeopleEvent ev; } timer[MAX_TIMERS];
+    struct { float left; PeopleEvent ev; int side; } timer[MAX_TIMERS];   /* side: the knock's x drawn as it fires */
     int ntimers;
     PeopleFindTemplate find;
     void *find_ctx;
@@ -81,7 +81,8 @@ static void emit(People *p, int type, int who, const char *name, const char *nod
         memcpy(e->v, v, sizeof e->v);
 }
 
-static void later(People *p, float delay, int type, const float v[3], float amount)   /* installObjectTimer */
+/* installObjectTimer(function, monster, delay): the event for that monster slot once the delay is out */
+static void later(People *p, float delay, int type, int monster, const float v[3], float amount, int side)
 {
     if (p->ntimers >= MAX_TIMERS)
         return;
@@ -89,7 +90,10 @@ static void later(People *p, float delay, int type, const float v[3], float amou
     memset(&p->timer[p->ntimers].ev, 0, sizeof(PeopleEvent));
     p->timer[p->ntimers].ev.type = type;
     p->timer[p->ntimers].ev.who = -1;
+    p->timer[p->ntimers].ev.monster = monster;
+    p->timer[p->ntimers].ev.object = -1;
     p->timer[p->ntimers].ev.amount = amount;
+    p->timer[p->ntimers].side = side;
     if (v)
         memcpy(p->timer[p->ntimers].ev.v, v, 3 * sizeof(float));
     p->ntimers++;
@@ -1797,6 +1801,8 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
     people_spawn_chain(p);                           /* the ones eaten since the last frame (people_remove) */
     for (int i = 0; i < p->ntimers; i++)
         if ((p->timer[i].left -= dt) <= 0) {
+            if (p->timer[i].side)                    /* doPriestReaction: if (gWorld.frand() < 0.5) vel.x = -10 */
+                p->timer[i].ev.v[0] = frand(p) < 0.5f ? -10.0f : 10.0f;
             if (p->nev < MAX_EVENTS)
                 p->ev[p->nev++] = p->timer[i].ev;
             p->timer[i--] = p->timer[--p->ntimers];
@@ -2031,7 +2037,7 @@ void people_hold(People *p, int who, const float hand[16], int mirrored, float d
     memcpy(q->pos, &q->world[12], sizeof q->pos);
 }
 
-PeopleEaten people_eat(People *p, int who)
+PeopleEaten people_eat(People *p, int who, int monster)
 {
     PeopleEaten e = { 0, 0, 0, 0 };
     if (who < 0 || who >= p->n || p->v[who].phase != PP_HELD)
@@ -2053,11 +2059,12 @@ PeopleEaten people_eat(People *p, int who)
             }
             const char *reaction = tstr(q, "ReactionType");
             if (reaction && same_text(reaction, "Priest")) {
-                /* Monsters::doPriestReaction after EatReactionDelay: thrown up and back, 30 HP */
-                float v[3] = { frand(p) < 0.5f ? -10.0f : 10.0f, -5, 20 };
+                /* Monsters::doPriestReaction on the eater after EatReactionDelay: thrown up and back (its side a
+                 * frand as it runs, after the fart's below), 30 HP [R StationaryPerson.scr, Monsters.scr] */
+                float v[3] = { 10, -5, 20 };
                 float delay = tnum(q, "EatReactionDelay", 0);
-                later(p, delay, PE_MONSTER_KNOCK, v, 0);
-                later(p, delay, PE_MONSTER_HP, NULL, -30);
+                later(p, delay, PE_MONSTER_KNOCK, monster, v, 0, 1);
+                later(p, delay, PE_MONSTER_HP, monster, NULL, -30, 0);
                 e.priest = 1;
             }
         }

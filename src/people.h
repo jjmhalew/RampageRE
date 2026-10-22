@@ -217,7 +217,7 @@ void people_grab(People *p, int who, float blend);
 /* each frame it is held: the hand's (LiftNodeName, "Helper R Hand") world matrix, column-major */
 void people_hold(People *p, int who, const float hand_world[16], int mirrored, float dt);
 /* throwObject(1, ...): onThrow(monster, eaten); gone. What the monster gets (gCommon.addStats, 0x2C51A0) */
-PeopleEaten people_eat(People *p, int who);
+PeopleEaten people_eat(People *p, int who, int monster);
 /* addStats on the monster: hit points to max(1, hp + health) within hp_max (MONSTER_DATA +0x138, 200), only while
  * hp > 0; energy within 0 .. 100 (100 starts its rage) */
 void people_apply_eaten(const PeopleEaten *e, float *hp, float hp_max, float *energy);

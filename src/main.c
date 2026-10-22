@@ -1996,7 +1996,7 @@ static void throw_held(Mon *mo, int eat, float x, float y, float z)
         const Person *pp = people_get(v->scene.folk, mo->held);
         int first = pp && !(pp->flags & 0x40000000u);    /* addStats once per object */
         const char *name = pp ? pp->name : NULL;
-        PeopleEaten got = people_eat(v->scene.folk, mo->held);
+        PeopleEaten got = people_eat(v->scene.folk, mo->held, mo->slot);
         monster_stats(mo, got.health, got.energy);
         if (got.fart)
             mon_fart_later(mo, 2.0f);
