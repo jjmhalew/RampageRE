@@ -132,6 +132,7 @@ typedef struct {
     const MoveGraph *g;
     int state; float time;
     int chosen;                                      /* transition picked and waiting for its switch window, -1 */
+    int floor_any, floor_act;                        /* the AI's pick floors (the pad's +0x8, +0xC: pickByAction) */
     uint8_t *in_window, *sw_window;                  /* per transition of the state */
     int from, via;                                   /* after a switch: the old state, the transition (-1: clip end) */
 } MoveRunner;

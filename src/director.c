@@ -134,8 +134,61 @@ int dir_graph_reachable(const DirGraph *ag, const MoveGraph *g, int from, int to
  * highest priority leading where it wants (a state of that action code, or that state), unless the pick already leads
  * there; with none, the state's own transition for that action (no window asked). It then waits for its switch window
  * (0x2EBF40 sets the runner's pick, +0x1E) [R] */
+static int node_action(const DirGraph *ag, int state)   /* the state's node's action (+0x3C) */
+{
+    return ag->action && state >= 0 && state < ag->n ? ag->action[state] : -1;
+}
+/* pickByAction 0x2F2630 (pad, action, again, again) [R]: the floors (pad +0x8 for a transition that needs nothing,
+ * +0xC for one of the action) start again (-1) only with no pick pending, so they hold while one waits for its
+ * switch window; with again 0 no pick by the action while the state or the pending pick already has it (0x2F26B0 ..
+ * 0x2F26EC). Each transition in its input window at the floor or above: one that needs nothing raises +0x8 and is
+ * the pick, the scan going on (0x2F2784), so a later one may take its place; one leading to a state of the action
+ * at +0x8 or above, usable, its target allowed and not where the pending pick leads raises +0xC and is the pick.
+ * None: the state's own transition for the action, in its window (0x2F28B8) */
+static void pick_by_action(MoveRunner *r, const DirGraph *ag, int action, int again, MoveCall call, void *ctx)
+{
+    const MoveGraph *g = r->g;
+    const MoveState *s = &g->states[r->state];
+    int want = action != DA_KEEP;
+    const MoveTrans *pend = r->chosen >= 0 && r->chosen < s->ntrans ? &s->trans[r->chosen] : NULL;
+    if (!pend)
+        r->floor_any = r->floor_act = -1;
+    else if (!again && node_action(ag, pend->target) == action)
+        want = 0;
+    if (!again && node_action(ag, r->state) == action)
+        want = 0;
+    int thr = r->floor_any > r->floor_act ? r->floor_any : r->floor_act, pick = -1;
+    for (int i = 0; i < s->ntrans; i++) {
+        const MoveTrans *t = &s->trans[i];
+        if (t->priority < thr || t->target < 0 || t->target >= g->n)
+            continue;
+        if (r->in_window[i] && usable(t, call, ctx) == 0) {
+            r->floor_any = thr = t->priority;
+            pick = i;
+            continue;
+        }
+        if (!want || node_action(ag, t->target) != action || t->priority < r->floor_any || !r->in_window[i] ||
+            usable(t, call, ctx) == 2 || !target_ok(g, t) || (pend && pend->target == t->target))
+            continue;
+        r->floor_act = thr = t->priority;
+        pick = i;
+    }
+    if (pick < 0 && want && action >= 0 && action < 16 && ag->fallback) {
+        int f = ag->fallback[r->state][action];
+        if (f >= 0 && f < s->ntrans && r->in_window[f] && usable(&s->trans[f], call, ctx) != 2 &&
+            target_ok(g, &s->trans[f]))
+            pick = f;
+    }
+    if (pick >= 0)
+        r->chosen = pick;
+}
+
 static void ai_pick(MoveRunner *r, const DirGraph *ag, int action, int to_state, MoveCall call, void *ctx)
 {
+    if (to_state < 0) {                              /* by action: pickByAction (pad, action, 0, 0) */
+        pick_by_action(r, ag, action, 0, call, ctx);
+        return;
+    }
     const MoveGraph *g = r->g;
     const MoveState *s = &g->states[r->state];
     int want = to_state >= 0 ? r->state != to_state : action != DA_KEEP;   /* 0x2F2A84: not where it is already */
@@ -709,17 +762,11 @@ static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
         ai_pick(r, ag, DA_WALK, -1, call, ctx);
 }
 
-/* pickByAction(a, a2, a3) 0x2F2630: with again (1, 1) a new pick even when the pick leads to that action already, so
- * attacks and hops repeat [R] */
+/* pickByAction(pad, action, again, again) 0x2F2630: with again 1 a pick by the action even when the state or the
+ * pending pick has it already, so attacks and hops repeat [R] */
 static void bot_action(MoveRunner *r, const DirGraph *ag, int action, int again, MoveCall call, void *ctx)
 {
-    if (again && r->chosen >= 0) {
-        const MoveTrans *t = &r->g->states[r->state].trans[r->chosen];
-        if (!r->sw_window[r->chosen] && ag->action && t->target >= 0 && t->target < ag->n &&
-            ag->action[t->target] == action)
-            r->chosen = -1;                          /* not switched yet: picked anew */
-    }
-    ai_pick(r, ag, action, -1, call, ctx);
+    pick_by_action(r, ag, action, again, call, ctx);
 }
 
 static int bot_facing(const DirBotView *v, float ax, float ay) { return v->fwd[0] * ax + v->fwd[1] * ay >= 0.95f; }
