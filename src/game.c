@@ -567,23 +567,26 @@ static float ny_boss_results_ni(Game *g, float last)
         e->v[0] = -3.08f; e->v[1] = 11.93f; e->v[2] = 66.46f;
         g->ny_moved = 1;
     }
-    for (int i = 0; i < np(g); i++)                  /* now and then a taunt, a grab or a punch at the roof */
+    for (int i = 0; i < np(g); i++) {                /* now and then a taunt, a grab or a punch at the roof */
         if (g->ni_move_done[i] && --g->ni_move_step[i] <= 0) {
             g->ni_move_step[i] = (int)(frand(g) * 60.0f);
             static const char *const moves[] = { "Ground_Taunt", "Ground_Grab_Down", "Ground_Punch_Down" };
             play_move(g, i, moves[(int)(frand(g) * 3.0f) % 3]);
         }
-    if (g->ny_watch) {
-        int two = np(g) >= 2;
-        for (int i = 0; i < (two ? 2 : 1); i++) {    /* held on the roof */
-            GameEvent *e = emit(g, GE_PLACE, i);
-            e->pos[0] = two ? AT[i][0] : 0;
-            e->pos[1] = 18;
-            e->pos[2] = 61.5f;
-        }
-        if (g->centre_down) {                        /* the centre building goes: the usual view */
-            camera(g, "TwoTilts", 1.5f);
-            g->ny_watch = 0;
+        if (g->ny_watch) {                           /* within the players' loop (NewYork.scr 345 .. 368) */
+            if (g->centre_down) {                    /* the centre building goes: the usual view, and the players
+                                                      * after this one wait for the next call, where they are */
+                camera(g, "TwoTilts", 1.5f);
+                g->ny_watch = 0;
+                return g->ni_frequency;
+            }
+            int two = np(g) >= 2;
+            for (int k = 0; k < (two ? 2 : 1); k++) {    /* held on the roof */
+                GameEvent *e = emit(g, GE_PLACE, k);
+                e->pos[0] = two ? AT[k][0] : 0;
+                e->pos[1] = 18;
+                e->pos[2] = 61.5f;
+            }
         }
     }
     return g->ni_frequency;
