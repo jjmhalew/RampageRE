@@ -29,6 +29,7 @@ in the file; indentation is regenerated from the braces.
 | 0x419358 | token name table, 8 bytes per entry (`"=="`, `"!="`, `"*"`, ...); the token code is the index |
 | 0x2B02D0 | example of a native class's method lookup (`World`): `strcmp` against each method name and return a 16-byte descriptor `{method index, 0, slot, ...}` at 0x42AF30+ |
 | 0x1BB620 | `POperatorNode` (vtable 0x445660) +0x30, an operator's evaluation: a jump table (0x4186C0) on its kind (+0x10). Kind 5 is `&&` / `\|\|` (token +0x1C, 0x0B or 0x0C) and short-circuits as in C (0x1BB7F0): the left operand (+0x20) is evaluated and tested, and the right (+0x24) only when it decides the result, so a `gWorld.frand()` on the right of `a && b` is not drawn when `a` is false, nor of `a \|\| b` when `a` is true |
+| 0x1B9630 | `PFunctionCallNode` (vtable 0x445560) +0x30, a call's evaluation: its arguments from the list at +0x18, first to last, each into the next slot of the argument array (slot 0 the first parameter), then the callee's expression (+0x20), then the call. So the arguments are evaluated left to right, and `p.set(frand(), frand(), 0)` draws its x before its y |
 
 ## File layout (little endian)
 | Offset | Type | |
