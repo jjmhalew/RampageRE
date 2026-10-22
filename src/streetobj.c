@@ -166,6 +166,16 @@ static void set_facing(StreetObj *o, const float e[3])
     update_world(o);
     o->moved = 1;
 }
+/* getFacing() (WorldObject id 9, 0x277E10) [R]: read back from the matrix (0x101220: asin, atan2), so a rotateAA's
+ * lean is in it. Its z is the atan2's within (-pi, pi]; here the turn nearest the last facing set, so that a jib
+ * turned to +pi reads +pi [G: which side of pi the game's VU0 sine (0xE00) leaves it is not known] */
+static void get_facing(const StreetObj *o, float e[3])
+{
+    e[0] = asinf(fmaxf(-1, fminf(1, o->rot[5])));
+    e[1] = atan2f(-o->rot[2], o->rot[8]);
+    e[2] = atan2f(-o->rot[3], o->rot[4]);
+    e[2] = o->facing[2] + remainderf(e[2] - o->facing[2], 2 * PI);
+}
 
 /* setPulseDelay (0x2AA2A0): only the delay; the pulse's clock (o->pulse) runs on [R] */
 static void set_pulse(StreetObj *o, float delay)
@@ -1746,7 +1756,9 @@ static void crane_process(StreetObjs *s, StreetObj *o)   /* Process, every frame
         cargo = 1;
     }
     if (o->state & 1) {                              /* the jib turning */
-        float fc[3] = { o->facing[0], o->facing[1], o->facing[2] + o->rot_dir * TIMESTEP * o->rot_vel };
+        float fc[3];                                 /* getFacing(): a blow's rocking stays in the turn [R] */
+        get_facing(o, fc);
+        fc[2] += o->rot_dir * TIMESTEP * o->rot_vel;
         if (fc[2] >= o->rot_max) {
             fc[2] = o->rot_max;
             o->state &= ~1;
