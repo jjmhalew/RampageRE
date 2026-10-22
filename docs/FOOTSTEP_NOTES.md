@@ -108,7 +108,7 @@ is not pressed (the wading does that every frame on its own, WATER_NOTES.md).
 
 ### cancelFootStep (0x33CA10) [R]
 Every standing clip sends it for both feet at its start (Ground_Idle, the reactions, the jumps' starts ...), but
-**only foot 0 does anything** (`bnez $s2` on the argument before the swap). Then, unless the debug byte, with a state
+**only foot 0 does anything** (`bnez $s2` on the argument before the swap). Then, unless an NI runs, with a state
 node at +0x74 — **the state just left** — whose flags have 0x50 or 0x1080 (NODE_AIR_X | NODE_ROOT_X, NODE_AIR_Y |
 NODE_ROOT_Y: a state that travels; Ground_Walk has 0x80) and the monster still:
 - s2 = record 0 (1 mirrored), s1 the other; both feet's places, less the monster's place, into its frame (0x101190:
@@ -155,7 +155,7 @@ at cancelFootStep the pose array still holds last frame's pose, IK and all; at 0
 before the IK.
 
 ### The foot lock (0x33BF10: a1 the frame's new matrix, a2 the matrix out, 1 = take it) [R]
-Nothing under the debug byte. With an anchor: if the +0x68 byte is set, a footfall at the anchor's record place (z the
+Nothing while an NI runs. With an anchor: if the +0x68 byte is set, a footfall at the anchor's record place (z the
 ground; record 1 → 0x2DC350, else 0x2DC3D0) and the byte cleared. **No code sets +0x68** (every `sb` to +0x68 /
 +0xC884 in the monster and foot code stores zero), so this footfall never happens: the footfalls are footPlant's
 alone. Then the anchor is dropped (−1) **when the state now (monster +0x10C) travels** (0x50 / 0x1080: 0x33BFE8 ..
@@ -314,4 +314,4 @@ at once and the walk is as fast as without the IK.
   monster's base matrix, which carries the dynamic scale (the frame's `mo->scale`), so a grown or shrunk monster's
   feet are where 0x2E5C40 puts them; the clip's own feet at its time 0 (0x33C5A0) go through the unscaled matrix, as
   the game's (`to_world`).
-- Not ported: the debug byte; the state command's own 0x33D490 refresh (the next frame's update does the same).
+- Not ported: the state command's own 0x33D490 refresh (the next frame's update does the same).
