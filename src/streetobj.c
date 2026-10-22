@@ -944,10 +944,11 @@ static void birds_fly(StreetObjs *s, StreetObj *o, int from_top)
 }
 
 /* Billboard_2Part.bsf's onStartFall [R]: a pulse every frame and a SplineMover at 10 a second from where it is to 3
- * out (-y) and 3 up, then down to z -3 [G: straight between the points]; deleted at its end (onMoverCallback 2) */
+ * out (-y) and 3 up, then down to z -3 [G: straight between the points]; deleted at its end (onMoverCallback 2). A
+ * front still falling starts again from where it is: the billboard's next blow calls it for each one still valid */
 static void part_start_fall(StreetObj *o)
 {
-    if (o->kind != SK_2PART || o->on_path)
+    if (o->kind != SK_2PART)
         return;
     set_pulse(o, TIMESTEP);
     memcpy(o->path[0], pos_of(o), sizeof o->path[0]);
