@@ -5927,7 +5927,7 @@ static void mon_step(Mon *mo, float dt)
         float before[3] = { mo->mx, mo->my, mo->mz };
         float root[3] = { mo->mx, mo->my, mo->mz };
         int switched = ev == 0 || (mo->is_ai && mo->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */
-                                   dir_ai_step(&mo->ai, &mo->ag, &mo->run, root, cdt, answer, mo) :
+                                   dir_ai_step(&mo->ai, &mo->ag, &mo->run, root, cdt, dt, answer, mo) :
                                    moves_step(&mo->run, in, cdt, answer, mo));
         for (; mo->is_ai && mo->ai.done > 0; mo->ai.done--)   /* Levels::moveComplete */
             if (mo->reveal)                          /* Monsters::onRevealNIEnd: stopReveal */

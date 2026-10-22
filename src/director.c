@@ -1086,7 +1086,10 @@ static int destroy_update(DirAI *ai, const DirGraph *ag, MoveRunner *r, float dt
     return 1;
 }
 
-int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, MoveCall call, void *ctx)
+/* dt: the clip's time (the speed scale's, 0x2EBFE0); world_dt: the world's step, which the goals' clocks count (gWorld
+ * +4: 0x2F0838, 0x2F087C, 0x2F08BC) [R] */
+int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, float world_dt, MoveCall call,
+                void *ctx)
 {
     ai->done = 0;
     ai->stick[0] = ai->stick[1] = 0;                 /* +0x0 and +0xC cleared each frame [R 0x2EE430] */
@@ -1115,7 +1118,7 @@ int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3]
         DirGoal *gl = &ai->q[0];
         ai->current = 1;
         running = gl->type == DG_WALK_TO ? walk_update(ai, gl, ag, r, pos, call, ctx)
-                : gl->type == DG_DESTROY ? destroy_update(ai, ag, r, dt, call, ctx)
+                : gl->type == DG_DESTROY ? destroy_update(ai, ag, r, world_dt, call, ctx)
                                          : play_update(ai, gl, ag, r, call, ctx);
         if (!running) {
             memmove(&ai->q[0], &ai->q[1], sizeof *ai->q * (size_t)(ai->n - 1));

@@ -156,7 +156,8 @@ void dir_ai_avoid(DirAI *ai, int b, const DirBotView *view);
  * their picks, the switch. pos: the monster's root position. call answers the transitions' script checks (as for
  * moves_step). Returns 1 when the state changed (r->from, r->via as moves_step: via -1 = forced or the clip ended);
  * ai->stick and ai->done are set. */
-int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, MoveCall call, void *ctx);
+int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, float world_dt, MoveCall call,
+                void *ctx);
 
 /* ================================================================ the camera */
 
