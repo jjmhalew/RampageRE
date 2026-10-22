@@ -2122,7 +2122,8 @@ static void grab_nearest(Mon *mo)
 {
     Viewer *v = mo->v;
     Mat4 h;
-    if (mo->held >= 0 || !v->scene.folk || attach_world(mo, "Helper R Hand", &h) != 0)
+    /* the hold (0x2DA4A0 -> 0x2DA310) takes nothing while the hand holds a valid object, of whatever kind [R] */
+    if (held_anything(mo) || !v->scene.folk || attach_world(mo, "Helper R Hand", &h) != 0)
         return;
     float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { mo->mx, mo->my, mo->mz };
     Mat4 n0;                                     /* in front of node 0 (Bip01) as posed, by the node getter that
