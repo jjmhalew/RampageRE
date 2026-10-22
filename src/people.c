@@ -901,8 +901,13 @@ static int on_mover(People *p, Person *q, int st)
             return DELETE_ME;
         }
         return 1;
-    case PK_CHILD:
-        return st == 2 ? DELETE_ME : 1;
+    case PK_CHILD:                                   /* [R Person_Child.scr] at its mover's end it draws a way back
+                                                      * (dir = -1 + 2 (frand > 0.5)) and sets its mover to it, then
+                                                      * is deleted all the same: only the draw is left of it */
+        if (st != 2)
+            return 1;
+        (void)frand(p);
+        return DELETE_ME;
     case PK_WALKER:
         if (st == 2 && q->state == 1) {
             if (q->has_idle == 1) {

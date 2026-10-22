@@ -312,9 +312,10 @@ crowds, a streaker), `Biker` 74 (parade.c), `StationaryPerson` 73, `Military_Win
   `RecessSound` and `SwarmSound`, and makes 12 + frand × 8 actors, each a random one of `Actor0` … `2`
   (`ChildRunner0` … `2`, Person_Child). Each starts at the place ± 5 in x and y, `Running` at a random offset, on a
   LineMover at 11.5 (no MonsterResponseDist) with flags 1 | 4: first to a middle point (x pushed 0 … 5 further from
-  the world's x = 0, y − 8 − 0 … 5), then to (its x − 45 + 90 frand, its y − 50), where Person_Child deletes it. The
-  next pulse deletes the swarm (4 | 8 | 16). Its sounds are one-shot 3D sounds at its place, as the people's
-  add3DSfx are here [G: whether the swarm's deletion stops them is not followed].
+  the world's x = 0, y − 8 − 0 … 5), then to (its x − 45 + 90 frand, its y − 50), where Person_Child deletes it,
+  after a frand for a way back it never takes. The next pulse deletes the swarm (4 | 8 | 16). Its sounds are one-shot
+  3D sounds at its place, as the people's add3DSfx are here [G: whether the swarm's deletion stops them is not
+  followed].
 - **SchoolBuilding.bsf** (a building template's script; main.c `building_script`) [R SchoolBuilding.scr]: a
   monster's hit of 2.5 or more, once its `fStateTime` is out (Process takes the step off it each frame), sets it to
   20 and makes the building's `Swarm` at its place (getPosition, +0x2C: the middle of its foot) and calls its
