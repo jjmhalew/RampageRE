@@ -3870,6 +3870,13 @@ static void unit_update(Army *a, int i, float dt)
         return;
     if (u->phase == AU_HELD) {                       /* the HeldObjectMover: army_hold places it */
         u->anim_time += dt;
+        /* [R 0x309AC0, 0x30CEA0] its pulse runs on in the hand: a police car grabbed before its cop makes it from
+         * there (its draws with it), a held troop's state 32 waits out its 1 s pulses, and the clock keeps its phase */
+        if (u->pulse_delay >= 0.01f && (u->pulse_time += dt) >= u->pulse_delay) {
+            u->pulse_time = fmodf(u->pulse_time, u->pulse_delay);
+            if (on_pulse(a, u) == DELETE_ME)
+                unit_remove(a, u);
+        }
         return;
     }
     int r = 1;
