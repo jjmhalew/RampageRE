@@ -2959,11 +2959,11 @@ static int shape_part(const Mon *mo, int i)
  * matrix, then by the monster's), into the scene's overlay */
 /* RoyalGuardHut.bsf's TakeDamage ends gCommon.addStats(this.object, m.getSlot(), 0): the hut's Health, Energy and
  * Points (DefObjectProps' 10) for the monster whose blow sent it flying [R] */
-static void hut_stats(Mon *mo, const float c[3], float r, const float from[3])
+static void hut_stats(Mon *mo, const float c[3], float r)
 {
     Viewer *v = mo->v;
     Group hit[8];
-    int n = scene_huts_hit(&v->scene, c, r, from, hit, 8);
+    int n = scene_huts_hit(&v->scene, c, r, hit, 8);
     for (int i = 0; i < n; i++)
         if (v->army)
             army_add_stats(v->army, mo->slot, hit[i], 0);
@@ -3016,8 +3016,7 @@ static void hit_spheres(Mon *mo)
         }
         if (v->scene.folk) {                         /* and people (TakeDamage), and the guards' huts */
             people_hit(v->scene.folk, mo->slot, c, c[3], mo->heading, mo->graph.states[mo->run.state].name);
-            float from[3] = { mo->mx, mo->my, mo->mz };
-            hut_stats(mo, c, c[3], from);
+            hut_stats(mo, c, c[3]);
         }
     }
 }
@@ -3211,8 +3210,7 @@ static void roar_burst(Viewer *v, Mon *mo, const ArmyMonWeapon *w, const float c
     }
     if (v->scene.folk) {
         hit += people_hit(v->scene.folk, mo->slot, c, r, mo->heading, mo->graph.states[mo->run.state].name);
-        float from[3] = { mo->mx, mo->my, mo->mz };
-        hut_stats(mo, c, r, from);
+        hut_stats(mo, c, r);
     }
     if (getenv("RAMPAGE_TRACE"))
         printf("  %s's %s burst at %.1f %.1f %.1f (radius %g, %g): %d hit\n", name, w->key, c[0], c[1], c[2], r, amount,

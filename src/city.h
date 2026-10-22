@@ -358,11 +358,11 @@ void scene_block_left(Scene *s);
 int scene_street_shape(Scene *s, int k, const char *shape);
 /* instance inst's model node `name` (or, name NULL, node number id) in the world now (base x node); 0 = ok */
 int scene_instance_node(const Scene *s, int inst, const char *name, int id, float out[16]);
-/* RoyalGuardHut's TakeDamage: a monster's armed attack sphere (centre, radius) from the monster at `from` sends the
+/* RoyalGuardHut's TakeDamage: a monster's armed attack sphere (centre, radius) sends the
  * huts it reaches flying (people_hut_hit); their templates (at most max) into hit, for gCommon.addStats(hut, slot,
  * 0), the count returned. A touch does nothing: the hut's Construct
  * sets 0x8000 OnlyHitWithEffNodes (setFlags(32768)), so 0x2E22B0 (0x2E256C) gives it only an armed sphere's blow [R] */
-int scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3], Group *hit, int max);
+int scene_huts_hit(Scene *s, const float centre[3], float radius, Group *hit, int max);
 void scene_huts_update(Scene *s, float dt);         /* the flying huts move; a deleted one is no longer drawn */
 /* the huts as world objects (WSimpleObject: the guardshack's sphere, 0x28FD70) in the frame's collision world, between
  * collide_begin and collide_finish: what a flying hut meets, and what meets it */

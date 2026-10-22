@@ -878,7 +878,7 @@ Group city_template(City *c, const char *name) { return template_of(c, name); }
 static float people_clip_seconds(void *ctx, const char *anim, const char *shape);
 float city_clip_seconds(City *c, const char *anim, const char *shape) { return people_clip_seconds(c, anim, shape); }
 
-int scene_huts_hit(Scene *s, const float centre[3], float radius, const float from[3], Group *hit, int max)
+int scene_huts_hit(Scene *s, const float centre[3], float radius, Group *hit, int max)
 {
     int n = 0;
     for (int k = 0; k < s->nscripted && s->folk; k++) {
@@ -898,8 +898,16 @@ int scene_huts_hit(Scene *s, const float centre[3], float radius, const float fr
         float d[3] = { at[0] - centre[0], at[1] - centre[1], at[2] - centre[2] };
         if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > (radius + r) * (radius + r))
             continue;
-        float dir[3] = { from[0] - p[0], from[1] - p[1], 0 }, l = sqrtf(dir[0] * dir[0] + dir[1] * dir[1]);
-        if (l > 1e-4f) { dir[0] /= l; dir[1] /= l; }    /* towards the monster: it flies away from it */
+        /* TakeDamage's direction [R 0x2E2598 .. 0x2E267C]: the sphere test's push (0x2813F0, collide.c
+         * sphere_sphere: from the hut's sphere out to the monster's, (0, 0, 1) on its centre, as long as they overlap)
+         * made 1 long, (1, 0, 0) under 0.001: it flies away from the monster in x and y and up by its z */
+        float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), depth = radius + r - l;
+        float dir[3] = { 0, 0, 1 };
+        if (l > 1e-6f)
+            for (int j = 0; j < 3; j++)
+                dir[j] = -d[j] / l;
+        if (depth * depth < 1e-6f)
+            dir[0] = 1, dir[1] = dir[2] = 0;
         PeopleEaten e = people_hut_hit(s->folk, s->scripted[k].hut_id, dir, s->scripted[k].vel);
         if (getenv("RAMPAGE_TRACE"))
             printf("  a guard's hut hit: %.0f points, flying at %.1f %.1f\n", e.points, s->scripted[k].vel[0],

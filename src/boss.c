@@ -3512,21 +3512,41 @@ static void part_obj(const Obj *o, CollideObj *co)  /* the part as the collision
     collide_matrix_from16(co->m, o->p.world);
     co->building = -1;
 }
-/* a monster's sphere against the part's collision shape (0x2E22B0 -> 0x280470, collide.c collide_obj_sphere) [R] */
-static int sphere_meets(const Obj *o, const float c[3], float r)
+/* TakeDamage's direction [R 0x2E2598 .. 0x2E267C]: 0x280470's push (what moves the monster's sphere out of the
+ * shape: out of the part, towards the monster), made 1 long, (1, 0, 0) under 0.001 */
+static void push_dir(const float push[3], float dir[3])
+{
+    float l2 = push[0] * push[0] + push[1] * push[1] + push[2] * push[2];
+    if (l2 < 1e-6f) {
+        set3(dir, 1, 0, 0);
+        return;
+    }
+    float l = sqrtf(l2);
+    for (int k = 0; k < 3; k++)
+        dir[k] = push[k] / l;
+}
+/* a monster's sphere against the part's collision shape (0x2E22B0 -> 0x280470, collide.c collide_obj_sphere) [R];
+ * dir (may be NULL) TakeDamage's direction */
+static int sphere_meets(const Obj *o, const float c[3], float r, float dir[3])
 {
     CollideObj co;
     float n[3], pt[3], push[3];
     part_obj(o, &co);
-    return collide_obj_sphere(&co, c, r, n, pt, push);
+    if (!collide_obj_sphere(&co, c, r, n, pt, push))
+        return 0;
+    if (dir)
+        push_dir(push, dir);
+    return 1;
 }
-/* the monster's touch: each of its spheres against the part's shape [R]; a monster without spheres: its box against
- * the shape (0x2801A0) */
-static int touches(const Obj *o, const BossMonster *m)
+/* the monster's touch: each of its spheres against the part's shape, the last that meets it giving the direction
+ * [R 0x2E22B0's loop]; a monster without spheres: its box against the shape (0x2801A0) */
+static int touches(const Obj *o, const BossMonster *m, float dir[3])
 {
+    int met = 0;
     for (int s = 0; s < m->nspheres; s++)
-        if (sphere_meets(o, m->spheres[s], m->spheres[s][3]))
-            return 1;
+        met |= sphere_meets(o, m->spheres[s], m->spheres[s][3], dir);
+    if (met)
+        return 1;
     if (m->nspheres == 0) {
         CollideObj co;
         float n[3], pt[3], push[3];
@@ -3537,17 +3557,12 @@ static int touches(const Obj *o, const BossMonster *m)
             c[k] = (lo[k] + hi[k]) / 2;
             e[k] = (hi[k] - lo[k]) / 2;
         }
-        return collide_obj_box(&co, c, e, n, pt, push);
+        if (!collide_obj_box(&co, c, e, n, pt, push))
+            return 0;
+        push_dir(push, dir);
+        return 1;
     }
     return 0;
-}
-/* TakeDamage's direction: here from the monster to the part [G: the game's is a direction out of the sphere test,
- * 0x280470's third result (0x2E2598), made 1 long (0x2E2654; (1, 0, 0) when too short), not followed into the
- * shape's test] */
-static void away_from(const Obj *o, const BossMonster *m, float dir[3])
-{
-    sub3(dir, o->p.pos, m->pos);
-    norm3(dir);
 }
 
 /* each frame: a part without OnlyHitWithEffNodes takes TakeDamage(monster, 2, Collision) from a monster touching
@@ -3561,9 +3576,8 @@ static void contacts(Boss *b)
             continue;
         for (int m = 0; m < b->nm && o->p.alive; m++) {
             const BossMonster *mm = &b->m[m];
-            if (touches(o, mm)) {
-                float dir[3];
-                away_from(o, mm, dir);
+            float dir[3];
+            if (touches(o, mm, dir)) {
                 if (take_damage(b, o, m, 2, DT_COLLISION, dir) == DELETE_ME)
                     obj_remove(b, o);
             }
@@ -3847,12 +3861,11 @@ int boss_hit(Boss *b, int monster, const float centre[3], float radius, float am
     int n = 0;
     for (int i = 0; i < b->n; i++) {
         Obj *o = &b->o[i];
-        if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || !sphere_meets(o, centre, radius))
+        float dir[3];
+        if (!o->p.alive || o->pending || !can_take_damage(o->p.kind) || !sphere_meets(o, centre, radius, dir))
             continue;
         if ((o->oflags & OF_EFF_NODES) && !collide_hit_once(&o->hits, monster, record))
             continue;
-        float dir[3];
-        away_from(o, &b->m[monster], dir);
         n++;
         if (take_damage(b, o, monster, amount, DT_CONCUSSIVE, dir) == DELETE_ME)
             obj_remove(b, o);

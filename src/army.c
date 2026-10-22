@@ -1922,7 +1922,9 @@ static void unit_shape(const Army *a, ArmyUnit *u, CollideShape *s)   /* read on
 
 /* [R 0x2E22B0 -> 0x280470] a monster's sphere against the unit's shape at its matrix (collide_obj_sphere): the
  * monster's attacks and a droppable's touch alike */
-static int unit_meets(const Army *a, ArmyUnit *u, const float c[3], float radius)
+/* dir (may be NULL): TakeDamage's direction [R 0x2E2598 .. 0x2E267C]: the test's push (out of the unit, towards the
+ * monster's sphere) made 1 long, (1, 0, 0) under 0.001 */
+static int unit_meets(const Army *a, ArmyUnit *u, const float c[3], float radius, float dir[3])
 {
     CollideObj co;
     float n[3], pt[3], push[3];
@@ -1931,7 +1933,14 @@ static int unit_meets(const Army *a, ArmyUnit *u, const float c[3], float radius
     collide_matrix_from16(co.m, u->world);
     co.flags = COLLIDE_F_WORLD;
     co.building = -1;
-    return collide_obj_sphere(&co, c, radius, n, pt, push);
+    if (!collide_obj_sphere(&co, c, radius, n, pt, push))
+        return 0;
+    if (dir) {
+        float l2 = push[0] * push[0] + push[1] * push[1] + push[2] * push[2], l = sqrtf(l2);
+        for (int k = 0; k < 3; k++)
+            dir[k] = l2 < 1e-6f ? (k == 0) : push[k] / l;
+    }
+    return 1;
 }
 
 static void unit_take_impact(Army *a, ArmyUnit *u);
@@ -3854,7 +3863,7 @@ static int on_pulse(Army *a, ArmyUnit *u)
 static int touches(const Army *a, const ArmyMonster *m, ArmyUnit *u)
 {
     for (int s = 0; s < m->nspheres; s++)
-        if (unit_meets(a, u, m->spheres[s], m->spheres[s][3]))
+        if (unit_meets(a, u, m->spheres[s], m->spheres[s][3], NULL))
             return 1;
     const float *p = u->pos;
     if (m->nspheres == 0 && m->box_max[2] > m->box_min[2])
@@ -4242,13 +4251,11 @@ int army_hit(Army *a, int monster, const float centre[3], float radius, float am
     int n = 0;
     for (int i = 0; i < a->n; i++) {
         ArmyUnit *u = &a->u[i];
-        if (u->phase != AU_ALIVE || !unit_meets(a, u, centre, radius))
+        float dir[3];
+        if (u->phase != AU_ALIVE || !unit_meets(a, u, centre, radius, dir))
             continue;
         if (u->kind != AK_DROP && !collide_hit_once(&u->hits, monster, record))
             continue;
-        float dir[3] = { u->pos[0] - a->m[monster].pos[0], u->pos[1] - a->m[monster].pos[1],
-                         u->pos[2] - a->m[monster].pos[2] };
-        norm3(dir);
         n++;
         switch (u->kind) {
         case AK_TANK: tank_damage(a, u, monster, amount); break;

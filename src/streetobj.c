@@ -2352,9 +2352,9 @@ static int sphere_meets(const StreetObj *o, const float c[3], float radius, floa
     if (!collide_obj_sphere(&co, c, radius, n, pt, push))
         return 0;
     if (dir) {
-        float l = sqrtf(push[0] * push[0] + push[1] * push[1] + push[2] * push[2]);
-        for (int k = 0; k < 3; k++)
-            dir[k] = l < 1e-6f ? (k == 0) : push[k] / l;
+        float l2 = push[0] * push[0] + push[1] * push[1] + push[2] * push[2], l = sqrtf(l2);
+        for (int k = 0; k < 3; k++)                  /* (1, 0, 0) under 0.001 [R 0x2E2654: the length squared] */
+            dir[k] = l2 < 1e-6f ? (k == 0) : push[k] / l;
     }
     return 1;
 }
