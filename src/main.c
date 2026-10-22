@@ -2377,7 +2377,11 @@ static void clip_event(Mon *mo, const MoveEvent *e)
                 mo->dropping = 1;                    /* +0xAB5: the camera leaves it out until it lands */
                 for (int k = 0; mo->have_graph && k < mo->graph.n; k++)
                     if (!_stricmp(mo->graph.states[k].name, "Jump_Butt_Slam_fall")) {
-                        moves_force(&mo->run, k);
+                        /* [R 0x2D3CF0: 0x2D9710(monster, Jump_Butt_Slam_fall, 0, 0)] posted (+0x110) as setReaction
+                         * does and let go (0x2DA570): it starts at the next step, its clip blended in and its
+                         * time-0 events (mode 1, column 0) played */
+                        mo->force_to = k + 1;
+                        let_go(mo, 0);
                         break;
                     }
             }
