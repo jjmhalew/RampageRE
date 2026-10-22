@@ -455,7 +455,8 @@ static void spawn(Edibles *e, int s)
 
 /* [R] Cryotube.bsf onPickup(monster, eat): its PickupFx, addStats(type 0), then out of the building along a
  * LineMover: 5 towards the street at 20, then 5 more and down to z = 1; leaveBuilding; a pulse every 1/24 s tumbles
- * it (pitch + 2 pi / 24 each) */
+ * it: setFacing(fallPitch, 0, 0), then fallPitch + 2 pi / 24, so the first pulse faces it level and ends the turn
+ * the RotationMover left it at */
 static void tube_pickup(Edibles *e, Edible *d, int monster)
 {
     int me = (int)(d - e->ed);
@@ -486,8 +487,7 @@ static void tube_pickup(Edibles *e, Edible *d, int monster)
     d->slot = -1;
     d->phase = EP_FALLING;
     d->pulse = 1.0f / 24.0f;
-    d->pitch = 0;
-    d->spin = 0;
+    d->fall_pitch = 0;
     d->rotate = 0;                                   /* the LineMover replaces the RotationMover */
 }
 
@@ -680,7 +680,9 @@ void edible_update(Edibles *e, float dt)
             d->pulse -= dt;
             if (d->pulse <= 0) {
                 if (d->script == EK_CRYOTUBE && d->phase == EP_FALLING) {   /* onPulse: setFacing(fallPitch, 0, 0) */
-                    d->pitch += 2 * PI / 24.0f;
+                    d->pitch = d->fall_pitch;
+                    d->spin = 0;
+                    d->fall_pitch += 2 * PI / 24.0f;
                     d->pulse += 1.0f / 24.0f;
                 } else {                             /* Edible.bsf onPulse: requestDelete */
                     place_world(d);

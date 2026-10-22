@@ -79,7 +79,8 @@ typedef struct {
     const char *name;                                /* its kind's name */
     Group tmpl;                                      /* its template (grabBuildingOccupantAsType replaces it, +0x80) */
     int script, phase, slot;                         /* EK_*, EP_*, its slot (-1 once out of it) */
-    float pos[3], spin, pitch;                       /* place; the RotationMover's turn about z; the tube's tumble */
+    float pos[3], spin, pitch, fall_pitch;           /* place; the RotationMover's turn about z; the tube's tumble
+                                                      * (its facing) and Cryotube.bsf's fallPitch, the next one */
     float world[16];                                 /* column-major; always kept */
     const char *shape;                               /* ActorAnimShape|Default's ShapeName; NULL for InvisShape (draw
                                                       * nothing: the effect is the look) */
