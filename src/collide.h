@@ -85,7 +85,6 @@ typedef struct {
     CollideBuilding b[COLLIDE_MAX_BUILDINGS]; int nb;
     int row[2][COLLIDE_ROW_MAX], nrow[2];            /* +0x10 / +0x18: each row by its x (0x2A51B0) */
     float back_row;                                  /* BackRowOffset (0x4D502C): the back row's fronts' y */
-    int street_open;                                 /* [G] the street's y limits off (the block's end: main.c) */
 } CollideWorld;
 
 /* each frame: empty it; back_row is the block's BackRowOffset (10 when the block does not say; < 0: taken from the

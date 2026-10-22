@@ -77,6 +77,8 @@ struct Game {
     int human[GAME_PLAYERS];                         /* +0xAB4: it became human (a streaker) */
     int buildings;
     int boss_finished;                               /* the city script's bIsBossBlockFinished */
+    int ni_on;                                       /* +0x1A (0x4D6A9A): an NI runs, set as one starts (0x324340's
+                                                      * starts), cleared by the first tick without one (0x324870) [R] */
     int centre_down, ny_watch, ny_moved;             /* NewYork::BossResultsNI: the centre building, the watch */
     int left;                                        /* GE_EXIT given: the world is being left, nothing runs */
     int button, button_end;                          /* gWorld +0x1B (0x4D6A9B): a pad button (game_attract_button);
@@ -731,6 +733,8 @@ static void start_ni(Game *g, const char *key, int prev)   /* the entries' "NI" 
 {
     g->ni = resolve(g, key, prev, g->ni_name, sizeof g->ni_name);
     g->ni_fallback = levels_fn(key);
+    if (g->ni != FN_NONE)
+        g->ni_on = 1;
     g->ni_timer = 0;
     g->ni_freq = 0;
 }
@@ -1002,7 +1006,9 @@ static void step(Game *g)
     if (g->state != g->entered)
         adv = enter(g);
     g->entered = g->state;
-    if (g->ni != FN_NONE) {                          /* the NI function, every ni_freq seconds */
+    if (g->ni == FN_NONE)
+        g->ni_on = 0;
+    else {                                           /* the NI function, every ni_freq seconds */
         g->ni_timer -= g->dt;
         if (g->ni_timer <= 0) {
             float r = call_ni(g, g->ni, g->ni_fallback, g->ni_name, g->ni_freq);
@@ -1270,6 +1276,7 @@ void game_start_respawn(Game *g, int slot, const GameRespawnIn *in, GameRespawn 
 }
 
 int game_state(const Game *g) { return g ? g->state : GS_NONE; }
+int game_ni_on(const Game *g) { return g && g->ni_on; }
 int game_weapons_on(const Game *g) { return g ? g->weapons_on : 1; }
 int game_left(const Game *g) { return g ? g->left : 1; }
 int game_play_type(const Game *g) { return g ? g->cfg.play_type : GP_CAMPAIGN; }

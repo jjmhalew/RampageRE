@@ -98,8 +98,8 @@ functions asks for them].
 
 ## Monster against monster (0x2E35D0)
 
-Every frame, for each monster, before its object test 0x2E22B0 (all modes, table 0x4312B0), unless byte 0x4D6A9A is
-set [R]:
+Every frame, for each monster, before its object test 0x2E22B0 (all modes, table 0x4312B0), unless an NI runs
+(0x4D6A9A, FLOW_NOTES.md) [R]:
 - the victims: every other slot within 40 that is not the attacker's held / holder monster (+0xB9C0 / +0xB9C4), not
   hidden (+0x109), interruptible (+0xAA2) and not held;
 - the attacker's collision spheres on bones of an armed attack record (+0xBD60 + 0x1C × bone; the clip's attack event,

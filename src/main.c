@@ -2639,12 +2639,6 @@ static void world_build(Viewer *v)
 {
     CollideWorld *w = &v->cw;
     collide_begin(w, -1);
-    /* [G] the street's y limits (-10 .. 21, 0x2A3638) left out while the block ends: Levels.scr's ResultsNI puts the
-     * winners on the block left (13, -42) and EndBlockNI walks them from there to (0.7 x, -13.2), then the street
-     * (x, -5.2); with the limits they would stand at the new street's front and walk at it until the 5 s are up. The
-     * game's 0x2E2C50 reaches 0x2A35A0 in every mode but on a building, and how it lets them by is not found */
-    int gs = v->game ? game_state(v->game) : -1;
-    w->street_open = gs == GS_BLOCK_WON || gs == GS_END_BLOCK;
     for (uint32_t i = 0; i < v->scene.nbuildings; i++) {
         const Building *b = &v->scene.buildings[i].b;
         if (v->scene.left) {                         /* the block left: rubble, flat (scene_block_left) */
@@ -2777,6 +2771,10 @@ static void push_out(Mon *mo)
     Viewer *v = mo->v;
     if (mo->slot >= v->nmon)                         /* 0x2E2C6C: a slot (+0xFC) past the players' count (0x4D7E28),
                                                       * the revealed monster's: none of it, so it walks off the street */
+        return;
+    if (game_ni_on(v->game))                         /* [R 0x2E2C84] none while an NI runs: ResultsNI's winners
+                                                      * stand on the block left (13, -42) and EndBlockNI walks them
+                                                      * through its fronts and the street's limits */
         return;
     float s = mo->scale > 0 ? mo->scale : 1;
     int landed = mo->landed;                         /* the frame it landed: as it was in the air */
@@ -3068,7 +3066,8 @@ static void monsters_fight(Viewer *v)
     int nnow[MONSTERS];
     for (int a = 0; a < v->nmon; a++)
         nnow[a] = mon_shape_spheres(&v->mon[a], now[a]);
-    for (int a = 0; a < v->nmon; a++) {
+    int ni = game_ni_on(v->game);                    /* [R 0x2E3620] no blows while an NI runs (the places kept) */
+    for (int a = 0; a < v->nmon && !ni; a++) {
         Mon *at = &v->mon[a];
         if (!at->nsph || at->defeated)
             continue;
@@ -5640,6 +5639,7 @@ static void bot_views(Viewer *v, DirBuilding *db, DirMonster *dm, DirBotView *bv
         b->half_width = dm[k].radius;
         b->probe = ((mo->graph.probe[1]) + mo->ev16) * (mo->scale > 0 ? mo->scale : 1);
         b->self = k;
+        b->ni = game_ni_on(v->game);
         b->b = db;
         b->nb = nb;
         b->m = dm;
@@ -6099,6 +6099,7 @@ static void play_step(Viewer *v, float dt, float aspect)
         return;
     }
     v->play_now += dt;
+    foot_set_ni(game_ni_on(v->game));                /* the feet's 0x4D6A9A gates */
     world_build(v);                                  /* the collision world as the frame begins */
     scene_cloth_step(&v->scene, dt);                 /* the cloths' time, simulated at the next posing */
     fx_budget(v->fxw, v->nmon + (v->extra >= 0));    /* the effects budget, by the monsters in the world (0x2B72B0) */

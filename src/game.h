@@ -214,6 +214,10 @@ void game_start_respawn(Game *g, int slot, const GameRespawnIn *in, GameRespawn 
 
 /* ---- queries */
 int game_state(const Game *g);                       /* gWorld.getState() */
+/* an NI runs (0x4D6A9A, the world state's +0x1A): from an NI's start to the first tick without one. Meanwhile the
+ * monsters have no push-out (0x2E2C84), no blows on each other (0x2E3620), the bots' walk no avoiding (0x2EDC94)
+ * and the feet no plant, cancel or lock (0x33CCC0, 0x33CA10, 0x33BF10) [R] */
+int game_ni_on(const Game *g);
 /* the weapons' global switch, gp-0x772C [R]: 1 in the ELF's data, set entering states 3 and 5 (0x3243A8, 0x324494),
  * cleared entering 7 and 8 (the block won 0x324510, Game Over 0x324588); World bindings 59 / 60 (globalWeaponEnable
  * 0x2AF0C0, isGlobalWeaponEnabled 0x2AF0D8) are in no script. Off, no weapon fires: the beams' and the projectiles'

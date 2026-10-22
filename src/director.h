@@ -84,6 +84,7 @@ typedef struct {
     const DirBuilding *b; int nb;
     const DirMonster *m; int nm;
     int under;               /* the building under its body (0x2D6150), -1 none */
+    int ni;                  /* an NI runs (0x4D6A9A, game_ni_on): the walk takes the way as it is */
     void *ctx;
     int (*cell)(void *ctx, int b, int storey, int column);   /* a front cell's damage state 0 .. 3, -1 none */
     int (*can_mount)(void *ctx, int side, int *building);     /* canMount(side, 0) (FACE_* sides), its candidate */

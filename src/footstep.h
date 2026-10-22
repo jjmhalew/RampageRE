@@ -111,6 +111,8 @@ void foot_step(FootState *s, int foot, int mirrored);
 /* Monsters::footPlant(foot) (0x33CCC0): only while the monster does not move (|vel|^2 < 1e-6), the footfall at the
  * foot's (x, y) on the ground it stands on, or on the water's surface (WaterFootStepFx). The foot's record is not
  * touched. 1 = *fx is to be started. */
+/* 0x4D6A9A, an NI runs (game_ni_on): footPlant, cancelFootStep and the lock do nothing meanwhile [R] */
+void foot_set_ni(int on);
 int foot_plant(FootState *s, const FootProps *p, int foot, const FootPose *m, FootFx *fx);
 /* Monsters::cancelFootStep(foot) (0x33CA10): the clip's start in a standing state (every such clip sends it for 0
  * and 1; only foot 0 does anything). Coming from a state that travels (the state left, s->node_flags, has 0x50 or

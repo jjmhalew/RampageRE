@@ -594,6 +594,12 @@ static void bot_walk(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirBotV
         bot_action(r, ag, DA_JUMP, 0, call, ctx);
         return;
     }
+    if (mode == 0 && v->ni) {                        /* [R 0x2EDC94] while an NI runs: straight at it, a walk */
+        ai->stick[0] = st[0];
+        ai->stick[1] = st[1];
+        ai_pick(r, ag, DA_WALK, -1, call, ctx);
+        return;
+    }
     if (bld >= 0) {
         /* [R 0x2ED990, IsBuilding] the ray from the bot along the flat way to the point, without end: when the first
          * building it meets is not bld, out into the street, or along it when it is that far out already, and a walk

@@ -86,7 +86,7 @@ the drawing, that is `scene_monster_node("Bip01 L Foot")` unmirrored and `"Bip01
 The foot lifts: record +0x24 &= ~3, +0x0 = 0. Nothing else: no effect, the anchor stays.
 
 ### footPlant (0x33CCC0) [R]
-1. Nothing while the debug byte 0x4D6A9A is set (only ever read: 0x2E2C84, 0x2E3620, 0x2EDC94, here, 0x33CA38).
+1. Nothing while an NI runs: 0x4D6A9A, the world state's +0x1A (FLOW_NOTES.md; footstep.c `foot_set_ni`).
 2. Nothing unless the monster is still: |getVelocity|² < 1e−6 (0x2E7460: the velocity +0xBD30 plus the stick's own
    +0xA68). So a monster walking on its root motion (Ground_Walk, flags 0x288, has no stick speed) steps; one
    sliding from a knock, flying, or carried along by the stick does not.

@@ -129,7 +129,10 @@ static int still(const FootPose *m)
     return m->vel[0] * m->vel[0] + m->vel[1] * m->vel[1] + m->vel[2] * m->vel[2] < STILL;
 }
 
-/* [R] 0x33CCC0: unless the debug byte 0x4D6A9A (never set here) and only while |getVelocity|^2 < 1e-6: the foot's
+static int ni_on;                                    /* 0x4D6A9A: the world state's +0x1A, an NI runs */
+void foot_set_ni(int on) { ni_on = on != 0; }
+
+/* [R] 0x33CCC0: unless an NI runs (0x4D6A9A) and only while |getVelocity|^2 < 1e-6: the foot's
  * place (0x2E5C40: its node's model-space place x the dynamic scale +0xA78, through the monster's matrix), z = the
  * monster's ground (0x2E8530, cached per frame at +0xA48), then 0x2DC350 (record 1) or 0x2DC3D0 (record 0): with a
  * water (0x2D5F00) the place becomes (x, y, the water's +0x34) and the water flag is passed; 0x2F4A20 / 0x2F4B70
@@ -140,7 +143,7 @@ static int still(const FootPose *m)
 int foot_plant(FootState *s, const FootProps *p, int foot, const FootPose *m, FootFx *fx)
 {
     (void)s;                                         /* [R] the records are not touched */
-    if (!still(m))
+    if (ni_on || !still(m))
         return 0;
     int r = rec_index(foot, m->mirrored);
     const char *name = m->in_water ? p->water_step : p->ground_step;
@@ -163,7 +166,7 @@ void foot_command(FootState *s, uint32_t leaving_flags)
     s->node_flags = leaving_flags;
 }
 
-/* [R] 0x33CA10: only for foot 0 (the argument as given), unless the debug byte; the foot object's state node
+/* [R] 0x33CA10: only for foot 0 (the argument as given), unless an NI runs; the foot object's state node
  * (+0x74, the state left: 0x33CCA0) must exist and have flags 0x50 or 0x1080, and the monster be still.
  * s2 = record 0 (1 mirrored), s1 the other; both feet's places (0x2E5C40) into the monster's frame (minus +0x2C, then
  * 0x101190: the dots with its axes); if s2's y < s1's, they swap: s2 is the foot further forward. s2: weight 1,
@@ -172,7 +175,7 @@ void foot_command(FootState *s, uint32_t leaving_flags)
 static void drag_setup(FootState *s, int r, const FootPose *m);
 int foot_cancel(FootState *s, int foot, const FootPose *m)
 {
-    if (foot != 0 || !(s->node_flags & NODE_FOOT_LOCK) || !still(m))
+    if (ni_on || foot != 0 || !(s->node_flags & NODE_FOOT_LOCK) || !still(m))
         return -1;
     int a = m->mirrored ? 1 : 0, b = a ^ 1;
     float ya = 0, yb = 0;
@@ -250,8 +253,8 @@ static void drag_setup(FootState *s, int r, const FootPose *m)
     s->rec[r].lift = lift * s->drag_scale;
 }
 
-/* [R] 0x33BF10 (a1 the matrix the frame's move made, a2 the matrix out; 1 = take it): nothing under the debug byte
- * 0x4D6A9A; with an anchor (+0x6C): first a footfall at its record's place when the +0x68 byte is set (never: no
+/* [R] 0x33BF10 (a1 the matrix the frame's move made, a2 the matrix out; 1 = take it): nothing while an NI runs
+ * (0x4D6A9A); with an anchor (+0x6C): first a footfall at its record's place when the +0x68 byte is set (never: no
  * code sets it, FOOTSTEP_NOTES.md); the anchor let go (-1) when the state now (monster +0x10C) travels (0x50 or
  * 0x1080: 0x33BFE8 .. 0x33C000 go to the drop at 0x33C018) or its record is no longer planted (footStep); else the
  * anchor's foot as the clip alone poses it at its time 0 (0x33C290 mirrored, else the clip's query 0x196D20; f12 = 0
@@ -261,7 +264,7 @@ static void drag_setup(FootState *s, int r, const FootPose *m)
 int foot_lock(FootState *s, uint32_t node_flags, const float foot[2][3], float place[3], float heading, float steps)
 {
     int a = s->anchor;
-    if (a < 0 || a > 1)
+    if (ni_on || a < 0 || a > 1)
         return 0;
     if ((node_flags & NODE_FOOT_LOCK) || !(s->rec[a].flags & FOOT_PLANTED)) {
         s->anchor = -1;

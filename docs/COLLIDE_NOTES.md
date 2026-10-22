@@ -183,8 +183,11 @@ a thrown object rests r above the street [R].
 
 ## Settled since, and what is left
 - The gate at the top of 0x2E2C50 [R 0x2E2C6C .. 0x2E2C88]: it returns at once when the monster's +0xFC (its slot)
-  is not below 0x4D7E28 (the players' count: the revealed monster's slot, main.c `push_out`) or the debug byte
-  0x4D6A9A is set, which nothing writes (FLOW_NOTES.md; read only at 0x2E2C84, 0x2E3620, 0x2EDC94, 0x33CA38). The
+  is not below 0x4D7E28 (the players' count: the revealed monster's slot, main.c `push_out`) or the byte 0x4D6A9A
+  is set: the world state's +0x1A (0x4D6A80), "an NI runs", written through the state's pointer, so no absolute
+  address finds the writes (0x324340 sets it at each NI's start, 0x324870 clears it on the first tick without one;
+  game.c `game_ni_on`). So no push-out at all while BeginLevelNI, ResultsNI, EndBlockNI and the others run: the
+  winners stand on the block left and walk through its fronts and the street's limits. The
   fields it reads: +0x108 setIsAI (0x2E35C0), +0xB9C0 (`Monster.isClimbing` tests it ≠ 0, BOSS_NOTES.md; the held
   monster's slot word, MULTIPLAYER_NOTES.md), +0x258C the foot IK (FOOTSTEP_NOTES.md), +0xBAA0 the kept type-16 move
   record (its +0xC / +0x10, main.c `Mon.ev16x` / `ev16`) [R].

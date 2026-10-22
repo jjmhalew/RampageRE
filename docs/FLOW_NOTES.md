@@ -211,7 +211,9 @@ it and are pulled onto it, so the fires sit about 8 from the centre, at z ≈ �
   object's facing, the same for an upright object (every script passes 0). The script camera's callback
   (`setCallback`), `setFovTarg`, `enableInertia`, `setPosParms` … are not bound (no script calls them).
 - The walk (WalkToGoal 0x2F1F20) calls 0x2EDB40 with mode 0 and no avoidance: the stick along the flat direction,
-  action 9 [R]; only the bots' callers avoid other monsters. 0x4D6A9A is a debug byte nothing writes [R].
+  action 9 [R]; only the bots' callers avoid other monsters, and not while an NI runs (0x4D6A9A, the world state's
+  +0x1A: set at each NI's start in 0x324340, cleared on the first tick without one at 0x324870; game.c
+  `game_ni_on`) [R].
 - A play-move goal whose state is unknown ends at once here, a stand-in for the game's undefined behaviour. In the
   game [R]: the init (0x2F1EE0) stores +0x20 = 0x2D9890(name) = NULL; the update (0x2F1DB0) finds it not begun and
   calls 0x2F2B90(pad, NULL), which answers 0 at once (0x2F2BBC), so the force 0x2D9710(monster, NULL, 1, 0) and
