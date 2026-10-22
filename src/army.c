@@ -2093,7 +2093,8 @@ static int unit_new(Army *a, const char *name, Group tmpl, Group inst)
     u->friend_of = -1;
     u->person = -1;
     u->cobj = -1;
-    u->pulse_delay = 0.25f;
+    u->pulse_delay = -1;                             /* [R 0x30A440] the ScriptObject's: +0x11C = -1, no pulses till a
+                                                      * script sets one (the clock +0x118 at 0) */
     /* [R 0x315330 through the vtable's init 0x304FA0, before onInit] the wobble's keys, the instance book the
      * AIInstance; the Actors (0x44B300) have none [R: 0x314EF0 is in the AttackObject's vtable alone, the Actor's
      * +0x10 is 0x30CD20], and none of their templates has the keys */
@@ -2546,8 +2547,7 @@ static void truck_init(Army *a, ArmyUnit *u)         /* Construct + onInit */
     line_init(u, u->pos, end, 20);
     u->mv.resp2 = unum(u, "MonsterResponseDist", -1);
     u->mv.resp2 *= u->mv.resp2;
-    u->state = 2;
-    u->pulse_delay = 1;
+    u->state = 2;                                    /* no setPulseDelay: none till it stops (0.25) */
 }
 
 static void truck_damaged_shape(Army *a, ArmyUnit *u)   /* applyDamagedShape */
@@ -3913,8 +3913,9 @@ static void unit_update(Army *a, int i, float dt)
             }
         }
     }
-    /* the pulse (setPulseDelay; 0: every frame) */
-    if (r != DELETE_ME) {
+    /* the pulse (setPulseDelay) [R 0x309BA0]: its clock runs only with a delay of 0.01 or more, so 0 (or the -1 it
+     * starts with) is none */
+    if (r != DELETE_ME && u->pulse_delay >= 0.01f) {
         u->pulse_time += dt;
         if (u->pulse_time >= u->pulse_delay) {
             u->pulse_time = u->pulse_delay > 0 ? fmodf(u->pulse_time, u->pulse_delay) : 0;
