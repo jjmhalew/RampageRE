@@ -2722,8 +2722,8 @@ static void impact_route(Viewer *v, int tag, int kind, const float at[3], float 
  * not in mode 3 or 5, is pushed off every other player's monster it overlaps (not one hidden, +0x109, nor one it
  * holds or is held by: none here): each is a cylinder about its reference point (0x2DA900: its place + (+0x190 +
  * the type-15 record's +0xC, +0x194 + its +0x10) x its scale along its x and y axes), MONSTER_DATA +0x188 + the
- * record's +0x8 x its scale across, from its feet 2 x +0x18C up (in mode 1 or 2 about +0xB20 x its scale instead
- * [G: +0xB20 not traced: the feet's cylinder kept]); overlapping in z and nearer in x, y than the two radii, it is
+ * record's +0x8 x its scale across, from its feet 2 x +0x18C up (in mode 1 or 2 +-+0x18C about +0xB20 x its scale,
+ * node 0's z in the animation player's pose, +0xAF4 + 0x30 node + 0x24: Bip01, mon_cyl); overlapping in z and nearer in x, y than the two radii, it is
  * moved away along their x, y by half of what they overlap, that overlap at most 50 x the frame's time (straight
  * along a default way when they are within 0.001), and with foot IK both its feet let go (0x33BE90) */
 static void push_apart(Mon *mo, float dt)
@@ -2745,7 +2745,7 @@ static void push_apart(Mon *mo, float dt)
         if (l2 >= r * r)
             continue;
         float l = sqrtf(l2);
-        if (l <= 0.001f) {                           /* the default way (0x40A008) [G: its value not read] */
+        if (l <= 0.001f) {                           /* the default way (0x40A008: (1, 0, 0)) [R] */
             d[0] = 1;
             d[1] = 0;
         } else {
@@ -2925,6 +2925,11 @@ static void mon_cyl(const Mon *mo, float c[3], float *r, float *h)
     c[2] = mo->mz;
     *r = (mo->graph.bot_r + mo->ev15r) * s;
     *h = mo->graph.bot_h * s;
+    const Instance *in = mon_in(mo);
+    if ((mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF) && in && in->node && in->tree.n)
+        /* [R 0x2E4870 .. 0x2E48C0] in the air its middle is node 0's (Bip01's) height in its pose (+0xB20), x the
+         * scale: the cylinder that height +- +0x18C [G: the pose as last drawn, the game's this frame's clip's] */
+        c[2] = mo->mz + (in->node[0].m[14] - mo->graph.bot_h) * s;
 }
 
 static void mon_shape(const Mon *mo, float c[3], float *r)
