@@ -1744,7 +1744,7 @@ static void walk_in(People *p, Person *q)
         float vel = q->inst.at ? group_num(q->inst, "Velocity", tnum(q, "Velocity", 6)) : tnum(q, "Velocity", 6);
         mover_init(q, start, end, vel);
         q->mv.flags = (q->mv.flags | 1 | 4) & ~8u;
-        start_anim(p, q, "Running", 1, 0);
+        start_anim(p, q, "Running", 1, 1);           /* startAnimAtRandomOffset("Running", 1): the mover kept */
         q->state = 0;
         break;
     }
