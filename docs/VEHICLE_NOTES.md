@@ -273,5 +273,6 @@ reports every award with its template name, so the viewer can count challenge go
    - every armed attack sphere also calls `vehicle_hit`;
    - the grab tries `vehicle_nearest_pickup` and then `vehicle_grab`; `vehicle_hold` each frame with the hand's
      matrix; `throwObject` calls `vehicle_throw`;
-   - `Monsters::grabBoulder`: `vehicle_spawn("Boulder", monster + 6.5 up)` and then the grab.
+   - `Monsters::grabBoulder`: `vehicle_spawn("Boulder", monster + 6.5 up)` every time, then doGrabObject's search
+     (main.c `grab_nearest`), which takes the nearest object in front, the new boulder or something nearer.
 4. **Buildings:** a building that falls calls `vehicle_building_gone`.

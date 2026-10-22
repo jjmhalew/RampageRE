@@ -2117,6 +2117,47 @@ static void foot_pose(Mon *mo, FootPose *m)
     }
 }
 
+/* doGrabObject("Helper R Hand") (0x2D99C0): the nearest object to pick up within 15 of the hand, in front */
+static void grab_nearest(Mon *mo)
+{
+    Viewer *v = mo->v;
+    Mat4 h;
+    if (mo->held >= 0 || !v->scene.folk || attach_world(mo, "Helper R Hand", &h) != 0)
+        return;
+    float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { mo->mx, mo->my, mo->mz };
+    Mat4 n0;                                     /* in front of node 0 (Bip01) as posed, by the node getter that
+                                                  * gives the hand (vtable +0x4C(0): 0x2D9AF8 .. 0x2D9B30) [R] */
+    const Instance *rin = mon_in(mo);
+    if (rin && rin->tree.n && scene_monster_node(&v->scene, mo->slot, rin->tree.nodes[0].name, &n0) == 0) {
+        root[0] = n0.m[12]; root[1] = n0.m[13]; root[2] = n0.m[14];
+    }
+    float fwd[3] = { -sinf(mo->heading / 57.2957795f), cosf(mo->heading / 57.2957795f), 0 };
+    /* [R] one query of the object manager (0x4D0900's +0x20: within the reach, flags 0x20840, at most 64) and
+     * the nearest of them to the hand, of whatever kind: a cop beside a tourist is taken when he is nearer */
+    float r = 15;                                /* each kind asked within the nearest so far */
+    int kind = -1, who = -1, k;
+    if ((k = people_nearest(v->scene.folk, hand, root, fwd, r)) >= 0)
+        kind = 0, who = k, r = dist_to(people_get(v->scene.folk, k)->world + 12, hand);
+    if (v->army && (k = army_nearest_pickup(v->army, hand, root, fwd, r)) >= 0)
+        kind = 1, who = k, r = dist_to(army_unit(v->army, k)->pos, hand);
+    if (v->parade && mo->held_parade < 0 && (k = parade_nearest_pickup(v->parade, hand, root, fwd, r)) >= 0)
+        kind = 2, who = k, r = dist_to(parade_obj(v->parade, k)->world + 12, hand);
+    if (v->veh && mo->held_vehicle < 0 && (k = vehicle_nearest_pickup(v->veh, hand, root, fwd, r)) >= 0)
+        kind = 3, who = k, r = dist_to(vehicle_obj(v->veh, k)->pos, hand);
+    if (v->rail && mo->held_rail < 0 && (k = rail_nearest_pickup(v->rail, hand, root, fwd, r)) >= 0)
+        kind = 4, who = k, r = dist_to(rail_obj(v->rail, k)->pos, hand);
+    if (v->sobj && mo->held_sobj < 0 && (k = streetobj_nearest_pickup(v->sobj, hand, root, fwd, r)) >= 0)
+        kind = 5, who = k, r = dist_to(streetobj_get(v->sobj, k)->world + 12, hand);
+    switch (kind) {
+    case 0: people_grab(v->scene.folk, who, 0.1f); mo->held = who; break;
+    case 1: army_grab(v->army, who, mo->slot, 0.1f); mo->held_unit = who; break;
+    case 2: parade_grab(v->parade, who, mo->slot, 0.1f); mo->held_parade = who; break;
+    case 3: vehicle_grab(v->veh, who, mo->slot, 0.1f); mo->held_vehicle = who; break;
+    case 4: rail_grab(v->rail, who, mo->slot, 0.1f); mo->held_rail = who; break;
+    case 5: streetobj_grab(v->sobj, who, 0.1f); mo->held_sobj = who; break;   /* a parked car */
+    }
+}
+
 static void clip_event(Mon *mo, const MoveEvent *e)
 {
     Viewer *v = mo->v;
@@ -2377,52 +2418,15 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         }
         return;
     }
-    else if (!strcmp(n, "Monsters::doGrabObject")) { /* (0x2D99C0): the nearest within 15 of the hand, in front */
-        Mat4 h;
-        if (mo->held >= 0 || !v->scene.folk || attach_world(mo, "Helper R Hand", &h) != 0)
-            return;
-        float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { mo->mx, mo->my, mo->mz };
-        Mat4 n0;                                     /* in front of node 0 (Bip01) as posed, by the node getter that
-                                                      * gives the hand (vtable +0x4C(0): 0x2D9AF8 .. 0x2D9B30) [R] */
-        const Instance *rin = mon_in(mo);
-        if (rin && rin->tree.n && scene_monster_node(&v->scene, mo->slot, rin->tree.nodes[0].name, &n0) == 0) {
-            root[0] = n0.m[12]; root[1] = n0.m[13]; root[2] = n0.m[14];
-        }
-        float fwd[3] = { -sinf(mo->heading / 57.2957795f), cosf(mo->heading / 57.2957795f), 0 };
-        /* [R] one query of the object manager (0x4D0900's +0x20: within the reach, flags 0x20840, at most 64) and
-         * the nearest of them to the hand, of whatever kind: a cop beside a tourist is taken when he is nearer */
-        float r = 15;                                /* each kind asked within the nearest so far */
-        int kind = -1, who = -1, k;
-        if ((k = people_nearest(v->scene.folk, hand, root, fwd, r)) >= 0)
-            kind = 0, who = k, r = dist_to(people_get(v->scene.folk, k)->world + 12, hand);
-        if (v->army && (k = army_nearest_pickup(v->army, hand, root, fwd, r)) >= 0)
-            kind = 1, who = k, r = dist_to(army_unit(v->army, k)->pos, hand);
-        if (v->parade && mo->held_parade < 0 && (k = parade_nearest_pickup(v->parade, hand, root, fwd, r)) >= 0)
-            kind = 2, who = k, r = dist_to(parade_obj(v->parade, k)->world + 12, hand);
-        if (v->veh && mo->held_vehicle < 0 && (k = vehicle_nearest_pickup(v->veh, hand, root, fwd, r)) >= 0)
-            kind = 3, who = k, r = dist_to(vehicle_obj(v->veh, k)->pos, hand);
-        if (v->rail && mo->held_rail < 0 && (k = rail_nearest_pickup(v->rail, hand, root, fwd, r)) >= 0)
-            kind = 4, who = k, r = dist_to(rail_obj(v->rail, k)->pos, hand);
-        if (v->sobj && mo->held_sobj < 0 && (k = streetobj_nearest_pickup(v->sobj, hand, root, fwd, r)) >= 0)
-            kind = 5, who = k, r = dist_to(streetobj_get(v->sobj, k)->world + 12, hand);
-        switch (kind) {
-        case 0: people_grab(v->scene.folk, who, 0.1f); mo->held = who; break;
-        case 1: army_grab(v->army, who, mo->slot, 0.1f); mo->held_unit = who; break;
-        case 2: parade_grab(v->parade, who, mo->slot, 0.1f); mo->held_parade = who; break;
-        case 3: vehicle_grab(v->veh, who, mo->slot, 0.1f); mo->held_vehicle = who; break;
-        case 4: rail_grab(v->rail, who, mo->slot, 0.1f); mo->held_rail = who; break;
-        case 5: streetobj_grab(v->sobj, who, 0.1f); mo->held_sobj = who; break;   /* a parked car */
-        }
+    else if (!strcmp(n, "Monsters::doGrabObject")) {
+        grab_nearest(mo);
         return;
     }
-    else if (!strcmp(n, "Monsters::grabBoulder")) {  /* Monsters.bsf: a Boulder torn out of the street, 6.5 up */
+    else if (!strcmp(n, "Monsters::grabBoulder")) {  /* Monsters.bsf: createScriptObject("Boulder") 6.5 above the
+                                                      * monster, every time, then doGrabObject's search [R] */
         float at[3] = { mo->mx, mo->my, mo->mz + 6.5f };
-        int who = v->veh && mo->held < 0 && mo->held_unit < 0 && mo->held_vehicle < 0 ?
-                  vehicle_spawn(v->veh, "Boulder", at, 0, -1) : -1;
-        if (who >= 0) {
-            vehicle_grab(v->veh, who, mo->slot, 0.1f);
-            mo->held_vehicle = who;
-        }
+        if (v->veh && vehicle_spawn(v->veh, "Boulder", at, 0, -1) >= 0)
+            grab_nearest(mo);
         return;
     }
     else if (!strcmp(n, "Monsters::throwObject")) {  /* (eat, x, y, z) (0x2D9DC0): eaten, or smashed away */
@@ -6619,7 +6623,7 @@ static void game_next_block(Viewer *v)
 /* --do: "right 1, cross 0.5, wait 1.5": the stick held one way or a button held down, for that many seconds of play
  * (no seconds: one frame, a tap); "collapse" destroys the building in front of the monster (or under it), as collapseBuilding does;
  * "mirror" flips the mirror state for the next clip; "at x y [heading]" puts the monster there, facing the buildings (or that way);
- * "square+up 0.3": a button pressed with the stick held that way (a throw up, down);
+ * "square+up 0.3": a button pressed with the stick held that way (a throw up, down); "square+triangle" two pressed together;
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "rage" fills its energy (the rage starts);
  * "airstrike" starts the time-up airstrike;
  * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col [amount]" hits that front cell of
@@ -6884,21 +6888,25 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
             }
             continue;
         }
-        char *plus = strchr(word, '+');              /* button+direction: the stick held with it */
+        char *plus = strchr(word, '+');              /* button+direction: the stick held with it; button+button:
+                                                      * both pressed together (square+triangle) */
         float sx = 0, sy = 0;
+        int also = -1;
         if (plus) {
             *plus = 0;
             for (size_t i = 0; i < sizeof WORDS / sizeof *WORDS; i++)
                 if (WORDS[i].button == -1 && _stricmp(plus + 1, WORDS[i].name) == 0) {
                     sx = WORDS[i].x;
                     sy = WORDS[i].y;
-                }
+                } else if (WORDS[i].button >= 0 && _stricmp(plus + 1, WORDS[i].name) == 0)
+                    also = WORDS[i].button;
         }
         for (size_t i = 0; n && i < sizeof WORDS / sizeof *WORDS; i++) {
             if (_stricmp(word, WORDS[i].name) != 0)
                 continue;
             uint8_t pressed[MV_COUNT] = { 0 }, held[MV_COUNT] = { 0 };
             if (WORDS[i].button >= 0) pressed[WORDS[i].button] = 1;
+            if (also >= 0) pressed[also] = 1;
             int frames = (int)(seconds * 60 + 0.5f);
             if (frames < 1) frames = 1;
             if (WORDS[i].button >= 0)                /* a button: the demo's end */
@@ -6928,6 +6936,8 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
                 }
                 if (WORDS[i].button >= 0)
                     held[WORDS[i].button] = 1;
+                if (also >= 0)
+                    held[also] = 1;
                 memset(pressed, 0, sizeof pressed);
                 game_next_block(v);                  /* the game moved on, as the main loop does */
             }
