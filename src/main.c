@@ -6432,7 +6432,9 @@ static void power_from_profile(Mon *mo)
     int pm = mo->monster >= 0 ? profile_find_monster(&v->prof, v->monsters[mo->monster]) : -1;
     if (pm < 0)
         return;                                      /* not in the roster: edible.c's all four */
-    mo->power.abilities = profile_moves(&v->prof, 0, pm);
+    mo->power.abilities = profile_moves(&v->prof, mo->slot, pm);   /* [R Monsters.scr canSpin, hasRoarEnergy:
+                                                      * getMonsterFlags(monster.getSlot(), ..): a player's own flags
+                                                      * when it has them (player_flags), else the profile's */
     mo->power.cheats = profile_cheat_flags(&v->prof);
     v->upgrades[mo->monster & 63] = profile_monster_flags(&v->prof, 0, pm) & 0xF;
 }
