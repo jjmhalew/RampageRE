@@ -859,6 +859,7 @@ static int on_mover(People *p, Person *q, int st)
     case PK_MIME:
         if (st == 2 && (q->state == 4 || q->state == 5)) {
             q->state = 1;
+            (void)frand(p);                          /* [R Mime.scr] float rand = gWorld.frand(), unused */
             q->cur_anim = 1 + (int)(frand(p) * 7.995f);
             q->reps = 0;
             mime_anim(p, q, 1);
@@ -1200,6 +1201,7 @@ static void construct(People *p, Person *q)
         q->state = 4;
         memcpy(q->end_loc, q->pos, sizeof q->end_loc);
         q->stationary = (int)tnum(q, "Stationary", 1);
+        (void)frand(p);                              /* [R Mime.scr Construct] float rand = gWorld.frand(), unused */
         q->cur_anim = 8;
         q->reps = 0;
         mime_anim(p, q, 1);
