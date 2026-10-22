@@ -185,7 +185,7 @@ typedef struct {
     int flags;               /* +0x20 the old mode's blend flags (1: its place stays live) */
     CamView snap;            /* +0x24 the camera when the blend began */
     CamView out;             /* +0x70 the result (before the shake munger) */
-    float rage_time;         /* Monsters::restoreCam's timer, 0 none */
+    float rage_time[8]; int nrage;   /* Monsters::restoreCam's timers, one installed by each startRage */
     CamView follow;          /* the Follow mode (FollowPlayerCamMode 0x4D5D10): the camera shown when it began */
     float follow_off[3];     /* +0x40: that camera's place less player 1's monster's then (0 without one) */
     float p1[3]; int have_p1;   /* player 1's monster (gWorld +0x40) as the last frame gave it */

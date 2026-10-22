@@ -1555,7 +1555,8 @@ void dircam_rage(CamDirector *d, int obj)            /* Monsters::startRage [R M
     dircam_script_target(d, obj, 0, TARGET);
     dircam_script_location(d, obj, 0, LOCATION, 0);
     dircam_script_cut(d);
-    d->rage_time = 1.5f;                             /* installTimer("Monsters::restoreCam", 1.5) */
+    if (d->nrage < 8)                                /* installTimer("Monsters::restoreCam", 1.5): one a rage, so a */
+        d->rage_time[d->nrage++] = 1.5f;             /* rage soon after another loses its shot to the first's */
 }
 
 static void mode_view(CamDirector *d, int m, const DirObject *o, int n, float dt, CamView *v)   /* the mode's +0x14 */
@@ -1587,10 +1588,11 @@ static void mode_view(CamDirector *d, int m, const DirObject *o, int n, float dt
  * began, the place a lerp from the old mode's live place (flag 1), the fov a lerp, by the share of the blend left [R] */
 void dircam_update(CamDirector *d, float dt, const DirObject *objs, int nobjs, CamView *out)
 {
-    if (d->rage_time > 0 && (d->rage_time -= dt) <= 0) {   /* Monsters::restoreCam */
-        d->rage_time = 0;
-        dircam_set_prev_mode(d, 0.5f);
-    }
+    for (int i = 0; i < d->nrage; i++)               /* Monsters::restoreCam */
+        if ((d->rage_time[i] -= dt) <= 0) {
+            d->rage_time[i--] = d->rage_time[--d->nrage];
+            dircam_set_prev_mode(d, 0.5f);
+        }
     if (nobjs > 0) {
         memcpy(d->p1, objs[0].pos, sizeof d->p1);
         d->have_p1 = 1;
