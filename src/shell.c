@@ -1966,6 +1966,7 @@ typedef struct {
     Node *video, *still, *press;
     float still_time, elapsed;
     int cheat_video, state, delay;
+    float tick;                                          /* ShortDelay's script frames (TICK) not yet counted */
     int movie_on;                                        /* a movie "plays" (Video.status 1 or 2) */
     float movie_left;
 } Attract;
@@ -2007,6 +2008,7 @@ typedef struct {
     Node *globe, *rings[SHELL_CITIES];                   /* guiGlobe, cityRings (fx_<city>) */
     int initialized, index, left, locked, night, jumped, stats_visible, flash_city, cheat_block, ring_on;
     float flash, look[3], target[3], dir[3];             /* lookAt, lookAtTarget, moveDir (radians) */
+    float tick;                                          /* the globe's script frames (TICK) not yet turned */
     char msg_key[48];
     Faders fd;
 } CitySel;
@@ -3283,10 +3285,14 @@ static int am_state(Shell *s, int st, int ev)
     case AS_SHORT_DELAY:
         if (ev == EV_GAIN) {
             a->delay = 0;
+            a->tick = 0;
             if (a->video) col_set(a->video->col, 0, 0, 0, 1);
         } else if (ev == EV_FRAME) {
-            if (++a->delay > 115)                        /* 115 frames */
-                am_next(s);
+            for (; a->tick >= TICK; a->tick -= TICK)     /* 115 script frames, whatever the display's rate */
+                if (++a->delay > 115) {
+                    am_next(s);
+                    break;
+                }
         }
         break;
     case AS_MIDWAY: am_video(s, ev, "midway"); break;
@@ -3400,6 +3406,7 @@ static void am_event(Shell *s, int ev, int pad, float dt)
         am_send(s, EV_START);
     else if (ev == EV_FRAME) {
         a->elapsed += dt;
+        a->tick += dt;
         if (a->movie_on)
             s->movie_clock += dt;
         if (a->movie_on && (a->movie_left -= dt) <= 0)
@@ -4966,8 +4973,20 @@ static void cs_day_night_globe(Shell *s)               /* updateDayNightGlobe: t
 }
 
 /* updateGlobe(dt): lookAt goes 0.05 (radians) a frame along moveDir while that brings it nearer to the city's; within
- * 0.5 of it, the city's ring starts */
+ * 0.5 of it, the city's ring starts. A script frame is TICK: one step per TICK of dt (dt 0: the one step of the
+ * setup's call) */
+static void cs_globe_step(Shell *s, float dt);
 static void cs_globe(Shell *s, float dt)
+{
+    CitySel *c = &s->cs;
+    if (dt == 0.0f) {
+        cs_globe_step(s, 0);
+        return;
+    }
+    for (c->tick += dt; c->tick >= TICK; c->tick -= TICK)
+        cs_globe_step(s, TICK);
+}
+static void cs_globe_step(Shell *s, float dt)
 {
     CitySel *c = &s->cs;
     float d[3], len = 0;
