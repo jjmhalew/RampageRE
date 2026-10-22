@@ -844,8 +844,11 @@ static int on_mover(People *p, Person *q, int st)
     case PK_WINDOW:
         return window_mover(p, q, st);
     case PK_RUNNER:
-        if (st == 2)                                 /* it sets up another run across, then asks to be deleted */
+        if (st == 2) {                               /* it sets up another run across (dir = -1 + 2 (frand > 0.5)),
+                                                      * then asks to be deleted: only the draw is left of it [R] */
+            (void)frand(p);
             return DELETE_ME;
+        }
         if (st == 3 && strcmp(q->anim, "RunOut") == 0) {
             q->heading = q->pos[1] < -3.0f ? -90.0f : 90.0f;
         } else if (st == 3 && strcmp(q->anim, "StreakOut") == 0) {   /* out on the street: scurry off */
