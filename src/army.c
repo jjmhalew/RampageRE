@@ -2952,8 +2952,7 @@ static void troop_smash(Army *a, ArmyUnit *u, int monster)
     smash_object(a, u, monster >= 0 ? a->m[monster].heading : 0);
     sound_kept(a, u, ustr(u, "FlyingSound"));
     u->state = 512;
-    u->pulse_delay = 3;
-    u->pulse_time = 0;
+    u->pulse_delay = 3;                              /* [R] setPulseDelay only: its pulse's clock runs on */
 }
 
 static void troop_pickup(Army *a, ArmyUnit *u)       /* onPickup */
@@ -3076,8 +3075,7 @@ static void window_smash(Army *a, ArmyUnit *u, int monster)
     smash_object(a, u, monster >= 0 ? a->m[monster].heading : 0);
     sound_kept(a, u, ustr(u, "FlyingSound"));
     u->state = 9;
-    u->pulse_delay = 3;
-    u->pulse_time = 0;
+    u->pulse_delay = 3;                              /* [R] setPulseDelay only: its pulse's clock runs on */
 }
 
 static void window_pickup(Army *a, ArmyUnit *u)
