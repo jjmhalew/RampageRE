@@ -2010,8 +2010,10 @@ static void throw_held(Mon *mo, int eat, float x, float y, float z)
      * (0x2FC2D4); all 30 monsters have two (MONSTER_DATA +0xA14) [R] */
     float h = mo->heading / 57.2957795f, lx = mo->mirror ? -x : x;
     float vel[3] = { cosf(h) * lx - sinf(h) * y, sinf(h) * lx + cosf(h) * y, z };
-    if (!eat && held_anything(mo))                   /* thrown, not eaten: +0xA94 = 1 (0x2DA284), the camera keeps
-                                                      * its held object's distance a second more */
+    if (held_anything(mo) && !held_edible(mo))       /* [R 0x2DA050 .. 0x2DA078, 0x2DA284] a held object without the
+                                                      * edible flag 0x80000, eaten or not, goes off as a sphere and
+                                                      * +0xA94 = 1: the camera keeps its held object's distance a second
+                                                      * more; an edible (a person, a soldier, a cart) is let go without */
         mo->thrown_t = 1;
     if (mo->held_unit >= 0 && v->army) {
         army_throw(v->army, mo->held_unit, mo->slot, eat, vel, mo->heading / 57.2957795f);
