@@ -1101,7 +1101,8 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
                                                       * (3 from the WorldObject's constructor 0x288228, the cluster's 4
                                                       * once out of ammo) the hold, vtable +0x7C (0x2973A4 .. 0x2973DC):
                                                       * a beam on stops at once [R] */
-        if (!u->ammo_out)
+        if (!u || !u->ammo_out)                      /* (no unit: a person's or a boss's weapon, their owner's
+                                                      * state 3 as well) */
             beam_hold(a, w);
         return;
     }
