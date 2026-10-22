@@ -2182,7 +2182,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
                                                         * with the barf and React_Ground_Heavy_Back */
         if (held_shaker(mo) == 2 && (int)e->p[1] == 1) {
             mon_add_hp(mo, -40);
-            if ((int)e->p[2] == 1 && mo->hp > 0) {
+            if ((int)e->p[2] == 1) {                 /* at 0 HP too: addHitPoints fells it at its next state */
                 face_play(mo, "Expression_Barf", 0, 0, 1);
                 force_state(mo, "React_Ground_Heavy_Back");
             }
