@@ -121,6 +121,7 @@ typedef struct Mon {
     EdiblePower power;                               /* the monster's energy, rage and speed (energy mirrored in .energy) */
     ArmyMonWeapons weapons;                          /* its WeaponList (+0xC5E4, army.c): the roar's Shockwave */
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
+    float turn_from, turn_to, turn_left, turn_len;   /* a hit's turn to face it (degrees, seconds; hit_turn) */
     int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
     float look_yaw, look_pitch;                      /* the head animator's angles now (+0xBC, +0xE8) */
     float scale, scale_from, scale_to, scale_time, scale_left;   /* setDynamicScale */
@@ -624,6 +625,7 @@ static void start_moves(Mon *mo)
     mo->held_parade = -1;
     mo->held_sobj = -1;
     mo->pending_slot = -1;
+    mo->turn_left = 0;
     mo->defeated = 0;
     mo->human = mo->dropping = 0;                    /* (a game quit with its streaker running or dropping in: the
                                                       * next one's camera framed no monster, its view never set) */
@@ -4284,10 +4286,36 @@ static int monster_hittable(const Mon *mo)
  * HP with no reaction asked (+0x110) the defeat: slot 67 React_Defeated, the velocity 0, +0xA59 (0x2D9518 ..
  * 0x2D95F4); with one asked it plays, and the update's own test fells the monster once it has started and the
  * monster is out of the air (mon_step, 0x2E68D0) [R] */
-static void monster_take(Mon *mo, const char *name, float amount, int level, int slot)
+/* [R 0x2D8C30 .. 0x2D9324, applied by 0x2E2130 from the modes' updates 0x2DF788, 0x2DED80, 0x2E03E0] a hit that posts
+ * a new state (+0x110 changed) turns the monster over that state's blend time (+0xBA54): its front onto -d, its back
+ * when hit from behind, the short way about z; none in mode 4 or with d's flat length squared 1e-6 or less. d: a
+ * monster's blow the attacker's front (victim - attacker for an aiming state), a shot's or TakeDamage's knock at
+ * level 2 only. Not ported: the same transition's place, lowered in modes 1 and 2 to the new clip's root */
+static void hit_turn(Mon *mo, int was, const float d[2], int behind)
 {
+    if (mo->pending_slot < 0 || mo->pending_slot == was || mo->mode == MODE_PRONE || !mo->have_graph ||
+        d[0] * d[0] + d[1] * d[1] <= 1e-6f)
+        return;
+    int k = moves_slot(&mo->graph, mo->pending_slot, mo->column);
+    if (k < 0)
+        return;
+    float fx = behind ? d[0] : -d[0], fy = behind ? d[1] : -d[1];   /* where the front goes */
+    float to = atan2f(-fx, fy) * 57.2957795f;        /* the heading whose front (-sin h, cos h) that is */
+    mo->turn_from = mo->heading;
+    mo->turn_to = mo->heading + (fmodf(to - mo->heading + 540, 360) - 180);
+    mo->turn_len = mo->turn_left = mo->graph.states[k].blend;
+    if (mo->turn_len <= 0.001f) {
+        mo->heading = mo->turn_to;
+        mo->turn_left = 0;
+    }
+}
+
+static void monster_take(Mon *mo, const char *name, float amount, int level, int slot, const float d[2], int behind)
+{
+    int was = mo->pending_slot;
     if (slot >= 0)                                   /* (what it holds let go of: set_reaction) */
         set_reaction(mo, slot);
+    hit_turn(mo, was, d, behind);
     if (level == 1 || level == 2)
         mon_rumble(mo, level == 1 ? 400 : 800);
     mo->hp = fmaxf(0, mo->hp - amount);
@@ -4308,8 +4336,9 @@ static void monster_hit(Mon *mo, const char *name, float amount, int level, cons
         return;
     float heading = mo->heading / 57.2957795f, at[3] = { mo->mx, mo->my, mo->mz };
     mo->friction = monster_knock_shot(mo->vel, knock);
-    int slot = army_reaction_slot(level, mo->vel, mo->mode, army_hit_behind(at, heading, from));
-    monster_take(mo, name, amount, level, slot);
+    int behind = army_hit_behind(at, heading, from), slot = army_reaction_slot(level, mo->vel, mo->mode, behind);
+    float d[2] = { level == 2 && knock ? knock[0] : 0, level == 2 && knock ? knock[1] : 0 };
+    monster_take(mo, name, amount, level, slot, d, behind);
 }
 
 /* 0x2D6A50 with the attacker's attack record (the fight, 0x2E35D0): the knock and the reaction by look.c monster_blow
@@ -4324,14 +4353,20 @@ static void monster_blow_hit(Mon *mo, const Mon *by, const struct MonAtk *atk, c
                       { atk->over[0], atk->over[1], atk->over[2], atk->over[3] }, { by->mx, by->my },
                       { -sinf(h), cosf(h) }, { cosf(h), sinf(h) }, st && st->aim, by->mirror };
     float at[3] = { mo->mx, mo->my, mo->mz }, from[3] = { by->mx, by->my, by->mz }, right[2] = { cosf(vh), sinf(vh) };
-    int slot = monster_blow(&b, at, right, mo->mirror, mo->mode, army_hit_behind(at, vh, from), &mo->air_hits,
-                            mo->vel, &mo->friction);
+    int behind = army_hit_behind(at, vh, from);
+    int slot = monster_blow(&b, at, right, mo->mirror, mo->mode, behind, &mo->air_hits, mo->vel, &mo->friction);
     if (getenv("RAMPAGE_TRACE"))
         printf("  blow by %s (kind %d, level %d): %s, velocity %.1f %.1f %.1f, friction %.1f\n", name, atk->kind,
                atk->level, slot == MONSTER_BLOW_BLOCKED ? "none (past the air hits)" : "knocked", mo->vel[0],
                mo->vel[1], mo->vel[2], mo->friction);
-    if (slot != MONSTER_BLOW_BLOCKED)
-        monster_take(mo, name, atk->damage, atk->level, slot);
+    if (slot != MONSTER_BLOW_BLOCKED) {
+        float d[2] = { -sinf(h), cosf(h) };          /* the attacker's front; aiming, the way to the victim */
+        if (st && st->aim) {
+            d[0] = mo->mx - by->mx;
+            d[1] = mo->my - by->my;
+        }
+        monster_take(mo, name, atk->damage, atk->level, slot, d, behind);
+    }
 }
 
 /* the vehicles' frame (vehicle.c): what they see of the monster and the buildings, then what they did */
@@ -6025,6 +6060,11 @@ static void mon_step(Mon *mo, float dt)
                 mo->mx = v->mid_x + (mo->mx > v->mid_x ? 30 : -30);
                 mo->vel[0] = mo->air[0] = 0;
             }
+        }
+        if (mo->turn_left > 0) {                     /* a hit's turn (hit_turn) over what else turned it */
+            mo->turn_left -= dt;
+            float t = mo->turn_left > 0 ? 1 - mo->turn_left / mo->turn_len : 1;
+            mo->heading = mo->turn_from + (mo->turn_to - mo->turn_from) * t;
         }
         mo->heading = fmodf(mo->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE") && mo->slot)
