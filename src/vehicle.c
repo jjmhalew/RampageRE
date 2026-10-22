@@ -38,6 +38,7 @@ struct Vehicles {
     VehicleEvent ev[MAX_EVENTS]; int nev, next_fx;
     TrafficSlot slot[SLOTS]; int nslots;             /* gAIMgr +4 (records), +C (their count) */
     int filled;                                      /* gAIMgr +0x50 bit 2: the first fill is done */
+    int drawn;                                       /* the object being made had its Construct's draw made already */
     int block_vehicles;                              /* gp - 0x6C78: vehicles of slot 0 */
     /* this frame */
     const ArmyMonster *m; int nm;
@@ -678,7 +679,7 @@ static void car_construct(Vehicles *v, VehObj *o)
     o->flags = 0;
     o->horn = 0;
     o->fly_duration = 3;
-    set_pulse(o, 0.5f + frand(v));
+    set_pulse(o, 0.5f + (v->drawn ? 0 : frand(v)));
     if (tnum(o, "Animates", 0) != 0)
         o->oflags = VF_EFF_NODES | VF_PICKUP | VF_ANIMATES | VF_EDIBLE;
     else if (tnum(o, "Edible", 0) != 0)
@@ -1374,15 +1375,44 @@ int vehicle_kind_of(Vehicles *v, const char *tmpl_name)
 }
 
 /* Traffic.bsf onInit [R]: a HiddenVehicle from (-100 + 100 rand, 0, -0.5) to (100, -5, -0.5) at 5; it turns back at
- * each end (at 8), and a monster within its MonsterResponseDist (22) hears the Cop_Loudspeaker, then not for 20 s */
-int vehicle_level_start(Vehicles *v)
+ * each end (at 8), and a monster within its MonsterResponseDist (22) hears the Cop_Loudspeaker, then not for 20 s.
+ * Its draws (the x, then Vehicle.bsf Construct's 0.5 + frand pulse, which IsHidden makes 1 s) are the caller's */
+void vehicle_hidden_save(const Vehicles *v, VehicleHidden *out)
 {
-    float a[3] = { -100 + frand(v) * 100, 0, -0.5f }, b[3] = { 100, -5, -0.5f };
-    VehObj *o = spawn_obj(v, "HiddenVehicle", a, 0, -1);
+    memset(out, 0, sizeof *out);
+    for (int i = 0; v && i < v->n; i++) {
+        const VehObj *o = &v->o[i];
+        if (o->phase == VP_ALIVE && o->hidden && o->line.on) {
+            out->have = 1;
+            memcpy(out->a, o->line.a, sizeof out->a);
+            memcpy(out->b, o->line.b, sizeof out->b);
+            out->t = o->line.t;
+            out->speed = o->line.speed;
+            out->pulse_timer = o->pulse_timer;
+            out->horn = o->horn;
+            return;
+        }
+    }
+}
+
+int vehicle_level_start(Vehicles *v, float x, const VehicleHidden *keep)
+{
+    float a[3] = { x, 0, -0.5f }, b[3] = { 100, -5, -0.5f };
+    v->drawn = 1;                                    /* its Construct's frand: the caller's, with Traffic's own */
+    VehObj *o = spawn_obj(v, "HiddenVehicle", keep && keep->have ? keep->a : a, 0, -1);
+    v->drawn = 0;
     if (!o)
         return -1;
-    line_init(o, a, b, 5, 0);
+    if (keep && keep->have) {
+        line_init(o, keep->a, keep->b, keep->speed, keep->t);
+        o->pulse_timer = keep->pulse_timer;
+        o->horn = keep->horn;
+    } else
+        line_init(o, a, b, 5, 0);
     update_world(o);
+    if (getenv("RAMPAGE_TRACE"))
+        printf("  HiddenVehicle %s at %.1f %.1f, to %.1f\n", keep && keep->have ? "kept" : "made", o->pos[0], o->pos[1],
+               o->line.b[0]);
     return idx(v, o);
 }
 

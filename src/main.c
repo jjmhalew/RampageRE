@@ -221,6 +221,10 @@ typedef struct Viewer {
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
+    /* Traffic.bsf, once a world: fNextExitTime (onEndFrame draws it again each time it runs out, world steps in
+     * traffic_acc), the HiddenVehicle's start x, and its state kept over the port's rebuilds of the block's traffic */
+    float traffic_exit, traffic_acc, hidden_x;
+    VehicleHidden hidden;
     struct { int fx, edible, id; float off[3]; } efx[64]; int nefx;   /* the edibles' effects that follow them (id:
                                                      * edible.c's handle of it) */
     struct { int id, fx, obj; float off[3]; } vfx[64]; int nvfx;   /* the vehicles' effects that follow them */
@@ -961,6 +965,14 @@ static void build(Viewer *v)
          * zeros: every window the list's first kind (NY01: all Hazard_Rage) */
         dir_ai_seed(v->prof.current.seed[1]);
         city_new_world(v->city);
+        /* [R Traffic.scr onInit] the world's init (0x2852E0 -> WorldScript +0x28: slot 0) before any block is made:
+         * fNextExitTime = 5 + 5 frand, the HiddenVehicle's x = -100 + 100 frand, and its Construct's frand
+         * (Vehicle.bsf's pulse, 1 s for a hidden one), from the world's stream */
+        v->traffic_exit = 5.0f + wrand_frand() * 5.0f;
+        v->hidden_x = -100.0f + wrand_frand() * 100.0f;
+        (void)wrand_frand();
+        v->traffic_acc = 0;
+        memset(&v->hidden, 0, sizeof v->hidden);
     }
     v->have_scene = city_build(v->city, v->blocks[v->block], v->night, &v->scene) == 0;
     if (v->have_scene && v->game_built && v->left_block >= 0)
@@ -1045,6 +1057,8 @@ static void build(Viewer *v)
         }
     }
     v->scene.army = v->army;
+    if (v->game_built)                               /* the HiddenVehicle is Traffic's, not the block's: it drives on */
+        vehicle_hidden_save(v->veh, &v->hidden);
     vehicle_free(v->veh);                            /* the traffic of the three block slots, the roof rockets */
     v->veh = NULL;
     v->nvfx = 0;
@@ -1067,7 +1081,7 @@ static void build(Viewer *v)
             for (int k = 0; k < 3; k++)
                 if (v->scene.traffic_def[k].at)
                     vehicle_load_traffic(v->veh, k, v->scene.traffic_def[k]);
-            vehicle_level_start(v->veh);
+            vehicle_level_start(v->veh, v->hidden_x, &v->hidden);
             for (int k = 0; k < v->scene.nrockets; k++)
                 vehicle_spawn(v->veh, v->scene.rockets[k].name, v->scene.rockets[k].pos, v->scene.rockets[k].facing,
                               v->scene.rockets[k].building);
@@ -6497,11 +6511,12 @@ static void block_left(Viewer *v)
         sound_kill(v->osnd[k].h);
     v->nosnd = 0;
     if (v->veh) {
+        vehicle_hidden_save(v->veh, &v->hidden);
         vehicle_clear(v->veh);
         for (int k = 1; k < 3; k++)
             if (v->scene.traffic_def[k].at)
                 vehicle_load_traffic(v->veh, k, v->scene.traffic_def[k]);
-        vehicle_level_start(v->veh);
+        vehicle_level_start(v->veh, v->hidden_x, &v->hidden);
     }
     if (v->army) {                                   /* its units and shots; the army stays, the scores' way */
         army_clear(v->army);

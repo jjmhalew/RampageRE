@@ -145,8 +145,12 @@ void vehicle_bind_army(Vehicles *v, Army *army);     /* addStats through army_ad
  * block_def (its BlockDef| group; 0x334240); the number of vehicle types read */
 int vehicle_load_traffic(Vehicles *v, int slot, Group block_def);
 void vehicle_clear(Vehicles *v);                     /* every object gone, every slot empty, the first fill again */
-/* Traffic.bsf onInit (once a level): the HiddenVehicle, the police loudspeaker that drives the street unseen */
-int vehicle_level_start(Vehicles *v);
+/* Traffic.bsf onInit (once a world): the HiddenVehicle, the police loudspeaker that drives the street unseen, from
+ * (x, 0, -0.5), x = -100 + 100 frand drawn by the caller, as its Construct's frand (none here). A script's object, not a block's: the port's rebuilds of the
+ * block's traffic keep it as it was (keep, from vehicle_hidden_save) instead of making it again */
+typedef struct { int have; float a[3], b[3], t, speed, pulse_timer; int horn; } VehicleHidden;
+void vehicle_hidden_save(const Vehicles *v, VehicleHidden *out);
+int vehicle_level_start(Vehicles *v, float x, const VehicleHidden *keep);
 
 /* an object by template name, if its script is one of ours (Vehicle.bsf, Vehicle_FireTruck.bsf, Rocket.bsf,
  * RocketBase.bsf), at pos facing facing (the fire truck places itself). A rocket stands on building `building` (the
