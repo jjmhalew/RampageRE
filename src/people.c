@@ -39,7 +39,8 @@ struct People {
     void *find_ctx;
     PeopleVisible visible;
     void *visible_ctx;
-    int band_flee, band_sound;                       /* BandMember.bsf's globals: flee, bandSFXAllocated */
+    int band_flee, band_sound, *band_sound_at;       /* BandMember.bsf's globals: flee, bandSFXAllocated (the
+                                                      * host's when set: people_set_band_sound) */
     int hitter;                                      /* the monster slot whose blow is being dealt (people_hit) */
     struct { int building, storey, column; } retired[64];   /* the windows grabbed from (0x318140(.., 1)) */
     int nretired;
@@ -1231,10 +1232,11 @@ static void construct(People *p, Person *q)
         q->state = 1;
         q->pulse_delay = 0.25f;
         q->flags |= OF_EFF_NODES | OF_PICKUP;
-        if (tstr(q, "Sound|BandSound") && !p->band_sound) {   /* the band's music, once */
+        int *allocated = p->band_sound_at ? p->band_sound_at : &p->band_sound;
+        if (tstr(q, "Sound|BandSound") && !*allocated) {   /* the band's music, once */
             emit(p, PE_SOUND, who_of(p, q), tstr(q, "Sound|BandSound"), NULL, q->pos, 0, 1);
             q->sub |= 64;
-            p->band_sound = 1;
+            *allocated = 1;
         }
         break;
     case PK_GUARD:
@@ -1411,6 +1413,8 @@ void people_set_visible(People *p, PeopleVisible visible, void *ctx)
     p->visible = visible;
     p->visible_ctx = ctx;
 }
+
+void people_set_band_sound(People *p, int *allocated) { p->band_sound_at = allocated; }
 
 static Group template_ref(People *p, Group from, const char *key)   /* the template an OTRef| of from names */
 {

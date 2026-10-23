@@ -327,6 +327,7 @@ typedef struct Viewer {
                                                       * cleared (the airstrike's height in 0, the NY generators' ends) */
     int ny_generators;                               /* Boss_NY_Generator.bsf's numGenerators: from 0 as the city's
                                                       * scripts load (open_city), on through its blocks and continues */
+    int band_sound;                                  /* BandMember.bsf's bandSFXAllocated: the same life */
 } Viewer;
 
 /* gCommon.getPlayType() of the game played: the demo's 0, else --play's or the shell's (unset: the campaign) */
@@ -1400,8 +1401,10 @@ static void build(Viewer *v)
             }
         }
     }
-    if (v->have_scene && v->scene.folk)
+    if (v->have_scene && v->scene.folk) {
         people_set_visible(v->scene.folk, people_visible, v);
+        people_set_band_sound(v->scene.folk, &v->band_sound);
+    }
     if (!v->game_built || !v->hud) {                 /* the game's next block keeps the HUDs (their results going) */
         huds_close(v);
         for (int k = 0; v->have_gui && v->have_scene && have_monster(v) && !v->no_hud && k < v->nmon; k++) {
@@ -1476,7 +1479,7 @@ static int open_city(Viewer *v, int index, uint32_t block, int game_block)
     city_close(v->city);
     v->city = c;
     v->city_index = index;
-    v->ny_generators = 0;                            /* the city's onLoadScript loads its scripts' bundle anew */
+    v->ny_generators = v->band_sound = 0;            /* the city's onLoadScript loads its scripts' bundle anew */
     if (v->roster.n)                                 /* its names are the old city's book's: read from this one's */
         reveal_roster_load(&v->roster, city_book_group(c, "ShellData", "MonsterData"));
     v->nblocks = city_blocks(c, v->blocks, 64);

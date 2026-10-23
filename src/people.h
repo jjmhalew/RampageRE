@@ -135,6 +135,9 @@ void people_set_templates(People *p, PeopleFindTemplate find, void *ctx);
 /* gWorld.isSphereVisible(pos, r): the streakers leave once out of view; unset, everything counts as visible */
 typedef int (*PeopleVisible)(void *ctx, const float pos[3], float radius);
 void people_set_visible(People *p, PeopleVisible visible, void *ctx);
+/* BandMember.bsf's bandSFXAllocated: a script global, so it lasts as long as the city's scripts' bundle (the city's
+ * onLoadScript .. onShutdown, BOSS_NOTES.md "Other natives"), not the block: the host keeps it; NULL the module's own */
+void people_set_band_sound(People *p, int *allocated);
 /* the block's DroppableDef (0x31A540): its number, the rate every occupant kind takes as its DropRate (+0x34 into
  * the kinds' +0x10, 0x318CC4: no OccupantInstance sets its own), and its names, getDroppableName's pick */
 void people_set_droppables(People *p, float rate, const char *const *names, int n);
