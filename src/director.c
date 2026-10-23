@@ -933,7 +933,10 @@ static void bot_approach(DirAI *ai, const DirGraph *ag, MoveRunner *r, const Dir
     mount_point(v, b, bt->side, mp);
     static const int FACE[3] = { 0, 1, 2 };          /* climb.h's FACE_LEFT, FACE_RIGHT, FACE_FRONT */
     int cand = -1, cm = v->can_mount ? v->can_mount(v->ctx, FACE[bt->side], &cand) : -7;
-    int place = place_fine(v, bt->target, mp) ? 1 : -5;
+    /* [R 0x2EFB54 .. 0x2EFB84] the mount point's place check (0x2DDC40), -5 also when approachClear fails */
+    int place = v->place ? v->place(v->ctx, bt->target, mp) : 1;
+    if (place != -5 && !approach_clear(v, bt->target, bt->side, mp))
+        place = -5;
     if (cm == 1 && cand == bt->target) {
         int air = bot_in_air(v);
         if (bt->side == 2) {
@@ -946,7 +949,7 @@ static void bot_approach(DirAI *ai, const DirGraph *ag, MoveRunner *r, const Dir
             if (!bot_facing(v, -1, 0) || air) bot_walk(ai, ag, r, v, bt->walk, 0, bt->target, call, ctx);
             else bot_go_state(r, ag, v->mirror ? bt->st_side_l : bt->st_side_r, call, ctx);
         }
-    } else if (place == -5 || cm == -5 || cm == -6) {
+    } else if (place == -5 || place == -6) {         /* [R 0x2EFF78] only the place's; canMount's -5 walks on */
         bt->target = -1;
         ai_pick(r, ag, DA_IDLE, -1, call, ctx);
     } else if (cm == -2 || cm == -3) {
