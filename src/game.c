@@ -1260,7 +1260,9 @@ void game_start_respawn(Game *g, int slot, const GameRespawnIn *in, GameRespawn 
         out->pos[1] = in->cam_pos[1] + dy * t;
         /* z: where the vertical through that point meets the camera's plane at +0x7C of its object (gp-0x6CFC
          * +0x660), put through its matrix (0x102F60), 0 when the plane is all but vertical (|normal . up| <= 0.001)
-         * [R]; which plane that is is not traced: here the view's top [G] */
+         * [R]: the frustum's top, the fourth of the four side planes through the eye the view keeps from +0x4C
+         * (CameraMgr 0x27EFA0 -> 0x16CF50 -> 0x16D150: left, right, bottom, top, each put into the camera's frame
+         * by 0x103040) [R] */
         float h = sqrtf(in->cam_dir[0] * in->cam_dir[0] + in->cam_dir[1] * in->cam_dir[1]);
         float pitch = atan2f(in->cam_dir[2], h > 1e-6f ? h : 1e-6f);
         float d = sqrtf((out->pos[0] - in->cam_pos[0]) * (out->pos[0] - in->cam_pos[0]) +
