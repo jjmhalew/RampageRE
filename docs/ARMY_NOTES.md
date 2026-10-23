@@ -184,8 +184,8 @@ otherwise.
   A hit on the shot's own unit (+0xC4) is no hit at all (0x293CD8). The monsters are their collision spheres, flagged
   0x40; a ray that starts inside a box meets it at t = 0 (0x280780 → 0x100420: the face of least depth, ties to z
   then y, on the start's side), inside a sphere too (0x100900: away from its centre), so a shot whose step starts
-  inside its own unit is blind for that step [R]. What the shot hits that is not a monster or a building only
-  stops it: its impact on such an object (0x292D20) is not ported. On a building (`AE_BUILDING_HIT`, the beam's
+  inside its own unit is blind for that step [R]. What the shot hits that is not a monster or a building gets
+  its TakeDamage (0x292D20, AE_OBJECT_HIT: "The collision world" below). On a building (`AE_BUILDING_HIT`, the beam's
   too: 0x33B440) it is Building::hit (0x2BC150) with the shot's DamageType, its ImpactDamage x the damage scale as the
   amount (the beam's DamagePerSec x dt after its first touch) and the point: the building's hitter is cleared (the
   attacker is not a monster, +0x4C & 0x40, 0x2BC190), a Nuclear one (DamageType 8, the airstrike's FinalBomberBomb)
@@ -602,7 +602,7 @@ The building records each Scoring call as it makes it (building.c `Building.scor
     AE_OBJECT_HIT. Most scripts' TakeDamage begin with coerceToMonster and ignore it, but Vehicle.bsf's asks only its
     flags (8, 1024, 32): a car hit is wrecked and flies off at 25 along the shot's way (z made positive) and explodes
     on its next pulse, no score (vehicle.c `vehicle_shot`); Fountain.bsf (ungated) breaks a hydrant or fountain off
-    along it (streetobj.c `streetobj_shot`); DamagingEffect.scr's is not followed;
+    along it (streetobj.c `streetobj_shot`); DamagingEffect.scr's asks for a monster too (nothing);
   - a unit has one shape by 0x28FD70 (`collide_shape_pick`: CollisionBox, CollisionRadius, AutoCollisionBox, else
     the sphere the model keeps (0x184CB0, stored apart from its box, 0x184940) [R]; here the union of its meshes'
     header spheres, city.c `city_shape_sphere`), and the monster's spheres meet that one shape (0x2E22B0 ->
