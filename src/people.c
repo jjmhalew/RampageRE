@@ -50,6 +50,7 @@ struct People {
     Group block;                                     /* people_set_block: its ActorInstance|s for the chains */
     int not_in_play;                                 /* people_set_world_state: the world's state is not 6 */
     Group spawn[16];                                 /* the chains' next ones, made after the frame's update */
+    CollideWorld *cw;                                /* the frame's collision world (people_collide_add), NULL none */
     int nspawn;
 };
 
@@ -1809,6 +1810,50 @@ void people_remove(People *p, int who)
         gone(p, &p->v[who]);
 }
 
+/* a flying person's contact (collide.h): the street is nothing (no OnHitGround); an object met is its TakeImpact,
+ * the owner's (PE_IMPACT), the person's own none */
+typedef struct { People *p; int who; } FlightCtx;
+static void flight_contact(void *user, int other, const float at[3], const float n[3])
+{
+    FlightCtx *c = user;
+    (void)n;
+    if (other < 0 || !c->p->cw)
+        return;
+    const CollideObj *w = &c->p->cw->o[other];
+    if (COLLIDE_TAG_OWNER(w->tag) == COLLIDE_OWN_PEOPLE)
+        return;
+    if (c->p->nev >= MAX_EVENTS)
+        return;
+    emit(c->p, PE_IMPACT, c->who, NULL, NULL, at, c->p->v[c->who].cm.mass, w->kind);
+    c->p->ev[c->p->nev - 1].object = w->tag;
+}
+
+void people_collide_add(People *p, CollideWorld *w)
+{
+    p->cw = w;
+    for (int i = 0; i < p->n; i++) {
+        Person *q = &p->v[i];
+        q->cobj = -1;
+        if (!w || q->phase == PP_GONE)
+            continue;
+        float r = tnum(q, "CollisionRadius", 1), c[3] = { 0, 0, r / 2 }, m[12];
+        CollideShape sh;
+        collide_shape_sphere(&sh, c, r);
+        collide_matrix_from16(m, q->world);
+        q->cobj = collide_add(w, &sh, m, COLLIDE_F_WORLD | q->flags, COLLIDE_TAG(COLLIDE_OWN_PEOPLE, i), 0);
+        if (q->cobj < 0)
+            continue;
+        if (q->phase == PP_FLYING)                   /* flying: another flying object exchanges impulses with it */
+            collide_set_mover(w, q->cobj, &q->cm, q->cmat, q->vel);
+        else if (q->phase == PP_HELD || q->mv.active) {   /* driven (held, a LineMover): the exchange moves only the
+                                                      * flying one [R 0x28F220, collide.h] */
+            CollideMover *k = &q->cm;
+            collide_mover_kinematic(k, tnum(q, "Mass", 1), tnum(q, "Restitution", 0.8f), tnum(q, "SlidingFriction", 0.4f));
+            collide_set_mover(w, q->cobj, k, NULL, NULL);
+        }
+    }
+}
+
 void people_update(People *p, float dt, const PeopleMonster *m, int nm)
 {
     p->m = m;
@@ -1859,10 +1904,13 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
             place_matrix(q->world, q->pos, q->heading, NULL);
         } else if (r != DELETE_ME && q->phase == PP_FLYING) {
             /* [R] the SpherePhysicsMover's frame (0x28E440, collide.c): sub-steps, gravity, the street's push and
-             * impulse (restitution and friction, the spin); the people scripts have no OnHitGround. [G: the objects
-             * of the frame's collision world it would meet (0x287430) are left out: people are not in the viewer's
-             * collision world] */
-            collide_mover_step(NULL, &q->cm, q->cmat, -1, dt, NULL, NULL);
+             * impulse (restitution and friction, the spin), then the frame's objects it meets (0x287430: the
+             * buildings, the other objects and people; the monsters are not met), each a TakeImpact on both; the
+             * people scripts have no OnHitGround and no TakeImpact */
+            int self = p->cw ? collide_check(p->cw, q->cobj, COLLIDE_TAG(COLLIDE_OWN_PEOPLE, i), 0) : -1;
+            FlightCtx c = { p, i };
+            collide_mover_step_ex(self >= 0 ? p->cw : NULL, &q->cm, q->cmat, self, dt, COLLIDE_F_MONSTER,
+                                  flight_contact, &c);
             collide_matrix_to16(q->cmat, q->world);
             memcpy(q->pos, q->cmat + 9, sizeof q->pos);
             memcpy(q->vel, q->cm.vel, sizeof q->vel);

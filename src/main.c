@@ -2644,7 +2644,8 @@ static int monster_spheres(Mon *mo, float out[][4], int max)
  * spheres (flags 4 | COLLIDE_F_MONSTER: what the shots' rays hit; WCISpheres 0x449A20, one object each: its ray
  * 0x29A300 keeps the nearest sphere's hit, as the world's ray does across them [R]; their radii x the dynamic scale,
  * 0x2DAB60), then every module's objects with their shapes and flags (army, vehicles, rail, parade, street and roof
- * objects, the bosses' parts and VolumeTriggers). The monster (push_out), the shots and the flying objects ask it */
+ * objects, the bosses' parts and VolumeTriggers, the huts, the people). The monster (push_out), the shots and the
+ * flying objects ask it */
 static void world_build(Viewer *v)
 {
     CollideWorld *w = &v->cw;
@@ -2680,6 +2681,8 @@ static void world_build(Viewer *v)
     if (v->sobj) streetobj_collide_add(v->sobj, w);
     if (v->boss) boss_collide_add(v->boss, w);
     scene_huts_collide_add(&v->scene, w);           /* the guards' huts (city.c) */
+    if (v->scene.folk)                               /* the people, every one in the world (people.h) */
+        people_collide_add(v->scene.folk, w);
     collide_finish(w);
 }
 
@@ -6223,7 +6226,8 @@ static void play_step(Viewer *v, float dt, float aspect)
         for (int i = 0; v->army && i < v->narmed_people; i++) {
             const Person *p = people_get(v->scene.folk, v->armed_people[i]);
             if (p && p->phase != PP_GONE)
-                army_person_moved(v->army, v->armed_people[i], p->world, 0, p->anim_time, p->anim_len);
+                army_person_moved(v->army, v->armed_people[i], p->world,
+                                  COLLIDE_TAG(COLLIDE_OWN_PEOPLE, v->armed_people[i]), p->anim_time, p->anim_len);
             else {                                   /* [R] a deleted actor's weapon goes with it */
                 army_person_forget(v->army, v->armed_people[i]);
                 v->armed_people[i--] = v->armed_people[--v->narmed_people];
@@ -6261,6 +6265,8 @@ static void play_step(Viewer *v, float dt, float aspect)
             }
             if (ev[i].type == PE_WINDOW_CLOSE)       /* back in: its window shuts */
                 scene_window_close_at(&v->scene, ev[i].v);
+            if (ev[i].type == PE_IMPACT)             /* a flying person met an object: its TakeImpact */
+                impact_route(v, ev[i].object, ev[i].on, ev[i].v, ev[i].amount);
             if (ev[i].type == PE_MESSAGE && v->hud && ev[i].name) {   /* ActorSwarm's RECESS (createAndStartText) */
                 float rgba[4] = { ev[i].v[0], ev[i].v[1], ev[i].v[2], ev[i].amount };
                 hud_banner_text(v->hud, ev[i].name, rgba, 0.5f, "");

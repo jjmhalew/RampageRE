@@ -344,14 +344,29 @@ crowds, a streaker), `Biker` 74 (parade.c), `StationaryPerson` 73, `Military_Win
 
 PK_OTHER (a script not in this list) keeps only the native part: its `DefaultAnim`, no TakeDamage, no onPickup.
 
+## In the collision world [R]
+- **Every actor is a world object**: the occupants' spawner adds each one (0x285710 makes it, 0x3189D0 calls
+  World::addObject, gWorld vtable +0x3C: flag 4), and its shape (+0x74) is one sphere they all share: the Actor
+  constructor points +0x74 at 0x4D5C20 (0x30E420), and each actor's init (0x30DB50 .. 0x30DE70) sets that sphere to
+  its `CollisionRadius` (a float record, the instance's book first, then the template's; 1 without) about (0, 0, r / 2)
+  (a `CollisionBox` would make a box of its own; no actor has one). Every actor inherits DefActorProps' 2, so every
+  person is a sphere of radius 2 centred 1 above its place.
+- So the world's queries see them: a shot's ray (include 4) or a beam's (−1) stops on a person, a ray starting inside
+  the sphere at once (a soldier among pedestrians fires into the nearest), and the TakeDamage that follows asks
+  `coerceToMonster` and does nothing; a flying object meets them (0x287430 asks with include −1, exclude 0), bouncing
+  off one standing (static) or walking or held (driven: an exchange that moves only the flying one), and its own
+  TakeImpact runs (a thrown car is wrecked, Vehicle.bsf); the Dragon's `PushOutMonsters` pushes the monster out.
+- A person sent flying meets the frame's objects as any SpherePhysicsMover: the buildings (Building::hit at the
+  contact, radius Mass / 1000), cars (wrecked), street objects (their TakeImpact) and the other people (nothing: no
+  people script has a TakeImpact). people.c `people_collide_add` (tag `COLLIDE_OWN_PEOPLE`), its flight against the
+  world, `PE_IMPACT` to main.c's `impact_route`.
+
 ## Not traced (stand-ins in people.c)
 - **Random numbers**: `frand` is the world's one Park-Miller state (gWorld +0x828, 0x106BD0, seeded from GameStatus seed[0]), shared with every other system as in the game (wrand.c) [R].
   `getTimeStep` is the world's step, 1/30 (0x2B7800, FLOW_NOTES.md) [R].
-- **The flight's objects**: the SpherePhysicsMover would also meet the frame's collision objects (0x287430); people
-  are not in the viewer's collision world, so only the street is met.
 - **The hit test**: the attack-sphere test against people is the monster against the objects (0x2E22B0: an armed
   sphere's blow on an `OnlyHitWithEffNodes` person, against its shape: `CollisionRadius` about the model's bounding
-  sphere's centre, 0x28FD70); people are not in the viewer's collision world, so the centre is taken 1 up. Person_Child
+  sphere's centre, 0x28FD70); the actor's shape is the shared sphere below, so the centre is taken 1 up. Person_Child
   sets no 0x8000, so in the game a mere touch (type 1) reaches it too; here only blows do.
 - **The hold blend** [R 0x310ED0 / 0x310B50]: the start kept in the hold's frame, w = 1 − left / blend, its turn w of
   the way to none and its place scaled by 1 − w; the port takes the hand of the first held frame for the grab's.

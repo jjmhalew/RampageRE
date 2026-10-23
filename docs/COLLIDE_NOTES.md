@@ -256,7 +256,8 @@ Each frame, before anything moves, main.c's `world_build` fills the Viewer's `Co
 3. each module's objects with their shapes (0x28FD70, `collide_shape_pick`, read once per object) and their own
    flags | 4: `army_collide_add`, `vehicle_collide_add`, `rail_collide_add`, `parade_collide_add`,
    `streetobj_collide_add`, `scene_huts_collide_add` (the guards' huts, their own sphere: a flying hut meets the
-   buildings and objects), `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged 4 |
+   buildings and objects), `people_collide_add` (every person, the actors' shared sphere: PEOPLE_NOTES.md),
+   `boss_collide_add` (its parts kind 0, its VolumeTriggers kind 1 flagged 4 |
    `COLLIDE_F_TRIGGER`, | `COLLIDE_F_PUSHOUT` with DoPushout). Flag 4 is "in the world's object list": World::addObject
    (0x284CD0, gWorld vtable +0x3C) sets it on every object it adds, VolumeTriggers too (0x2A6710 adds them at 0x2A67C0
    / 0x2A68D4), and removeObject (0x284B60, +0x40) clears it [R]. A held object stays in, as in the game: the grab
@@ -276,10 +277,10 @@ Who asks it:
 - **The shots** (army.c `ray_hit`): `collide_ray` with the shot's masks (include 4, 0x2000 for DamageType 8, 0x2040
   for Blunt; exclude 8; a hit on its owner is none) or a beam's (include −1, its owner flagged 8). A monster's sphere
   is a hit on that monster; anything else stops the shot.
-- **The flights** (army.c, vehicle.c, rail.c, parade.c `sphere_step`): one `CollideMover` per flying object from the
+- **The flights** (army.c, vehicle.c, rail.c, parade.c `sphere_step`, people.c): one `CollideMover` per flying object from the
   template's Gravity, Mass, Restitution, SlidingFriction and InertiaSolidity and `collide_mover_radius` of its shape,
   stepped by `collide_mover_step_ex` (the monsters left out). The −1 contact is OnHitGround; an object contact is
-  TakeImpact on both: within the module directly, else an `AE_IMPACT` / `VE_IMPACT` / `RE_IMPACT` / `PAE_IMPACT` event
+  TakeImpact on both: within the module directly, else an `AE_IMPACT` / `VE_IMPACT` / `RE_IMPACT` / `PAE_IMPACT` / `PE_IMPACT` event
   that main.c's `impact_route` gives to the owner (`building_hit` with radius Mass / 1000, `vehicle_impact`,
   `rail_impact`, `streetobj_take_impact`, `army_impact`).
 - **The street objects' tests** (streetobj.c): a blow `collide_obj_sphere`, a touch `collide_obj_box`, against the

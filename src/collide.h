@@ -242,7 +242,7 @@ static inline int collide_hit_once(CollideHitList *h, int monster, unsigned reco
 /* CollideObj.tag / CollideBuilding.tag: the module that added it and its index there; kind is the module's own
  * (which of its lists: boss.c's parts 0 and VolumeTriggers 1, the monster's spheres by number, ...) */
 enum { COLLIDE_OWN_NONE, COLLIDE_OWN_BUILDING, COLLIDE_OWN_MONSTER, COLLIDE_OWN_ARMY, COLLIDE_OWN_VEHICLE,
-       COLLIDE_OWN_RAIL, COLLIDE_OWN_PARADE, COLLIDE_OWN_STREET, COLLIDE_OWN_BOSS };
+       COLLIDE_OWN_RAIL, COLLIDE_OWN_PARADE, COLLIDE_OWN_STREET, COLLIDE_OWN_BOSS, COLLIDE_OWN_PEOPLE };
 #define COLLIDE_TAG(owner, index) ((int)(((unsigned)(owner) << 24) | ((unsigned)(index) & 0xFFFFFFu)))
 #define COLLIDE_TAG_OWNER(tag) ((int)((unsigned)(tag) >> 24))
 #define COLLIDE_TAG_INDEX(tag) ((int)((unsigned)(tag) & 0xFFFFFFu))

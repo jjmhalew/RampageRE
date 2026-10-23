@@ -78,6 +78,7 @@ typedef struct {
     float end_loc[3], march_dir, idle_time;
     int anim_reverse;                                /* setAnimPlayDir(-1): anim_time runs backwards */
     int fx;                                          /* its PE_FX_ON effects still on: 1 << PFX_* */
+    int cobj;                                        /* its object in the frame's collision world (people_collide_add) */
 } Person;
 
 typedef struct {                                     /* what the people see of a monster */
@@ -102,8 +103,11 @@ enum {
                                                       * on: its slot (PFX_*); amount 1: it follows the person
                                                       * (FollowEffect attached), 0: it stays at v */
     PE_FX_OFF,                                       /* that slot's effect stops (on: the slot) */
-    PE_MESSAGE                                       /* PointsBanner.createAndStartText(name, colour, 0.5, ""): v
+    PE_MESSAGE,                                      /* PointsBanner.createAndStartText(name, colour, 0.5, ""): v
                                                       * the colour's red, green, blue and amount its alpha (0 .. 1) */
+    PE_IMPACT                                        /* the person, flying, met the world's object whose collision tag
+                                                      * is object (on: its kind) at v: that object's TakeImpact (the
+                                                      * person's own has none), amount the person's mover's Mass */
 };
 enum {                                               /* PE_FX_ON's slots */
     PFX_AMBIENT,                                     /* the Actor's AmbientEffect (+0x108; the priests' halo) */
@@ -185,6 +189,13 @@ int people_hut_state(const People *p, int hut);     /* 0 standing, 1 hit (flying
 int people_add_streaker(People *p, Group tmpl, const float monster_pos[3], float camera_x);
 void people_remove(People *p, int who);              /* requestDelete: gone at once (the respawn's streaker) */
 
+/* every person into the frame's collision world (main.c world_build), tagged COLLIDE_TAG(COLLIDE_OWN_PEOPLE, who):
+ * [R] an occupant is added to the world (World::addObject, 0x3189D0 in the spawner), and the Actor's shape (+0x74) is
+ * the one sphere they all share (0x4D5C20: the constructor 0x30E420 points it there, each init 0x30DE6C sets it to
+ * CollisionRadius about (0, 0, r / 2), DefActorProps' 2 for every actor), flags 4 | the object's. So the shots and
+ * beams stop on people, the flying objects meet them (TakeImpact), the Dragon (PushOutMonsters) pushes the monster
+ * out, and a person sent flying meets the world (its flight then asks w) */
+void people_collide_add(People *p, CollideWorld *w);
 void people_update(People *p, float dt, const PeopleMonster *m, int nm);
 int people_count(const People *p);
 const Person *people_get(const People *p, int who);
