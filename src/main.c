@@ -7738,11 +7738,13 @@ static void card_free(Viewer *v, float dt)
 
 /* ---- the controllers (pad.h) as the PS2's pads ---- */
 
-/* an axis through the dead zone, the rest scaled to 0 .. 1 (the PS2 pack does it per axis, 0x1A6050 [R]; its zone
- * and curve sit in the pack object, not traced: 0.2 and straight here [G]) */
+/* an axis through the dead zone, the rest scaled to 0 .. 1 (the PS2 pack does it per axis, 0x1A6050 [R]): its zone
+ * is 0.35 on every axis and its curve straight (exponent 0, scale 1 / (1 - 0.35)), as the pack's constructor sets
+ * them (0x1A5B20, the one pack 0x488700) and nothing sets them again (its setter, vtable 0x445060 + 0x14, has no
+ * caller) [R] */
 static float pad_axis(float v)
 {
-    const float DZ = 0.2f;
+    const float DZ = 0.35f;
     return v > DZ ? (v - DZ) / (1 - DZ) : v < -DZ ? (v + DZ) / (1 - DZ) : 0;
 }
 

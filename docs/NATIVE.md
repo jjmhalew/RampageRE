@@ -383,8 +383,8 @@ fill the same pad; buttons add up, the stick pushed further wins):
 | Triangle | TRIANGLE 17 (kick) | Y / Triangle | button 1 |
 | R3, L3 | R3 20, L3 21 | RS, LS | |
 
-The sticks go through a dead zone of 0.2 per axis, the rest scaled to full (the PS2 pack does it per axis, 0x1A6050;
-its own zone was not traced). The pressures (variables 28, 29) are not read by the port's move graphs, so the
+The sticks go through a dead zone of 0.35 per axis, the rest scaled straight to full, as the PS2 pack does it
+(0x1A6050; the zone and curve its constructor 0x1A5B20 sets, which nothing changes). The pressures (variables 28, 29) are not read by the port's move graphs, so the
 triggers' travel is not passed on. Each controller sends its menu events as its own pad (`shell_input_pad`,
 `hud_input_pad`: the shell's player screens and the Pause menu's Options, pad 0's, tell them apart as the game does);
 the held state (`shell_pad_held`, `hud_pad_held`: getController(0)) is pad 0's and the keys'.
