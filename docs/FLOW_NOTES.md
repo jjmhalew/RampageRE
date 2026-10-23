@@ -73,6 +73,19 @@ when its switch window opens, as a player's (the runner's +0x1E, 0x2EBF40) [R]:
 - **The next-hop table** (0x2F2B90): MONSTER_DATA ends with an n × n byte table after the states (176² for George):
   [from × n + to] the next state on the way, 0xFF none. A target is reachable when each hop has a usable transition
   (or is the clip's end).
+- **The search that rewrites them** (0x2F2D60, each frame of the AI's update 0x2EE430, before the goal) [R]: the
+  file's table and the states' +0x18 bytes are only where the game starts. The AI runs a quickest-way search over the
+  graph from the state it is in (its pad +0x10; the list +0x14 / +0x18, the queued and done bits +0x1C / +0x3C, per
+  state +0x5C: +0x8 the time, +0xC the state before): a transition costs its switch window's start (+0x14), a clip's
+  end the clip's length, each plus the world's step (gWorld +4, 1/30); only usable transitions into states without
+  flag 0x40000000 count, a clip's end always. From the first state the first way into a state stands; after that the
+  least time. Each frame it takes 17 / (the AI monsters, +0x108 set and +0x109 clear) states off the list, the first of
+  the least time. When the list is empty it writes what it found (0x2F3460): for every state reached, each state on
+  the way to it gets the next one in the table; for each action code but the first state's own, each state on the way
+  to the nearest state of that code gets the transition that leads on in its +0x18 byte (−1 for a clip's end; the
+  first state −1 when no state of that code was reached). The next frame it begins anew from the state it is then
+  in. The tables it makes differ from the file's (George: 41 of the 176 rows; the file's were made another way), so
+  the AI's ways through the graph are the search's.
 
 Action codes (node +0x3C) for George: 0 attacks and grabs, 1 the transitions onto a building, 4 hops, 5 jumps, 6
 mantles, 7 climbing down, 8 climbing up, **9 Ground_Walk**, 10 the mirror transition, **11 the idles** (Ground_Idle,

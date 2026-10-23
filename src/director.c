@@ -65,11 +65,17 @@ int dir_graph_read(const Bundle *monster, DirGraph *ag)
         at += 0x2C + 0x74 * (uint32_t)(int16_t)(d[at + 0xE] | d[at + 0xF] << 8);
     }
     /* the next-hop table: n x n bytes right after the states, [from * n + to] the state to go to next (0xFF none)
-     * [R 0x2F2B90: the graph's +0x24 table, +0x2C stride; George's file ends with it] */
+     * [R 0x2F2B90: the graph's +0x24 table, +0x2C stride; George's file ends with it]. It and the states' +0x18 bytes
+     * are where the game starts: the AI's search rewrites them (search_step) */
     if (at + (uint32_t)(n * n) > size)
         return dir_graph_free(ag), -1;
     ag->hop = malloc((size_t)(n * n));
     memcpy(ag->hop, d + at, (size_t)(n * n));
+    ag->cost = malloc(sizeof *ag->cost * (size_t)n);
+    ag->pred = malloc((size_t)n);
+    ag->mark = malloc((size_t)n);
+    ag->queue = malloc((size_t)n);
+    ag->nq = 0;
     return 0;
 }
 
@@ -78,6 +84,10 @@ void dir_graph_free(DirGraph *ag)
     free(ag->action);
     free(ag->fallback);
     free(ag->hop);
+    free(ag->cost);
+    free(ag->pred);
+    free(ag->mark);
+    free(ag->queue);
     memset(ag, 0, sizeof *ag);
 }
 
@@ -127,6 +137,124 @@ int dir_graph_reachable(const DirGraph *ag, const MoveGraph *g, int from, int to
         c = next;
     }
     return 0;
+}
+
+/* ---- the AI's search over the graph (0x2F2D60, each frame of 0x2EE430 before the goal) [R]: the quickest ways from
+ * the state it began in, a transition costing its switch window's start and a clip's end the clip's length, each
+ * plus the world's step k; through transitions the AI may take (usable, at the time) into states it may enter, the
+ * clip's end always. 17 / (the visible AI monsters) states a frame are taken off the list (the first of the least
+ * time); when the list is empty the ways found go into hop and fallback, and the next frame begins anew */
+enum { SM_QUEUED = 1, SM_DONE = 2 };
+
+static void search_reach(DirGraph *ag, int from, int to, float c, int first)
+{
+    if (ag->mark[to] & SM_DONE)
+        return;
+    if (!(ag->mark[to] & SM_QUEUED)) {
+        ag->queue[ag->nq++] = (uint8_t)to;
+        ag->mark[to] |= SM_QUEUED;
+    } else if (first) {                              /* from the state it began in: the first way in stays */
+        return;
+    }
+    if (first || !(ag->cost[to] <= c)) {             /* from the others: the least time */
+        ag->cost[to] = c;
+        ag->pred[to] = (uint8_t)from;
+    }
+}
+
+static void search_expand(DirGraph *ag, const MoveGraph *g, int k, float base, float step, int first, MoveCall call,
+                          void *ctx)
+{
+    const MoveState *s = &g->states[k];
+    for (int i = 0; i < s->ntrans; i++) {
+        const MoveTrans *t = &s->trans[i];
+        if (t->target >= 0 && t->target < ag->n && !(ag->mark[t->target] & SM_DONE) &&
+            usable(t, call, ctx) != 2 && target_ok(g, t))
+            search_reach(ag, k, t->target, t->sw0 + base + step, first);
+    }
+    if (s->next >= 0 && s->next < ag->n)
+        search_reach(ag, k, s->next, s->length + base + step, first);
+}
+
+/* the ways found: for each state reached, each state on the way to it gets the next one in hop; for each action code
+ * but the first state's own, each state on the way to the nearest state of that code gets the transition that leads
+ * on (-1: the clip's end), the first state -1 when none was reached (0x2F3460 .. 0x2F3740) */
+static void search_write(DirGraph *ag, const MoveGraph *g, MoveCall call, void *ctx)
+{
+    float best[16];
+    int at[16];
+    for (int a = 0; a < 16; a++) {
+        best[a] = 100000.0f;
+        at[a] = -1;
+    }
+    for (int t = 0; t < ag->n; t++) {
+        if (ag->pred[t] == 0xFF)
+            continue;
+        int a = ag->action[t];
+        if (a >= 0 && a < 16 && !(best[a] <= ag->cost[t])) {
+            best[a] = ag->cost[t];
+            at[a] = t;
+        }
+        for (int c = t, p; ; c = p) {
+            p = ag->pred[c];
+            ag->hop[p * ag->n + t] = (uint8_t)c;
+            if (p == ag->src)
+                break;
+        }
+    }
+    for (int a = 0; a < 16; a++) {
+        if (ag->action[ag->src] == a)
+            continue;
+        if (at[a] < 0) {
+            ag->fallback[ag->src][a] = -1;
+            continue;
+        }
+        for (int c = at[a], p; ; c = p) {
+            p = ag->pred[c];
+            const MoveState *s = &g->states[p];
+            int i = 0;
+            while (i < s->ntrans && !(s->trans[i].target == c && usable(&s->trans[i], call, ctx) != 2 &&
+                                      target_ok(g, &s->trans[i])))
+                i++;
+            ag->fallback[p][a] = (int8_t)(i < s->ntrans ? i : -1);
+            if (p == ag->src)
+                break;
+        }
+    }
+}
+
+static void search_step(DirGraph *ag, const MoveGraph *g, int state, float step, int nai, MoveCall call, void *ctx)
+{
+    if (!ag->cost || ag->n > g->n)
+        return;
+    if (ag->nq == 0) {                               /* begin from the state it is in */
+        ag->src = state;
+        for (int k = 0; k < ag->n; k++) {
+            ag->cost[k] = 100000.0f;
+            ag->pred[k] = 0xFF;
+            ag->mark[k] = 0;
+        }
+        ag->cost[state] = step;
+        ag->mark[state] = SM_DONE;
+        search_expand(ag, g, state, 0, step, 1, call, ctx);
+    }
+    int budget = 17 / (nai > 0 ? nai : 1);
+    for (int n = 0; ag->nq > 0 && n != budget; n++) {
+        int pick = 0;
+        float least = 100000.0f;
+        for (int q = 0; q < ag->nq; q++)
+            if (ag->cost[ag->queue[q]] < least) {
+                least = ag->cost[ag->queue[q]];
+                pick = q;
+            }
+        int k = ag->queue[pick];
+        memmove(&ag->queue[pick], &ag->queue[pick + 1], (size_t)(ag->nq - pick - 1));
+        ag->nq--;
+        ag->mark[k] = SM_DONE;
+        search_expand(ag, g, k, ag->cost[k], step, 0, call, ctx);
+    }
+    if (ag->nq == 0)
+        search_write(ag, g, call, ctx);
 }
 
 /* The AI's pick (0x2F2630 by action, 0x2F2970 by state): of the current state's transitions in their input window and
@@ -1142,8 +1270,8 @@ static int destroy_update(DirAI *ai, const DirGraph *ag, MoveRunner *r, float dt
 
 /* dt: the clip's time (the speed scale's, 0x2EBFE0); world_dt: the world's step, which the goals' clocks count (gWorld
  * +4: 0x2F0838, 0x2F087C, 0x2F08BC) [R] */
-int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, float world_dt, MoveCall call,
-                void *ctx)
+int dir_ai_step(DirAI *ai, DirGraph *ag, MoveRunner *r, const float pos[3], float dt, float world_dt, int nai,
+                MoveCall call, void *ctx)
 {
     ai->done = 0;
     ai->stick[0] = ai->stick[1] = 0;                 /* +0x0 and +0xC cleared each frame [R 0x2EE430] */
@@ -1166,6 +1294,7 @@ int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3]
         if (in_window(t->in0, t->in1, prev, r->time)) r->in_window[i] = 1;
         if (in_window(t->sw0, t->sw1, prev, r->time)) r->sw_window[i] = 1;
     }
+    search_step(ag, g, r->state, world_dt, nai, call, ctx);   /* 0x2EE430 -> 0x2F2D60 [R] */
     /* 0x2EE430: the current goal, or the next one; over: out of the queue, and the idle asked for at once */
     int running = 0;
     if (ai->n > 0) {

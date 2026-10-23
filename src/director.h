@@ -46,6 +46,12 @@ typedef struct {
     int8_t *action;          /* per state: its node's action code (node +0x3C), DA_* */
     int8_t (*fallback)[16];  /* per state and action: the transition to pick when none is found (state +0x18), -1 */
     uint8_t *hop;            /* n x n after the states: [from * n + to] the next state on the way, 0xFF none */
+    /* the search the AI runs over the graph a few states a frame (0x2F2D60, the AI's pad +0x10 .. +0x5C), which
+     * writes hop and fallback anew from the state it began in each time it ends */
+    int src;                 /* +0x10: the state it began in */
+    float *cost;             /* +0x5C per state: +0x8 the time to it */
+    uint8_t *pred, *mark;    /* +0xC the state before it (0xFF none); bit 0 queued (+0x1C), bit 1 done (+0x3C) */
+    uint8_t *queue; int nq;  /* +0x14 / +0x18: the list, in the order they were queued */
 } DirGraph;
 int dir_graph_read(const Bundle *monster, DirGraph *ag);   /* 0 = ok */
 void dir_graph_free(DirGraph *ag);
@@ -152,12 +158,13 @@ void dir_ai_on_hit(DirAI *ai, const float off[3], int mirror);
 void dir_ai_on_mount(DirAI *ai, int b, int rail, int width);
 void dir_ai_avoid(DirAI *ai, int b, const DirBotView *view);
 
-/* One frame of an AI monster (setIsAI(1)) in place of moves_step: the windows (0x2EBFE0), the goals (0x2EE430) and
- * their picks, the switch. pos: the monster's root position. call answers the transitions' script checks (as for
- * moves_step). Returns 1 when the state changed (r->from, r->via as moves_step: via -1 = forced or the clip ended);
- * ai->stick and ai->done are set. */
-int dir_ai_step(DirAI *ai, const DirGraph *ag, MoveRunner *r, const float pos[3], float dt, float world_dt, MoveCall call,
-                void *ctx);
+/* One frame of an AI monster (setIsAI(1)) in place of moves_step: the windows (0x2EBFE0), the search over the graph
+ * (0x2F2D60, which rewrites ag's hop and fallback), the goals (0x2EE430) and their picks, the switch. pos: the
+ * monster's root position; nai: the AI monsters in play (setIsAI and not hidden), who share the search's 17 states a
+ * frame. call answers the transitions' script checks (as for moves_step). Returns 1 when the state changed (r->from,
+ * r->via as moves_step: via -1 = forced or the clip ended); ai->stick and ai->done are set. */
+int dir_ai_step(DirAI *ai, DirGraph *ag, MoveRunner *r, const float pos[3], float dt, float world_dt, int nai,
+                MoveCall call, void *ctx);
 
 /* ================================================================ the camera */
 
