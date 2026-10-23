@@ -122,6 +122,7 @@ typedef struct Mon {
     ArmyMonWeapons weapons;                          /* its WeaponList (+0xC5E4, army.c): the roar's Shockwave */
     int pending_slot;                                /* a reaction the army caused: started at the next step, -1 */
     float turn_from, turn_to, turn_left, turn_len;   /* a hit's turn to face it (degrees, seconds; hit_turn) */
+    float lift, lift_left, lift_len;                 /* a hit's move of its place in z over the blend (hit_turn) */
     int defeated;                                    /* its HP ran out: React_Defeated .. the respawn */
     float look_yaw, look_pitch;                      /* the head animator's angles now (+0xBC, +0xE8) */
     float scale, scale_from, scale_to, scale_time, scale_left;   /* setDynamicScale */
@@ -625,7 +626,7 @@ static void start_moves(Mon *mo)
     mo->held_parade = -1;
     mo->held_sobj = -1;
     mo->pending_slot = -1;
-    mo->turn_left = 0;
+    mo->turn_left = mo->lift_left = 0;
     mo->defeated = 0;
     mo->human = mo->dropping = 0;                    /* (a game quit with its streaker running or dropping in: the
                                                       * next one's camera framed no monster, its view never set) */
@@ -4293,14 +4294,32 @@ static int monster_hittable(const Mon *mo)
  * a new state (+0x110 changed) turns the monster over that state's blend time (+0xBA54): its front onto -d, its back
  * when hit from behind, the short way about z; none in mode 4 or with d's flat length squared 1e-6 or less. d: a
  * monster's blow the attacker's front (victim - attacker for an aiming state), a shot's or TakeDamage's knock at
- * level 2 only. Not ported: the same transition's place, lowered in modes 1 and 2 to the new clip's root */
+ * level 2 only. Over the same time its place goes to where the hit left it, lowered in modes 1 and 2 (in the air,
+ * taking off) by the new clip's root at its start less the pose's (node 0's z, +0xB20), x its scale (0x2D9248 ..
+ * 0x2D92A0), so the body goes on where it was: the turn's quaternion and the place both blended by 0x2E2130, the
+ * place's two ends moved on as the monster moves (0x2DEE40, 0x2DF86C) [R]. Here a move added over the blend on top of
+ * the rest [G: taking off, the ground follow (0x2E0330) eases it as it comes; whether the game's follows the blended
+ * place or is overwritten by it each frame was not traced] */
 static void hit_turn(Mon *mo, int was, const float d[2], int behind)
 {
-    if (mo->pending_slot < 0 || mo->pending_slot == was || mo->mode == MODE_PRONE || !mo->have_graph ||
-        d[0] * d[0] + d[1] * d[1] <= 1e-6f)
+    if (mo->pending_slot < 0 || mo->pending_slot == was || !mo->have_graph)
         return;
     int k = moves_slot(&mo->graph, mo->pending_slot, mo->column);
     if (k < 0)
+        return;
+    const Instance *in = mon_in(mo);
+    float root[3];
+    mo->lift_left = 0;
+    if ((mo->mode == MODE_AIRBORNE || mo->mode == MODE_TAKEOFF) && in && in->node && in->tree.n &&
+        scene_monster_clip_root(&mo->v->scene, mo->slot, mo->graph.states[k].clip, 0, root) == 0) {
+        mo->lift = -(root[2] - in->node[0].m[14]) * (mo->scale > 0 ? mo->scale : 1);
+        mo->lift_len = mo->lift_left = mo->graph.states[k].blend;
+        if (mo->lift_len <= 0.001f) {
+            mo->mz += mo->lift;
+            mo->lift_left = 0;
+        }
+    }
+    if (mo->mode == MODE_PRONE || d[0] * d[0] + d[1] * d[1] <= 1e-6f)
         return;
     float fx = behind ? d[0] : -d[0], fy = behind ? d[1] : -d[1];   /* where the front goes */
     float to = atan2f(-fx, fy) * 57.2957795f;        /* the heading whose front (-sin h, cos h) that is */
@@ -6075,6 +6094,11 @@ static void mon_step(Mon *mo, float dt)
             mo->turn_left -= dt;
             float t = mo->turn_left > 0 ? 1 - mo->turn_left / mo->turn_len : 1;
             mo->heading = mo->turn_from + (mo->turn_to - mo->turn_from) * t;
+        }
+        if (mo->lift_left > 0) {                     /* and its place's move, over what else moved it */
+            float was_t = 1 - mo->lift_left / mo->lift_len;
+            mo->lift_left -= dt;
+            mo->mz += mo->lift * ((mo->lift_left > 0 ? 1 - mo->lift_left / mo->lift_len : 1) - was_t);
         }
         mo->heading = fmodf(mo->heading + 360, 360);
         if (getenv("RAMPAGE_TRACE") && mo->slot)

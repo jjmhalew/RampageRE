@@ -414,6 +414,9 @@ void scene_monster_blend_step(Scene *s, int k, float dt);   /* the clip of that 
 void scene_cloth_step(Scene *s, float dt);          /* play time for the cloths, simulated at the next posing */
 /* the root node's translation and rotation in the monster's clip at `seconds`; 0 = ok */
 int scene_monster_root(const Scene *s, int k, double seconds, float t[3], float q[4]);
+/* the same root's translation in the monster's clip of that name (any case, as scene_monster_play) at `seconds`,
+ * before it plays; 0 = ok */
+int scene_monster_clip_root(const Scene *s, int k, const char *clip, double seconds, float t[3]);
 /* a bake (0x300FE0): the root of the pose kept for the blend (and the last one) set to this (the new clip's at its start) */
 void scene_monster_hold_root(Scene *s, int k, const float t[3], const float q[4]);
 /* the side it is drawn on (mirrored or not); a blend under way keeps the pose it had as it was drawn */

@@ -4619,6 +4619,35 @@ int scene_monster_root(const Scene *s, int k, double seconds, float t[3], float 
     return 0;
 }
 
+int scene_monster_clip_root(const Scene *s, int k, const char *clip, double seconds, float t[3])
+{
+    const Instance *in = mon_inst(s, k);
+    if (!in || !s->mon[k].anims || !clip)
+        return -1;
+    const Bundle *ab = s->mon[k].anims;
+    for (uint32_t i = 0; i < ab->nentries; i++) {
+        const BdpEntry *e = &ab->entries[i];
+        if (e->type != ET_ANIM)
+            continue;
+        const char *n = bdp_name(ab, e->name);
+        if (!strncmp(n, "000", 3))
+            n += 3;
+        Clip c;
+        if (_stricmp(n, clip) != 0 || clip_read(e, &c) != 0)
+            continue;
+        int found = -1;
+        for (uint32_t j = 0; j < in->tree.n && found < 0; j++) {   /* the root as scene_monster_root picks it */
+            float q[4];
+            memcpy(t, in->tree.nodes[j].t, sizeof in->tree.nodes[j].t);
+            if (in->tree.nodes[j].parent < 0 && clip_pose(&c, seconds, j, t, q))
+                found = (int)j;
+        }
+        clip_free(&c);
+        return found >= 0 ? 0 : -1;
+    }
+    return -1;
+}
+
 /* 0x300FE0 [R] (only from the bake, 0x2E6580): the new clip's root where it starts goes into the root of both pose
  * buffers, the one posed (+0x29C4) and the one kept for the blend (+0x29C0), so the root does not blend from where the
  * old clip had it: the monster was moved so that the new root stands there */

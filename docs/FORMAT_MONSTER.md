@@ -398,6 +398,14 @@ when knocked down. Hits pick their slot by the victim's mode (the table 0x431270
 `army_reaction_slot`). That is why
 `Jump_Air_Borne_Descend` has no landing transition: the landing comes from the slot.
 
+A hit that posts a new state blends the monster into it over that state's blend time (+0xBA54, its node +0x14;
+0x2D8C30 .. 0x2D9324, applied by 0x2E2130 from the modes' updates) [R]: the turn onto the blow (main.c `hit_turn`)
+and its place, from where the hit left it to a target that in modes 1 and 2 (in the air, taking off) is lowered by
+the new clip's root z at its start less the pose's (node 0's, +0xB20), x the scale. So the body goes on where it
+was: George hit in `Jump_Air_Borne` (root 4.42) goes into `React_Airborne` (2.27) with his place raised 2.15 over
+0.2 s. Both ends move on with the monster meanwhile (in the air its velocity, 0x2DEE40; on the ground its root's
+travel, 0x2DF86C).
+
 ## At run time
 A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next one, +0x8 the transition taken,
 +0x10 the time, +0x18 the monster, +0x1E the transition picked.
