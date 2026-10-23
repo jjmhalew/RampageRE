@@ -11,6 +11,8 @@
 
 #define UNSET (-1)
 static const char *const SMAA_NAMES[5] = { "off", "low", "medium", "high", "ultra" };
+static const char *const LANGUAGE_NAMES[8] = { "japanese", "english", "french", "spanish", "german", "italian", "dutch",
+                                               "portuguese" };
 
 static void defaults(Settings *s)
 {
@@ -19,12 +21,13 @@ static void defaults(Settings *s)
     s->aniso = 1; s->mips = 0;
     s->smaa = 0; s->msaa = 0;
     s->profile_autoload = 1;
+    s->language = 1;
 }
 
 void settings_unset(Settings *f)
 {
     f->width = f->height = f->fullscreen = f->vsync = f->ao = f->aniso = f->mips = f->smaa = f->msaa = UNSET;
-    f->profile_autoload = UNSET;
+    f->profile_autoload = f->language = UNSET;
     f->ao_radius = UNSET;
 }
 
@@ -39,6 +42,14 @@ static int smaa_of(const char *v)                    /* 0..4 or off / low / medi
     int n = atoi(v);
     return n < 0 ? 0 : n > 4 ? 4 : n;
 }
+static int language_of(const char *v)                /* 0..7 or japanese .. portuguese; -1 neither */
+{
+    for (int k = 0; k < 8; k++)
+        if (!_stricmp(v, LANGUAGE_NAMES[k]))
+            return k;
+    return isdigit((unsigned char)v[0]) && atoi(v) < 8 ? atoi(v) : -1;
+}
+const char *settings_language_name(int language) { return LANGUAGE_NAMES[language >= 0 && language < 8 ? language : 1]; }
 static int size_of(const char *v, int *w, int *h)    /* WxH */
 {
     int a, b;
@@ -63,6 +74,11 @@ static int set(Settings *s, const char *key, const char *v)
     else if (!_stricmp(key, "smaa")) s->smaa = smaa_of(v);
     else if (!_stricmp(key, "msaa")) s->msaa = clamp_msaa(atoi(v));
     else if (!_stricmp(key, "profile_autoload")) s->profile_autoload = atoi(v) != 0;
+    else if (!_stricmp(key, "language")) {
+        int l = language_of(v);
+        if (l >= 0) s->language = l;
+        else printf("settings: language=%s is none of english, french, german, italian, spanish, ...\n", v);
+    }
     else return 0;
     return 1;
 }
@@ -96,7 +112,7 @@ static void read_cfg(Settings *s, const char *path)
 static void read_env(Settings *s)
 {
     static const char *const KEYS[] = { "window", "fullscreen", "vsync", "ao", "ao_radius", "aniso", "mips", "smaa", "msaa",
-                                        "profile_autoload" };
+                                        "profile_autoload", "language" };
     for (size_t k = 0; k < sizeof KEYS / sizeof *KEYS; k++) {
         char name[32];
         snprintf(name, sizeof name, "RAMPAGE_%s", KEYS[k]);
@@ -124,6 +140,10 @@ int settings_arg(Settings *f, int argc, char **argv, int *i)
     else if (v && !strcmp(a, "--msaa")) { f->msaa = clamp_msaa(atoi(v)); ++*i; }
     else if (v && !strcmp(a, "--aniso")) { f->aniso = clamp_aniso(atoi(v)); ++*i; }
     else if (v && !strcmp(a, "--vsync")) { f->vsync = atoi(v) != 0; ++*i; }
+    else if (v && !strcmp(a, "--language")) {
+        if ((f->language = language_of(v)) < 0) printf("--language %s is none of english, french, german, ...\n", v);
+        ++*i;
+    }
     else if (v && !strcmp(a, "--window")) {
         if (!size_of(v, &f->width, &f->height)) printf("--window %s is not WxH\n", v);
         ++*i;
@@ -148,6 +168,7 @@ void settings_resolve(Settings *s, const Settings *f, int use_cfg)
     if (f->smaa != UNSET) s->smaa = f->smaa;
     if (f->msaa != UNSET) s->msaa = f->msaa;
     if (f->profile_autoload != UNSET) s->profile_autoload = f->profile_autoload;
+    if (f->language >= 0) s->language = f->language;
 }
 
 static void apply_render(const Settings *s)
@@ -240,6 +261,8 @@ void settings_graphics(Settings *s, Window *w, const Settings *to)
     s->mips = to->mips;
     s->fullscreen = to->fullscreen;
     s->vsync = to->vsync;
+    if (to->language >= 0 && to->language < 8)
+        s->language = to->language;
     apply_render(s);
     if (!w->hidden && mode)
         win_mode(w, s->width, s->height, s->fullscreen);
@@ -250,7 +273,7 @@ void settings_graphics(Settings *s, Window *w, const Settings *to)
 
 int settings_save(const Settings *s, const char *path)
 {
-    static const char *const KEYS[] = { "fullscreen", "vsync", "ao", "smaa", "msaa", "aniso", "mips" };
+    static const char *const KEYS[] = { "fullscreen", "vsync", "ao", "smaa", "msaa", "aniso", "mips", "language" };
     enum { NK = sizeof KEYS / sizeof *KEYS, MAXL = 256 };
     char val[NK][16], *lines[MAXL], line[512];
     int n = 0, done[NK] = { 0 };
@@ -261,6 +284,7 @@ int settings_save(const Settings *s, const char *path)
     snprintf(val[4], sizeof val[4], "%d", s->msaa);
     snprintf(val[5], sizeof val[5], "%d", s->aniso);
     snprintf(val[6], sizeof val[6], "%d", s->mips);
+    snprintf(val[7], sizeof val[7], "%s", settings_language_name(s->language));
     FILE *f = fopen(path, "r");
     if (f) {
         while (n < MAXL && fgets(line, sizeof line, f)) {

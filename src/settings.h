@@ -17,6 +17,10 @@ typedef struct {
     /* profile_autoload= (port extra, docs/NATIVE.md "The profile at launch"): 1 (the default) loads the profile file at
      * launch as if picked from the list, and with none opens the name entry once; 0 the game's way */
     int profile_autoload;
+    /* language= (port extra, docs/NATIVE.md "Graphics settings"): the console's language, as sceScfGetLanguage answers it (0
+     * japanese, 1 english, 2 french, 3 spanish, 4 german, 5 italian, 6 dutch, 7 portuguese), which the game takes at
+     * start-up for its texts and movies; the default english */
+    int language;
 } Settings;
 
 void settings_unset(Settings *flags);                /* nothing given yet (for settings_arg) */
@@ -30,9 +34,11 @@ void settings_apply(const Settings *s, Window *w);
  * then no press); 1 = something changed (applied and printed) */
 int  settings_keys(Settings *s, Window *w);
 /* the graphics of `to` (ao, smaa, msaa, aniso, mips, fullscreen, vsync) into s, applied (the window's mode and vsync
- * only when they change) and printed: the Options' Graphics page (shell.h ShellGraphics) */
+ * only when they change) and printed, and its language (taken at the next start): the Options' Graphics page (shell.h ShellGraphics) */
 void settings_graphics(Settings *s, Window *w, const Settings *to);
-/* those seven into the file (rampage.cfg): each key's line changed in place (its comment kept), the missing ones added
+/* the console languages' names (settings.h's language: "japanese" .. "portuguese") */
+const char *settings_language_name(int language);
+/* those eight (the seven and the language) into the file (rampage.cfg): each key's line changed in place (its comment kept), the missing ones added
  * at the end, every other line as it was; 0 written */
 int  settings_save(const Settings *s, const char *path);
 /* the effects that are on, for the title (", AO, SMAA high, ..."; "" none) */

@@ -88,8 +88,9 @@ one: George, Lizzie, Ralph or Boosy, the first not taken). Controllers play too 
 first one, player 2 on the second, players 3 and 4 on the third and fourth; without one, players 3 and 4 and the bots
 are computer-driven (below, "Several monsters"); the front end (`--shell`) hands its players, bots and monsters over the same way. `--cam x y z yaw pitch` (degrees) draws the shot from a fixed view. `--play kingcity|kingworld|timed` plays another mode than the campaign
 (its results screens). `--lang N` picks the texts' language (the .loc column: 0 English, 1 English 2, 2 Japanese,
-3 French, 4 German, 5 Italian, 6 Spanish, 7 Dutch, 8 Portuguese; without it the game's own pick for an English
-console, `console_language` [R 0x10D300]: English 2 on the European disc, English on the USA one); `--card-free-kb N` the "memory card"'s free room
+3 French, 4 German, 5 Italian, 6 Spanish, 7 Dutch, 8 Portuguese; without it `rampage.cfg`'s `language=`, the console's language as the game
+picks its column from it, `console_language` [R 0x10D300]: English 2 on the European disc, English on the USA one;
+see "Graphics settings"); `--card-free-kb N` the "memory card"'s free room
 (a save needs 140; else the drive's). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
@@ -427,6 +428,7 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | MSAA | `msaa=0` | `--msaa N` | `RAMPAGE_MSAA` | F7 (cycles) | multisampling, 0, 2, 4, 8 samples: polygon edges only |
 | anisotropy | `aniso=1` | `--aniso N` | `RAMPAGE_ANISO` | F8 (cycles) | `GL_TEXTURE_MAX_ANISOTROPY` 1 (off), 2, 4, 8, 16 on the world's textures: streets and walls at a grazing angle stay sharp |
 | the profile at launch | `profile_autoload=1` | `--autoload`, `--noautoload` | `RAMPAGE_PROFILE_AUTOLOAD` | | not graphics, but read the same way: see "The profile at launch" below |
+| language | `language=english` | `--language NAME` | `RAMPAGE_LANGUAGE` | | not graphics either: the console's language (`english`, `french`, `german`, `italian`, `spanish`; `japanese`, `dutch`, `portuguese` as the game takes them, English), which the PS2 game reads at start-up (sceScfGetLanguage, 0x10D300) for its texts and movies (the intro and Victory have French, German, Italian and Spanish cuts); `--lang N` picks a .loc column itself |
 | mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
 
 **rampage.cfg** is read from the current directory (next to `rampage_profile.bin`) before the window opens: one
@@ -436,7 +438,9 @@ the settings as `rampage.cfg` lines (`graphics: ao=1 ...`) and in the title, wit
 **The Graphics page** (shell.c `op_graphics_*`, hud.c `pause_graphics_*`): the Options screen of the main menu, and
 the Pause menu's Options, have a third button, Triangle **Graphics** (key V), next to Cancel and Accept. It opens a page in the same frame,
 widened and made taller, whose rows are copies of the Vibration row: Ambient Occlusion, SMAA (off, low, medium, high,
-ultra), MSAA (off, 2x, 4x, 8x), Texture Filter (anisotropy: off, 2x .. 16x), Mipmaps, Fullscreen and VSync. Up and
+ultra), MSAA (off, 2x, 4x, 8x), Texture Filter (anisotropy: off, 2x .. 16x), Mipmaps, Fullscreen, VSync and Language
+(EN, FR, DE, IT, ES: `language=`; each screen reads its texts as it loads, so like the console's setting it counts
+from the next start, and Defaults leaves it). Up and
 down choose the row (its title pulses), left and right the value, which is applied at once. On the page the button is
 Square **Defaults** (key C): every row back to the defaults above (all off, VSync on), applied at once too. Accept keeps them and
 writes them to `rampage.cfg` (`settings_save`: each key's line changed in place with its comment, the missing keys

@@ -263,7 +263,7 @@ void hud_settings(const Hud *h, float *sound, float *music, int *rumble);
 /* port extra (docs/NATIVE.md "Graphics settings"): the graphics settings the Pause menu's Options' Graphics page shows,
  * in settings.h's values (as shell.h's ShellGraphics). The viewer gives the ones in use every frame (the page takes
  * them as it opens); hud_graphics is the page's, after HUD_CALL_GRAPHICS */
-typedef struct { int ao, smaa, msaa, aniso, mips, fullscreen, vsync; } HudGraphics;
+typedef struct { int ao, smaa, msaa, aniso, mips, fullscreen, vsync, language; } HudGraphics;
 void hud_set_graphics(Hud *h, const HudGraphics *g);
 const HudGraphics *hud_graphics(const Hud *h);
 /* what the Pause menu asks of gSndDev / gCommon since the last call (the same call twice in a row: the last kept) */

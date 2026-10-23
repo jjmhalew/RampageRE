@@ -3996,6 +3996,18 @@ static void game_step(Viewer *v, float dt)
         }
 }
 
+/* gApp +0x70 from the console's language [R 0x10D300: sceScfGetLanguage 0 Japanese, 1 English, 2 French, 3 Spanish,
+ * 4 German, 5 Italian, 6 Dutch, 7 Portuguese; English and Japanese are English 2 on the European disc (region 1),
+ * Dutch and Portuguese English, any other 0], less 1: the .loc column (hud.h) */
+static int console_language(int scf, int region)
+{
+    static const int LANG[8] = { 3, 1, 4, 7, 5, 6, 1, 1 };
+    int l = scf >= 0 && scf < 8 ? LANG[scf] : 0;
+    if (region == 1 && (l == 1 || scf == 0))
+        l = 2;
+    return l - 1;
+}
+
 /* a Graphics page's values (the front end's; the Pause menu's HudGraphics copied into one) into the
  * settings, applied; keep: the page's Accept, written to rampage.cfg (not by --shot runs) */
 static void graphics_from_menu(Viewer *v, const ShellGraphics *g, int keep)
@@ -4004,8 +4016,11 @@ static void graphics_from_menu(Viewer *v, const ShellGraphics *g, int keep)
         return;
     Settings to = *v->gfx;
     to.ao = g->ao; to.smaa = g->smaa; to.msaa = g->msaa; to.aniso = g->aniso; to.mips = g->mips;
-    to.fullscreen = g->fullscreen; to.vsync = g->vsync;
+    to.fullscreen = g->fullscreen; to.vsync = g->vsync; to.language = g->language;
     settings_graphics(v->gfx, v->win, &to);
+    if (keep && console_language(v->gfx->language, v->region) != v->lang)   /* (each screen's texts are read as it
+                                                                              * loads: the start's language stays) */
+        printf("settings: language=%s from the next start\n", settings_language_name(v->gfx->language));
     if (keep && v->gfx_write)
         settings_save(v->gfx, "rampage.cfg");
 }
@@ -4052,7 +4067,8 @@ static void hud_frame(Viewer *v, int after)
         switch (calls[i].call) {
         case HUD_CALL_GRAPHICS: {                    /* the Pause menu's Graphics page: tried, put back or kept */
             const HudGraphics *hg = hud_graphics(v->hud);
-            ShellGraphics g = { hg->ao, hg->smaa, hg->msaa, hg->aniso, hg->mips, hg->fullscreen, hg->vsync };
+            ShellGraphics g = { hg->ao, hg->smaa, hg->msaa, hg->aniso, hg->mips, hg->fullscreen, hg->vsync,
+                                hg->language };
             graphics_from_menu(v, &g, calls[i].arg);
             break;
         }
@@ -7944,10 +7960,10 @@ static void shell_give_graphics(Viewer *v)
     if (!v->gfx)
         return;
     ShellGraphics g = { v->gfx->ao, v->gfx->smaa, v->gfx->msaa, v->gfx->aniso, v->gfx->mips, v->gfx->fullscreen,
-                        v->gfx->vsync };
+                        v->gfx->vsync, v->gfx->language };
     if (v->shell)
         shell_set_graphics(v->shell, &g);
-    HudGraphics hg = { g.ao, g.smaa, g.msaa, g.aniso, g.mips, g.fullscreen, g.vsync };
+    HudGraphics hg = { g.ao, g.smaa, g.msaa, g.aniso, g.mips, g.fullscreen, g.vsync, g.language };
     if (v->hud)
         hud_set_graphics(v->hud, &hg);
 }
@@ -8305,18 +8321,6 @@ static void gui_log_bound(void)                      /* a bound for whatever sti
 #define DEBUG_TITLE 1                                /* city, block, clip, triangles, fps and effects in the title */
 #endif
 
-/* gApp +0x70 from the console's language [R 0x10D300: sceScfGetLanguage 0 Japanese, 1 English, 2 French, 3 Spanish,
- * 4 German, 5 Italian, 6 Dutch, 7 Portuguese; English and Japanese are English 2 on the European disc (region 1),
- * Dutch and Portuguese English, any other 0], less 1: the .loc column (hud.h) */
-static int console_language(int scf, int region)
-{
-    static const int LANG[8] = { 3, 1, 4, 7, 5, 6, 1, 1 };
-    int l = scf >= 0 && scf < 8 ? LANG[scf] : 0;
-    if (region == 1 && (l == 1 || scf == 0))
-        l = 2;
-    return l - 1;
-}
-
 static int viewer_main(int argc, char **argv)
 {
     static Viewer v;
@@ -8457,7 +8461,7 @@ static int viewer_main(int argc, char **argv)
         plat_message(msg, 1);
     v.region = data_region(pos[0], &v.vol);
     if (v.lang < 0)
-        v.lang = console_language(1, v.region);      /* an English console */
+        v.lang = console_language(gfx.language, v.region);   /* rampage.cfg's language= (settings.h) */
     int city = 0;
     for (int i = 0; i < NCITIES; i++)
         if (_stricmp(pos[1], CITIES[i]) == 0)

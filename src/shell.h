@@ -223,7 +223,7 @@ void shell_settings(const Shell *s, float *sound, float *music, int *rumble);
 /* port extra (docs/NATIVE.md "Graphics settings"): the graphics settings the Options' Graphics page shows, in
  * settings.h's values (smaa 0 .. 4, msaa 0 2 4 8, aniso 1 2 4 8 16, the rest 0 / 1). The viewer gives the ones in use
  * every frame (the page takes them as it opens); shell_graphics is the page's, after SHELL_EVT_GRAPHICS */
-typedef struct { int ao, smaa, msaa, aniso, mips, fullscreen, vsync; } ShellGraphics;
+typedef struct { int ao, smaa, msaa, aniso, mips, fullscreen, vsync, language; } ShellGraphics;   /* (language: settings.h's) */
 void shell_set_graphics(Shell *s, const ShellGraphics *g);
 const ShellGraphics *shell_graphics(const Shell *s);
 /* MonsterSelect::onGetBuddyProfileCallback(player): the buddy profile for player n was loaded (its monster flags in

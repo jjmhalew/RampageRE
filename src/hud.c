@@ -30,8 +30,8 @@
 #define HUD_PI 3.14159265f
 #define MAX_NODES 160                                    /* (Pause: 79, and its Graphics page's 39) */
 /* the Pause menu's Graphics page (pause_graphics_build) */
-#define GFX_ROWS 7
-#define GFX_EXTRA 86.0f                                  /* the frame's height added for the page */
+#define GFX_ROWS 8
+#define GFX_EXTRA 116.0f                                  /* the frame's height added for the page */
 #define GFX_WIDER 60.0f                                  /* and its width, half each side */
 #define GFX_Y0 80.0f                                     /* the first row, in the Options group's frame */
 #define GFX_PITCH 30.0f
@@ -4042,11 +4042,14 @@ static const struct { const char *title; int n; const char *items[5]; int values
     { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 }, 0 },
     { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
     { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
-    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 } };   /* (def: the item of settings.c's default) */
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 },
+    /* the console's language (settings.h), taken at the next start: Defaults leaves it */
+    { "Language:", 5, { "EN", "FR", "DE", "IT", "ES" }, { 1, 2, 4, 5, 3 }, -1 } };   /* (def: the item of settings.c's
+                                                                                     * default, -1 none) */
 
 static int *gfx_field(HudGraphics *g, int row)
 {
-    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync };
+    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync, &g->language };
     return f[row];
 }
 
@@ -4198,7 +4201,8 @@ static void pause_graphics_input(Hud *h, Screen *s, int ev, int button)
     if (ev == HUD_EV_BUTTON && button == 0) {            /* Square: the defaults */
         sound(h, "Click", 0);
         for (int i = 0; i < GFX_ROWS; i++)
-            list_select(s->g_lists[i], GFX_ROW[i].def);
+            if (GFX_ROW[i].def >= 0)
+                list_select(s->g_lists[i], GFX_ROW[i].def);
         pause_graphics_read(h, s);
         hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 0);
     } else if (ev == HUD_EV_ACCEPT) {
