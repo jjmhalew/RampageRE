@@ -3961,8 +3961,11 @@ static void op_graphics_build(Shell *s, Node *r)
         float x0 = many ? 0.0f : first->p[0], dx = many ? 52.0f : second->p[0] - first->p[0];
         for (int k = 2; k < GFX_ROW[i].n; k++)
             node_copy(L, second, l);
-        if (many)
+        if (many) {                                      /* (the list steps each text's width + <sp>,
+                                                          * layouts_lay: Vibration's own would run past the frame) */
+            l->lsp = 18;
             l->growth[0] = 1.0f + 0.5f * (l->growth[0] - 1.0f);
+        }
         int k = 0;
         for (Node *it = l->child; it; it = it->next, k++) {
             set_text(it, GFX_ROW[i].items[k]);
