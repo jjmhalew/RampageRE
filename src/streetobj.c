@@ -953,9 +953,10 @@ static void birds_fly(StreetObjs *s, StreetObj *o, int from_top)
     o->bird_fx = -1;
 }
 
-/* Billboard_2Part.bsf's onStartFall [R]: a pulse every frame and a SplineMover at 10 a second from where it is to 3
- * out (-y) and 3 up, then down to z -3 [G: straight between the points]; deleted at its end (onMoverCallback 2). A
- * front still falling starts again from where it is: the billboard's next blow calls it for each one still valid */
+/* Billboard_2Part.bsf's onStartFall [R]: a pulse every frame and a SplineMover at 10 a second from where it is (d 0)
+ * to 3 out (-y) and 3 up (d p1, the length there), then down to z -3 (d p2: that leg's own length, not the sum);
+ * deleted at its end (onMoverCallback 2). A front still falling starts again from where it is: the billboard's next
+ * blow calls it for each one still valid (clearPath: d back to 0) */
 static void part_start_fall(StreetObj *o)
 {
     if (o->kind != SK_2PART)
@@ -970,6 +971,9 @@ static void part_start_fall(StreetObj *o)
     o->path_at = 0;
     o->on_path = 1;
 }
+/* [R 0x33ACA0, the curve 0x13B780 with the tangents 0x13B2F0 as boss.c's sp_eval] d grows 10 a second; the place
+ * is the Hermite curve between the two points whose d hold it, each point's tangent half of (p - prev) + (next - p),
+ * an end its own neighbour; past the last point's d it stays there and answers 2 */
 static void part_move(StreetObjs *s, StreetObj *o)
 {
     float d1[3], d2[3];
@@ -977,12 +981,27 @@ static void part_move(StreetObjs *s, StreetObj *o)
         d1[k] = o->path[1][k] - o->path[0][k];
         d2[k] = o->path[2][k] - o->path[1][k];
     }
-    float l1 = len3(d1), l2 = len3(d2), t = (o->path_at += 10 * TIMESTEP);
-    for (int k = 0; k < 3; k++)
-        o->world[12 + k] = t < l1 ? o->path[0][k] + d1[k] * t / l1 :
-                           t < l1 + l2 ? o->path[1][k] + d2[k] * (t - l1) / l2 : o->path[2][k];
+    float d[3] = { 0, len3(d1), len3(d2) };
+    float u = (o->path_at += 10 * TIMESTEP);
+    int end = u > d[2];
+    if (end)
+        u = o->path_at = d[2];
+    if (u <= d[0])
+        memcpy(&o->world[12], o->path[0], sizeof o->path[0]);
+    else if (u >= d[2])
+        memcpy(&o->world[12], o->path[2], sizeof o->path[2]);
+    else {
+        int i = u >= d[1];
+        float l = d[i + 1] - d[i], t = l > 0 ? (u - d[i]) / l : 1, t2 = t * t, t3 = t2 * t;
+        float h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+        for (int k = 0; k < 3; k++) {
+            float m0 = 0.5f * (o->path[i + 1][k] - o->path[i > 0 ? i - 1 : 0][k]);
+            float m1 = 0.5f * (o->path[i + 1 < 2 ? i + 2 : 2][k] - o->path[i][k]);
+            o->world[12 + k] = h00 * o->path[i][k] + h10 * m0 + h01 * o->path[i + 1][k] + h11 * m1;
+        }
+    }
     o->moved = 1;
-    if (t >= l1 + l2)
+    if (end)
         request_delete(s, o);
 }
 /* onPulse [R]: turning about its own y at 2 pi a second, fRotDir (+1 when Construct's gWorld.frand() < 0.5, else -1) */

@@ -363,9 +363,11 @@ BillboardKenoMarquee, BillboardPrimeRibMarquee, the invisible BirdsOnlyInvisBill
   birds fly from where they sat; it falls (fFalling 4). The marquees stand on the street in no building's
   footprint, so their buildings never take them.
 - **Billboard_2Part.bsf** (the breakaway fronts): Construct picks fRotDir ±1 (+1 when `gWorld.frand() < 0.5`).
-  `onStartFall`: a pulse every frame and a SplineMover at 10 a second from where it is to 3 out (−y) and 3 up, then
-  down to z −3 [G: straight between the points], deleted at its end (`onMoverCallback(2)`). onPulse: turning about
-  its own y at 2π a second.
+  `onStartFall`: a pulse every frame and a SplineMover at 10 a second from where it is (d 0) to 3 out (−y) and 3 up
+  (d p1, the length of that leg), then down to z −3 (d p2, the length of that leg alone, not p1 + p2: a front at z 25.75
+  (Chicago 1) takes some 3.2 s, not 3.6), deleted at its end (`onMoverCallback(2)`). The way is the
+  SplineMover's curve (Kochanek-Bartels tangents with T = B = C = 0, BOSS_NOTES.md), so it arcs over the peak
+  rather than turning a corner there [R]. onPulse: turning about its own y at 2π a second.
 - The attachments without a script (the Midway logo and name) have no TakeDamage: blows pass them.
 - Here streetobj.c `SK_BILLBOARD`, `SK_2PART`, `SK_ATTACH`; `--do "strike k"` is a blow on street object k.
 
