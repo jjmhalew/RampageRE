@@ -8305,6 +8305,18 @@ static void gui_log_bound(void)                      /* a bound for whatever sti
 #define DEBUG_TITLE 1                                /* city, block, clip, triangles, fps and effects in the title */
 #endif
 
+/* gApp +0x70 from the console's language [R 0x10D300: sceScfGetLanguage 0 Japanese, 1 English, 2 French, 3 Spanish,
+ * 4 German, 5 Italian, 6 Dutch, 7 Portuguese; English and Japanese are English 2 on the European disc (region 1),
+ * Dutch and Portuguese English, any other 0], less 1: the .loc column (hud.h) */
+static int console_language(int scf, int region)
+{
+    static const int LANG[8] = { 3, 1, 4, 7, 5, 6, 1, 1 };
+    int l = scf >= 0 && scf < 8 ? LANG[scf] : 0;
+    if (region == 1 && (l == 1 || scf == 0))
+        l = 2;
+    return l - 1;
+}
+
 static int viewer_main(int argc, char **argv)
 {
     static Viewer v;
@@ -8316,6 +8328,7 @@ static int viewer_main(int argc, char **argv)
     v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
     v.card_free_kb = -1;
     v.left_block = -1;
+    v.lang = -1;                                     /* (no --lang: the console's, below) */
     int newprofile = 0;
     const char *cheat = NULL;
     double shot_time = 0;
@@ -8443,6 +8456,8 @@ static int viewer_main(int argc, char **argv)
     if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
         plat_message(msg, 1);
     v.region = data_region(pos[0], &v.vol);
+    if (v.lang < 0)
+        v.lang = console_language(1, v.region);      /* an English console */
     int city = 0;
     for (int i = 0; i < NCITIES; i++)
         if (_stricmp(pos[1], CITIES[i]) == 0)
