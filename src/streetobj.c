@@ -1512,15 +1512,20 @@ static void set_point(StreetObj *o, const float p[3])   /* setPoint */
     memcpy(o->world + 12, p, 3 * sizeof(float));
     o->moved = 1;
 }
-/* gWorld.createLineMover(): init(object, its place, to, speed, 0), setMover */
+/* gWorld.createLineMover(): init(object, its place, to, speed, 0), setMover; the init (0x317650) takes the object's
+ * MonsterResponseDist squared (+0x5C), -1 without [R] */
 static void line_mover(StreetObj *o, const float to[3], float speed)
 {
     memcpy(o->lm_to, to, sizeof o->lm_to);
     o->lm_speed = speed;
     o->lm_on = 1;
+    float r = onum(o, "MonsterResponseDist", -1);
+    o->lm_resp2 = r >= 0 ? r * r : -1;
 }
-/* the LineMover's step, straight at its speed [G: no easing]; 1 at its end (onMoverCallback) */
-static int line_step(StreetObj *o)
+/* the LineMover's step (0x315E10), straight at its speed [R: the place stays on the segment]; onMoverCallback: 2 at
+ * its end; while it simply moves, 4 with any monster nearer than MonsterResponseDist (3D, 0x316D60 .. 0x316E04);
+ * 0 none */
+static int line_step(StreetObjs *s, StreetObj *o)
 {
     float d[3], l = 0, p[3];
     for (int k = 0; k < 3; k++) {
@@ -1532,11 +1537,17 @@ static int line_step(StreetObj *o)
     if (l <= step) {
         set_point(o, o->lm_to);
         o->lm_on = 0;
-        return 1;
+        return 2;
     }
     for (int k = 0; k < 3; k++)
         p[k] = o->world[12 + k] + d[k] / l * step;
     set_point(o, p);
+    if (o->lm_resp2 > 0)
+        for (int i = 0; i < s->nm; i++) {
+            float e[3] = { p[0] - s->m[i].pos[0], p[1] - s->m[i].pos[1], p[2] - s->m[i].pos[2] };
+            if (e[0] * e[0] + e[1] * e[1] + e[2] * e[2] < o->lm_resp2)
+                return 4;
+        }
     return 0;
 }
 
@@ -1862,8 +1873,9 @@ static void kite_fly(StreetObj *o)
  * Loc1Y and back to y -3 at 6, and round again. Pickupable; held (onPickup) it stops for good, DamageShape; a monster's
  * blows take its HitPoints (1): HitEffect1 on it, and at the last (not held) DamageShape, HitEffect2 on it (with none:
  * the score, 2) and it flies off 25 a second away from the monster; thrown, landing or hit by a thrown object, or
- * after that flight: 1.5 s later it goes (ExplodeFX on it in its last quarter second). [G: not ported: the custom
- * collision the mover's callback 4 does on the x legs, a monster beside it pushed 0.3 towards the street] */
+ * after that flight: 1.5 s later it goes (ExplodeFX on it in its last quarter second). On the x legs it has no
+ * push-out (flag 0x4000) and its own collision (bDoCustomCollision): its LineMover's callback 4 (a monster within its
+ * MonsterResponseDist, 7.5) pushes the nearest monster, when on the forklift's level, 0.3 towards the street */
 static void fork_construct(StreetObj *o)
 {
     o->oflags |= SF_PUSH_OUT | SF_EFF_NODES | SF_PICKUP;
@@ -1895,10 +1907,12 @@ static void fork_next(StreetObj *o)
     int turned = o->flags & 1;
     if (o->state == 2) {
         if (!turned) { fork_turn(o, PI / 2); o->flags |= 1; return; }
+        o->custom = 1;
         o->oflags &= ~(uint32_t)SF_PUSH_OUT;
         fork_move(o, x, y, loc3x, y, 8);
         o->state = 3;
     } else if (o->state == 3) {
+        o->custom = 0;
         o->oflags |= SF_PUSH_OUT;
         if (!turned) { fork_turn(o, 0); o->flags |= 1; return; }
         fork_move(o, x, y, x, loc4y, 6);
@@ -1921,10 +1935,12 @@ static void fork_next(StreetObj *o)
         o->state = 7;
     } else if (o->state == 7) {
         if (!turned) { fork_turn(o, -PI / 2); o->flags |= 1; return; }
+        o->custom = 1;
         o->oflags &= ~(uint32_t)SF_PUSH_OUT;
         fork_move(o, x, y, loc1x, y, 8);
         o->state = 8;
     } else if (o->state == 8) {
+        o->custom = 0;
         o->oflags |= SF_PUSH_OUT;
         if (!turned) { fork_turn(o, 0); o->flags |= 1; return; }
         fork_move(o, x, -3, x, loc1y, 6);
@@ -1936,6 +1952,17 @@ static void fork_next(StreetObj *o)
     } else
         return;
     o->flags &= ~1;
+}
+/* onMoverCallback(4) [R]: whatever its state, with bDoCustomCollision the nearest monster (getNearestMonster), within
+ * 1.2 of the forklift's z, goes 0.3 to -y (queuePushRequest of its place so moved) */
+static void fork_push(StreetObjs *s, StreetObj *o)
+{
+    int m = nearest_monster(s, pos_of(o));
+    if (m < 0 || !o->custom || fabsf(s->m[m].pos[2] - o->world[14]) >= 1.2f)
+        return;
+    StreetEvent *e = monster_call(s, o, SE_MONSTER_PUSH, m);
+    memcpy(e->pos, s->m[m].pos, sizeof e->pos);
+    e->pos[1] += -0.3f;
 }
 static void fork_pulse(StreetObjs *s, StreetObj *o)
 {
@@ -2273,11 +2300,14 @@ static void step(StreetObjs *s)
             george_process(s, o);
         else if (o->kind == SK_CRANE && !s->deleting[i])
             crane_process(s, o);
-        if (o->lm_on && !s->deleting[i] && !(o->oflags & SF_HELD) && !o->flying && line_step(o)) {
-            if (o->kind == SK_KITE)                  /* onMoverCallback */
+        int cb = o->lm_on && !s->deleting[i] && !(o->oflags & SF_HELD) && !o->flying ? line_step(s, o) : 0;
+        if (cb) {                                    /* onMoverCallback */
+            if (o->kind == SK_KITE)
                 request_delete(s, o);
-            else if (o->kind == SK_FORK)
+            else if (o->kind == SK_FORK && cb == 2)
                 fork_next(o);
+            else if (o->kind == SK_FORK)
+                fork_push(s, o);
         }
         if (o->kind == SK_2PART && o->on_path && !s->deleting[i])   /* its SplineMover */
             part_move(s, o);

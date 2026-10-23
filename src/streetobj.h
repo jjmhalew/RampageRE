@@ -140,14 +140,16 @@ typedef struct {
     /* its model's nodes 1 and 2 in its own frame (the caller's, streetobj_nodes: getNodePosition) */
     float node[2][3];
     int nnode;
-    /* a LineMover (0x31C0B0: from where it is to `to` at `speed` a second; onMoverCallback at its end) */
-    float lm_to[3], lm_speed;
+    /* a LineMover (0x31C0B0: from where it is to `to` at `speed` a second; onMoverCallback at its end, and with a
+     * monster within lm_resp2: MonsterResponseDist squared, -1 none) */
+    float lm_to[3], lm_speed, lm_resp2;
     int lm_on;
     /* Crane.bsf: fallDir, vel, rbTime, hitPoints, crackingSfxDelay, dieDelay, cargoRotOffset.z, cargoProgress,
      * cargoDir, slideVel, rotMin, rotMax, rotVel (rotDir is rot_dir, axisA axis, totalAngle total_angle) */
     float fall_dir[3], vel[3], rb_time, hp, crack_delay, die_delay, cargo_rot, cargo_at, cargo_dir, slide_vel,
           rot_min, rot_max, rot_vel;
     float rot_start, rot_end, rot_cur;               /* ForkLift.bsf: startRotZ, endRotZ, curRotZ */
+    int custom;                                      /* ForkLift.bsf: bDoCustomCollision */
     int saved;                                       /* ... savedState */
 } StreetObj;
 
