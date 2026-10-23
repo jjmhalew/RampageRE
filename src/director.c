@@ -972,6 +972,8 @@ static void bot_on_roof(DirAI *ai, const DirGraph *ag, MoveRunner *r, const DirB
         if (bt->target >= 0 && bt->target != u) {
             const DirBuilding *t = &v->b[bt->target];
             float to[3] = { t->pos[0], (t->min[1] + t->max[1]) / 2, t->max[2] };
+            memcpy(bt->walk, to, sizeof to);         /* [R 0x2F0280 .. 0x2F02A8] the walk point and the side kept */
+            bt->side = pick_side(v, bt->target);
             float dx = to[0] - v->pos[0], dy = to[1] - v->pos[1], l = sqrtf(dx * dx + dy * dy);
             int toward = l > 1e-6f && (v->fwd[0] * dx + v->fwd[1] * dy) / l >= 0.9f;
             bot_walk(ai, ag, r, v, to, toward ? 1 : 0, toward ? -1 : u, call, ctx);
