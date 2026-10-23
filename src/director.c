@@ -500,16 +500,18 @@ static void mount_point(const DirBotView *v, const DirBuilding *b, int side, flo
     }
 }
 
-/* approachClear 0x2F1290: a box the bot's size, pushed out from the side, meets no other standing building [R] */
+/* approachClear 0x2F1290 [R]: a box of half size r (and the half height up and down, from the street) at the mount
+ * point pushed out from the side by the probe + r (0x2E4E40 + 0x2E4D00: 5.5 for George) meets no other building
+ * there (+0x14C not 0: a falling one too, 0x2F14A4) */
 static int approach_clear(const DirBotView *v, int bi, int side, const float pt[3])
 {
-    float hw = v->half_width, c[2] = { pt[0], pt[1] };
-    if (side == 0) c[0] -= 2 * hw;
-    else if (side == 1) c[0] += 2 * hw;
-    else c[1] -= 2 * hw;
+    float hw = v->half_width, push = v->probe + hw, c[2] = { pt[0], pt[1] };
+    if (side == 0) c[0] -= push;
+    else if (side == 1) c[0] += push;
+    else c[1] -= push;
     for (int i = 0; i < v->nb; i++) {
         const DirBuilding *o = &v->b[i];
-        if (i == bi || !bot_standing(o))
+        if (i == bi || o->state == 0)
             continue;
         if (c[0] + hw > o->min[0] && c[0] - hw < o->max[0] && c[1] + hw > o->min[1] && c[1] - hw < o->max[1])
             return 0;
