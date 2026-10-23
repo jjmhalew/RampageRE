@@ -4016,15 +4016,24 @@ static void graphics_from_menu(Viewer *v, const ShellGraphics *g, int keep)
         return;
     Settings to = *v->gfx;
     to.ao = g->ao; to.smaa = g->smaa; to.msaa = g->msaa; to.aniso = g->aniso; to.mips = g->mips;
-    to.fullscreen = g->fullscreen; to.vsync = g->vsync; to.language = g->language;
+    to.fullscreen = g->fullscreen; to.vsync = g->vsync;
     settings_graphics(v->gfx, v->win, &to);
-    if (keep && console_language(v->gfx->language, v->region) != v->lang)   /* (each screen's texts are read as it
-                                                                              * loads: the start's language stays) */
-        printf("settings: language=%s from the next start\n", settings_language_name(v->gfx->language));
     if (keep && v->gfx_write)
         settings_save(v->gfx, "rampage.cfg");
 }
 static void shell_give_graphics(Viewer *v);
+
+/* the Options' Language row's Accept: the console's language (settings.h's) into rampage.cfg, for the next start
+ * (each screen reads its texts as it loads: the start's stay) */
+static void language_from_menu(Viewer *v, int language)
+{
+    if (!v->gfx || language < 0 || language > 7)
+        return;
+    v->gfx->language = language;
+    printf("settings: language=%s from the next start\n", settings_language_name(language));
+    if (v->gfx_write)
+        settings_save(v->gfx, "rampage.cfg");
+}
 
 /* after the screens ran: a results screen's answer to the game, the sounds they start and stop */
 static void hud_frame(Viewer *v, int after)
@@ -4072,6 +4081,7 @@ static void hud_frame(Viewer *v, int after)
             graphics_from_menu(v, &g, calls[i].arg);
             break;
         }
+        case HUD_CALL_LANGUAGE: language_from_menu(v, calls[i].arg); break;
         case HUD_CALL_MUSIC_VOLUME:                  /* setMusicVolume(v, ms): the music slots go there over ms
                                                       * (0x26B5E0, group 3) [R Pause.scr: 0 over 1 s at the menu's
                                                       * opening and back over 1 s at Continue] */
@@ -7631,6 +7641,7 @@ static int shell_answer(Viewer *v)
                 if (shell_graphics(v->shell))
                     graphics_from_menu(v, shell_graphics(v->shell), e->arg);
                 break;
+            case SHELL_EVT_LANGUAGE: language_from_menu(v, e->arg); break;
             case SHELL_EVT_MOVIE: movie_start(v, e->name); break;
             case SHELL_EVT_VICTORY_SHOWN: profile_set_victory_shown(&v->prof); break;
             case SHELL_EVT_RESTORE: {                /* the shell's game status took it: the profile's records too */

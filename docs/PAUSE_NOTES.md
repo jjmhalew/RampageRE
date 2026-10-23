@@ -189,10 +189,12 @@ falls back to its `Scale`. With 0 (ChallengeStatus, ChallengeText) it reads `Sca
   - `PLAY_MUSIC`: start the block's music if none plays;
   - `SAVE_SETTINGS`: `gCommon.set*Volume` / `setEnableRumble(.., 1)`, read with `hud_settings`;
   - `CLEAR_CHEATS`: 65536;
-  - `GRAPHICS` (port extra): the Graphics page's values changed, read with `hud_graphics` (arg 1: its Accept).
+  - `GRAPHICS` (port extra): the Graphics page's values changed, read with `hud_graphics` (arg 1: its Accept);
+  - `LANGUAGE` (port extra): the Options' Accept with another language in the Language row (arg, settings.h's).
 - **Port extra:** the Options page has a third button, Triangle **Graphics** (a copy of Cancel with CommonGUI's
   `Controller_B1`; on the page Square **Defaults**, `Controller_B0`), which opens the front end's Graphics page in the same frame (`pause_graphics_*`, NATIVE.md
-  "Graphics settings"); `hud_set_graphics` gives it the settings in use. The game's Options have no such button.
+  "Graphics settings"), and a fourth row under Vibration, Language (`pause_language_build`); `hud_set_graphics` gives
+  them the settings in use. The game's Options have no such button or row.
 - The sounds come out of `hud_sounds`.
 - `hud_pause_result` gives `HUD_PAUSE_RESUME` (Continue), `HUD_PAUSE_QUIT` (call `game_restart_shell`) or
   `HUD_PAUSE_SETTINGS` (the profile's settings changed).

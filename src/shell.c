@@ -2013,9 +2013,10 @@ typedef struct {
     Faders fd;
 } CitySel;
 
-enum { GFX_ROWS = 8 };
+enum { GFX_ROWS = 7 };
 typedef struct {
-    Node *group, *sound, *music, *rumble, *titles[3];
+    Node *group, *sound, *music, *rumble, *titles[4];   /* (titles[3], lang: the port's Language row) */
+    Node *lang;
     int initialized, mode, exiting, rumble_on, tweak_sound;
     float f_music, f_sound, pulse, tick;
     /* port extra: the Graphics page (Triangle), in the Options' own frame made taller (op_graphics_build) */
@@ -3827,6 +3828,71 @@ static void mm_event(Shell *s, int ev, int button, int pad, float dt)
     }
 }
 
+#define LANG_PITCH 40.0f                                 /* the Options' rows' pitch (Sound, Music, Vibration) */
+#define LANG_EXTRA 40.0f                                 /* the Options' frame's height added for the Language row */
+/* ---- port extra: the Options' Language row (docs/NATIVE.md "Graphics settings": rampage.cfg language=), under
+ * Vibration: its title and list copies of Vibration's, one row's pitch lower, the frame LANG_EXTRA taller below. It
+ * shows the console's language (settings.h's, the viewer's); Accept hands another one to the viewer for the next start
+ * (each screen reads its texts as it loads), Back leaves it */
+static const char *const LANG_ITEMS[5] = { "EN", "FR", "DE", "IT", "ES" };
+static const int LANG_VALUES[5] = { 1, 2, 4, 5, 3 };   /* settings.h's english, french, german, italian, spanish */
+
+static const char *lang_title(int col)                   /* the row's title in the texts' language (the .loc column) */
+{
+    return col == 3 ? "Langue:" : col == 4 ? "Sprache:" : col == 5 ? "Lingua:" : col == 6 ? "Idioma:" : "Language:";
+}
+
+static int lang_item(int language)                       /* the list's item for settings.h's language (0: English) */
+{
+    for (int k = 0; k < 5; k++)
+        if (LANG_VALUES[k] == language)
+            return k;
+    return 0;
+}
+
+static Node *parent_of(Node *in, const Node *of)
+{
+    for (Node *c = in ? in->child : NULL; c; c = c->next) {
+        if (c == of)
+            return in;
+        Node *p = parent_of(c, of);
+        if (p)
+            return p;
+    }
+    return NULL;
+}
+
+static void op_language_build(Shell *s, Node *r)
+{
+    Options *o = &s->op;
+    Layout *L = s->ifc[IF_OPTIONS];
+    Node *rect = find(r, "options_rect"), *buttons = find(r, "buttonSizer");
+    Node *tp = parent_of(r, o->titles[2]), *lp = parent_of(r, o->rumble);
+    if (!rect || !buttons || !o->titles[2] || !o->rumble || !tp || !lp)
+        return;
+    Node *t = node_copy(L, o->titles[2], tp), *l = node_copy(L, o->rumble, lp);
+    if (!t || !l || !l->child || !l->child->next)
+        return;
+    snprintf(t->name, sizeof t->name, "language_title");
+    snprintf(l->name, sizeof l->name, "language");
+    set_text(t, lang_title(s->gui.lang));
+    t->p[1] += LANG_PITCH;
+    l->p[1] += LANG_PITCH;
+    for (int k = 2; k < 5; k++)
+        node_copy(L, l->child->next, l);
+    l->lsp = 18;                                         /* (as the Graphics page's rows of more than two) */
+    l->growth[0] = 1.0f + 0.5f * (l->growth[0] - 1.0f);
+    int k = 0;
+    for (Node *it = l->child; it; it = it->next, k++) {
+        set_text(it, LANG_ITEMS[k]);
+        it->tscale = 0.6f;
+    }
+    o->titles[3] = t;
+    o->lang = l;
+    rect->d[1] += LANG_EXTRA;
+    buttons->p[1] += LANG_EXTRA;
+}
+
 /* ---------------------------------------------------------------- Options.scr [R] */
 static void op_setup(Shell *s)                         /* setupItems */
 {
@@ -3840,7 +3906,8 @@ static void op_setup(Shell *s)                         /* setupItems */
     if (o->sound) o->sound->val = 100.0f * o->f_sound / 0.75f;
     if (o->music) o->music->val = 100.0f * o->f_music / 0.75f;
     list_set(o->rumble, !o->rumble_on);
-    for (int i = 0; i < 3; i++)
+    list_select(o->lang, lang_item(s->gfx.language));
+    for (int i = 0; i < 4; i++)
         if (o->titles[i]) o->titles[i]->tscale = 1.0f;
 }
 
@@ -3860,6 +3927,9 @@ static void op_save(Shell *s)
     event(s, SHELL_EVT_SAVE_SETTINGS, NULL, s->prof.rumble, 0);
     if (s->prof.changed)
         save_profile(s);
+    int k = o->lang ? o->lang->sel : -1;                 /* (the port's Language row) */
+    if (k >= 0 && k < 5 && LANG_VALUES[k] != s->gfx.language)
+        event(s, SHELL_EVT_LANGUAGE, NULL, LANG_VALUES[k], 0);
 }
 
 /* ---- port extra: the Graphics page (docs/NATIVE.md "Graphics settings"). Triangle on the Options opens it in the
@@ -3875,11 +3945,8 @@ static const struct { const char *title; int n; const char *items[5]; int values
     { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 }, 0 },
     { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
     { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
-    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 },
-    /* the console's language (settings.h), taken at the next start: Defaults leaves it */
-    { "Language:", 5, { "EN", "FR", "DE", "IT", "ES" }, { 1, 2, 4, 5, 3 }, -1 } };   /* (def: the item of settings.c's
-                                                                                     * default, -1 none) */
-#define GFX_EXTRA 116.0f                                  /* the frame's height added for the page */
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 } };   /* (def: the item of settings.c's default) */
+#define GFX_EXTRA (86.0f - LANG_EXTRA)                   /* and for the Graphics page, over it */
 #define GFX_WIDER 60.0f                                  /* and its width, half each side */
 #define GFX_Y0 80.0f                                     /* the first row, in the Options group's frame */
 #define GFX_PITCH 30.0f
@@ -3887,7 +3954,7 @@ static const struct { const char *title; int n; const char *items[5]; int values
 
 static int *gfx_field(ShellGraphics *g, int row)
 {
-    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync, &g->language };
+    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync };
     return f[row];
 }
 
@@ -4016,7 +4083,7 @@ static void op_page(Shell *s, int page)
     }
     if (o->line)
         o->line->ep[2] = o->line_x1 + w;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 4; i++)
         if (o->titles[i]) o->titles[i]->tscale = 1.0f;
     for (int i = 0; i < GFX_ROWS; i++)
         if (o->g_titles[i]) o->g_titles[i]->tscale = GFX_TITLE_SCALE;
@@ -4044,8 +4111,7 @@ static void op_graphics_event(Shell *s, int ev, int button)
     if (ev == EV_BUTTON && button == 0) {                /* Square: the defaults */
         sound(s, "Click");
         for (int i = 0; i < GFX_ROWS; i++)
-            if (GFX_ROW[i].def >= 0)
-                list_select(o->g_lists[i], GFX_ROW[i].def);
+            list_select(o->g_lists[i], GFX_ROW[i].def);
         op_graphics_read(o);
         event(s, SHELL_EVT_GRAPHICS, NULL, 0, 0);
     } else if (ev == EV_ACCEPT) {
@@ -4139,6 +4205,7 @@ static void op_event(Shell *s, int ev, int button, int pad, float dt)
             if (off) off->tscale = 0.6f;
             o->rumble->lsp = 30;                         /* glb.setExtraSpacing(30.0) */
         }
+        op_language_build(s, r);
         op_graphics_build(s, r);
         op_setup(s);
     } else if (ev == EV_GAIN) {
@@ -4160,12 +4227,15 @@ static void op_event(Shell *s, int ev, int button, int pad, float dt)
         event(s, SHELL_EVT_RUMBLE, NULL, o->rumble_on, 0);
         o->exiting = 1;
     } else if (ev == EV_UP || ev == EV_DOWN) {
-        int prev = o->mode;
+        int prev = o->mode, last = o->lang ? 3 : 2;   /* (3: the port's Language row) */
         o->mode += ev == EV_UP ? -1 : 1;
-        if (o->mode < 0) o->mode = 2;
-        if (o->mode > 2) o->mode = 0;
+        if (o->mode < 0) o->mode = last;
+        if (o->mode > last) o->mode = 0;
         if (o->titles[prev]) o->titles[prev]->tscale = 1.0f;
         o->pulse = 0;
+        sound(s, "Rollover");
+    } else if ((ev == EV_LEFT || ev == EV_RIGHT) && o->mode == 3) {
+        list_increment(o->lang, ev == EV_RIGHT ? 1 : -1);
         sound(s, "Rollover");
     } else if ((ev == EV_LEFT || ev == EV_RIGHT) && o->mode >= 2) {
         int sel = o->rumble ? o->rumble->sel : 0;       /* updateLists */

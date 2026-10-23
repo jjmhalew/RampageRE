@@ -512,8 +512,8 @@ Victory movie, as the port's pad does].
 - Back restores the old values.
 - Either way, it waits until the popup is gone and then calls `fadeOutInterface("MainMenu")`.
 
-**Port extra:** Triangle opens a Graphics page in the same frame (NATIVE.md "Graphics settings"); the game's Options
-have no such button.
+**Port extra:** Triangle opens a Graphics page in the same frame, and a Language row sits under Vibration (NATIVE.md
+"Graphics settings"); the game's Options have no such button or row.
 
 ## The monster select (MonsterSelect.scr) [R]
 

@@ -278,8 +278,10 @@ enum {
     HUD_CALL_SAVE_PROFILE,   /* Results: gCommon.saveProfile() (it writes only with autosave on); arg 1: 1.5 s in,
                               * gCommon.updateProfile() first */
     HUD_CALL_ALLOW_SAVE,     /* Results' Save button: gCommon.setAllowSave(1) */
-    HUD_CALL_GRAPHICS        /* port extra, the Options' Graphics page: hud_graphics() changed (arg 0: to try, or back
+    HUD_CALL_GRAPHICS,       /* port extra, the Options' Graphics page: hud_graphics() changed (arg 0: to try, or back
                               * to what the page opened with; 1: the page's Accept, to keep) */
+    HUD_CALL_LANGUAGE        /* port extra, the Options' Language row: Accept with another language (arg, settings.h's),
+                              * for the next start */
 };
 typedef struct { int call; float value; int arg; } HudCall;
 int hud_calls(Hud *h, HudCall *out, int max);

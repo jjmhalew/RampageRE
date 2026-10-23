@@ -30,8 +30,10 @@
 #define HUD_PI 3.14159265f
 #define MAX_NODES 160                                    /* (Pause: 79, and its Graphics page's 39) */
 /* the Pause menu's Graphics page (pause_graphics_build) */
-#define GFX_ROWS 8
-#define GFX_EXTRA 116.0f                                  /* the frame's height added for the page */
+#define GFX_ROWS 7
+#define LANG_PITCH 40.0f                                 /* the Options' rows' pitch (Sound, Music, Vibration) */
+#define LANG_EXTRA 40.0f                                 /* the Options' frame's height added for the Language row */
+#define GFX_EXTRA (86.0f - LANG_EXTRA)                   /* and for the Graphics page, over it */
 #define GFX_WIDER 60.0f                                  /* and its width, half each side */
 #define GFX_Y0 80.0f                                     /* the first row, in the Options group's frame */
 #define GFX_PITCH 30.0f
@@ -1578,7 +1580,9 @@ typedef struct {
     int pad;                                             /* the controller that opened it */
     int prev_rumble, b_rumble, mode, tweak_sound;        /* nMode: the Options row (0 sound, 1 music, 2 rumble) */
     float prev_music, f_music, f_sound, opt_pulse, tick;
-    Node *pause_group, *options_group, *s_sound, *s_music, *l_rumble, *titles[3];
+    Node *pause_group, *options_group, *s_sound, *s_music, *l_rumble, *titles[4];   /* (titles[3], l_lang: the
+                                                                                     * port's Language row) */
+    Node *l_lang;
     /* port extra: the Options' Graphics page (Triangle), in the Options' own frame made wider and taller */
     Node *o_rect, *o_title, *o_line, *o_buttons, *g_button, *g_group, *g_titles[GFX_ROWS], *g_lists[GFX_ROWS];
     int page, g_mode;
@@ -3939,6 +3943,69 @@ static void pause_boss(Hud *h, Screen *s)
     show(layout_find(r, "controller_group"), 0);
 }
 
+/* ---- port extra: the Options' Language row (docs/NATIVE.md "Graphics settings": rampage.cfg language=), under
+ * Vibration: its title and list copies of Vibration's, one row's pitch lower, the frame LANG_EXTRA taller below. It
+ * shows the console's language (settings.h's, the viewer's); Accept hands another one to the viewer for the next start
+ * (each screen reads its texts as it loads), Back leaves it */
+static const char *const LANG_ITEMS[5] = { "EN", "FR", "DE", "IT", "ES" };
+static const int LANG_VALUES[5] = { 1, 2, 4, 5, 3 };   /* settings.h's english, french, german, italian, spanish */
+
+static const char *lang_title(int col)                   /* the row's title in the texts' language (the .loc column) */
+{
+    return col == 3 ? "Langue:" : col == 4 ? "Sprache:" : col == 5 ? "Lingua:" : col == 6 ? "Idioma:" : "Language:";
+}
+
+static int lang_item(int language)                       /* the list's item for settings.h's language (0: English) */
+{
+    for (int k = 0; k < 5; k++)
+        if (LANG_VALUES[k] == language)
+            return k;
+    return 0;
+}
+
+static Node *parent_of(Node *in, const Node *of)
+{
+    for (Node *c = in ? in->child : NULL; c; c = c->next) {
+        if (c == of)
+            return in;
+        Node *p = parent_of(c, of);
+        if (p)
+            return p;
+    }
+    return NULL;
+}
+
+static void pause_language_build(Hud *h, Screen *s)
+{
+    Layout *L = s->L;
+    Node *go = s->options_group;
+    Node *rect = go ? layout_find(go->child, "options_rect") : NULL;
+    Node *buttons = go ? layout_find(go->child, "buttonSizer") : NULL;
+    Node *list = go ? layout_find(go->child, "rumble") : NULL, *title = go ? layout_find(go->child, "rumble_title") : NULL;
+    Node *tp = parent_of(go, title), *lp = parent_of(go, list);
+    if (!rect || !buttons || !list || !title || !tp || !lp)
+        return;
+    Node *t = node_copy(L, title, tp), *l = node_copy(L, list, lp);
+    if (!t || !l || !l->child || !l->child->next)
+        return;
+    snprintf(t->name, sizeof t->name, "language_title");
+    snprintf(l->name, sizeof l->name, "language");
+    node_text(t, lang_title(h->gui.lang));
+    t->p[1] += LANG_PITCH;
+    l->p[1] += LANG_PITCH;
+    for (int k = 2; k < 5; k++)
+        node_copy(L, l->child->next, l);
+    l->lsp = 18;                                         /* (as the Graphics page's rows of more than two) */
+    l->growth[0] = 1.0f + 0.5f * (l->growth[0] - 1.0f);
+    int k = 0;
+    for (Node *it = l->child; it; it = it->next, k++) {
+        node_text(it, LANG_ITEMS[k]);
+        it->tscale = 0.6f;
+    }
+    rect->d[1] += LANG_EXTRA;
+    buttons->p[1] += LANG_EXTRA;
+}
+
 static void pause_graphics_build(Hud *h, Screen *s);
 
 /* Pause::process 8192: the interface starts */
@@ -3973,6 +4040,7 @@ static void pause_start(Hud *h, Screen *s, int pad, const HudPause *p)
     s->options_group = layout_find(r, "options_group");  /* the outer one (there is a second inside it) */
     fader_init(&s->fd, s->pause_group, 1);
     fader_init(&s->fd, s->options_group, 0);
+    pause_language_build(h, s);
     pause_graphics_build(h, s);
 }
 
@@ -4010,6 +4078,9 @@ static void pause_options_setup(Hud *h, Screen *s)
     s->titles[0] = go ? layout_find(go->child, "sound_title") : NULL;
     s->titles[1] = go ? layout_find(go->child, "music_title") : NULL;
     s->titles[2] = go ? layout_find(go->child, "rumble_title") : NULL;
+    s->titles[3] = go ? layout_find(go->child, "language_title") : NULL;
+    s->l_lang = go ? layout_find(go->child, "language") : NULL;
+    list_select(s->l_lang, lang_item(h->gfx.language));
     s->f_music = s->prev_music;
     s->b_rumble = s->prev_rumble;
     s->f_sound = h->set_sound;                           /* gCommon.getSoundVolume() */
@@ -4017,7 +4088,7 @@ static void pause_options_setup(Hud *h, Screen *s)
     if (s->s_sound) s->s_sound->val = fminf(100.0f, fmaxf(0.0f, 100.0f * s->f_sound / 0.75f));
     if (s->s_music) s->s_music->val = fminf(100.0f, fmaxf(0.0f, 100.0f * s->f_music / 0.75f));
     list_select(s->l_rumble, !s->b_rumble);              /* item 0 ON, 1 OFF */
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 4; i++)
         if (s->titles[i]) s->titles[i]->tscale = 1.0f;
     if (h->gui.lang + 1 == 7 && s->l_rumble) {           /* getLanguage() == 7, Spanish: the list moved, its words
                                                           * smaller, 30 apart */
@@ -4042,14 +4113,11 @@ static const struct { const char *title; int n; const char *items[5]; int values
     { "Texture Filter:", 5, { "OFF", "2X", "4X", "8X", "16X" }, { 1, 2, 4, 8, 16 }, 0 },
     { "Mipmaps:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
     { "Fullscreen:", 2, { "ON", "OFF" }, { 1, 0 }, 1 },
-    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 },
-    /* the console's language (settings.h), taken at the next start: Defaults leaves it */
-    { "Language:", 5, { "EN", "FR", "DE", "IT", "ES" }, { 1, 2, 4, 5, 3 }, -1 } };   /* (def: the item of settings.c's
-                                                                                     * default, -1 none) */
+    { "VSync:", 2, { "ON", "OFF" }, { 1, 0 }, 0 } };   /* (def: the item of settings.c's default) */
 
 static int *gfx_field(HudGraphics *g, int row)
 {
-    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync, &g->language };
+    int *f[GFX_ROWS] = { &g->ao, &g->smaa, &g->msaa, &g->aniso, &g->mips, &g->fullscreen, &g->vsync };
     return f[row];
 }
 
@@ -4175,7 +4243,7 @@ static void pause_graphics_page(Screen *s, int page)
     }
     if (s->o_line)
         s->o_line->ep[2] = s->line_x1 + w;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 4; i++)
         if (s->titles[i]) s->titles[i]->tscale = 1.0f;
     for (int i = 0; i < GFX_ROWS; i++)
         if (s->g_titles[i]) s->g_titles[i]->tscale = GFX_TITLE_SCALE;
@@ -4201,8 +4269,7 @@ static void pause_graphics_input(Hud *h, Screen *s, int ev, int button)
     if (ev == HUD_EV_BUTTON && button == 0) {            /* Square: the defaults */
         sound(h, "Click", 0);
         for (int i = 0; i < GFX_ROWS; i++)
-            if (GFX_ROW[i].def >= 0)
-                list_select(s->g_lists[i], GFX_ROW[i].def);
+            list_select(s->g_lists[i], GFX_ROW[i].def);
         pause_graphics_read(h, s);
         hud_call(h, HUD_CALL_GRAPHICS, 0.0f, 0);
     } else if (ev == HUD_EV_ACCEPT) {
@@ -4264,14 +4331,17 @@ static void pause_options_save(Hud *h, Screen *s)
     h->set_rumble = br;
     hud_call(h, HUD_CALL_SAVE_SETTINGS, 0.0f, 0);
     h->pause_result = HUD_PAUSE_SETTINGS;
+    int k = s->l_lang ? s->l_lang->sel : -1;             /* (the port's Language row) */
+    if (k >= 0 && k < 5 && LANG_VALUES[k] != h->gfx.language)
+        hud_call(h, HUD_CALL_LANGUAGE, 0.0f, LANG_VALUES[k]);
 }
 
 static void pause_options_row(Screen *s, int dir)       /* updateSelection */
 {
-    int pm = s->mode;
+    int pm = s->mode, last = s->l_lang ? 3 : 2;         /* (3: the port's Language row) */
     s->mode += dir;
-    if (s->mode < 0) s->mode = 2;
-    if (s->mode > 2) s->mode = 0;
+    if (s->mode < 0) s->mode = last;
+    if (s->mode > last) s->mode = 0;
     if (s->titles[pm]) s->titles[pm]->tscale = 1.0f;
     s->opt_pulse = 0;
 }
@@ -4369,6 +4439,9 @@ static void pause_options_input(Hud *h, Screen *s, int ev, int button, int pad) 
         pause_options_close(h, s);
     } else if (ev == HUD_EV_UP || ev == HUD_EV_DOWN) {
         pause_options_row(s, ev == HUD_EV_UP ? -1 : 1);
+        sound(h, "Rollover", 0);
+    } else if ((ev == HUD_EV_LEFT || ev == HUD_EV_RIGHT) && s->mode == 3) {
+        list_increment(s->l_lang, ev == HUD_EV_LEFT ? -1 : 1);
         sound(h, "Rollover", 0);
     } else if ((ev == HUD_EV_LEFT || ev == HUD_EV_RIGHT) && s->mode >= 2) {
         pause_options_list(h, s, ev == HUD_EV_LEFT ? -1 : 1);
