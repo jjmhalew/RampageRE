@@ -122,7 +122,15 @@ last leg's pitch, and `setFacing` / `setFacingZ` change only their part (boss.c 
 - The scripts' height of a building is always storeys × 3 + 1.5 + 6.
 
 **Other natives** [R]:
-- `gWorld.getPlayValue / setPlayValue`: a table of ints. The generators write it and the blimp reads it.
+- `gWorld.getPlayValue / setPlayValue` (World cases 61 / 62, 0x2AF108 / 0x2AF148): eight ints at 0x4D201C, indices 0
+  … 7. Nothing clears them: they last the whole run. The generators write theirs (genId) and the blimp reads 0 and 1,
+  and the airstrike keeps its bombers' height in 0 (0x332930, `FinalBomber`'s `getPlayValue(0)`). So after any
+  airstrike, earlier or in NY10 itself, the blimp takes the first generator as gone and its barriers come down (main.c
+  `play_values`).
+- `numGenerators`, Boss_NY_Generator.bsf's global: a script's globals last as long as its bundle,
+  NewYork_scripts, which NewYork's `onLoadScript` loads (`loadCityData`, 0x2B5000: `_buildings`, `_scripts`,
+  `_props`) and `onShutdown` unloads. A continue plays NY10 again in the same world, so its generators count on
+  (2 and 3) and theirs are not the values the blimp reads (main.c `ny_generators`, from 0 at `open_city`).
 - `Monster.isClimbing` (0x2AAAD8): mode 5 (+0xAD8) and mounted (+0xC644). A monster only getting on (its mount
   prepared, +0xC640 set) is not climbing.
 - `Building.isFalling` (0x2ADE10 → 0x2CE230): a storey of it coming down, G+0x1CC set (a floor dropping off a
@@ -479,8 +487,6 @@ falling back one loses its barriers too.
 ## Not traced (stand-ins in boss.c)
 - **TakeDamage's direction** (the blimp's knock follows it): here from the monster to the part; the game's is
   0x280470's third result (0x2E2598), made 1 long (0x2E2654), not followed into the shape's test.
-- **The numGenerators global and the play values:** taken as starting again per block (the life of a script's
-  globals is the loader's, not traced; only NY10 has generators).
 - **An invalid monster's place** reads as 0: the WorldObject cases test the handle and then write nothing
   (0x277E30), so the script reads what its Point3 held.
 - **Never reached with the shipped data:** Boss_Helicopter without paths (the script asserts; SF10 has 4), and its

@@ -279,6 +279,9 @@ void army_activate(Army *a, int on);                 /* gAIMgr.activate: the spa
  * it is, its FinalBombers bombing the tallest buildings */
 void army_airstrike(Army *a, int time_up);
 void army_set_weapons(Army *a, int on);              /* gp-0x772C (game_weapons_on): off, no weapon fires */
+/* gWorld's play values (boss.h BossHost.play): the airstrike keeps its height in slot 0 (0x332930), where its
+ * FinalBombers read it (getPlayValue(0)) and where the NY blimp reads its first generator's end; NULL: the army's own */
+void army_set_play(Army *a, int *play);
 int army_weapons_on(const Army *a);
 void army_clear(Army *a);                            /* every unit and shot gone (a new block) */
 

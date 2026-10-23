@@ -157,8 +157,6 @@ struct Boss {
     int ntouch;
     WorldObj wobj[MAX_WOBJ];
     int nwobj;
-    int play[8];                                     /* gWorld.getPlayValue / setPlayValue */
-    int num_generators;                              /* Boss_NY_Generator.bsf's numGenerators */
     int main, defeated, city_destroyed;
     float now, view[2];
     /* this frame */
@@ -3138,9 +3136,11 @@ static int blimp_pulse(Boss *b, Obj *o, float frame_dt)   /* onPulse */
     }
     if (k->destroyed_gens < 2)                       /* a generator gone: one set of barriers down */
         for (int i = 0; i < 2; i++)
-            if (!(k->gen_state[i] & 1) && b->play[i]) {
+            if (!(k->gen_state[i] & 1) && b->host.play && b->host.play[i]) {
                 k->gen_state[i] |= 1;
                 k->destroyed_gens++;
+                if (getenv("RAMPAGE_TRACE"))
+                    printf("  blimp: generator %d down (play value %d), its barriers off\n", i, b->host.play[i]);
                 for (int q = 2; q < 5; q++) {
                     Barrier *br = (k->gen_state[i] & 2) ? &k->bld[q].top : &k->bld[q].barrier;
                     fx_stop(b, br->fx);
@@ -3262,7 +3262,7 @@ static void gen_construct(Boss *b, Obj *o)           /* Construct (at the block'
 {
     GenDef *g = &o->s.gen;
     o->oflags |= OF_EFF_NODES;
-    g->gen_id = b->num_generators++;
+    g->gen_id = b->host.generators ? (*b->host.generators)++ : 0;
     g->hp = 3;
     g->hit_fx = -1;
     o->pulse_delay = 0.33f;
@@ -3285,8 +3285,8 @@ static int gen_damage(Boss *b, Obj *o, int monster, int type)   /* TakeDamage: t
         g->hp = 0;
     fx_on(b, o, tstr(o, "HitEffect"), NULL, NULL, -1, 0);
     if (g->hp == 0) {
-        if (g->gen_id >= 0 && g->gen_id < 8)
-            b->play[g->gen_id] = 1;                  /* gWorld.setPlayValue(genId, 1): the blimp reads it */
+        if (g->gen_id >= 0 && g->gen_id < 8 && b->host.play)
+            b->host.play[g->gen_id] = 1;            /* gWorld.setPlayValue(genId, 1): the blimp reads it */
         const char *e = tstr(o, "DestEffect");
         if (e) {
             float p[3];
@@ -3704,8 +3704,6 @@ void boss_clear(Boss *b)
     b->active = 0;
     b->ntrig = 0;
     b->nwobj = 0;
-    b->num_generators = 0;                           /* [G] the script global's life (the loader) not traced */
-    memset(b->play, 0, sizeof b->play);
     b->main = -1;
     b->defeated = 0;
 }

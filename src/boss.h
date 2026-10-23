@@ -102,6 +102,13 @@ typedef struct {
                         const float frame[3][3], int target, float dt, int part);   /* frame: the firing frame, or
                                                       * NULL; part: the part firing it, whose body its shots pass (a
                                                       * hit on the shot's owner is none, 0x293CD8) */
+    /* gWorld.getPlayValue / setPlayValue's eight ints (0x4D201C, cases 61 / 62 0x2AF108 / 0x2AF148: indices 0 .. 7),
+     * which nothing clears: the run's, shared with the airstrike's height (index 0); NULL none */
+    int *play;
+    /* Boss_NY_Generator.bsf's global numGenerators: a script global lives as long as its bundle, NewYork_scripts,
+     * which the city's onLoadScript loads (loadCityData 0x2B5000) and onShutdown unloads, so a block played again
+     * (a continue) goes on counting; the host's, NULL none */
+    int *generators;
     void *ctx;
 } BossHost;
 

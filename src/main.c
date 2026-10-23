@@ -323,6 +323,10 @@ typedef struct Viewer {
     Autoplay *ap; double ap_t; float ap_wait;
     int ap_type, ap_players, ap_bots, ap_city, ap_demos;
     int bot_guard_falls;                             /* buildings the bots' 60 s guard felled (for the watchdog) */
+    int play_values[8];                              /* gWorld.getPlayValue / setPlayValue (0x4D201C): the run's, never
+                                                      * cleared (the airstrike's height in 0, the NY generators' ends) */
+    int ny_generators;                               /* Boss_NY_Generator.bsf's numGenerators: from 0 as the city's
+                                                      * scripts load (open_city), on through its blocks and continues */
 } Viewer;
 
 /* gCommon.getPlayType() of the game played: the demo's 0, else --play's or the shell's (unset: the campaign) */
@@ -1080,8 +1084,10 @@ static void build(Viewer *v)
         host.rod = effect_rod;
         host.ctx = v;
         v->army = army_new(&host);
-        if (v->army)
+        if (v->army) {
             army_set_collide(v->army, &v->cw);
+            army_set_play(v->army, v->play_values);
+        }
         if (v->army) {
             army_load_block(v->army, v->scene.block);
             army_activate(v->army, !v->game);        /* the game's BeginBlockNI activates it (GE_AI_ACTIVATE): the
@@ -1318,6 +1324,8 @@ static void build(Viewer *v)
         bh.weapon_make = boss_weapon_make;
         bh.weapon_tick = boss_weapon_tick;
         bh.node_world = boss_node_world;
+        bh.play = v->play_values;
+        bh.generators = &v->ny_generators;
         bh.ctx = v;
         v->boss = boss_new(&bh);
         v->boss_block = 0;
@@ -1468,6 +1476,7 @@ static int open_city(Viewer *v, int index, uint32_t block, int game_block)
     city_close(v->city);
     v->city = c;
     v->city_index = index;
+    v->ny_generators = 0;                            /* the city's onLoadScript loads its scripts' bundle anew */
     if (v->roster.n)                                 /* its names are the old city's book's: read from this one's */
         reveal_roster_load(&v->roster, city_book_group(c, "ShellData", "MonsterData"));
     v->nblocks = city_blocks(c, v->blocks, 64);

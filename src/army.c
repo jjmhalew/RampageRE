@@ -66,10 +66,13 @@ struct Army {
     int time_up;
     struct { int unit, serial, building; float time; } strike[6];
     int nstrike, strike_voice;
-    float strike_wait, strike_height;
+    float strike_wait;
+    int *play, own_play[8];                          /* gWorld's play values (army_set_play), own_play without */
 };
 
 /* ---------------------------------------------------------------- small things */
+
+static int *army_play(Army *a) { return a->play ? a->play : a->own_play; }
 
 /* gWorld.frand() (0x279F98): the world's Park-Miller, gWorld +0x828 (wrand.c) [R] */
 static float frand(Army *a)
@@ -1670,6 +1673,7 @@ void army_weapon_tick(Army *a, ArmyWeapon *w, int may, const float from[3], cons
 
 void army_activate(Army *a, int on) { a->active = on; }   /* [R] 0x2A6208: bit 8 of the manager's flags */
 void army_set_weapons(Army *a, int on) { if (a) a->weapons_off = !on; }
+void army_set_play(Army *a, int *play) { if (a) a->play = play; }
 int army_weapons_on(const Army *a) { return !a || !a->weapons_off; }
 
 /* [R] gAIMgr.removeAIObject (0x332A50): every record of that template name has one fewer alive */
@@ -3418,7 +3422,7 @@ static void finalbomber_init(Army *a, ArmyUnit *u)
 {
     u->oflags |= OF_EFF_NODES;
     u->aux[1] = tnum(u, "Speed", 12);                /* fSpeed */
-    u->aux[2] = a->strike_height;                    /* fHeight: gWorld.getPlayValue(0) */
+    u->aux[2] = (float)army_play(a)[0];              /* fHeight: gWorld.getPlayValue(0) */
     memcpy(u->lock, u->pos, sizeof u->lock);         /* ptTarget */
     float start[3] = { -100, -15, fmaxf(20, u->lock[2] - 5) }, end[3] = { 100, -15, start[2] };
     line_init(u, start, end, u->aux[1] * 1.5f);
@@ -3550,7 +3554,7 @@ static void airstrike_update(Army *a)
     i = pick[i < 0 ? 0 : i >= n ? n - 1 : i];
     const ArmyBox *b = &a->b[i];
     float at[3] = { (b->min[0] + b->max[0]) / 2 + 5, (b->min[1] + b->max[1]) / 2, b->max[2] };
-    a->strike_height = (float)(int)(20 + top);
+    army_play(a)[0] = (int)(20 + top);               /* setPlayValue's slot 0 (0x332930) */
     int k = army_spawn(a, "FinalBomber", at, 0);
     if (getenv("RAMPAGE_TRACE"))
         printf("  airstrike: FinalBomber %d on building %d (top %.1f)\n", k, i, b->max[2]);
