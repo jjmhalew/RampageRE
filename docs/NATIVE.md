@@ -131,7 +131,7 @@ computer's (`DRIVE_COMPUTER`: the bots' DestroyBuildings goal, director.c, for p
 counts them as players and bots as given), the results screens answer themselves (`hud_results_auto`, Continue on
 Game Over), the SaveGame popup's messages are taken, and the shell is driven by an autopilot (main.c
 `autopilot_shell`, a press every 0.4 s at most, reading the menus through `shell_auto_view`): the boot's notice, the
-main menu to the `--play` mode and the `--players` / `--bots` asked for (the PS2's boxes: 1 or 2 players), every
+main menu to the `--play` mode and the `--players` / `--bots` asked for (the PS2's boxes: 1 or 2 players; up to 4 outside the campaign with `four_players`), every
 card readied, the city select to `--ap-city` or the campaign's next city (the last one open and not destroyed), the
 Victory's movies and the credits played their length. Started in a city instead of `--shell`, the shell takes over
 when the city is left, as after a game it chose. It stops at the main menu after a game (the campaign's credits, a
@@ -436,6 +436,7 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | MSAA | `msaa=0` | `--msaa N` | `RAMPAGE_MSAA` | F7 (cycles) | multisampling, 0, 2, 4, 8 samples: polygon edges only |
 | anisotropy | `aniso=1` | `--aniso N` | `RAMPAGE_ANISO` | F8 (cycles) | `GL_TEXTURE_MAX_ANISOTROPY` 1 (off), 2, 4, 8, 16 on the world's textures: streets and walls at a grazing angle stay sharp |
 | the profile at launch | `profile_autoload=1` | `--autoload`, `--noautoload` | `RAMPAGE_PROFILE_AUTOLOAD` | | not graphics, but read the same way: see "The profile at launch" below |
+| four players in the menu | `four_players=1` | `--four-players`, `--no-four-players` | `RAMPAGE_FOUR_PLAYERS` | | not graphics either: see "Four players in the menu" below |
 | language | `language=english` | `--language NAME` | `RAMPAGE_LANGUAGE` | | not graphics either: the console's language (`english`, `french`, `german`, `italian`, `spanish`; `japanese`, `dutch`, `portuguese` as the game takes them, English), which the PS2 game reads at start-up (sceScfGetLanguage, 0x10D300) for its texts and movies (the intro and Victory have French, German, Italian and Spanish cuts); `--lang N` picks a .loc column itself |
 | mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
 
@@ -501,6 +502,18 @@ one profile, `rampage_profile.bin`, so with `profile_autoload` on:
 
 `profile_autoload=0` (or `--noautoload`) is the game's way. A `--shot` run reads no `rampage.cfg` and starts a new
 profile unless `--profile` names one.
+
+### Four players in the menu
+A port extra (`four_players=1`, the default; `four_players=0` in `rampage.cfg` or `--no-four-players` is the PS2's
+way). The PS2's main menu offers one or two players. Its menu code holds the other consoles' too (shell.c `mm_play_mode_select`, processPlayModeSelect [R]):
+where `getPlatform()` is 1, 4 or 8 (the PS2 is 2) the player count list shows 3 Player and 4 Player as well, except
+in the campaign. With the option on the port takes that branch: King of the City and King of the World offer 2 .. 4
+players, the Timed Run 1 .. 4, the campaign 1 or 2 as on every console. The rest is the game's own 4-player flow (the bots'
+box up to players - 1, four cards in the monster select, its `DisableFor4Player` monsters, the pads of every human
+player in the menus). Players 3 and 4 play on the third and fourth controller ("Several monsters"). The PS2's
+layout puts 3 Player and 4 Player on one place (y 113.5, under 41.5 and 77.5), so with the option on the shown items
+are laid one under another a step apart (four of them a step higher, clear of the Cancel / Select bar). Autoplay's
+`--players` goes up to 4 there too.
 
 ## Source
 | File | |

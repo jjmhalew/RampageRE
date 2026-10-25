@@ -231,6 +231,7 @@ typedef struct Viewer {
     struct { int obj, h; } bsnd[64]; int nbsnd;      /* and their sounds (add3DSfx: each follows its part) */
     float play_now;                                  /* the world's play time (gWorld.curTime): the buildings' alarms */
     int profile_autoload;                            /* rampage.cfg profile_autoload (port extra, settings.h) */
+    int four_players;                                /* rampage.cfg four_players (port extra, settings.h) */
     int game_block;                                  /* a block the game moved on to, to build after the frame; -1 */
     int left_block;                                  /* the block the game left, laid at -41 by that build; -1 */
     int game_built;                                  /* this build is the game's: keep the game going */
@@ -7140,6 +7141,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->region = v->region;
     sp->profile_shown = v->prof.profile_shown;
     sp->offer_create = v->profile_autoload && !v->prof_on_card && v->prof_write;
+    sp->four_players = v->four_players;
     snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
     for (int p = 0; p < 4; p++)
         for (int m = 0; m < SHELL_MONSTERS; m++)
@@ -8163,8 +8165,9 @@ static void autopilot_shell(Viewer *v, float dt)
     } else if (!strcmp(f, "AttractMode"))
         ev = v->ap_demos ? 0 : HUD_EV_ACCEPT;
     else if (!strcmp(f, "MainMenu")) {
-        int want = v->ap_type ? v->ap_type : GP_CAMPAIGN, np = v->ap_players < 1 ? 1 : v->ap_players > 2 ? 2 :
-                   v->ap_players;                    /* (the PS2's boxes offer 1 or 2) */
+        int want = v->ap_type ? v->ap_type : GP_CAMPAIGN, most = v->four_players && want != GP_CAMPAIGN ? 4 : 2,
+            np = v->ap_players < 1 ? 1 : v->ap_players > most ? most : v->ap_players;   /* (the PS2's boxes offer 1
+                                                      * or 2; four_players 3 and 4 too, but not in the campaign) */
         if (v->ap_demos)
             ev = 0;
         else if (sv.mm_state == 0)
@@ -8591,6 +8594,7 @@ static int viewer_main(int argc, char **argv)
     if (!v.prof_path)
         v.prof_path = "rampage_profile.bin";
     v.profile_autoload = gfx.profile_autoload;
+    v.four_players = gfx.four_players;
     int prof_read = !newprofile && v.prof_write ? profile_read(&v.prof, v.prof_path) : -1;
     if (prof_read > 0) {
         printf("profile %s\n", v.prof_path);

@@ -21,6 +21,10 @@ typedef struct {
      * japanese, 1 english, 2 french, 3 spanish, 4 german, 5 italian, 6 dutch, 7 portuguese), which the game takes at
      * start-up for its texts and movies; the default english */
     int language;
+    /* four_players= (port extra, docs/NATIVE.md "Four players in the menu"): 1 (the default) offers the main menu's
+     * 3 Player and 4 Player as the game's other consoles do (King of the City, King of the World, the Timed Run; never
+     * the campaign); 0 the PS2's one or two */
+    int four_players;
 } Settings;
 
 void settings_unset(Settings *flags);                /* nothing given yet (for settings_arg) */

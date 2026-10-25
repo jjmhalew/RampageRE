@@ -1977,6 +1977,8 @@ typedef struct {
     int state, play_mode, retro_game, start_retro, num_players, num_bots, ntsc;
     int code[6], code_index;
     float glow_time, retro_delay;
+    float np_y0, np_step;                                /* [port extra, four_players] the players' list's first place
+                                                          * and step (np_rows) */
     Faders fd;
 } MainMenu;
 
@@ -3556,14 +3558,38 @@ static void mm_cheating(Shell *s, int ev)              /* processCheating */
     }
 }
 
+static void np_rows(MainMenu *m)
+{
+    Node *a = list_item(m->lb_players, 0), *b = list_item(m->lb_players, 1);
+    if (!m->np_step && a && b) {                         /* the file's places, before any is moved */
+        m->np_y0 = a->p[1];
+        m->np_step = b->p[1] - a->p[1];
+    }
+    int n = 0;
+    for (Node *c = m->lb_players->child; c; c = c->next)
+        n += c->visible;
+    float y = m->np_y0 - (n > 3 ? (float)(n - 3) * m->np_step : 0);   /* four: up into the room under the title, the
+                                                          * last on the third place, clear of the Cancel / Select bar */
+    for (Node *c = m->lb_players->child; c; c = c->next)
+        if (c->visible) {
+            c->p[1] = y;
+            y += m->np_step;
+        }
+}
+
 static void mm_play_mode_select(Shell *s)              /* processPlayModeSelect */
 {
     MainMenu *m = &s->mm;
-    if (s->platform & (1 | 8 | 4)) {                     /* three and four players: not on the PS2 (2) */
+    /* three and four players: not on the PS2 (2); [port extra, rampage.cfg four_players] as the other consoles */
+    if (s->platform & (1 | 8 | 4) || s->prof.four_players) {
         show(find(m->lb_players, "3 Player"), m->play_mode != 2);
         show(find(m->lb_players, "4 Player"), m->play_mode != 2);
     }
     show(find(m->lb_players, "1 Player"), m->play_mode == 2 || m->play_mode == 5);
+    if (s->prof.four_players && m->lb_players)          /* [port extra] the PS2's layout has 3 Player and 4 Player on
+                                                          * one place (y 113.5, after 41.5 and 77.5): the shown items
+                                                          * one under another, a step apart */
+        np_rows(m);
     s->gs.play_type = m->play_mode;
     m->state = 1;
     list_settle(m->lb_players);                         /* the list's own layout moves its selection [R 0x23CF60] */
