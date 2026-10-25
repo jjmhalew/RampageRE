@@ -415,9 +415,16 @@ A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next on
 2. 0x2EC3D0 (monsters with +0x108 set run 0x2E1AA0 instead): of the transitions with 0x100 and 0x10 whose
    target is not disabled (0x80000000 in the target node's +0x2C), skipping any of lower priority than the one
    already picked, the last one whose conditions all hold and whose script check (if any) says yes is picked.
-3. A picked transition that has 0x200 is taken: the next state is its target (0x1000 at once, otherwise after a
-   short wait counted at +0x14). With none, a state whose time passed its length takes its "clip ended" transition. A pick whose switch
-   window has passed is dropped; windows that passed are cleared.
+3. A picked transition that has 0x200 is taken: +0x4 its target, +0x8 the transition. Its clip's request goes out
+   that same frame (0x2ECBE0 fills it whenever +0x8 is set, then moves it to +0xC and clears +0x8), with or without
+   0x1000. With 0x1000 the runner enters the target at once too (+0x1C). Without it only the runner's own state
+   waits [R 0x2EC1A0 .. 0x2EC2A8]: +0x1D on, the count +0x14 from 0, one a frame, the old state's time held
+   (0x2EBFEC skips the advance while +0x1D is on), and it enters the target when the count reaches the global at
+   gp −0x7218 (0x44C958, 2) + 1, its time then the start plus (count − 1) × dt × the speed (0x2ECE70, 0x2ECF08), where
+   the clip begun at the pick has got to; a pick of the same transition meanwhile (+0xC) changes nothing. So what is
+   seen starts at the pick either way; `moves.c` enters at once. With no pick, a state whose time passed its length
+   takes its "clip ended" transition. A pick whose switch window has passed is dropped; windows that passed are
+   cleared.
 4. 0x2ECBE0 starts the next clip: at 0, or with flag 0x1 at the same fraction of its length (capped at its end);
    looping into the same state carries the time over (time − length). The request it fills (per player, 0x100
    bytes) holds the new node (+0x0), its blend time (+0x4), the start time (+0x8), the sticks × 255 (+0x1C..+0x28)
