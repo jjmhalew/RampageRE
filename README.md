@@ -20,8 +20,8 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 **Playable from start to end in the native port** (`RampageRE.exe`, [docs/NATIVE.md](docs/NATIVE.md)): the front end
 (legal screen, intro movies, the attract mode and its demo games, menus, profiles, monster and city select), the
 campaign's seven cities block by block
-with their challenges, bosses, results screens and the credits, the other play modes, up to four players (bots
-included), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch (homebrew)
+with their challenges, bosses, results screens and the credits, the other play modes, one or two players as on the PS2 (computer monsters
+included; four monsters with the command line's `--players 4`), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch (homebrew)
 and Android, on keyboard, controllers (rumble included) or the touch screen, with texture packs and graphics
 settings (GTAO, SMAA / MSAA). It has been played on Windows; the Switch, phones and controllers are not yet tried on
 real hardware. Still missing: the smaller gaps that the notes in `docs/` list under "Not ported" (and mark [G] where
