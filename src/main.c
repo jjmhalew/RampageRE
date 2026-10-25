@@ -5046,6 +5046,41 @@ static void unit_fx_frame(Viewer *v, int unit, const ArmyUnit *u, int node, cons
         at[c] = o[c] + off[0] * R[0][c] + off[1] * R[1][c] + off[2] * R[2][c];
 }
 
+/* a shot's look, its frame at the launch [R 0x2944F0: 0x294AB8 .. 0x294D50]: y its direction made unit ((1, 0, 0)
+ * when its length squared is below 1e-6), x = y x up made unit ((1, 0, 0) likewise), z = x x y; up the world's z
+ * (0x40A028), but the world's x (0x40A008) for a direction with |y.z| >= 0.95, so a falling bomb's x is the world's
+ * -y and its z the world's x */
+static void shot_fx_frame(const float dir[3], float R[3][3])
+{
+    float y[3] = { dir[0], dir[1], dir[2] }, x[3], l = y[0] * y[0] + y[1] * y[1] + y[2] * y[2];
+    if (l < 1e-6f) {
+        y[0] = 1;
+        y[1] = y[2] = 0;
+    } else
+        for (int k = 0; k < 3; k++)
+            y[k] /= sqrtf(l);
+    float up[3] = { 0, 0, 1 };
+    if (!(fabsf(y[2]) < 0.95f)) {
+        up[0] = 1;
+        up[2] = 0;
+    }
+    x[0] = y[1] * up[2] - y[2] * up[1];
+    x[1] = y[2] * up[0] - y[0] * up[2];
+    x[2] = y[0] * up[1] - y[1] * up[0];
+    l = x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+    if (l < 1e-6f) {
+        x[0] = 1;
+        x[1] = x[2] = 0;
+    } else
+        for (int k = 0; k < 3; k++)
+            x[k] /= sqrtf(l);
+    memcpy(R[0], x, sizeof x);
+    memcpy(R[1], y, sizeof y);
+    R[2][0] = x[1] * y[2] - x[2] * y[1];
+    R[2][1] = x[2] * y[0] - x[0] * y[2];
+    R[2][2] = x[0] * y[1] - x[1] * y[0];
+}
+
 static void army_step(Viewer *v, float dt)
 {
     if (!v->army || !have_monster(v) || !v->mon[0].have_graph || !mon_in(&v->mon[0]))
@@ -5099,8 +5134,11 @@ static void army_step(Viewer *v, float dt)
                                                       * -> 0x291ED0, 0x291440: the offset x the unit's matrix] */
                     if (on)
                         unit_fx_frame(v, e->unit, on, e->node, e->v, R, at);
+                    else if (e->shot >= 0 && !bs)
+                        shot_fx_frame(e->dir, R);
                     int id = bs ? fx_spawn_frame(v->fxw, e->name, e->pos, bs->R, 1) :
                              on ? fx_spawn_frame(v->fxw, e->name, at, (const float (*)[3])R, 1) :
+                             e->shot >= 0 ? fx_spawn_frame(v->fxw, e->name, e->pos, (const float (*)[3])R, 1) :
                                   fx_spawn(v->fxw, e->name, e->pos, e->dir, 1);
                     if (id >= 0 && (e->unit >= 0 || e->shot >= 0) && v->nfxa < 128) {
                         v->fxa[v->nfxa].id = e->id;

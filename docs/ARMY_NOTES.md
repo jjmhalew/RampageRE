@@ -170,7 +170,10 @@ otherwise.
 
 **A shot** (RProjectile; init 0x2944F0, update 0x293120, step 0x294300) [R]:
 - **Launch:** speed = Velocity × InitialVelocityPercent. Its look is the `FireEffect` (`Tank_Projectile`,
-  `Punk_Bottle`, `Handgun_projectile`), which the viewer moves with it.
+  `Punk_Bottle`, `Handgun_projectile`), which the viewer moves with it. The look's frame (0x294AB8 .. 0x294D50): y the
+  direction, x = y × up made unit, z = x × y; up the world's z (0x40A028), the world's x (0x40A008) when |y.z| ≥ 0.95,
+  so a falling `BomberBomb`'s x is the world's −y and its wobble (em_vel.x) goes towards and away from the camera
+  (main.c `shot_fx_frame`).
 - **Steering:** towards its target the unit direction changes by at most `Mobility` × dt. That is barely at all at
   0.02 (bullets, shells), and outright homing at 17.5 (`SmartMissile*`).
 - **Step:** speed = min(Velocity, speed + Acceleration × dt); the velocity loses 9.81 × Gravity × dt in z; the shot
