@@ -116,8 +116,9 @@ what each block holds (models, people, vehicles, anything not found) and, in pla
 `RAMPAGE_NOIK=1`: the arms as the clips have them; `RAMPAGE_NOTAIL=1`: the tails as the clips have them, without
 their springs; `RAMPAGE_MAGENTA=1`: a magenta background, to show holes in the
 world). The fog is on (F toggles it, `--nofog` starts without). Texture packs: PNGs in `mods/textures/` replace the
-game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes
-([TEXTURES.md](TEXTURES.md)). `--cheat` takes several codes, comma separated (`--cheat 986960,071767`).
+game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under the name a replacement takes,
+`--dumptex all` every texture in `RAMPAGE.VOL` at once, then quits ([TEXTURES.md](TEXTURES.md); `make_hd_textures.bat`
+makes an AI-upscaled pack from it). `--cheat` takes several codes, comma separated (`--cheat 986960,071767`).
 
 ### Autoplay (the playthrough test)
 ```bat
@@ -172,6 +173,7 @@ and every blow between them one of its attack records' damage (+0x2C); a failed 
 | `build.bat dev` | `rampage.exe`, the developer build: a console, the same command line; what this document and the tests use (`build_viewer.bat` calls this) |
 | `build.bat standalone [DATA]` | `RampageRE.exe`, then `RampageRE-standalone.exe` (`make_standalone.bat`, below) |
 | `build.bat apkbundle` | `build\apkbundle.exe`, the tool of `make_android_bundle.bat` ("Android") |
+| `build.bat texup` | only `build\texup.exe`, the image helper of `make_hd_textures.bat` ([TEXTURES.md](TEXTURES.md) 5) |
 | `build.bat tools` | only `build\bundle_stub.exe`, `build\pack.exe` and `build\apkbundle.exe` (the CI builds them) |
 
 Both exes ask for the disc image at a first start without data ("Game data"), never under `--shot`, which keeps every

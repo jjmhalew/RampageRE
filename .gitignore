@@ -16,6 +16,7 @@ RampageRE*.exe
 rampage.nro
 shot_*.png
 tools/zig/
+tools/realesrgan/
 *.pdb
 rampage.log
 

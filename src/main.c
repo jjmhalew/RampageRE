@@ -1,7 +1,8 @@
 /* main.c - RampageRE's native viewer: draws the city blocks straight from RAMPAGE.VOL (the game's own archive),
  * with the game's layout, lights, traffic, people and a monster (city.c, anim.c, render_gl.c).
  *   rampage [RAMPAGE.VOL] [City] [block number] [--night] [--monster NAME] [--clip N] [--shot FILE.png] [--time T]
- *   [--dumptex] (texture packs, texpack.c: every texture drawn to mods/dump/; mods/textures/ replaces them)
+ *   [--dumptex [all]] (texture packs, texpack.c: every texture drawn to mods/dump/, "all": every one in RAMPAGE.VOL,
+ *   then quit; mods/textures/ replaces them)
  * RAMPAGE.VOL may be the game's disc image (.iso), read in place; without it data_find() looks (iso.h: build\disc
  * first). Default Chicago, 1. --shot draws one frame (at T seconds) as a PNG and quits; with a
  * monster in play the camera settles for 2 s, then the monster plays --do "right 1, cross, wait 1.5, ..." (held
@@ -8386,13 +8387,73 @@ static void gui_log_bound(void)                      /* a bound for whatever sti
 #define DEBUG_TITLE 1                                /* city, block, clip, triangles, fps and effects in the title */
 #endif
 
+/* the dump folder of a bundle in RAMPAGE.VOL for --dumptex all, by its file name: the scopes the loaders give
+ * (docs/TEXTURES.md "Folders"): the city's, Monsters, GUI, fx, Shell, else Common */
+static const char *dump_scope(const char *file)
+{
+    static const char *const SHELL[] = { "Shell.bdp", "VShell.bdp", "ShellData.bdp", "MemoryCard.bdp" };
+    for (int i = 0; i < NCITIES; i++)
+        if (!_strnicmp(file, CITIES[i], strlen(CITIES[i])))
+            return CITIES[i];
+    size_t n = strlen(file);
+    if ((n > 4 && !_stricmp(file + n - 4, ".cmp")) || (n > 9 && !_stricmp(file + n - 9, "_prop.bdp")))
+        return "Monsters";
+    if (!_stricmp(file, "fx.bdp"))
+        return "fx";
+    if (!_strnicmp(file, "WorldGui", 8) || !_stricmp(file, "CommonGUI.bdp"))
+        return "GUI";
+    if (!_strnicmp(file, "Loading", 7))
+        return "Shell";
+    for (size_t i = 0; i < sizeof SHELL / sizeof *SHELL; i++)
+        if (!_stricmp(file, SHELL[i]))
+            return "Shell";
+    return "Common";
+}
+
+/* --dumptex all (port extra, docs/TEXTURES.md "Every texture at once"; make_hd_textures.bat): every texture of every
+ * bundle in RAMPAGE.VOL (.bdp, .cmp) decoded as the renderer decodes it (tex_decode, render_gl.c texture_at) and
+ * written under the same name, without drawing anything: what --dumptex collects in play, and what no block draws */
+static int dumptex_all(const Vol *vol)
+{
+    int bundles = 0, textures = 0;
+    for (uint32_t i = 0; i < vol->count; i++) {
+        const char *name = vol->files[i].name;
+        size_t n = strlen(name);
+        if (n < 5 || (_stricmp(name + n - 4, ".bdp") && _stricmp(name + n - 4, ".cmp")))
+            continue;
+        uint32_t size;
+        uint8_t *file = vol_read(vol, name, &size);
+        Bundle b;
+        if (!file)
+            continue;
+        if (bdp_load(&b, file, size) != 0) {         /* (it holds the buffer either way) */
+            bdp_free(&b);
+            continue;
+        }
+        tp_scope(dump_scope(name));
+        for (uint32_t e = 0; e < b.nentries; e++) {
+            uint8_t *rgba;
+            int w, h;
+            if (b.entries[e].type != ET_TEXTURE || tex_decode(&b, &b.entries[e], &rgba, &w, &h) != 0)
+                continue;
+            tp_dump(tp_hash('T', rgba, (uint32_t)w * (uint32_t)h * 4, w, h), rgba, w, h);
+            free(rgba);
+            textures++;
+        }
+        bdp_free(&b);
+        bundles++;
+    }
+    printf("texture dump: %d textures of %d bundles in mods/dump (each once)\n", textures, bundles);
+    return 0;
+}
+
 static int viewer_main(int argc, char **argv)
 {
     static Viewer v;
     if (getenv("RAMPAGE_TRACE"))                     /* a trace survives a crash */
         setvbuf(stdout, NULL, _IONBF, 0);
     const char *shot = NULL, *monster[MONSTERS] = { NULL }, *pos[3] = { NULL, "Chicago", "1" };
-    int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0, players = 1, bots = 0;
+    int npos = 0, night = 0, clip = -1, have_view = 0, mute = 0, players = 1, bots = 0, dump_all = 0;
     float view[5] = { 0 };
     v.sfx_vol = v.music_vol = v.music_now = 1;      /* the Options page: as the game until changed */
     v.card_free_kb = -1;
@@ -8448,7 +8509,13 @@ static int viewer_main(int argc, char **argv)
         else if (strcmp(argv[i], "--night") == 0) night = 1;
         else if (strcmp(argv[i], "--nofog") == 0) v.fog = -1;
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
-        else if (strcmp(argv[i], "--dumptex") == 0) tp_set_dump(1);   /* mods/dump/<scope>/ (texpack.c) */
+        else if (strcmp(argv[i], "--dumptex") == 0) {   /* mods/dump/<scope>/ (texpack.c); "all": every texture, quit */
+            tp_set_dump(1);
+            if (i + 1 < argc && !strcmp(argv[i + 1], "all")) {
+                dump_all = 1;
+                i++;
+            }
+        }
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
         else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
         else if (strcmp(argv[i], "--shell") == 0) v.shell_mode = 1;
@@ -8526,6 +8593,8 @@ static int viewer_main(int argc, char **argv)
     }
     if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
         plat_message(msg, 1);
+    if (dump_all)                                    /* --dumptex all: no window, nothing drawn */
+        return dumptex_all(&v.vol);
     v.region = data_region(pos[0], &v.vol);
     if (v.lang < 0)
         v.lang = console_language(gfx.language, v.region);   /* rampage.cfg's language= (settings.h) */
