@@ -212,6 +212,21 @@ class MonsterData:
             out.append((t, at, text))
         return out
 
+    def hp_max(self):
+        """the most HP (+0x138): what the monster starts and respawns with"""
+        return self.f(0x138)
+
+    def attacks(self):
+        """every armed attack record (clip event type 0 with flags 2 or 4): (state name, damage at +0x2C)"""
+        out = []
+        for node, _, state in self.nodes:
+            span = self.u(node + 0x28)
+            for k in range(span >> 16, (span >> 16) + (span & 0xFFFF)):
+                o = self.item_at[k]
+                if self.u(o) == 0 and self.u(o + 0x14) & 6:
+                    out.append((state, self.f(o + 0x2C)))
+        return out
+
     def dump(self):
         out = ['// slots (event -> start list -> state) per mode; - = the default']
         for k, l in enumerate(self.slots):

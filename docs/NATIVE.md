@@ -158,7 +158,10 @@ per problem (80 at most) and every fifth block's end. The exit code is 3 when it
 Timed Run through the menus and alone, two and four players in the campaign, six demos), each run's files in OUT
 only (its log, console, screenshots, profile), and writes OUT\report.md and report.json: a table per run (how it
 ended, blocks won / ended, simulated minutes, wall seconds, peak memory, problems), each block, each problem, and
-the console's lines that look wrong ("not found", errors, `no ...`), counted.
+the console's lines that look wrong ("not found", errors, `no ...`), counted. `--suite monsters` runs each monster of
+the disc on its own (four of it in Chicago, three blocks, `RAMPAGE_TRACE=1`) and checks the trace against its
+MONSTER_DATA (FORMAT_MONSTER.md): the HP before a hit never past +0x138 and once equal to it, the blocks' HP likewise,
+and every blow between them one of its attack records' damage (+0x2C); a failed check is a `MONSTER CHECK` line.
 
 ### Windows builds
 `build.bat` (after WoodyRE's) builds, with Zig, from the same SRC list:

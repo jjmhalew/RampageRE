@@ -2,7 +2,8 @@
 
 Each run is one rampage.exe --autoplay process (offscreen, simulated time; docs/NATIVE.md "Autoplay"): the campaign from
 the front end to the credits, each city on its own, the other play modes, two and four players, the attract mode's
-demos, with several seeds. The runs go in parallel; everything is written to the folder given (OUT): per run its log
+demos, with several seeds; and every monster on its own, its HP and its blows checked against its MONSTER_DATA. The
+runs go in parallel; everything is written to the folder given (OUT): per run its log
 (<name>.log, the watchdog's BLOCK / PROBLEM / EVENT / SUMMARY lines), its console (<name>.out), its screenshots
 (<name>_shots/) and its profile; then report.md and report.json, a table per run and every problem.
 
@@ -10,6 +11,9 @@ Usage:
   python tools/playthrough.py OUT [--vol RAMPAGE.VOL] [--exe rampage.exe] [--suite full|cities|modes|ci] [--jobs N]
                                   [--seeds 1,2] [--only NAME,...] [--timeout SECONDS]
   python tools/playthrough.py OUT --suite ci      one city, two blocks: exit 1 on a crash, a hang or a problem
+  python tools/playthrough.py OUT --suite monsters   each of the 30 monsters, four of it in Chicago for three blocks
+                                                  (RAMPAGE_TRACE on): its most HP (+0x138) and the damage of every blow
+                                                  between them must be the disc's
 
 The exit code: 0 no crash, hang or problem; 1 otherwise.
 """
@@ -21,6 +25,10 @@ import re
 import subprocess
 import sys
 import time
+
+import bdp
+import monster
+import pvol
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CAMPAIGN = ['LasVegas', 'SanFrancisco', 'London', 'LosAngeles', 'Chicago', 'HongKong', 'NewYork']
@@ -37,10 +45,64 @@ KIND_HINT = {
     'under_ground': 'port bug?', 'outside_street': 'port bug?', 'monster_stuck': 'bot limit or port bug',
     'block_never_ends': 'bot limit or port bug', 'block_lost_repeatedly': 'bot limit (it does not eat or dodge)',
 }
+MONSTER_RUN = 'monster_'                             # the monsters suite's runs: traced, then checked against the disc
+HIT = re.compile(r'^  hit by (.+?): ([\d.]+), HP (\d+)')   # main.c monster_take's trace (HP printed whole)
 QUIET = [re.compile(p) for p in (r'\b0 not found', r'^\[\d\] |^[A-Z][A-Za-z_0-9]* -> ', r'^wrote ', r'^camera at ')]
 
 
-def runs(suite, seeds):
+def disc_monsters(vol):
+    """each monster of the disc (an <M>_anims.cmp beside its <M>.cmp): {name: MonsterData}"""
+    out = {}
+    with open(vol, 'rb') as f:
+        files = {name: (offset, size) for name, offset, size in pvol.read_index(f)}
+        for name in sorted(files):
+            if not name.endswith('_anims.cmp') or name[:-10] + '.cmp' not in files:
+                continue
+            offset, size = files[name[:-10] + '.cmp']
+            f.seek(offset)
+            b = bdp.Bundle(f.read(size))
+            for e, a, _ in b.items(0):
+                if b.name(e.name).lstrip('\x13').endswith('MONSTER_DATA'):
+                    out[name[:-10]] = monster.MonsterData(a, b.names)
+    return out
+
+
+def monster_check(console, blocks, md):
+    """a monsters-suite run against its MONSTER_DATA: the HP before every hit (HP after + the amount) at most +0x138 and
+    once equal to it (the start), the HP at each block's end at most +0x138, and every blow between the monsters one of
+    its attack records' damage. The trace prints the HP whole, so 0.5 either way."""
+    hp_max, damages = md.hp_max(), {d for _, d in md.attacks()}
+    hits, other, top, fail = {}, 0, 0.0, []
+    with open(console, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            m = HIT.match(line)
+            if not m:
+                continue
+            who, amount, hp = m.group(1), float(m.group(2)), int(m.group(3))
+            top = max(top, hp + amount)
+            if hp + amount > hp_max + 0.5:
+                fail.append(f'{line.strip()}: more than the most HP {hp_max:g}')
+            if not who.startswith('monster '):
+                other += 1
+                continue
+            hits[amount] = hits.get(amount, 0) + 1
+            if all(abs(amount - d) > 1e-3 for d in damages):
+                fail.append(f'{line.strip()}: no attack record of that damage')
+    if not hits:
+        fail.append('no blow between the monsters: nothing checked')
+    elif abs(top - hp_max) > 0.5:
+        fail.append(f'the HP before a hit was at most {top:g}, the disc says {hp_max:g}')
+    for b in blocks:
+        hp = [float(x) for x in b.get('hp', '').split(',') if x]
+        if any(x > hp_max + 0.5 for x in hp):
+            fail.append(f"block {b.get('block')}: hp {b.get('hp')} past {hp_max:g}")
+    if len(blocks) < 3:
+        fail.append(f'{len(blocks)} of 3 blocks ended')
+    return {'hp_max': hp_max, 'top': top, 'hits': {f'{k:g}': n for k, n in sorted(hits.items())}, 'other_hits': other,
+            'damages': sorted(damages), 'fail': fail}
+
+
+def runs(suite, seeds, monsters=()):
     """the runs of a suite: (name, arguments, minutes)"""
     r = []
     if suite in ('full', 'campaign'):
@@ -68,6 +130,10 @@ def runs(suite, seeds):
                                      s], 300),
             ('demos', ['--shell', '--ap-demos', '6'], 120),
         ]
+    if suite == 'monsters':
+        for m in monsters:
+            r.append((MONSTER_RUN + m, ['Chicago', '1', '--players', '4', '--monster', m, '--monster2', m, '--monster3',
+                                        m, '--monster4', m, '--ap-blocks', '3', '--ap-seed', str(seeds[0])], 12))
     if suite == 'ci':
         r.append(('ci_LasVegas', ['LasVegas', '1', '--ap-blocks', '2', '--ap-seed', str(seeds[0])], 30))
     return r
@@ -130,10 +196,11 @@ def run_one(exe, vol, outdir, name, args, minutes, timeout):
         os.remove(prof)
     cmd = [exe, vol] + args + ['--autoplay', '--ap-minutes', str(minutes), '--ap-log', log, '--ap-shots', shots,
                               '--profile', prof, '--shot', os.path.join(outdir, name + '_end.png'), '--mute']
+    env = os.environ | {'RAMPAGE_TRACE': '1'} if name.startswith(MONSTER_RUN) else None
     t0 = time.time()
     with open(con, 'w', encoding='utf-8', errors='replace') as f:
         try:
-            p = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, timeout=timeout, cwd=outdir)
+            p = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, timeout=timeout, cwd=outdir, env=env)
             code, hung = p.returncode, False
         except subprocess.TimeoutExpired:
             code, hung = None, True
@@ -163,7 +230,8 @@ def main():
     ap.add_argument('out', help='the folder everything is written to')
     ap.add_argument('--vol', default=os.environ.get('RAMPAGE_VOL', os.path.join(ROOT, 'build', 'disc', 'RAMPAGE.VOL')))
     ap.add_argument('--exe', default=os.path.join(ROOT, 'rampage.exe' if os.name == 'nt' else 'rampage'))
-    ap.add_argument('--suite', default='full', choices=['full', 'campaign', 'cities', 'modes', 'ci'])
+    ap.add_argument('--suite', default='full', choices=['full', 'campaign', 'cities', 'modes', 'ci',
+                                                                'monsters'])
     ap.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument('--seeds', default='1,2')
     ap.add_argument('--only', default='', help='the runs to do, by name (comma separated prefixes)')
@@ -173,7 +241,8 @@ def main():
     os.makedirs(out, exist_ok=True)
     exe, vol = os.path.abspath(a.exe), os.path.abspath(a.vol)
     seeds = [int(s) for s in a.seeds.split(',') if s]
-    todo = runs(a.suite, seeds)
+    mons = disc_monsters(vol) if a.suite == 'monsters' else {}
+    todo = runs(a.suite, seeds, mons)
     if a.only:
         pre = a.only.split(',')
         todo = [t for t in todo if any(t[0].startswith(p) for p in pre)]
@@ -183,6 +252,9 @@ def main():
         futs = {pool.submit(run_one, exe, vol, out, n, args, m, a.timeout): n for n, args, m in todo}
         for f in concurrent.futures.as_completed(futs):
             r = f.result()
+            if r['name'].startswith(MONSTER_RUN):
+                r['monster'] = monster_check(os.path.join(out, r['name'] + '.out'), r['blocks'],
+                                             mons[r['name'][len(MONSTER_RUN):]])
             results.append(r)
             s = r['summary'] or {}
             print(f"{r['name']}: exit {r['exit']}{' HUNG' if r['hung'] else ''}, {len(r['blocks'])} blocks, "
@@ -210,6 +282,14 @@ def main():
         for b in r['blocks']:
             md.append(f"- {b.get('city')} {b.get('block')} ({b.get('type')}): {b.get('result')} in {b.get('dur')} s, "
                       f"score {b.get('score')}, lives {b.get('lives')}, hp {b.get('hp')}, boss {b.get('boss')}")
+        if r.get('monster'):
+            c = r['monster']
+            md.append(f"- monster: most HP {c['hp_max']:g}, before a hit at most {c['top']:g}; blows between them "
+                      f"{', '.join(f'{k} x{n}' for k, n in c['hits'].items()) or 'none'} (the disc's damages "
+                      f"{', '.join(f'{d:g}' for d in c['damages'])}); {c['other_hits']} other hits")
+            for x in c['fail']:
+                md.append(f'- MONSTER CHECK {x}')
+                bad = True
         for p in r['problems']:
             md.append(f"- PROBLEM ({KIND_HINT.get(p.get('kind'), '?')}, a guess) {p['line']}")
             bad = True
