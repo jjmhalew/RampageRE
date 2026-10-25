@@ -186,6 +186,15 @@ The clock starts when state 6 is entered. The time left is the seconds minus the
 0. `gWorld.getGameClockTime` (World binding 82, 0x2AF848) is that time left; `getGameClockLimit` (binding 81, 0x2AF818)
 is the clock's +0x30, the TimeLimit read (`game_clock_limit`). It is drawn in states 5 and 6 when ClockVisible is set (Clock.bsf: m:ss, fading in).
 
+**The clock is out** (0x347D70, asked by gAIMgr's update for the airstrike, 0x3341E4 → 0x3320F0) [R]: armed (+0x44)
+or running (+0x45, set by the start 0x347EA0, cleared by the stop and the reset), and the world's clock (gp−0x6CFC
++0x30, from the world's start) the bonus time (+0x3C) or more past the start (+0x34). It is not the time-up of state
+6: a campaign block without a TimeLimit runs out at its 0:00 (480 s) and the airstrike comes, the block going on
+until its buildings are down; a boss block's (600 s, bonus time 480) comes with 2:00 left. Armed and not running
+(the boss block from its activation to state 6, the start 0) it is out once the world's clock is past the bonus time
+(game.c `game_time_up`; up to v0.15.0 the port asked for armed and the time left 0, so the airstrike came only
+with a Timed Run's or a boss block's game over).
+
 **Time bonus** (0x347E10, when the block is won): of the entries whose time has not been reached, the most points.
 The default table is < 120 s 5000, < 150 s 2500, < 180 s 1500, < 240 s 500, < 360 s 200, < 480 s 100. In the
 campaign each player gets bonus / players as category 4. In a Timed Run what is left of the clock carries on to the

@@ -275,7 +275,7 @@ void army_set_view(Army *a, float xmin, float xmax);
 /* the block's AIDef (its BlockDef| group in <City>_Props; 0x334C40): the spawner's records; their count */
 int army_load_block(Army *a, Group block_def);
 void army_activate(Army *a, int on);                 /* gAIMgr.activate: the spawner's clocks run from here */
-/* the block's clock is out (0x347D70: armed and run down; game_time_up): gAIMgr's airstrike (0x3320F0) runs while
+/* the block's clock is out (0x347D70: armed or running, the bonus time past; game_time_up): gAIMgr's airstrike (0x3320F0) runs while
  * it is, its FinalBombers bombing the tallest buildings */
 void army_airstrike(Army *a, int time_up);
 void army_set_weapons(Army *a, int on);              /* gp-0x772C (game_weapons_on): off, no weapon fires */
