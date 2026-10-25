@@ -101,6 +101,11 @@ folder and in `%LOCALAPPDATA%\RampageRE` first (`~/.local/share/RampageRE` on Li
 [docs/NATIVE.md](docs/NATIVE.md) "Game data"). They do not need `build.ps1`. The recompiled game (`build.ps1`) is not
 built there, as it needs the disc.
 
+**Linux / Steam Deck**: unpack `RampageRE-linux-x86_64-<tag>.tar.gz` and start `./rampage ~/Rampage.iso` (your
+disc image or `RAMPAGE.VOL`; needs SDL2, which SteamOS has). It starts in the front end. On the Steam Deck add
+`rampage` to Steam as a non-Steam game with the disc image's path as its launch option, so Steam hands its controls over
+as a pad.
+
 **Nintendo Switch** (homebrew, experimental, not yet tried on a Switch): unpack `RampageRE-switch-<tag>.zip` onto the
 SD card (or build `rampage.nro` with `./build_switch.sh`, devkitPro or its Docker image), put your disc image (or
 `RAMPAGE.VOL` with `RAMPAGE.ELF`) into `/switch/rampagere/` beside it and start it from the Homebrew Menu, preferably

@@ -209,10 +209,15 @@ On Linux (Debian / Ubuntu; WSL2 too):
 ```sh
 sudo apt install build-essential libsdl2-dev libgl-dev
 ./build.sh                                          # ./rampage (CC=clang ./build.sh for another compiler)
+./rampage ~/Rampage.iso                             # the front end (so does ./rampage alone, with the data found)
 ./rampage build/disc/RAMPAGE.VOL Chicago 1 --monster George
 SDL_VIDEODRIVER=offscreen ./rampage build/disc/RAMPAGE.VOL Chicago 1 --mute --shot s.png   # no display needed
 ```
 `SDL_VIDEODRIVER=offscreen` is SDL's EGL pbuffer driver: it needs no X or Wayland server (CI, WSL without WSLg).
+Linux's `rampage` is the player build there too: started alone or with only the data's path it opens the front end,
+as `RampageRE.exe` does; given a city (or any option) it is the viewer, as `rampage.exe`. On the Steam Deck add it to
+Steam as a non-Steam game (*Add a Non-Steam Game*, the disc image's path as its launch option), so that in Game Mode, or
+started from Steam in Desktop Mode, Steam Input hands its controls over as a pad.
 Pass the disc image (`./rampage ~/Rampage.iso Chicago 1`), or put it (or `RAMPAGE.VOL` with `SLES_538.00` or
 `RAMPAGE.ELF`) in `~/.local/share/RampageRE` ("Game data" above). A shot on Mesa's llvmpipe differs from the Windows one only in rounding (under 0.1 % of the pixels by more
 than 8 of 255).

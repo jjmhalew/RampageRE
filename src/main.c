@@ -12,8 +12,9 @@
  * moves.c) from a pad made of keys - W A S D / the arrows the left stick, Space Cross (jump), J Square (punch),
  * K Triangle (kick), L Circle (grab), R R2 (roar) - and the game's own camera (camera.c) follows it. Controllers
  * (pad.h) play too, one a player, and rumble where the game does (docs/NATIVE.md "Input").
- * Built with RAMPAGE_GUI (build.bat: RampageRE.exe, no console) it is the player build: without arguments the front end
- * (--shell), stdout and stderr in rampage.log, a plain window title, and a message box when it cannot start. */
+ * Built with RAMPAGE_GUI (build.bat: RampageRE.exe, no console) it is the player build: without arguments (or with the
+ * data's path alone) the front end (--shell), stdout and stderr in rampage.log, a plain window title, and a message box
+ * when it cannot start. Linux's rampage (build.sh, the Steam Deck's too) starts in the front end the same way. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,6 +69,13 @@ static int campaign_index(const char *city)
     return 0;
 }
 #define NCITIES 7
+static int city_named(const char *s)                 /* "rampage Chicago": a city, not the data's path */
+{
+    for (int i = 0; i < NCITIES; i++)
+        if (_stricmp(s, CITIES[i]) == 0)
+            return 1;
+    return 0;
+}
 
 /* the pad a monster is driven by this frame: the left stick (x right, y down), the right stick, the buttons pressed
  * this frame (MV_CROSS ...) and held */
@@ -8405,8 +8413,10 @@ static int viewer_main(int argc, char **argv)
 #elif defined __ANDROID__
     android_init();                                  /* logcat; the app folder the current one: the data, rampage.cfg,
                                                       * the profile (RampageActivity starts the front end, --shell) */
-#elif defined RAMPAGE_GUI
-    if (argc < 2)                                    /* RampageRE.exe started as it is: the front end */
+#elif defined RAMPAGE_GUI || !defined _WIN32
+    /* the player builds (RampageRE.exe; Linux's one rampage, the Steam Deck's) started as they are, or with the data
+     * alone (./rampage ~/Rampage.iso, a disc image dropped on the exe): the front end, not Chicago 1 in the viewer */
+    if (argc < 2 || (argc == 2 && argv[1][0] != '-' && !city_named(argv[1])))
         v.shell_mode = 1;
 #endif
     for (int i = 1; i < argc; i++) {
