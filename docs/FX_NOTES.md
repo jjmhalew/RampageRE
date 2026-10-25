@@ -258,7 +258,11 @@ fall: +0x1CC is the falling storey then). The spawner's start places every recor
   current camera's right (+0x30) and up (+0x3C) (0x22233C … 0x2223D8), the corners (±0.5, ±0.5) (0x3B2480) [R]. The
   effect's matrix never reaches these axes, so a scaled effect's billboards keep their size (only their places
   scale). A streak (0x1F7500) [R]: tail and head (+ length × direction) go through the matrix, so its length scales,
-  but its width is size × size_mul (0x1F769C), laid in camera space after the transform, so it does not. The ground test and the bounding box use half the size as the radius.
+  but its width is size × size_mul (0x1F769C), laid in camera space after the transform, so it does not. There d is
+  the head's direction from the tail in the camera's x y ((−1, 0) when that is no longer than √0.001), n = (−d.y, d.x),
+  w half the width; the corners tail + w(n − d), tail − w(n + d), head + w(n + d), head + w(d − n): the quad runs w
+  past each end. Their uv (0x3B2550, u in the low half): u 1 at the tail and 0 at the head, v 0 on the n side, so the
+  texture's width lies along the streak (the `bomb`, its nose at the picture's right, falls nose first) [R]. The ground test and the bounding box use half the size as the radius.
 - **DontBillboard** (0x222C08) [R]: not relative, the quad lies in the world's x y plane (the draw's model matrix ×
   size), forward_axis unused (Barf_pool, chocolate_pool, the Carbinator's glows); relative, rows 0 and 1 of (emitter
   × effect) × B, B by forward_axis: 2 identity, 1 rows (1, 0, 0), (0, 0, 1), (0, −1, 0), 0 rows (0, 1, 0), (−1, 0,

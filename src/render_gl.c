@@ -1443,19 +1443,30 @@ static void draw_fx(Renderer *r, const FxQuad *fx, int nfx, const Camera *cam, f
                 c[2][k] = q->pos[k] + q->axis[0][k] - q->axis[1][k];
                 c[3][k] = q->pos[k] - q->axis[0][k] - q->axis[1][k];
             }
-        } else {                                           /* a streak, head (v 0) to tail (v 1), facing the camera */
-            float view[3] = { q->pos[0] - cam->pos[0], q->pos[1] - cam->pos[1], q->pos[2] - cam->pos[2] }, wd[3];
+        } else {
+            /* a streak [R 0x1F7500]: tail to head in the camera's plane, d their direction there ((-1, 0) when shorter
+             * than sqrt(0.001)), n = d turned a quarter counter-clockwise, half the width w; the corners tail + w(n - d),
+             * tail - w(n + d), head + w(n + d), head + w(d - n), so the quad runs w past each end; their uv (0x3B2550):
+             * u 1 at the tail and 0 at the head, v 0 on the n side: the texture's width lies along the streak (the
+             * bomb's nose, at its picture's right, leads it down) */
             const float *a = q->axis[0];
-            wd[0] = a[1] * view[2] - a[2] * view[1];
-            wd[1] = a[2] * view[0] - a[0] * view[2];
-            wd[2] = a[0] * view[1] - a[1] * view[0];
-            float l = sqrtf(wd[0] * wd[0] + wd[1] * wd[1] + wd[2] * wd[2]);
+            float dx = 2 * (a[0] * right[0] + a[1] * right[1] + a[2] * right[2]);
+            float dy = 2 * (a[0] * up[0] + a[1] * up[1] + a[2] * up[2]), l2 = dx * dx + dy * dy, w = q->size[1] / 2;
+            if (l2 <= 0.001f) {
+                dx = -1;
+                dy = 0;
+            } else {
+                float l = sqrtf(l2);
+                dx /= l;
+                dy /= l;
+            }
             for (int k = 0; k < 3; k++) {
-                wd[k] = l > 1e-6f ? wd[k] / l * q->size[1] / 2 : 0;
-                c[0][k] = q->pos[k] + a[k] - wd[k];
-                c[1][k] = q->pos[k] + a[k] + wd[k];
-                c[2][k] = q->pos[k] - a[k] + wd[k];
-                c[3][k] = q->pos[k] - a[k] - wd[k];
+                float d = w * (dx * right[k] + dy * up[k]), n = w * (-dy * right[k] + dx * up[k]);
+                float head = q->pos[k] + a[k], tail = q->pos[k] - a[k];
+                c[0][k] = head + n + d;                    /* u0 v0 */
+                c[1][k] = tail + n - d;                    /* u1 v0 */
+                c[2][k] = tail - n - d;                    /* u1 v1 */
+                c[3][k] = head - n + d;                    /* u0 v1 */
             }
         }
         /* lying on the street: pulled in front of it. The street writes depth [R: every block ground part is a kind 2

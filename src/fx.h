@@ -88,8 +88,8 @@ enum {
     FXQ_BILLBOARD,   /* faces the camera: corners pos +- right * size[0]/2 +- up * size[1]/2, turned by rot (radians,
                       * counter-clockwise on screen) */
     FXQ_FLAT,        /* lies in the effect's frame: corners pos +- axis[0] +- axis[1] (half extents), rot already in */
-    FXQ_STRETCH      /* a streak: from pos - axis[0] to pos + axis[0] (tail to head), size[1] wide, turned about the
-                      * streak to face the camera; u runs along the width, v from the head (0) to the tail (1) */
+    FXQ_STRETCH      /* a streak: from pos - axis[0] to pos + axis[0] (tail to head), size[1] wide in the camera's
+                      * plane and half that past each end; u from the tail (1) to the head (0), v across */
 };
 typedef struct {
     int kind;
