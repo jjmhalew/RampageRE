@@ -69,6 +69,7 @@ static int campaign_index(const char *city)
     return 0;
 }
 #define NCITIES 7
+#if defined RAMPAGE_GUI || !defined _WIN32
 static int city_named(const char *s)                 /* "rampage Chicago": a city, not the data's path */
 {
     for (int i = 0; i < NCITIES; i++)
@@ -76,6 +77,7 @@ static int city_named(const char *s)                 /* "rampage Chicago": a cit
             return 1;
     return 0;
 }
+#endif
 
 /* the pad a monster is driven by this frame: the left stick (x right, y down), the right stick, the buttons pressed
  * this frame (MV_CROSS ...) and held */
