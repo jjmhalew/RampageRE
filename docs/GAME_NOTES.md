@@ -317,7 +317,11 @@ reset only when the first city starts). (cities − 1) / players + 1 cities make
 GameStatus (0x4D7990, the player's +0x3C), which outlives the world; the port makes a game.c `Game` per city, so
 main.c carries them over (`GameConfig.cities_won`, kept at each `GE_EXIT`).
 
-**Timed Run**: TimeLimit 180 per block, adding up. Running out is game over. There is no Continue choice.
+**Timed Run**: TimeLimit 180 per block, adding up. Running out is game over. GameOver offers Retry and Quit (Choose
+Monster is hidden, GameOver.scr). Retry starts the city over from its first block with 3:00: the Continue (0x3250B0)
+calls the city's start 0x33DB90 (0x3251D0), which clears the seconds (0x33DBE4) before activateNextBlock adds the
+block's 180 (up to v0.15.0 the port cleared them only at the city's load, so a Retry began with the lost block's
+seconds plus 180; game.c `status_reset`).
 
 ## What the port does not have
 

@@ -262,6 +262,8 @@ static void status_reset(Game *g)                    /* 0x33DB90 [R] */
 {
     for (int i = 0; i < GAME_PLAYERS; i++)
         clear_points(&g->p[i]);
+    g->clock_limit = 0;                              /* the Timed Run's seconds start from nothing (0x33DBE4: +0x4B8 =
+                                                      * 0x4D7E48), at the city's start and at Game Over's Retry */
     if (g->start_block != 0)
         return;
     for (int i = 0; i < GAME_PLAYERS; i++) {
@@ -1151,11 +1153,6 @@ void game_start(Game *g)
     g->start_block = 0;                              /* a new city: the lives (0x33DB90 with no start block yet) */
     status_reset(g);
     g->start_block = keep;
-    if (g->cfg.play_type == GP_TIMED_RUN)          /* the run's time starts from nothing [R 0x33DBE4: the city's
-                                                      * start (0x33DB90 on gCommon, from the world's 0x2B7D40) clears
-                                                      * +0x4B8 = 0x4D7E48; its one other writer is a block's win,
-                                                      * 0x3256A0] */
-        g->clock_limit = 0;
     g->cur = (g->first > g->start_block ? g->first : g->start_block) - 1;   /* 0x2B74D0 */
     activate_next_block(g, 0);
     checkpoint_save(g);                              /* the checkpoint starts here: the shell's startGame takes it
