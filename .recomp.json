@@ -6,12 +6,12 @@
   "type": ["recomp", "port"],
   "original": { "region": "Europe", "revision": "1.00", "serial": "SLES-53800", "sha1": "983b5250aecbfafb2f8620dff52599459a8ef775" },
   "project": "RampageRE",
-  "status": "playable",
+  "status": "released",
   "targets": ["Windows", "Linux", "Android", "Switch"],
   "toolchain": "Ps2recomp",
   "approach": "The ELF statically recompiled to C++ with PS2Recomp as the reference, then replaced by a native C port built from the reverse-engineered formats and game code",
   "maintainers": [{ "name": "jjmhalew", "link": "https://github.com/jjmhalew" }],
-  "notes": "The native port plays from start to end from your own disc: front end and attract mode, the seven cities with challenges and bosses, the other modes, up to four players, sound, music and saving, with GTAO and SMAA/MSAA. Played on Windows; the Switch, phones and controllers are not yet tried on real hardware. The recompiled base runs the front end and Las Vegas. After v1: the Midway Classics arcade games.",
+  "notes": "The native port plays from start to end from your own disc: front end and attract mode, the seven cities with challenges and bosses, the other modes, up to four players (King of the City, King of the World, the Timed Run), sound, music and saving, with GTAO and SMAA/MSAA. Played on Windows; a player reports it running on a Retroid handheld (Android); the Steam Deck and the Switch are not yet tried on real hardware. The recompiled base runs the front end and Las Vegas. After v1: the Midway Classics arcade games.",
   "help": ["Testing on Switch, Android and controllers"],
   "tags": ["monsters", "action"]
 }
