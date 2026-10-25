@@ -1,4 +1,5 @@
-/* shot.c - the window's picture to a PNG (stored zlib blocks: no compressor needed), for --shot and the F12 key. */
+/* shot.c - the window's picture to a PNG (stored zlib blocks: no compressor needed), for --shot and the F12 key; and
+ * as raw frames for RAMPAGE_CAPTURE (tools/clip.py). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,4 +79,15 @@ int shot_png(const char *path, int w, int h)
     fclose(f);
     free(px); free(raw); free(z);
     return 0;
+}
+
+/* the picture's rows as they are (RGB, bottom row first) appended to f: one frame of RAMPAGE_CAPTURE's video.rgb */
+int shot_raw(FILE *f, int w, int h)
+{
+    uint8_t *px = malloc((size_t)w * h * 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, px);
+    size_t n = fwrite(px, 1, (size_t)w * h * 3, f);
+    free(px);
+    return n == (size_t)w * h * 3 ? 0 : -1;
 }

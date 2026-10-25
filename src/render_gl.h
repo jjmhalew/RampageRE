@@ -58,5 +58,6 @@ int  rnd_aniso_max(void);
 void rnd_video(Renderer *r, const uint8_t *rgba, int w, int h);
 uint32_t rnd_triangles(const Renderer *r);          /* drawn in the last frame */
 int shot_png(const char *path, int width, int height);   /* the back buffer to a PNG (shot.c) */
+int shot_raw(FILE *f, int width, int height);           /* its raw RGB rows appended to f (RAMPAGE_CAPTURE) */
 
 #endif

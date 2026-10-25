@@ -8734,6 +8734,31 @@ static int viewer_main(int argc, char **argv)
      * +0xA0 & 0x10 skips the world's update, 0x288340), the GUI going on with the frame's time [R] */
     double world_t = 0;
     int frames = 0, settled = 0;                     /* a shot's game: its words played */
+    /* RAMPAGE_CAPTURE="START SECONDS DIR" with --autoplay (tools/clip.py): from START simulated seconds on, SECONDS of
+     * video at 30 frames a second, every other step's picture appended to DIR/video.rgb (shot_raw) and every step's
+     * sound (1/60 s, sound_mix) to DIR/audio.raw; the run ends after the last frame. Not the game's: footage */
+    FILE *cap_v = NULL, *cap_a = NULL;
+    long cap_step = 0, cap_from = 0, cap_to = 0;     /* steps since the start: now, the first captured, the end */
+    {
+        const char *c = getenv("RAMPAGE_CAPTURE");
+        double from, secs;
+        int at = 0;
+        if (c && v.ap && sscanf(c, "%lf %lf %n", &from, &secs, &at) == 2 && at) {
+            char path[1024];
+            cap_from = lround(from * 60);
+            cap_to = cap_from + 2 * lround(secs * 30);
+            snprintf(path, sizeof path, "%s/video.rgb", c + at);
+            cap_v = fopen(path, "wb");
+            snprintf(path, sizeof path, "%s/audio.raw", c + at);
+            cap_a = fopen(path, "wb");
+            if (!cap_v || !cap_a) {
+                printf("capture: cannot write into %s\n", c + at);
+                return 1;
+            }
+            sound_volume(0.5f, 0.5f);                /* 6 dB of room: the mix at the game's volumes clips */
+            printf("capture: %dx%d, steps %ld .. %ld\n", w.width, w.height, cap_from, cap_to);
+        }
+    }
     while (!w.quit) {
         win_poll(&w);
         double now = win_time();
@@ -8744,6 +8769,22 @@ static int viewer_main(int argc, char **argv)
             dt = 1.0f / 60;
             v.ap_t += dt;
             now = start + v.ap_t;
+        }
+        int cap_draw = 0;                            /* RAMPAGE_CAPTURE: this step's picture is a frame */
+        if (cap_v) {
+            if (cap_step == cap_to) {
+                fclose(cap_v);
+                fclose(cap_a);
+                printf("capture: %ld frames\n", (cap_to - cap_from) / 2);
+                break;
+            }
+            if (cap_step >= cap_from) {
+                static int16_t pcm[2 * SOUND_RATE / 60];
+                sound_mix(pcm, SOUND_RATE / 60);
+                fwrite(pcm, sizeof pcm, 1, cap_a);
+                cap_draw = !((cap_step - cap_from) & 1);
+            }
+            cap_step++;
         }
         if (!(v.hud && hud_paused(v.hud)))           /* (paused: the Pause menu, GameOver's pauseGame(1)) */
             world_t += dt;
@@ -8775,8 +8816,11 @@ static int viewer_main(int argc, char **argv)
             if (v.ap) {                              /* the autopilot's press, the shell's frame, the watchdog */
                 autopilot_shell(&v, dt);
                 shell_frame(&v, &w, dt);
-                if (!((apf = autoplay_watch(&v)) & (AP_SHOT | AP_STOP)))
+                if (!((apf = autoplay_watch(&v)) & (AP_SHOT | AP_STOP)) && !cap_draw) {
+                    if (cap_v)                       /* (RAMPAGE_CAPTURE: the sound goes on between the frames) */
+                        sound_update(dt);
                     continue;                        /* nothing to draw */
+                }
             } else if (!shot)
                 shell_frame(&v, &w, dt > 0.1f ? 0.1f : dt);
             static HudQuad sq[4096];
@@ -8786,9 +8830,14 @@ static int viewer_main(int argc, char **argv)
             v.shell_scene->nhud = shell_quads(v.shell, sq, 4096);
             gui3d_layers(&v, v.shell, v.shell_scene);
             Camera none = { { 0, 0, 0 }, 0, 0, 60 };
-            sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
+            sound_update(shot && !cap_v ? 0 : (dt > 0.1f ? 0.1f : dt));
             rnd_hud_time(v.rnd, now - start);
             rnd_frame(v.rnd, &w, &none, now - start, 0);
+            if (cap_draw) {
+                shot_raw(cap_v, w.width, w.height);
+                if (!(apf & (AP_SHOT | AP_STOP)))
+                    continue;
+            }
             if (shot) {
                 const char *to = apf & AP_STOP ? shot : v.ap ? ap_shot_path(v.ap) : shot;
                 int ok = shot_png(to, w.width, w.height) == 0;
@@ -8981,7 +9030,7 @@ static int viewer_main(int argc, char **argv)
         double t = shot && !v.ap ? shot_time : world_t;
         rnd_hud_time(v.rnd, shot && !v.ap ? shot_time : now - start);   /* the GUI's 3D layers: the frame's time */
         sound_listener(cam.pos, (const float (*)[3])cam.rows);   /* the camera (its rows when it is the game's) */
-        sound_update(shot ? 0 : (dt > 0.1f ? 0.1f : dt));
+        sound_update(shot && !cap_v ? 0 : (dt > 0.1f ? 0.1f : dt));
         if (v.have_scene) {
             scene_update(&v.scene, t);
             if (playing)
@@ -8989,13 +9038,13 @@ static int viewer_main(int argc, char **argv)
             else
                 v.scene.nspheres = 0;
         }
-        if (v.ap && !v.shell && !((apf = autoplay_watch(&v)) & (AP_SHOT | AP_STOP)))
+        if (v.ap && !v.shell && !((apf = autoplay_watch(&v)) & (AP_SHOT | AP_STOP)) && !cap_draw)
             continue;                                /* --autoplay: nothing to draw */
         {                                            /* this frame's particles */
             static FxQuad quads[8192];
             v.scene.fx = quads;
             v.scene.nfx = v.fxw ? fx_quads(v.fxw, quads, 8192) : 0;
-            shadow_frame(&v, shot ? 1.0f : (dt > 0.1f ? 0.1f : dt));
+            shadow_frame(&v, cap_v ? 2.0f / 60 : shot ? 1.0f : (dt > 0.1f ? 0.1f : dt));
             if (shot && getenv("RAMPAGE_TRACE")) {
                 int np[3] = { 0, 0, 0 };
                 for (int k = 0; k < v.shl.nb; k++)
@@ -9038,6 +9087,11 @@ static int viewer_main(int argc, char **argv)
             rnd_frame(v.rnd, &w, &fixed, t, v.fog);
         } else
             rnd_frame(v.rnd, &w, &cam, t, v.fog);
+        if (cap_draw) {
+            shot_raw(cap_v, w.width, w.height);
+            if (!(apf & (AP_SHOT | AP_STOP)))
+                continue;
+        }
         if (shot) {
             if (cam.use_rows)
                 printf("camera at %.2f %.2f %.2f, forward %.3f %.3f %.3f, up %.3f %.3f %.3f, tilt %.3f, state %d\n",
