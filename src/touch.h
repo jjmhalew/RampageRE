@@ -11,4 +11,6 @@ void touch_event(const void *sdl_event, int width, int height);   /* an SDL_Even
 /* merge into this frame's pads (pad_poll's st and its slots on): 1 when the on-screen pad is up (it is then slot 0's) */
 unsigned touch_pad(PadState st[PAD_SLOTS], unsigned on);
 void touch_draw(int width, int height);                            /* over the finished frame, before the swap */
+/* the fingers put down on none of the buttons since the last call (main.c: a tap on a movie skips it) */
+int touch_tapped(void);
 #endif

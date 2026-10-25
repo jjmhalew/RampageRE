@@ -21,7 +21,8 @@ static struct {
                                                                       * the game has had a frame of it; up: lifted before
                                                                       * that, goes after it */
     int stick; float sx, sy, kx, ky;                          /* the stick's finger: base and knob, pixels */
-} T = { 1, 0, 0, { { 0, 0, 0, 0 } }, 0, -1, 0, 0, 0, 0 };
+    int taps;                                                 /* fingers put down on no button since touch_tapped */
+} T = { 1, 0, 0, { { 0, 0, 0, 0 } }, 0, -1, 0, 0, 0, 0, 0 };
 
 static float unit(void) { return T.W < T.H ? T.W : T.H; }
 static void layout(Btn *b)
@@ -75,6 +76,7 @@ void touch_event(const void *ev, int width, int height)
         if (k < 0) { if (T.nf == NFING) return; k = T.nf++; T.f[k].id = e->tfinger.fingerId; }
         T.f[k].seen = T.f[k].up = 0;
         int b = hit(x, y, 0);
+        if (b < 0) T.taps++;
         if (b >= 0) T.f[k].ctl = 1 + b;
         else if (x < T.W * 0.5f && T.stick < 0) { T.f[k].ctl = 0; T.stick = k; T.sx = T.kx = x; T.sy = T.ky = y; }
         else T.f[k].ctl = -1;
@@ -93,6 +95,8 @@ void touch_event(const void *ev, int width, int height)
         drop(k);
     }
 }
+
+int touch_tapped(void) { int n = T.taps; T.taps = 0; return n; }
 
 unsigned touch_pad(PadState st[PAD_SLOTS], unsigned on)
 {

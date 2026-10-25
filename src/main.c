@@ -8808,6 +8808,10 @@ static int viewer_main(int argc, char **argv)
             v.pads_on = pad_poll(v.pads, w.focused, (unsigned)w.dev_changes);
 #ifdef __ANDROID__
             v.pads_on |= touch_pad(v.pads, v.pads_on);   /* the on-screen pad: slot 0's */
+            if (touch_tapped() && v.movie && v.shell)   /* [port extra] a tap anywhere on a movie (the boot's,
+                                                      * the attract mode's, Victory's) skips it as Cross does; the
+                                                      * menus take only the buttons */
+                shell_input(v.shell, HUD_EV_ACCEPT, 0);
 #endif
             pad_set_strength(v.vibrate ? 1.0f : 0.0f);
         }

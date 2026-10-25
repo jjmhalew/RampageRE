@@ -95,7 +95,7 @@ see "Graphics settings"); `--card-free-kb N` the "memory card"'s free room
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
 upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
-autosave notice, the movies (the logos and the intro, each press of Enter, Space, P or the pad's A / Start skips one; the
+autosave notice, the movies (the logos and the intro, each press of Enter, Space, P or the pad's A / Start skips one, a tap on the movie on Android; the
 Victory movie and the credits after the campaign), the profile popup (one profile, its file; letters and digits type
 the name, Enter is DONE; it opens from Back on the main menu, "Profiles", and autosave is on once a profile is
 loaded from it or the Results' Save is pressed), the main menu, players, monster select, city select, the loading screen, then the game it chose; the popup shows the
@@ -346,7 +346,8 @@ Circle (grab) as on the PS2 pad, R2 (roar) above them and Start (pause) in the t
 the pages' buttons); a finger may slide between the face buttons. The pad hides when a real controller's buttons or
 sticks or a key are used and comes back at the next touch. Controllers (Bluetooth or USB) play through `pad_sdl.c` as
 on Linux, up to four. The back button (or gesture) is Backspace in the menus (back) and Start in play (the Pause
-menu). Not there: the right stick (turning the head), L1 / L2 / R1, Select, and letters for the profile popup's name
+menu). A tap anywhere on a movie (the logos, the intro, the attract mode's, Victory's and the credits) skips it as
+Cross does (port extra, main.c `touch_tapped`); in the menus only the buttons count. Not there: the right stick (turning the head), L1 / L2 / R1, Select, and letters for the profile popup's name
 entry, which types from a keyboard (an attached one works; there is no on-screen one yet).
 
 **Testing.** `adb shell am start -n io.github.jjmhalew.rampagere/.RampageActivity -e args "'Chicago 1 --monster George'" -e env "RAMPAGE_TRACE=1;RAMPAGE_TOUCHLOG=1"`
