@@ -2112,6 +2112,10 @@ struct Shell {
     int attract_game;                                    /* +0x20: startAttractGame's */
     float idle, movie_time;
     float movie_clock;                                   /* seconds since the playing movie started */
+    /* a movie on after a press (shell_input_pad), and the frame after it: its time does not run down in that frame's
+     * update, so the viewer's shell_movie_hold reaches it first (a press started the next movie between the frames;
+     * with nothing held its shell_set_movie_time of 0 ran out at once, and one press skipped two movies) */
+    int movie_pressed, movie_wait;
     /* gCommon */
     int choose_monster, city_destroyed, quitting, ctrl_mask, platform, region;
     uint32_t cheats;
@@ -3412,7 +3416,7 @@ static void am_event(Shell *s, int ev, int pad, float dt)
         a->tick += dt;
         if (a->movie_on)
             s->movie_clock += dt;
-        if (a->movie_on && (a->movie_left -= dt) <= 0)
+        if (a->movie_on && !s->movie_wait && (a->movie_left -= dt) <= 0)
             a->movie_on = 0;
         am_send(s, EV_FRAME);
     }
@@ -5761,6 +5765,7 @@ void shell_input_pad(Shell *s, int ev, int button, int pad)
             s->vi.movie_on = 0;
             victory_next(s);
             if (!s->vi.on) cr_open(s);
+            s->movie_pressed = movie_left(s) != NULL;
         }
         return;
     }
@@ -5772,6 +5777,8 @@ void shell_input_pad(Shell *s, int ev, int button, int pad)
     if (!pad_allowed(s, pad))
         return;
     ifc_event(s, s->focus, ev, button, pad, 0);
+    if (movie_left(s))
+        s->movie_pressed = 1;
 }
 void shell_input(Shell *s, int ev, int button) { shell_input_pad(s, ev, button, 0); }
 
@@ -5926,10 +5933,12 @@ void shell_update(Shell *s, float dt)
     if ((s->cheats & 0x10000u) && !s->popup)
         soak(s);
     s->gui.time += dt;
+    s->movie_wait = s->movie_pressed;
+    s->movie_pressed = 0;
     if (s->vi.on) {
         if (s->vi.movie_on)
             s->movie_clock += dt;
-        if (s->vi.movie_on && (s->vi.movie_left -= dt) <= 0) {
+        if (s->vi.movie_on && !s->movie_wait && (s->vi.movie_left -= dt) <= 0) {
             s->vi.movie_on = 0;
             victory_next(s);
             if (!s->vi.on) cr_open(s);
