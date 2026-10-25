@@ -5174,7 +5174,10 @@ static void army_step(Viewer *v, float dt)
             case AE_EFFECT_STOP:
                 for (int k = 0; k < v->nfxa; k++)
                     if (v->fxa[k].id == e->id) {
-                        fx_stop(v->fxw, v->fxa[k].fx);
+                        if (e->level == 1)
+                            fx_kill(v->fxw, v->fxa[k].fx);
+                        else
+                            fx_stop(v->fxw, v->fxa[k].fx);
                         v->fxa[k] = v->fxa[--v->nfxa];
                         break;
                     }

@@ -1078,13 +1078,13 @@ static void beam_hold(Army *a, ArmyWeapon *w);
 /* a weapon each frame (the common countdown 0x2971A0, the charge 0x297760 and the fire 0x2963C0 / 0x295C70) [R]:
  *  - the countdown falls by the rate x dt while the weapon has ammo or does not count it (+0x4 & 2); while it may not
  *    fire it stops at ChargeTime + FiringOffset, so from a permission to the shot is FiringOffset + ChargeTime;
- *  - at ChargeTime or less (with ammo) the ChargeEffect starts, once;
+ *  - at ChargeTime or less (with ammo) the ChargeEffect starts, once (weapon_tick moves it);
  *  - at 0, with ammo: one shot (or the beam starts for Duration), ammo - 1, and the countdown starts again at
  *    max(RefireDelay, ChargeTime);
  *  - a beam that has run its Duration stops (0x295C20) and the countdown restarts the same way.
  * may: what the weapon system allows [R 0x29ADE0, 0x299010]: a target within MaxFiringRange and, for a cluster, on
  * target (weapon_aim); an actor's while enableWeapon and setWeaponTarget hold */
-static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+static void weapon_step(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const float from[3], const float dir[3],
                         const float frame[3][3], int target, float dt)
 {
     if (w->type == 2)
@@ -1119,8 +1119,16 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
         return;
     if (w->timer <= w->charge_time && !w->charging && w->ammo > 0) {
         w->charging = 1;
-        if (w->charge_fx)
-            effect_at(a, w->charge_fx, from);
+        if (w->charge_fx) {                          /* [R 0x2977F8 .. 0x297818] made, an old one freed */
+            if (w->charge_id) {
+                ArmyEvent *e = emit(a, AE_EFFECT_STOP, -1, NULL, NULL);
+                e->id = w->charge_id;
+                e->level = 1;
+            }
+            w->charge_id = effect_at(a, w->charge_fx, from);
+            if (w->charge_id < 0)
+                w->charge_id = 0;
+        }
     }
     if (w->timer > 0 || w->ammo <= 0)
         return;
@@ -1160,6 +1168,25 @@ static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const floa
                 memcpy(e->dir, s->dir, sizeof e->dir);
             }
         }
+    }
+}
+
+/* weapon_step, then its ChargeEffect (+0x1A4) as the common update leaves it [R 0x2974D0 .. 0x297564]: while the
+ * weapon charges (+0xF6) put at the weapon's place each frame (vtable +0x8C, its turn +0x90), so it goes with the
+ * blimp's gun; once it no longer charges (it fired, or was held) stopped and freed at once (+0x30, 0x207A40) */
+static void weapon_tick(Army *a, ArmyUnit *u, ArmyWeapon *w, int may, const float from[3], const float dir[3],
+                        const float frame[3][3], int target, float dt)
+{
+    weapon_step(a, u, w, may, from, dir, frame, target, dt);
+    if (!w->charge_id)
+        return;
+    if (w->charging)
+        emit(a, AE_EFFECT_MOVE, -1, NULL, from)->id = w->charge_id;
+    else {
+        ArmyEvent *e = emit(a, AE_EFFECT_STOP, -1, NULL, NULL);
+        e->id = w->charge_id;
+        e->level = 1;
+        w->charge_id = 0;
     }
 }
 
@@ -2139,9 +2166,16 @@ static void unit_remove(Army *a, ArmyUnit *u)        /* requestDelete */
     u->phase = AU_GONE;
     if (getenv("RAMPAGE_TRACE"))
         printf("  %.2f: unit %d gone: %s\n", a->now, who(a, u), u->name ? u->name : "?");
-    for (int i = 0; i < u->nw; i++)
+    for (int i = 0; i < u->nw; i++) {
         if (u->w[i].shot >= 0)
             beam_end(a, u->w[i].shot);
+        if (u->w[i].charge_id) {                     /* (the weapon goes with it, its ChargeEffect freed) */
+            ArmyEvent *e = emit(a, AE_EFFECT_STOP, -1, NULL, NULL);
+            e->id = u->w[i].charge_id;
+            e->level = 1;
+            u->w[i].charge_id = 0;
+        }
+    }
     emit(a, AE_REMOVED, who(a, u), u->name, u->pos);
 }
 

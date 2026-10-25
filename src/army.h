@@ -103,6 +103,7 @@ typedef struct {                                     /* one weapon (a Weapon| gr
     /* the weapon (0x296760): +0xB4 the countdown, +0xEC ammo, +0xF5 firing (a beam), +0xF6 charging, +0x1B8 first */
     float timer, beam_left, scale;
     int ammo, on, firing, charging, first;
+    int charge_id;                                   /* +0x1A4: the ChargeEffect's handle while it charges, 0 none */
     float yaw, pitch;                                /* a cluster's turn from the unit's front (+0x54, +0x3C) */
     float rot_range, rot_rate, elev_range, elev_rate;   /* the WeaponCluster's, radians (rates a second) */
     float rot_min, rot_max, elev_min, elev_max;      /* the turn's and the pitch's ends (0x299640) */
@@ -191,7 +192,7 @@ enum {
                        * offset v from its place; shot >= 0: it is that shot's look and follows the shot; level 1:
                        * the unit's ChallengeEffect, only when its template is one of the block's challenge goals
                        * (the host's to decide, challenge_is_goal: the world object's init 0x30D280 -> 0x3466A0) */
-    AE_EFFECT_STOP,   /* the effect with handle id stops */
+    AE_EFFECT_STOP,   /* the effect with handle id stops; level 1: gone at once (freed, a weapon's ChargeEffect) */
     AE_EFFECT_MOVE,   /* the effect with handle id is moved to pos (a beam's ImpactEffect where it touches) */
     AE_SOUND,         /* `name` at pos from unit; level 0: stop that unit's sound of that name (a tank's treads);
                        * amount 1: kept (add3DSfx(name, 1): it plays on once the unit is gone) */

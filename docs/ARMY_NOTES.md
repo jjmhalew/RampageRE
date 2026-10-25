@@ -82,6 +82,11 @@ else 0.
 - **Each frame:** the countdown falls by dt while the weapon has ammo, or does not count its ammo.
 - **While the weapon may not fire**, the countdown stops at ChargeTime + FiringOffset. So the time from permission to
   the shot is FiringOffset, then ChargeTime with the `ChargeEffect` showing.
+- **The ChargeEffect** (+0x1A4) [R 0x297760, 0x2974D0 .. 0x297564]: made when the charge starts (an old one freed);
+  each frame of the common update, while charging (+0xF6), put at the weapon node's place and turn (vtable +0x8C /
+  +0x90), so it goes with the weapon (the NY blimp's gun); once no longer charging (it fired, or was held), stopped
+  and freed at once. army.c `weapon_tick` (up to v0.15.0 the port left it where the charge began: the blimp flew
+  out of its own glow).
 - **At 0, with ammo:** one shot, or a beam for `Duration`. Ammo goes down by 1 and the countdown restarts at
   max(RefireDelay, ChargeTime). A beam restarts it when its Duration is over (0x295C20).
 
