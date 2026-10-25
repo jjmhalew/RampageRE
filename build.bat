@@ -8,6 +8,7 @@ rem   build.bat standalone [DATA]   RampageRE-standalone.exe: RampageRE.exe + YO
 rem                                 only (make_standalone.bat); DATA = your disc image or RAMPAGE.VOL, else the data the
 rem                                 viewer finds (docs\NATIVE.md "Game data")
 rem   build.bat apkbundle           only build\apkbundle.exe, the tool of make_android_bundle.bat
+rem   build.bat texup               only build\texup.exe, the image helper of make_hd_textures.bat
 rem   build.bat tools               only the helpers of tools\native\ in build\: bundle_stub.exe and pack.exe (standalone),
 rem                                 apkbundle.exe (the CI builds them)
 rem Linux: build.sh (SDL2), the same SRC list plus src\plat_sdl.c, and src\pad_sdl.c for src\pad.c; the Switch:
@@ -33,6 +34,11 @@ call :find_zig || goto :fail
 
 if /i "%~1"=="apkbundle" (
     call :apkbundle || goto :fail
+    exit /b 0
+)
+if /i "%~1"=="texup" (
+    if not exist build mkdir build
+    %ZIG% cc -std=c99 -O2 -Wall %CPU% -o build\texup.exe tools\native\texup.c || goto :fail
     exit /b 0
 )
 if /i "%~1"=="tools" (
@@ -82,7 +88,7 @@ where zig >nul 2>nul && (set "ZIG=zig" & exit /b 0)
 python -m ziglang version >nul 2>nul && (set "ZIG=python -m ziglang" & exit /b 0)
 echo Zig %ZIG_VER% (the C compiler, about 95 MB) is not here yet: downloading it from ziglang.org into tools\zig ...
 if not exist tools\zig mkdir tools\zig
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; Invoke-WebRequest -Uri 'https://ziglang.org/download/%ZIG_VER%/%ZIG_NAME%.zip' -OutFile 'tools\zig\zig.zip'; if ((Get-FileHash 'tools\zig\zig.zip' -Algorithm SHA256).Hash -ne '%ZIG_SHA%') { Remove-Item 'tools\zig\zig.zip'; throw 'SHA-256 of the download does not match' }" || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; Invoke-WebRequest -Uri 'https://ziglang.org/download/%ZIG_VER%/%ZIG_NAME%.zip' -OutFile 'tools\zig\zig.zip'; if (([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes('tools\zig\zig.zip'))) -replace '-','') -ne '%ZIG_SHA%') { Remove-Item 'tools\zig\zig.zip'; throw 'SHA-256 of the download does not match' }" || exit /b 1
 tar -xf tools\zig\zig.zip -C tools\zig || exit /b 1
 del tools\zig\zig.zip
 if not exist "tools\zig\%ZIG_NAME%\zig.exe" (echo The Zig archive did not contain %ZIG_NAME%\zig.exe & exit /b 1)
