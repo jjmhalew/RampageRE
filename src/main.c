@@ -205,7 +205,7 @@ typedef struct Viewer {
     Scene scene; int have_scene;
     Renderer *rnd;
     int play; CamSettings cam_settings; GameCamera cam;   /* play: the monsters under control, the game camera */
-    int show_hits;                                   /* H draws the attack spheres */
+    int show_hits;                                   /* H draws the attack spheres (off at the start: the game never does) */
     /* 0: monster 0's own shake (monster +0x7DFC +0x160), 1 .. 7 the effects', 8 .. 10 monsters 1 .. 3's own */
     CamShake shakes[8 + MONSTERS - 1];
     uint32_t shake_seed;
@@ -8583,7 +8583,6 @@ static int viewer_main(int argc, char **argv)
             free(data);
     }
     v.night = night;
-    v.show_hits = 1;
     profile_init(&v.prof);                           /* the profile: rampage_profile.bin (a --shot run: a new one,
                                                       * not written, unless --profile names one) */
     v.prof_write = !shot || v.prof_path;
