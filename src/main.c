@@ -8486,8 +8486,6 @@ static int viewer_main(int argc, char **argv)
         else if (npos < 3) pos[npos++] = argv[i];
     }
     settings_resolve(&gfx, &gfx_flags, !shot);       /* a --shot run: the flags alone, never rampage.cfg */
-    if (gfx.wii_data[0])
-        printf("wii data: %s\n", gfx.wii_data);
     char found[1024], msg[1024];
     for (int i = 0; pos[0] && npos < 3 && i < NCITIES; i++)   /* "rampage Chicago 1": no path, a city */
         if (_stricmp(pos[0], CITIES[i]) == 0 && !plat_exists(pos[0])) {
@@ -8534,6 +8532,13 @@ static int viewer_main(int argc, char **argv)
     if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
         plat_message(msg, 1);
     v.region = data_region(pos[0], &v.vol);
+    if (gfx.wii_data[0]) {                           /* the Wii's extra content (docs/WII_PLAN.md) */
+        uint32_t n = vol_add_wii(&v.vol, gfx.wii_data);
+        if (n)
+            printf("wii data: %s, %u files\n", gfx.wii_data, n);
+        else
+            printf("wii data: %s holds no Game folder (nor DATA/files/Game): not used\n", gfx.wii_data);
+    }
     if (v.lang < 0)
         v.lang = console_language(gfx.language, v.region);   /* rampage.cfg's language= (settings.h) */
     int city = 0;

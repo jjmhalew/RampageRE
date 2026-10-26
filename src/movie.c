@@ -906,7 +906,7 @@ Movie *movie_open(const Vol *v, const char *name)
     char path[64];
     snprintf(path, sizeof path, "%s%s", name, strchr(name, '.') ? "" : ".pss");
     const VolFile *vf = v ? vol_find(v, path) : NULL;
-    if (!vf || vf->size < 2048)
+    if (!vf || vf->size < 2048 || vf->path)               /* streamed from the VOL; the Wii's movies are Bink */
         return NULL;
     vlc_init();
     if (IDCT_C[0][0] == 0) idct_init();

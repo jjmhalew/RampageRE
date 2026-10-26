@@ -11,14 +11,21 @@ static inline uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_
 static inline float rdf(const uint8_t *p) { union { uint32_t u; float f; } v; v.u = rd32(p); return v.f; }
 
 /* ---- RAMPAGE.VOL ("PVOL" 0x1001: u32 count, u32 name block size, count x {u32 offset, u32 size, u32 index}, names) */
-typedef struct { const char *name; uint32_t offset, size; } VolFile;
-typedef struct { FILE *f; VolFile *files; uint32_t count; char *names; int64_t base; } Vol;   /* base: its start in f */
+typedef struct { const char *name; uint32_t offset, size; const char *path; } VolFile;   /* path: a Wii file's, else NULL */
+typedef struct {
+    FILE *f; VolFile *files; uint32_t count; char *names; int64_t base;   /* base: its start in f */
+    VolFile *wii; uint32_t nwii;                         /* the Wii folder's files (vol_add_wii), after the VOL's */
+} Vol;
 /* path: RAMPAGE.VOL, or a disc image read in place (iso.h). 0 = ok, else VOL_UNREADABLE or VOL_NOT_IN_IMAGE (an
  * ISO 9660 image without RAMPAGE.VOL: another disc) */
 enum { VOL_UNREADABLE = -1, VOL_NOT_IN_IMAGE = -2 };
 int vol_open(Vol *v, const char *path);
-const VolFile *vol_find(const Vol *v, const char *name); /* case-insensitive */
+/* case-insensitive: the VOL's file, else the Wii folder's of that name, else its .bdg / .cmg for a .bdp / .cmp */
+const VolFile *vol_find(const Vol *v, const char *name);
 uint8_t *vol_read(const Vol *v, const char *name, uint32_t *size);   /* malloc'd copy of a file, NULL if absent */
+/* the player's extracted Wii disc (wii_data=, docs/WII_PLAN.md): the files of its Game, Shell and Audio folders, found
+ * under dir, dir/DATA/files or dir/files, added after the VOL's (vol_find). Returns how many, 0 none */
+uint32_t vol_add_wii(Vol *v, const char *dir);
 
 /* ---- bundles (.bdp/.cmp, "Pipeworks Bundle File version 1.3", segment 0) */
 enum { ET_MESH = 0, ET_RAW = 2, ET_TREE = 3, ET_ANIM = 4, ET_MATERIAL = 6, ET_TEXTURE = 9, ET_PALETTE = 13,
