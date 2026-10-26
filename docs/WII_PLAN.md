@@ -81,6 +81,17 @@ symbols).
 Check: `rampage.exe Dallas 4` draws the block; `--monster Boris` walks in a PS2 city (with George's controls until
 phase 2); `--shot` images of each of the 10 against the viewer's glTF.
 
+**Phase 1 done** (92fe225 .. adff860): `rampage.exe build\disc\RAMPAGE.VOL Dallas 4 --wii DIR` draws Dallas's blocks
+(the viewer's eighth city, key 8) and `--monster Boris` (any of the ten) plays a Wii monster in any city; the computer
+drives Boris through three Dallas blocks (`--autoplay`). Every reader was checked against the tools on every Wii file
+(textures, meshes, cloth, books, string tables, MONSTER_DATA by George's PS2 and Wii records), and the PS2 game
+stays byte for byte the same with and without `--wii`. Found on the way:
+- `MONSTER_DATA` has 16-bit fields the PS2's little endian hid (docs/FORMAT_BDP.md);
+- a Wii cloth mesh has no vertex -> particle table: its vertices lie on their particles;
+- shared books (`Objects1_props`) come from the PS2, so Dallas's templates the PS2's lacks (cows, oil towers, its
+  people) are taken from the Wii's copy for the groups the PS2's has not got (city.c `wii_twin`);
+- the human player's pad drives a Wii monster's graph with the PS2's input numbers until phase 2 maps them.
+
 **Phase 2, the Wii monsters playing.**
 1. The input table of decision 5 applied to Wii graphs at load (`moves_read`).
 2. The Wii sound bank as a second bank: its 153 events not in the PS2's, DSP-ADPCM (`sound.c` `sample_get`).
