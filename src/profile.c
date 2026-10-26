@@ -14,7 +14,7 @@ const char *const PROFILE_MONSTER_NAMES[PROFILE_PS2_MONSTERS] = {
     "Rock", "Dick", "Furby", "Batty", "Jack", "Jill", "Nick", "Philbert", "Eyegore", "Boosy"
 };
 /* [R] CityData City0 .. City6 { City } */
-const char *const PROFILE_CITY_NAMES[PROFILE_CITIES] = {
+const char *const PROFILE_CITY_NAMES[PROFILE_PS2_CITIES] = {
     "LasVegas", "SanFrancisco", "London", "LosAngeles", "Chicago", "HongKong", "NewYork"
 };
 
@@ -53,10 +53,21 @@ int profile_ps2_monster(const char *name)
     return -1;
 }
 
+static int ps2_city(const char *name)
+{
+    for (int k = 0; name && k < PROFILE_PS2_CITIES; k++)
+        if (same(PROFILE_CITY_NAMES[k], name))
+            return k;
+    return -1;
+}
+
 static int roster_beyond_ps2(const Profile *p)
 {
     for (int m = 0; m < p->nmonsters; m++)
         if (profile_ps2_monster(p->monster_name[m]) < 0)
+            return 1;
+    for (int c = 0; c < p->ncities; c++)
+        if (ps2_city(p->city_name[c]) < 0)
             return 1;
     return 0;
 }
@@ -80,7 +91,7 @@ void profile_set_roster(Profile *p, const char *const *monsters, int nmonsters, 
         for (int i = 0; i < PROFILE_MONSTERS; i++)
             p->monster_name[i] = i < p->nmonsters ? monsters[i] : NULL;
     }
-    if (cities) {                                    /* [R] 0x33EED0: 8 or more are cut to 7 */
+    if (cities) {                                    /* [R] 0x33EED0: 8 or more are cut to 7 (here 9 to 8) */
         p->ncities = ncities < 0 ? 0 : ncities > PROFILE_CITIES ? PROFILE_CITIES : ncities;
         for (int i = 0; i < PROFILE_CITIES; i++)
             p->city_name[i] = i < p->ncities ? cities[i] : NULL;
@@ -181,7 +192,7 @@ void profile_block_new(ProfileBlock *b)
 void profile_init(Profile *p)
 {
     memset(p, 0, sizeof *p);
-    profile_set_roster(p, PROFILE_MONSTER_NAMES, PROFILE_PS2_MONSTERS, PROFILE_CITY_NAMES, PROFILE_CITIES);
+    profile_set_roster(p, PROFILE_MONSTER_NAMES, PROFILE_PS2_MONSTERS, PROFILE_CITY_NAMES, PROFILE_PS2_CITIES);
     p->play_type = CAMPAIGN;
     /* allow_save 0 [R]: flag 4 is clear in .bss and the boot's card check does not set it */
     p->last_city = 0;
@@ -460,7 +471,7 @@ void profile_pack(const ProfileBlock *b, uint8_t out[PROFILE_SIZE])
     put32(out + 0x20, (uint32_t)b->save_time);
     put32(out + 0x24, (uint32_t)(b->save_time >> 32));
     pack_status(&b->status, out + 0x28);
-    for (int i = 0; i < PROFILE_CITIES; i++) {
+    for (int i = 0; i < PROFILE_PS2_CITIES; i++) {
         put32(out + 0xE0 + 4 * i, b->city_flags[i]);
         put32(out + 0xFC + 4 * i, (uint32_t)b->start_block[i]);
     }
@@ -481,7 +492,7 @@ int profile_unpack(ProfileBlock *b, const uint8_t in[PROFILE_SIZE])
     b->name[sizeof b->name - 1] = 0;
     b->save_time = get32(in + 0x20) | (uint64_t)get32(in + 0x24) << 32;
     unpack_status(&b->status, in + 0x28);
-    for (int i = 0; i < PROFILE_CITIES; i++) {
+    for (int i = 0; i < PROFILE_PS2_CITIES; i++) {
         b->city_flags[i] = get32(in + 0xE0 + 4 * i);
         b->start_block[i] = (int32_t)get32(in + 0xFC + 4 * i);
     }
@@ -564,6 +575,45 @@ static void status_out(const Profile *p, const ProfileStatus *s, ProfileStatus *
         }
 }
 
+/* the block's cities into the file's (o: already a copy of b, its status mapped) and back */
+static void cities_out(const Profile *p, const ProfileBlock *b, ProfileBlock *o)
+{
+    for (int k = 0; k < PROFILE_CITIES; k++) {
+        int c = k < PROFILE_PS2_CITIES ? profile_find_city(p, PROFILE_CITY_NAMES[k]) : -1;
+        o->city_flags[k] = c >= 0 ? b->city_flags[c] : 0;
+        o->start_block[k] = c >= 0 ? b->start_block[c] : 0;
+    }
+    int c = b->status.city;
+    if (c < 0 || c >= p->ncities)
+        return;
+    int k = ps2_city(p->city_name[c]);
+    if (k < 0) {                                     /* not the PS2's: its first city to go on with */
+        for (k = 0; k < PROFILE_PS2_CITIES && (o->city_flags[k] & (PC_AVAILABLE | PC_ALL_BLOCKS)) ==
+                                              (PC_AVAILABLE | PC_ALL_BLOCKS); k++)
+            ;
+        if (k >= PROFILE_PS2_CITIES)
+            k = 0;
+        o->status.start_block = o->start_block[k];
+        o->status.city_flags = o->city_flags[k];
+        o->status.city_score = 0;
+    }
+    o->status.city = k;
+}
+
+static void cities_in(const Profile *p, const ProfileBlock *f, ProfileBlock *b)
+{
+    for (int c = 0; c < PROFILE_CITIES; c++) {
+        int k = c < p->ncities ? ps2_city(p->city_name[c]) : -1;
+        b->city_flags[c] = k >= 0 ? f->city_flags[k] : 0;
+        b->start_block[c] = k >= 0 ? f->start_block[k] : 0;
+    }
+    int k = f->status.city;
+    if (k >= 0 && k < PROFILE_PS2_CITIES) {
+        int c = profile_find_city(p, PROFILE_CITY_NAMES[k]);
+        b->status.city = c >= 0 ? c : k;
+    }
+}
+
 static void status_in(const Profile *p, const ProfileStatus *s, ProfileStatus *o)
 {
     *o = *s;
@@ -584,7 +634,7 @@ static void status_in(const Profile *p, const ProfileStatus *s, ProfileStatus *o
 #define SIDE_MAGIC 0x49575052u                       /* "RPWI" */
 #define SIDE_VERSION 1
 #define SIDE_MAX 128
-enum { SIDE_FLAGS = 1, SIDE_PICK = 2 };
+enum { SIDE_FLAGS = 1, SIDE_PICK = 2, SIDE_CITY = 3, SIDE_STATUS_CITY = 4 };
 
 void profile_side_path(const char *path, char *out, int size)
 {
@@ -620,6 +670,25 @@ static int side_write(const Profile *p, const char *path, uint32_t crc)
         snprintf((char *)r, 16, "%s", p->monster_name[m]);
         put32(r + 16, SIDE_PICK);
         put32(r + 20, (uint32_t)i);
+    }
+    for (int c = 0; c < p->ncities && n < SIDE_MAX; c++) {
+        if (ps2_city(p->city_name[c]) >= 0)
+            continue;
+        uint8_t *r = buf + 16 + 32 * n++;
+        memset(r, 0, 32);
+        snprintf((char *)r, 16, "%s", p->city_name[c]);
+        put32(r + 16, SIDE_CITY);
+        put32(r + 20, p->block.city_flags[c]);
+        put32(r + 24, (uint32_t)p->block.start_block[c]);
+        if (c == s->city && n < SIDE_MAX) {
+            r = buf + 16 + 32 * n++;
+            memset(r, 0, 32);
+            snprintf((char *)r, 16, "%s", p->city_name[c]);
+            put32(r + 16, SIDE_STATUS_CITY);
+            put32(r + 20, (uint32_t)s->start_block);
+            put32(r + 24, s->city_flags);
+            put32(r + 28, (uint32_t)s->city_score);
+        }
     }
     put32(buf, SIDE_MAGIC);
     put32(buf + 4, SIDE_VERSION);
@@ -657,13 +726,22 @@ static void side_read(Profile *p, const char *path, uint32_t crc)
         char name[16];
         memcpy(name, r, 15);
         name[15] = 0;
-        int m = profile_find_monster(p, name);
-        uint32_t a = get32(r + 20);
+        int m = profile_find_monster(p, name), c = profile_find_city(p, name);
+        uint32_t a = get32(r + 20), kind = get32(r + 16);
+        if (c >= 0 && ps2_city(name) < 0 && kind == SIDE_CITY) {
+            p->block.city_flags[c] |= a;
+            p->block.start_block[c] = (int32_t)get32(r + 24);
+        } else if (c >= 0 && ps2_city(name) < 0 && kind == SIDE_STATUS_CITY && fresh) {
+            s->city = c;
+            s->start_block = (int32_t)a;
+            s->city_flags = get32(r + 24);
+            s->city_score = (int32_t)get32(r + 28);
+        }
         if (m < 0)
             continue;
-        if (get32(r + 16) == SIDE_FLAGS)
+        if (kind == SIDE_FLAGS)
             s->monster_flags[m] |= profile_ps2_monster(name) < 0 ? a & 0xFF : a & PM_SUPER_JUMP;
-        else if (get32(r + 16) == SIDE_PICK && fresh && a < PROFILE_PLAYERS)
+        else if (kind == SIDE_PICK && fresh && a < PROFILE_PLAYERS)
             s->monster[a] = m;
     }
 }
@@ -677,6 +755,7 @@ int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
     uint8_t buf[PROFILE_FILE_SIZE];
     ProfileBlock fb = p->block;
     status_out(p, &p->block.status, &fb.status);
+    cities_out(p, &p->block, &fb);
     profile_pack_file(&fb, buf);
     errno = 0;
     FILE *f = path ? fopen(path, "wb") : NULL;
@@ -710,8 +789,9 @@ int profile_read(Profile *p, const char *path)
         profile_restore(p);
         return f ? 0 : -1;
     }
-    ProfileStatus s = p->block.status;
-    status_in(p, &s, &p->block.status);
+    ProfileBlock fb = p->block;
+    status_in(p, &fb.status, &p->block.status);
+    cities_in(p, &fb, &p->block);
     if (roster_beyond_ps2(p))
         side_read(p, path, get32(buf + 0x0C));
     wii_start(p, &p->block.status);                  /* a PS2 profile on the Wii's roster: Boris and Ruby too */

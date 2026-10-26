@@ -25,7 +25,8 @@
 
 #define PROFILE_VERSION 8                            /* [R] 0x33F630: the block's +0x00 */
 #define PROFILE_SIZE 0x128                           /* [R] its +0x04: the bytes saved (0x4D79B0 .. 0x4D7AD8) */
-#define PROFILE_CITIES 7                             /* [R] 0x33E850: CityData City0 .. City6 (at most 7) */
+#define PROFILE_PS2_CITIES 7                         /* [R] 0x33E850: CityData City0 .. City6 (at most 7); the file's */
+#define PROFILE_CITIES 8                             /* the room: the Wii's CityData has 8 (Dallas the fourth) */
 #define PROFILE_PS2_MONSTERS 30                      /* [R] 0x33E850: MonsterData Monster0 .. 29 (at most 30); the
                                                       * records keep 30 flags (0x33D820 copies 15 x 8 bytes), and so
                                                       * does the file */
@@ -93,7 +94,8 @@ typedef struct {
     uint64_t save_time;                              /* +0x20: stamped by the SaveGame popup before each card write
                                                       * (0x344434, 0x10D140: about ms since 2000) */
     ProfileStatus status;                            /* +0x28: where the profile is (Profile.getGameStatus) */
-    uint32_t city_flags[PROFILE_CITIES];             /* +0xE0: Profile.getCityFlags(i): PC_* saved per city */
+    uint32_t city_flags[PROFILE_CITIES];             /* +0xE0: Profile.getCityFlags(i): PC_* saved per city (the
+                                                      * file keeps the first 7) */
     int32_t start_block[PROFILE_CITIES];             /* +0xFC: Profile.getStartBlock(i): where the city resumes */
     uint8_t changed;                                 /* +0x118 (0x4D7AC8): to be saved */
     uint8_t victory_shown;                           /* +0x119: getVictoryShown / setVictoryShown */
@@ -129,11 +131,11 @@ typedef struct {
 
 /* ShellData's rosters as built in (MonsterData Monster0 .. 29, CityData City0 .. 6) */
 extern const char *const PROFILE_MONSTER_NAMES[PROFILE_PS2_MONSTERS];
-extern const char *const PROFILE_CITY_NAMES[PROFILE_CITIES];
+extern const char *const PROFILE_CITY_NAMES[PROFILE_PS2_CITIES];
 
 /* everything 0 (the bss at boot), the built-in rosters, then createProfile's new profile; campaign play type */
 void profile_init(Profile *p);
-/* 0x33E850's rosters (the names are kept, not copied); n above the room is cut (40 / 7; the game cuts at 30 / 7) */
+/* 0x33E850's rosters (the names are kept, not copied); n above the room is cut (40 / 8; the game cuts at 30 / 7) */
 void profile_set_roster(Profile *p, const char *const *monsters, int nmonsters, const char *const *cities, int ncities);
 int profile_find_monster(const Profile *p, const char *name);   /* 0x33DAF0: any case, -1 */
 int profile_find_city(const Profile *p, const char *name);      /* the CityData index, any case, -1 */
@@ -215,15 +217,20 @@ void profile_saved(Profile *p);
 int profile_write(Profile *p, const char *path, int force, uint64_t now_ms);
 /* the side file's name for a profile file's: "x.bin" -> "x.wii.bin", else + ".wii" */
 void profile_side_path(const char *path, char *out, int size);
-/* The file holds the PS2's roster (PROFILE_MONSTER_NAMES): with another one set (the Wii's, docs/WII_PLAN.md) each
- * monster's flags and each player's pick go by name, and a pick the PS2 has not got is saved as that player's start
- * pick (George, Lizzie, Ralph, Ramsey). With the PS2's roster the file is the block as it is.
+/* The file holds the PS2's rosters (PROFILE_MONSTER_NAMES, PROFILE_CITY_NAMES): with others set (the Wii's,
+ * docs/WII_PLAN.md) each monster's flags, each player's pick, each city's flags and start block and the status's city
+ * go by name; a pick the PS2 has not got is saved as that player's start pick (George, Lizzie, Ralph, Ramsey), a city
+ * it has not got (Dallas) as the first of its cities not both available and destroyed (its start block, its flags).
+ * With the PS2's rosters the file is the block as it is.
  * What the PS2's file has no room for goes to a side file beside it (profile_side_path: rampage_profile.wii.bin),
  * written with the file whenever the roster has monsters the PS2's has not, and read after it: the flags of those
- * monsters and every monster's PM_SUPER_JUMP (ORed in: flags only grow), and the players' picks of them (taken only
- * while the PS2's file is the one the side file was written with: its data's CRC). Little endian: "RPWI", u32 version
- * 1, u32 that CRC, u32 the count, then 32-byte records: char[16] a name, u32 the kind (1 a monster's flags: a; 2 a
- * pick: a the player), u32 a, b, c. A profile used without the Wii folder leaves the side file as it is.
+ * monsters and every monster's PM_SUPER_JUMP (ORed in: flags only grow), the cities the PS2's has not got (their
+ * flags ORed, their start block), and the players' picks of those monsters and the status's city when it is one of
+ * those (taken only while the PS2's file is the one the side file was written with: its data's CRC). Little endian:
+ * "RPWI", u32 version 1, u32 that CRC, u32 the count, then 32-byte records: char[16] a name, u32 the kind (1 a
+ * monster's flags: a; 2 a pick: a the player; 3 a city: a its flags, b its start block; 4 the status's city: a its
+ * start block, b its flags, c its score), u32 a, b, c. A profile used without the Wii folder leaves the side file as
+ * it is.
  * loadProfile: reads the file; a missing one (-1) or a bad one (0: shorter than its sizes, not the magic, a CRC that
  * is not 0 and does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C]; the version is not checked
  * [R 0x3445E0]) gives a

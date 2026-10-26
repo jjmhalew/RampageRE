@@ -2109,6 +2109,8 @@ struct Shell {
      * for the keys the Wii's has not got (DisableFor4Player, decision 7) */
     Bundle b_wii_data; Book wii_book; int have_wii_data;
     Group ps2_monster_data;
+    int ncities;                                         /* CityData's City<n> groups (7; the Wii's 8, its own
+                                                          * CitySelect.ifc then, which has Dallas) */
     ShellProfile prof;
     ShellGame gs;                                        /* gCommon.getGameStatus() and the players / bots */
     ShellStart st;
@@ -3631,7 +3633,7 @@ static void mm_to_monster_select(Shell *s)
 /* the game status (gCommon +0x200) from one of the profile's records: its city, night, start block and monsters */
 static void gs_from(Shell *s, int city, int night, int start_block, const int monster[4])
 {
-    s->gs.city_index = city >= 0 && city < SHELL_CITIES ? city : 0;
+    s->gs.city_index = city >= 0 && city < s->ncities ? city : 0;
     snprintf(s->gs.city, sizeof s->gs.city, "%s", city_name(s, s->gs.city_index));
     s->gs.night = night != 0;
     s->gs.start_block = start_block;
@@ -5165,7 +5167,7 @@ static void cs_day_night(Shell *s, int toggle)         /* updateDayNight */
     CitySel *c = &s->cs;
     if (toggle) c->night = !c->night;
     cs_day_night_globe(s);
-    for (int i = 0; i < SHELL_CITIES; i++)
+    for (int i = 0; i < s->ncities; i++)
         show(find(child_at(c->city_bar, i), "night"), c->night);
 }
 
@@ -5193,7 +5195,7 @@ static void cs_selection(Shell *s, int dir)            /* updateSelection */
     int prev = c->index;
     int i = c->index + dir;
     if (i < 0) i = 0;
-    if (i > SHELL_CITIES - 1) i = SHELL_CITIES - 1;
+    if (i > s->ncities - 1) i = s->ncities - 1;     /* (the Wii's 8 - 1) */
     if (i != c->index || dir == 0) {
         if (i < c->left) c->left = i;
         else if (i > c->left + 3) c->left = i - 3;
@@ -5201,8 +5203,8 @@ static void cs_selection(Shell *s, int dir)            /* updateSelection */
         if (c->city_bar) c->city_bar->p[0] = (float)c->left * -128.0f;
         c->index = i;
         show(c->arrow_l, c->left > 0);
-        show(c->arrow_r, c->left < 3);
-        for (int k = 0; k < SHELL_CITIES; k++)
+        show(c->arrow_r, c->left < s->ncities - 4);     /* (the Wii's < 4) */
+        for (int k = 0; k < s->ncities; k++)
             show(child_at(c->city_bar, k), k >= c->left && k < c->left + 4);
         /* the globe turns to CityData.City<i>.GlobeLocation (degrees: lat, lon, 0), from where it is now */
         Group gl = group_sub(city_group(s, i), "GlobeLocation");
@@ -5261,7 +5263,7 @@ static void cs_gain(Shell *s, int pad)                 /* gainFocus */
         float yellow[4], grey[4];
         col_255(yellow, 255, 255, 0, 255);
         col_255(grey, 75, 75, 75, 255);
-        for (int i = 0; i < SHELL_CITIES; i++) {
+        for (int i = 0; i < s->ncities; i++) {
             Node *city = find(c->city_bar, city_name(s, i));
             if (!city) continue;
             char ring[48];
@@ -5294,7 +5296,7 @@ static void cs_gain(Shell *s, int pad)                 /* gainFocus */
         node_look_at(c->globe, c->look);
         cs_globe(s, 0);
         if (campaign)
-            for (int i = 0; i < SHELL_CITIES; i++)
+            for (int i = 0; i < s->ncities; i++)
                 show(find(child_at(c->city_bar, i), "night"), (int)group_num(city_group(s, i), "CampaignNight", 0));
         else
             cs_day_night(s, 0);
@@ -5462,7 +5464,8 @@ static void cr_open(Shell *s)
     for (int i = 0; i < IF_COUNT; i++) {
         char name[32];
         snprintf(name, sizeof name, "%s.ifc", IFC_NAMES[i]);
-        s->ifc[i] = layout_load(&s->gui, &s->b_shell, name, i == IF_MONSTERSHEET ? SHELL_MONSTERS * 24 : i == IF_OPTIONS ? 128 :
+        const Bundle *b = i == IF_CITYSELECT && s->ncities > 7 && s->have_wii[0] ? &s->b_wii[0] : &s->b_shell;
+        s->ifc[i] = layout_load(&s->gui, b, name, i == IF_MONSTERSHEET ? SHELL_MONSTERS * 24 : i == IF_OPTIONS ? 128 :
                                 16);                     /* (Options: its Graphics page, op_graphics_build) */
     }
     for (int i = 0; i < IF_COUNT; i++)
@@ -5585,9 +5588,13 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
         book_open(&s->wii_book, &s->b_wii_data) == 0 && book_group(&s->wii_book, "MonsterData").at) {
         s->ps2_monster_data = s->monster_data;
         s->monster_data = book_group(&s->wii_book, "MonsterData");
+        if (book_group(&s->wii_book, "CityData").at)
+            s->city_data = book_group(&s->wii_book, "CityData");
     }
     while (s->nmonsters < SHELL_MONSTERS && monster_name(s, s->nmonsters)[0])
         s->nmonsters++;
+    while (s->ncities < SHELL_CITIES && city_name(s, s->ncities)[0])
+        s->ncities++;
     if (p) s->prof = *p;
     else {
         s->prof.sound = 0.5f;                            /* a new profile's (0x33F630) [R] */

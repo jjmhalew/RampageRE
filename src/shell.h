@@ -36,8 +36,8 @@
 #include "hud.h"
 
 #define SHELL_MONSTERS 40           /* room for MonsterData.Monster0 .. 29 of ShellData.bdp, 0 .. 39 of the Wii's */
-#define SHELL_CITIES 7              /* CityData.City0 .. 6: LasVegas SanFrancisco London LosAngeles Chicago HongKong
-                                     * NewYork (the campaign's order) */
+#define SHELL_CITIES 8              /* room for CityData.City0 .. 6: LasVegas SanFrancisco London LosAngeles Chicago
+                                     * HongKong NewYork (the campaign's order); the Wii's 0 .. 7, Dallas the fourth */
 #define SHELL_PROFILES 16           /* profiles on the "memory card" the popup lists */
 
 typedef struct { int city, night, start_block, monster[4]; } ShellStatus;   /* a profile status record's menu part */

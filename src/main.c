@@ -59,18 +59,10 @@
 #endif
 
 /* the viewer's cities; the Wii's Dallas eighth, reached with a Wii folder that has it (vol_add_wii, ncities;
- * docs/WII_PLAN.md: in the campaign from phase 4) */
+ * docs/WII_PLAN.md). The campaign's order is the profile's roster (campaign_index): ShellData CityData.City0 ..
+ * City6 (Las Vegas .. New York, GAME_NOTES.md), with the Wii's folder its 8 (Dallas the fourth) */
 static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas",
                                       "Dallas" };
-/* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
-static const char *const CAMPAIGN[] = { "LasVegas", "SanFrancisco", "London", "LosAngeles", "Chicago", "HongKong", "NewYork" };
-static int campaign_index(const char *city)
-{
-    for (int i = 0; i < 7; i++)
-        if (!strcmp(CAMPAIGN[i], city))
-            return i;
-    return 0;
-}
 #define NCITIES 7
 static int ncities = NCITIES;                        /* the viewer's: NCITIES + 1 with the Wii's Dallas */
 #if (defined RAMPAGE_GUI || !defined _WIN32) && !defined __SWITCH__ && !defined __vita__ && !defined __ANDROID__
@@ -290,6 +282,7 @@ typedef struct Viewer {
     /* the Wii folder's ShellData.bdg: its MonsterData the roster (40) of the profile, the shell and the reveals
      * (docs/WII_PLAN.md decision 2); wii_roster.n 0 without it */
     Bundle wii_shelldata; Book wii_shellbook; RevealRoster wii_roster;
+    const char *wii_cities[PROFILE_CITIES]; int nwii_cities;   /* its CityData's City<i>.City, the campaign's 8 */
     Reveal reveal; RevealRoster roster;              /* the cryotube's monster and the unlocks (reveal.c): the
                                                       * roster's flags stand for the profile's, from 0 */
     RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
@@ -353,6 +346,12 @@ typedef struct Viewer {
 
 /* gCommon.getPlayType() of the game played: the demo's 0, else --play's or the shell's (unset: the campaign) */
 static int play_type(const Viewer *v) { return v->attract ? GP_ATTRACT : v->play_type ? v->play_type : GP_CAMPAIGN; }
+/* a city's place in the campaign: the profile's CityData index (0: Las Vegas when it has not got it) */
+static int campaign_index(const Viewer *v, const char *city)
+{
+    int i = profile_find_city(&v->prof, city);
+    return i >= 0 ? i : 0;
+}
 
 /* the monster's instance in the scene, NULL none */
 static Instance *mon_in(const Mon *mo)
@@ -1413,7 +1412,7 @@ static void build(Viewer *v)
             if (getenv("RAMPAGE_TRACE"))
                 printf("reveal: %s%s\n", rm >= 0 ? v->roster.name[rm] : "-", v->extra >= 0 ? " (shown)" : "");
             GameConfig gc = { play_type(v), v->nmon, v->num_bots,
-                              campaign_index(CITIES[v->city_index]), 7,
+                              campaign_index(v, CITIES[v->city_index]), v->prof.ncities,
                               city_block_index(v->city, v->blocks[v->block]), v->prof.current.seed[0],
                               v->prof.cheats, v->prof.current.seed[1], { 0 } };
             memcpy(gc.cities_won, v->cities_won, sizeof gc.cities_won);   /* King of the World's so far */
@@ -3995,7 +3994,7 @@ static void game_step(Viewer *v, float dt)
                     r.blocks_to_win = game_blocks_to_win(v->game);
                     r.cities_to_win = game_cities_to_win(v->game);
                     int ci = game_city_index(v->game);
-                    r.next_city = ci >= 0 && ci < 6 ? CAMPAIGN[ci + 1] : NULL;
+                    r.next_city = ci >= 0 && ci + 1 < v->prof.ncities ? v->prof.city_name[ci + 1] : NULL;
                     r.clock_time = game_clock(v->game, NULL);
                     r.clock_limit = game_clock_limit(v->game);
                     r.block_played = game_block_name(v->game, 0);
@@ -7174,7 +7173,8 @@ static void prof_init(Viewer *v)
 {
     profile_init(&v->prof);
     if (v->wii_roster.n) {
-        profile_set_roster(&v->prof, v->wii_roster.name, v->wii_roster.n, NULL, 0);
+        profile_set_roster(&v->prof, v->wii_roster.name, v->wii_roster.n, v->nwii_cities ? v->wii_cities : NULL,
+                           v->nwii_cities);
         profile_create(&v->prof, NULL);              /* (the Wii's start monsters) */
     }
 }
@@ -7195,7 +7195,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     for (int p = 0; p < 4; p++)
         for (int m = 0; m < v->prof.nmonsters && m < SHELL_MONSTERS; m++)
             sp->monster_flags[p][m] = (uint8_t)profile_monster_flags(&v->prof, p, m);
-    for (int c = 0; c < SHELL_CITIES; c++) {
+    for (int c = 0; c < v->prof.ncities && c < SHELL_CITIES; c++) {
         sp->city_flags[c] = (uint8_t)profile_city_flags(&v->prof, c);
         sp->start_block[c] = profile_start_block(&v->prof, c);
     }
@@ -7815,7 +7815,7 @@ static void shell_start_game(Viewer *v)
 {
     const ShellGame *g = shell_game(v->shell);
     int city = v->city_index;
-    for (int i = 0; i < NCITIES; i++)
+    for (int i = 0; i < ncities; i++)
         if (!_stricmp(g->city, CITIES[i]))
             city = i;
     v->attract = g->play_type == GP_ATTRACT;
@@ -8247,7 +8247,7 @@ static void autopilot_shell(Viewer *v, float dt)
     } else if (!strcmp(f, "CitySelect")) {
         int target = v->ap_city;
         if (target < 0) {                            /* the campaign's next city */
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < v->prof.ncities; i++) {
                 int fl = profile_city_flags(&v->prof, i);
                 if ((fl & 0x80) && (target < 0 || !(fl & 1)))
                     target = i;
@@ -8600,12 +8600,21 @@ static int viewer_main(int argc, char **argv)
             ncities = NCITIES + 1;
         uint32_t size = 0;
         uint8_t *sd = n ? vol_read(&v.vol, "ShellData.bdg", &size) : NULL;
-        if (sd && bdp_load(&v.wii_shelldata, sd, size) == 0 && book_open(&v.wii_shellbook, &v.wii_shelldata) == 0)
+        if (sd && bdp_load(&v.wii_shelldata, sd, size) == 0 && book_open(&v.wii_shellbook, &v.wii_shelldata) == 0) {
             reveal_roster_load(&v.wii_roster, book_group(&v.wii_shellbook, "MonsterData"));
-        else
+            Group cd = book_group(&v.wii_shellbook, "CityData");
+            for (int i = 0; i < PROFILE_CITIES && cd.at; i++) {   /* City0 .. : the campaign's order */
+                char key[16];
+                snprintf(key, sizeof key, "City%d", i);
+                const char *c = group_str(group_sub(cd, key), "City");
+                if (!c)
+                    break;
+                v.wii_cities[v.nwii_cities++] = c;
+            }
+        } else
             free(sd);
         if (v.wii_roster.n)
-            printf("wii data: the roster of %d monsters\n", v.wii_roster.n);
+            printf("wii data: the roster of %d monsters, %d cities\n", v.wii_roster.n, v.nwii_cities);
     }
     if (v.lang < 0)
         v.lang = console_language(gfx.language, v.region);   /* rampage.cfg's language= (settings.h) */
@@ -8755,8 +8764,8 @@ static int viewer_main(int argc, char **argv)
         v.ap_type = v.play_type;
         v.ap_players = players;
         v.ap_bots = bots;
-        v.ap_city = ap_city ? campaign_index(ap_city) : v.play_type && v.play_type != GP_CAMPAIGN && !v.shell_mode ?
-                    campaign_index(CITIES[city]) : -1;
+        v.ap_city = ap_city ? campaign_index(&v, ap_city) : v.play_type && v.play_type != GP_CAMPAIGN &&
+                    !v.shell_mode ? campaign_index(&v, CITIES[city]) : -1;
         if (ap_seed) {                               /* the world's seeds, gShell's state they are drawn from, the bots' */
             uint32_t s = ap_seed;
             v.world_rng = v.bot_seed = ap_seed;
@@ -8816,7 +8825,7 @@ static int viewer_main(int argc, char **argv)
             g->monster[k] = r >= 0 ? r : 0;
             snprintf(g->monster_name[k], sizeof g->monster_name[k], "%s", v.monsters[v.mon[k].monster]);
         }
-        g->city_index = campaign_index(CITIES[city]);
+        g->city_index = campaign_index(&v, CITIES[city]);
         snprintf(g->city, sizeof g->city, "%s", CITIES[city]);
         g->start_block = city_block_index(v.city, v.blocks[v.block]);   /* (a BlockList index, as the profile's) */
         g->night = night;
