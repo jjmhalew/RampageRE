@@ -34,7 +34,10 @@ uint32_t vol_add_wii(Vol *v, const char *dir);
 /* ---- bundles (.bdp/.cmp, "Pipeworks Bundle File version 1.3", segment 0) */
 enum { ET_MESH = 0, ET_RAW = 2, ET_TREE = 3, ET_ANIM = 4, ET_MATERIAL = 6, ET_TEXTURE = 9, ET_PALETTE = 13,
        ET_PWK = 16, ET_SKINNED = 17, ET_EFFECT = 20, ET_BOOK = 22, ET_LOC = 23, ET_IFC = 24, ET_CLOTH = 25 };
-typedef struct { uint16_t index; uint8_t type, extra; uint32_t name; const uint8_t *data, *data2; uint32_t size, size2; } BdpEntry;
+typedef struct {
+    uint16_t index; uint8_t type, extra; uint32_t name; const uint8_t *data, *data2; uint32_t size, size2;
+    uint8_t wii;                                         /* the Wii's (Bundle.wii): mesh_read takes its own path */
+} BdpEntry;
 typedef struct {
     uint8_t *file; uint32_t file_size;
     const char **names; uint32_t nnames;
@@ -64,7 +67,9 @@ typedef struct {
     uint32_t material;                                   /* name index: a material (type 6) or a texture (type 9) */
     uint32_t nverts, ntris;
     float *pos, *nrm, *uv, *col;                         /* 3, 3, 2, 4 floats per vertex (nrm / uv / col may be NULL) */
-    uint8_t (*bones)[2]; float *weight;                  /* skinned: skeleton node indices and the first one's weight */
+    /* skinned: up to four skeleton node indices and their weights (the PS2's two: w and 1 - w, the rest 0; the
+     * Wii's four, or two) */
+    uint8_t (*bones)[4]; float (*weights)[4];
     uint32_t *tris;                                      /* 3 indices per triangle */
     int blend;                                           /* drawn over what is behind it by its alpha (1: the cracks;
                                                           * 2: depth still written, the facade sheets: GS state 2) */

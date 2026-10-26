@@ -25,14 +25,16 @@ static int read_section(const BdpEntry *e, const uint8_t *desc, int skinned, Mes
     p->nverts = count;
     p->pos = malloc(12u * count);
     if (skinned) {
-        p->bones = malloc(2u * count);
-        p->weight = malloc(4u * count);
+        p->bones = calloc(count, sizeof *p->bones);
+        p->weights = calloc(count, sizeof *p->weights);
     }
     for (uint32_t i = 0; i < count; i++) {
         const uint8_t *v = s + 16 * i;
         p->pos[3 * i] = rdf(v); p->pos[3 * i + 1] = rdf(v + 4); p->pos[3 * i + 2] = rdf(v + 8);
-        if (skinned) {
-            p->weight[i] = rd16(v + 12) / 4096.0f;
+        if (skinned) {                                   /* two bones, the first one's weight (4.12) */
+            float w = rd16(v + 12) / 4096.0f;
+            p->weights[i][0] = w > 1 ? 1 : w;
+            p->weights[i][1] = 1 - p->weights[i][0];
             p->bones[i][0] = v[14] / 4;
             p->bones[i][1] = v[15] / 4;
         } else {
@@ -82,9 +84,151 @@ static int read_section(const BdpEntry *e, const uint8_t *desc, int skinned, Mes
     return 0;
 }
 
+/* ---- the Wii's meshes (tools/mesh.py, docs/FORMAT_BDP.md "The Wii's bundles"): the PS2's records, big endian, each
+ * part pointing at a GX display list block (u32 vertices, u32 1 = u8 indices, u32 offset in data2, u32 size, u32
+ * indices per vertex) and a vertex descriptor (u32 count, u32 stride, u32 format, u32 0, u32 offset, u32 size) of
+ * interleaved vertices: position; skinned 3 weights and 4 u16 bones (0x004), or 1 and 2; then with 0x10000 uv,
+ * tangent, binormal, normal, else normal (0x010), colour (0x040, 255 = 1), uv (0x100), a 4-float uv (0x200). The
+ * list's quads, triangles, strips and fans wind as the normals face */
+enum { WII_FOUR_BONES = 0x004, WII_UV4 = 0x200, WII_NBT = 0x10000 };
+
+static int wii_triangles(const BdpEntry *e, const uint8_t *block, uint32_t count, MeshPart *p)
+{
+    uint32_t narrow = rd32be(block + 4), at = rd32be(block + 8), size = rd32be(block + 12), attrs = rd32be(block + 16);
+    uint32_t width = narrow ? 1 : 2, step = attrs * width;
+    if ((uint64_t)at + size > e->size2 || attrs == 0 || attrs > 8)
+        return -1;
+    const uint8_t *s = e->data2 + at, *end = s + size;
+    uint32_t cap = 0;
+    while (s + 3 <= end && *s) {
+        uint32_t op = s[0], n = rd16be(s + 1);
+        s += 3;
+        if (s + (uint64_t)n * step > end)
+            return -1;
+        uint32_t more = op == 0x80 ? n / 4 * 2 : op == 0x90 ? n / 3 : n >= 2 ? n - 2 : 0;
+        if (p->ntris + more > cap) {
+            uint32_t *grown = realloc(p->tris, 12u * (cap = (p->ntris + more) * 2 + 16));
+            if (!grown)
+                return -1;
+            p->tris = grown;
+        }
+        for (uint32_t k = 0; k < n; k++) {                /* every index of a vertex is the same: they are interleaved */
+            uint32_t idx = width == 1 ? s[k * step] : rd16be(s + k * step);
+            if (idx >= count)
+                return -1;
+        }
+#define IDX(k) (width == 1 ? s[(k) * step] : rd16be(s + (k) * step))
+        for (uint32_t k = 0; k < more; k++) {
+            uint32_t *t = p->tris + 3 * p->ntris++;
+            if (op == 0x80) {                            /* quads: (0 1 2) (0 2 3) */
+                uint32_t q = k / 2 * 4;
+                t[0] = IDX(q); t[1] = IDX(q + 1 + (k & 1)); t[2] = IDX(q + 2 + (k & 1));
+            } else if (op == 0x90) {                     /* triangles */
+                t[0] = IDX(3 * k); t[1] = IDX(3 * k + 1); t[2] = IDX(3 * k + 2);
+            } else if (op == 0x98) {                     /* strip, every other one turned */
+                t[0] = IDX(k + (k & 1)); t[1] = IDX(k + 1 - (k & 1)); t[2] = IDX(k + 2);
+            } else if (op == 0xA0) {                     /* fan */
+                t[0] = IDX(0); t[1] = IDX(k + 1); t[2] = IDX(k + 2);
+            } else {
+                return -1;
+            }
+        }
+#undef IDX
+        s += n * step;
+    }
+    return 0;
+}
+
+static int wii_section(const BdpEntry *e, const uint8_t *block, const uint8_t *desc, int skinned, MeshPart *p)
+{
+    uint32_t count = rd32be(desc), stride = rd32be(desc + 4), fmt = rd32be(desc + 8), off = rd32be(desc + 16);
+    uint32_t size = rd32be(desc + 20), at[8] = { 0 }, o = 12;   /* attribute offsets: weights, bones, uv, nrm, col */
+    enum { A_WEIGHTS, A_BONES, A_UV, A_NRM, A_COL };
+    int four = (fmt & WII_FOUR_BONES) != 0;
+    if (skinned) {
+        at[A_WEIGHTS] = o; o += four ? 12 : 4;
+        at[A_BONES] = o; o += four ? 8 : 4;
+    }
+    if (fmt & WII_NBT) {                                 /* uv, then tangent, binormal and the normal */
+        at[A_UV] = o; o += 8 + 24;
+        at[A_NRM] = o; o += 12;
+    } else {
+        if (fmt & F_NORMAL) { at[A_NRM] = o; o += 12; }
+        if (fmt & F_COLOUR) { at[A_COL] = o; o += 4; }
+        if (fmt & (F_UV | WII_UV4)) { at[A_UV] = o; o += fmt & F_UV ? 8 : 16; }
+    }
+    if (rd32be(desc + 12) != 0 || o != stride || size != count * stride || (uint64_t)off + size > e->size2 || !count)
+        return -1;
+    const uint8_t *s = e->data2 + off;
+    p->nverts = count;
+    p->pos = malloc(12u * count);
+    if (at[A_NRM]) p->nrm = malloc(12u * count);
+    if (at[A_UV]) p->uv = malloc(8u * count);
+    if (at[A_COL]) p->col = malloc(16u * count);
+    if (skinned) {
+        p->bones = calloc(count, sizeof *p->bones);
+        p->weights = calloc(count, sizeof *p->weights);
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *v = s + stride * i;
+        for (int k = 0; k < 3; k++) p->pos[3 * i + k] = rdfbe(v + 4 * k);
+        if (p->nrm) for (int k = 0; k < 3; k++) p->nrm[3 * i + k] = rdfbe(v + at[A_NRM] + 4 * k);
+        if (p->uv) for (int k = 0; k < 2; k++) p->uv[2 * i + k] = rdfbe(v + at[A_UV] + 4 * k);
+        if (p->col) for (int k = 0; k < 4; k++) p->col[4 * i + k] = v[at[A_COL] + k] / 255.0f;
+        if (skinned) {                                   /* the last bone's weight is the rest */
+            int nb = four ? 4 : 2;
+            float rest = 1;
+            for (int k = 0; k < nb; k++) {
+                uint32_t bone = rd16be(v + at[A_BONES] + 2 * k);
+                p->bones[i][k] = (uint8_t)(bone < 256 ? bone : 0);
+                p->weights[i][k] = k < nb - 1 ? rdfbe(v + at[A_WEIGHTS] + 4 * k) : rest;
+                rest -= p->weights[i][k];
+            }
+        }
+    }
+    return wii_triangles(e, block, count, p);
+}
+
+static int wii_mesh_read(const BdpEntry *e, Mesh *m)
+{
+    const uint8_t *d = e->data;
+    uint32_t count, first, stride, mat_at, block_at, desc_at;
+    if (e->size < 4)
+        return -1;
+    if (e->type == ET_MESH) {
+        count = rd32be(d); first = 0x20; stride = 0x50; mat_at = 0x0A; block_at = 0x3C; desc_at = 0x40;
+    } else if (e->type == ET_SKINNED) {
+        count = rd16be(d); first = 4 + 4u * rd16be(d + 2) + 12; stride = 0x58; mat_at = 0x38; block_at = 0x40;
+        desc_at = 0x44;
+    } else {
+        return -1;
+    }
+    m->parts = calloc(count ? count : 1, sizeof *m->parts);
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *rec = d + first + stride * i;
+        if (first + stride * (i + 1) > e->size)
+            break;
+        uint32_t block = rd32be(rec + block_at), desc = rd32be(rec + desc_at);
+        if ((uint64_t)(rec - d) + block + 20 > e->size || (uint64_t)(rec - d) + desc + 24 > e->size)
+            break;
+        MeshPart *p = &m->parts[m->nparts];
+        memset(p, 0, sizeof *p);
+        p->material = rd16be(rec + mat_at);
+        if (wii_section(e, rec + block, rec + desc, e->type == ET_SKINNED, p) == 0)
+            m->nparts++;
+        else {
+            free(p->pos); free(p->nrm); free(p->uv); free(p->col); free(p->bones); free(p->weights); free(p->tris);
+            memset(p, 0, sizeof *p);
+        }
+    }
+    return 0;
+}
+
 int mesh_read(const BdpEntry *e, Mesh *m)
 {
     memset(m, 0, sizeof *m);
+    if (e->wii)
+        return wii_mesh_read(e, m);
     const uint8_t *d = e->data;
     uint32_t count, first, stride, mat_at, desc_at;
     if (e->type == ET_MESH) {
@@ -110,7 +254,7 @@ void mesh_free(Mesh *m)
 {
     for (uint32_t i = 0; i < m->nparts; i++) {
         MeshPart *p = &m->parts[i];
-        free(p->pos); free(p->nrm); free(p->uv); free(p->col); free(p->bones); free(p->weight); free(p->tris);
+        free(p->pos); free(p->nrm); free(p->uv); free(p->col); free(p->bones); free(p->weights); free(p->tris);
     }
     free(m->parts);
     memset(m, 0, sizeof *m);

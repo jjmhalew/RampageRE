@@ -3970,11 +3970,9 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
         for (uint32_t pi = 0; pi < m.nparts; pi++) {
             const MeshPart *p = &m.parts[pi];
             for (uint32_t j = 0; j < p->nverts; j++, v++) {
-                if (p->bones) {                  /* skinned: two bones, the first one's weight */
-                    sk->bones[v][0] = p->bones[j][0];
-                    sk->bones[v][1] = p->bones[j][1];
-                    sk->weights[v][0] = p->weight[j] > 1 ? 1 : p->weight[j];
-                    sk->weights[v][1] = 1 - sk->weights[v][0];
+                if (p->bones) {                  /* skinned: up to four bones and their weights */
+                    memcpy(sk->bones[v], p->bones[j], sizeof sk->bones[v]);
+                    memcpy(sk->weights[v], p->weights[j], sizeof sk->weights[v]);
                     continue;
                 }
                 for (uint32_t q = 0; q < ncloth; q++)   /* cloth: the bones of the particle it sits on */

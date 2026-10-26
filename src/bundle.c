@@ -214,6 +214,7 @@ int bdp_load(Bundle *b, uint8_t *file, uint32_t size)
         const uint8_t *rec = seg + 0x18 + 0x12 * i, *ent = file + table + 16 * i;
         BdpEntry *e = &b->entries[i];
         e->index = (uint16_t)i;
+        e->wii = (uint8_t)b->wii;
         e->type = ent[2];
         e->extra = ent[3];
         e->name = r32(ent + 4);
