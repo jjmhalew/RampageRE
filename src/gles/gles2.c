@@ -621,10 +621,12 @@ void (*gles_proc(const char *name))(void)
         P(glDisableVertexAttribArray), P(glVertexAttrib4f), P(glGenBuffers), P(glDeleteBuffers), P(glBindBuffer), P(glBufferData),
         P(glGenFramebuffers), P(glDeleteFramebuffers), P(glBindFramebuffer), P(glFramebufferTexture2D), P(glFramebufferRenderbuffer),
         P(glCheckFramebufferStatus), P(glGenRenderbuffers), P(glDeleteRenderbuffers), P(glBindRenderbuffer), P(glRenderbufferStorage),
-        P(glGenerateMipmap), P(glBlendFuncSeparate), P(glBlendEquation) },
-    k_es3[] = { P(glBlitFramebuffer), P(glRenderbufferStorageMultisample) };
-    #undef P
+        P(glGenerateMipmap), P(glBlendFuncSeparate), P(glBlendEquation) };
     for (size_t i = 0; i < sizeof k_es2 / sizeof *k_es2; i++) if (!strcmp(base, k_es2[i].name)) return k_es2[i].f;
+#ifndef __vita__                                           /* (vitaGL, ES 2.0 only, has no glRenderbufferStorageMultisample) */
+    static const struct { const char *name; void (*f)(void); } k_es3[] = { P(glBlitFramebuffer), P(glRenderbufferStorageMultisample) };
     if (es3()) for (size_t i = 0; i < sizeof k_es3 / sizeof *k_es3; i++) if (!strcmp(base, k_es3[i].name)) return k_es3[i].f;
+#endif
+    #undef P
     return NULL;
 }

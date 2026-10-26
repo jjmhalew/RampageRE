@@ -13,7 +13,8 @@
 #include <windows.h>
 #include <psapi.h>
 #include <dbghelp.h>                                 /* the crash's stack, by the program's .pdb */
-#elif !defined __SWITCH__                            /* (the Switch's libnx has no getrusage: no memory figures) */
+#elif !defined __SWITCH__ && !defined __vita__       /* (no getrusage on the Switch, none with ru_maxrss on the
+                                                     * Vita: no memory figures) */
 #define AP_RUSAGE 1
 #include <sys/resource.h>
 #include <unistd.h>

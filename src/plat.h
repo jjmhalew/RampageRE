@@ -57,6 +57,10 @@ void plat_message(const char *text, int warn);
 #define SWITCH_HOME "sdmc:/switch/rampagere"     /* the Switch's folder: the data, rampage.cfg, the profile, the log */
 void plat_switch_home(void);                     /* SWITCH_HOME made and the current folder, stdout / stderr into its
                                                   * rampage.log */
+#elif defined __vita__
+#define VITA_HOME "ux0:data/rampagere"           /* the Vita's folder: the data, rampage.cfg, the profile, the log */
+void plat_vita_home(void);                       /* VITA_HOME made and the current folder, stdout / stderr into its
+                                                  * rampage.log; the clocks at their highest */
 #elif defined __ANDROID__
 /* a message with up to three buttons (RampageActivity.dialog; plat_sdl.c): 1 = b1, 0 = b2, -1 = b3; blocks */
 int plat_dialog(const char *text, const char *b1, const char *b2, const char *b3);

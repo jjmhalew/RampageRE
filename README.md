@@ -22,9 +22,9 @@ It has two halves, the same way as [WoodyRE](https://github.com/jjmhalew/WoodyRE
 campaign's seven cities block by block
 with their challenges, bosses, results screens and the credits, the other play modes, one or two players as on the PS2 (computer monsters
 included; up to four in King of the City, King of the World and the Timed Run, as on the game's other consoles (`four_players=0`
-in `rampage.cfg` keeps the PS2's menu); the command line's `--players 4` in any mode), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch (homebrew)
+in `rampage.cfg` keeps the PS2's menu); the command line's `--players 4` in any mode), sound and music, the Pause menu and saving the profile. It runs on Windows, Linux, the Switch and the PS Vita (homebrew)
 and Android, on keyboard, controllers (rumble included) or the touch screen, with texture packs and graphics
-settings (GTAO, SMAA / MSAA). It has been played on Windows; the Switch, phones and controllers are not yet tried on
+settings (GTAO, SMAA / MSAA). It has been played on Windows; the Switch, the Vita, phones and controllers are not yet tried on
 real hardware. Still missing: the smaller gaps that the notes in `docs/` list under "Not ported" (and mark [G] where
 the port guesses). After v1: the two arcade games of Bonus Content (Midway Classics), separate emulator programs on
 the disc rather than part of the game ([docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md)).
@@ -59,7 +59,7 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | The game's play camera (TwoTilts) transcribed; walk a monster about with it following | ✅ [docs/CAMERA.md](docs/CAMERA.md) |
 | Monster move graphs (`MONSTER_DATA`): all 30 parsed, the pad variables and the game's runner decoded; clip events (script calls, movement modes), jump physics and the landing slots, the state nodes (playback rate, flags), the game's steering, air control and clip blending; the native viewer plays every monster by its own graph, jumps included, its punches damage the buildings' cells by the game's rules until floors collapse and buildings fall to rubble, and it climbs them | ✅ [docs/FORMAT_MONSTER.md](docs/FORMAT_MONSTER.md) |
 | The game in the native port: front end and shell, profiles, game flow, challenges, people, army, traffic, bosses, edibles, effects, sound and music, movies, HUD and Pause | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
-| Linux, Switch (homebrew) and Android builds, controllers and rumble, touch pad, texture packs, graphics settings, CI | ✅ (not yet tried on real hardware) [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) |
+| Linux, Switch and PS Vita (homebrew) and Android builds, controllers and rumble, touch pad, texture packs, graphics settings, CI | ✅ (not yet tried on real hardware) [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) |
 | The attract mode's demo games (a random city, block and monsters, played by the computer) | ✅ [docs/SHELL_NOTES.md](docs/SHELL_NOTES.md) |
 | The arcade games (Midway Classics: Digital Eclipse's emulators on the disc) | after v1 [docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md) |
 | Coverage of the game's code: every function of the ELF ported, read, replaced by the port's own, unused by the data, or open (0.8 % of the code: the monsters' clip effects and roar, the tail motion, a few smaller items) | [docs/COVERAGE.md](docs/COVERAGE.md) |
@@ -114,6 +114,13 @@ by holding R while starting a game (title takeover: more memory than the Album a
 B is Cross, the buttons go by place; `rampage.cfg`, the profile and `rampage.log` live in `/switch/rampagere/`
 ([docs/NATIVE.md](docs/NATIVE.md) "Nintendo Switch").
 
+**PS Vita** (homebrew, experimental, not yet tried on a Vita): install `rampage.vpk` from `RampageRE-vita-<tag>.zip`
+with VitaShell (or build it with `./build_vita.sh`, VitaSDK or its Docker image) and put your disc image (or
+`RAMPAGE.VOL` with `RAMPAGE.ELF`) into `ux0:data/rampagere/`. It needs `ur0:data/libshacccg.suprx`, the system's shader
+compiler: run ShaRKBR33D once to extract it. It starts in the front end on OpenGL ES 2.0 (no GTAO / SMAA); the rear
+touch pad's halves are L2 / R2; `rampage.cfg`, the profile and `rampage.log` live in `ux0:data/rampagere/`
+([docs/NATIVE.md](docs/NATIVE.md) "PS Vita"). Whether a Vita is fast enough, and has memory enough, is not known yet.
+
 **Android** (7.0 and up, arm64 or x86_64; so far tried on the emulator only): install the APK from
 `RampageRE-android-<tag>.zip` (or build it with `android\gradlew.bat -p android assembleDebug`). At the first start it
 asks for your disc image (`.iso`) in the system's file picker and copies `RAMPAGE.VOL` and the game's ELF out of it
@@ -131,6 +138,7 @@ Windows 10 or 11; nothing needs to be installed first (the scripts are WoodyRE's
 | `build.bat dev` | `rampage.exe`, the developer build: the same program with a console that prints what each block holds (the one docs/NATIVE.md and the tests use; `build_viewer.bat`, the old name, builds it) |
 | `build.sh` | `./rampage` for Linux and the Steam Deck (SDL2; `GLES=1` for OpenGL ES; `build_viewer.sh` is the old name) |
 | `build_switch.sh` | `rampage.nro` for the Switch (devkitPro, or its Docker image) |
+| `build_vita.sh` | `rampage.vpk` for the PS Vita (VitaSDK, or its Docker image) |
 | `android\gradlew.bat -p android assembleRelease` | the Android APK (docs/NATIVE.md "Android") |
 | `make_standalone.bat` | `RampageRE-standalone.exe`: `RampageRE.exe` and **your** game data (`RAMPAGE.VOL`, the ELF and `SYSTEM.CNF` from your disc, 1.35 GB) in one exe, which unpacks itself to `%LOCALAPPDATA%\RampageRE` at its first start and runs from there. Drag your disc image or `RAMPAGE.VOL` onto the .bat (else the data `RampageRE.exe` finds is taken) |
 | `make_android_bundle.bat` | `RampageRE-bundle.apk`: the APK of a release (or of your own build) and **your** game data in one APK; the app reads the data from its own APK, so it neither asks for the disc nor copies anything. Drag the APK and your disc image (or `RAMPAGE.VOL`) onto the .bat, or put them next to it. It is signed with a key of your own (made once, kept in `%LOCALAPPDATA%\RampageRE\android-bundle.key`), so later bundles install as updates of it but not over a RampageRE from the Releases page: uninstall that first (its saves and copied files go with it) |
@@ -148,10 +156,10 @@ Never share or upload them.**
 |---|---|
 | `build.ps1` | the whole pipeline: disc → split ELF → C++ → `ps2EntryRunner.exe` |
 | `build.bat`, `src/` | the native port `RampageRE.exe` / `rampage.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
-| `build.sh`, `build_switch.sh` | the same port for Linux (SDL2) and for the Switch (homebrew `rampage.nro`) |
+| `build.sh`, `build_switch.sh`, `build_vita.sh` | the same port for Linux (SDL2), the Switch (homebrew `rampage.nro`) and the PS Vita (homebrew `rampage.vpk`) |
 | `android/` | the same port as an Android app (Gradle, SDL2's activity, the on-screen pad of `src/touch.c`) |
 | `make_standalone.bat`, `make_android_bundle.bat`, `tools/native/` | your own one-file builds with your game data inside: the standalone launcher (`bundle.c`) and its packer (`pack.c`), the APK bundler and signer (`apkbundle.c`) |
-| `res/` | the port's own icon (`rampagere.ico`, made from `switch_icon.jpg` by `tools/mkicon.py`) and `rampagere.rc` (icon and version of the Windows exes) |
+| `res/` | the port's own icon (`rampagere.ico`, made from `switch_icon.jpg` by `tools/mkicon.py`) and `rampagere.rc` (icon and version of the Windows exes); `vita/`, the Vita's LiveArea images (`tools/mkvita.py`) |
 | `build_viewer.bat`, `build_viewer.sh` | the old names of `build.bat dev` and `build.sh`, kept for older instructions |
 | `recomp/config.toml` | PS2Recomp config: stub bindings for the SCE libraries and newlib, plus Rampage fixes |
 | `recomp/funcmap.csv` | function map (Ghidra CSV format) the current state was tested with |

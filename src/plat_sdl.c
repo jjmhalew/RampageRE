@@ -5,7 +5,9 @@
  * A hidden window (--shot) is never shown and draws into a framebuffer object; headless, SDL_VIDEODRIVER=offscreen.
  * Built with GLES=1 the context is OpenGL ES 3.0 (else 2.0) and the renderer draws through src/gles's shim. The
  * Switch (build_switch.sh, __SWITCH__) is that ES build: the whole screen at 1280x720, messages in the system's error
- * dialog, its folder sdmc:/switch/rampagere the current one and stdout / stderr in rampage.log there. Android
+ * dialog, its folder sdmc:/switch/rampagere the current one and stdout / stderr in rampage.log there. The PS Vita
+ * (build_vita.sh, __vita__) too, on OpenGL ES 2.0 through vitaGL (VitaSDK's SDL2 draws with it): the whole screen at
+ * 960x544, ux0:data/rampagere the current folder with rampage.log in it, the clocks at their highest. Android
  * (android/, __ANDROID__) too: the whole screen in landscape, messages in RampageActivity's dialog, the back button as
  * Esc, and touch.c's on-screen pad fed every event and drawn over every frame. */
 #ifndef _WIN32
@@ -170,6 +172,38 @@ void plat_message(const char *text, int warn)
 }
 #endif
 
+#ifdef __vita__
+#include <psp2/power.h>
+/* newlib's heap, taken whole at start: the game's own memory (187 - 246 MB on Linux, textures included). vitaGL has
+ * the rest (the 128 MB of video memory first, then what is left of main memory), and param.sfo's ATTRIBUTE2=12
+ * (build_vita.sh) asks for the larger memory budget. As TheFloW's ports on vitaGL set them. */
+int _newlib_heap_size_user = 256 * 1024 * 1024;
+unsigned int sceUserMainThreadStackSize = 4 * 1024 * 1024;   /* (256 KB by default) */
+
+void plat_vita_home(void)
+{
+    scePowerSetArmClockFrequency(444);           /* the highest clocks: CPU, bus, GPU and its crossbar */
+    scePowerSetBusClockFrequency(222);
+    scePowerSetGpuClockFrequency(222);
+    scePowerSetGpuXbarClockFrequency(166);
+    mkdir(VITA_HOME, 0777);
+    if (chdir(VITA_HOME) != 0)
+        return;
+    FILE *f = fopen("rampage.log", "w");         /* a new log each start; both streams append to it */
+    if (f) {
+        fclose(f);
+        if (freopen("rampage.log", "a", stdout))
+            setvbuf(stdout, NULL, _IOLBF, 0);
+        if (freopen("rampage.log", "a", stderr))
+            setvbuf(stderr, NULL, _IONBF, 0);
+    }
+    /* vitaGL compiles the shim's shaders with the system's own compiler, which the user extracts (ShaRKBR33D) */
+    if (!plat_exists("ur0:data/libshacccg.suprx") && !plat_exists("ur0:data/external/libshacccg.suprx"))
+        plat_message("ur0:data/libshacccg.suprx is missing: vitaGL needs it to compile shaders. Install and run "
+                     "ShaRKBR33D once, which extracts it from the system, then start RampageRE again.", 1);
+}
+#endif
+
 /* ---- window */
 static int vk_of(const SDL_Keysym *k)
 {
@@ -244,6 +278,13 @@ int win_open(Window *w, const char *title, int width, int height, int hidden)
         flags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
         width = 1280;
         height = 720;
+    }
+#elif defined __vita__
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");   /* the touch screens are no mouse (the rear one is L2 / R2) */
+    if (!hidden) {                               /* the whole screen */
+        flags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
+        width = 960;
+        height = 544;
     }
 #elif defined __ANDROID__
     if (!hidden)
@@ -364,7 +405,7 @@ void win_mode(Window *w, int width, int height, int full)
     SDL_Window *sw = (SDL_Window *)w->hwnd;
     if (w->hidden)                               /* --shot: never shown, its size is the framebuffer object's */
         return;
-#if defined __SWITCH__ || defined __ANDROID__
+#if defined __SWITCH__ || defined __vita__ || defined __ANDROID__
     (void)width; (void)height; (void)full; (void)sw;
     drawable(w);                                 /* always the whole screen */
     return;

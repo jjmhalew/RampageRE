@@ -4,8 +4,8 @@
 # headers, e.g. on Debian / Ubuntu:
 #   sudo apt install build-essential libsdl2-dev libgl-dev
 # (Windows: build.bat; the SRC list is the same there, without plat_sdl.c and with pad.c for pad_sdl.c; the
-# Switch: build_switch.sh, the same list with src/gles/gles2.c; Android: android/app/CMakeLists.txt, that list with
-# src/android.c and src/touch.c: keep the four in step. build_viewer.sh, the old name, calls this.) Run it from the
+# Switch: build_switch.sh, the same list with src/gles/gles2.c; the PS Vita: build_vita.sh, the same as the Switch's;
+# Android: android/app/CMakeLists.txt, that list with src/android.c and src/touch.c: keep the five in step. build_viewer.sh, the old name, calls this.) Run it from the
 # repository root:
 # ./rampage [RAMPAGE.VOL] [City] [block]; with no display: SDL_VIDEODRIVER=offscreen ./rampage ... --shot s.png
 # GLES=1 ./build.sh draws through OpenGL ES 3.0 / 2.0 instead (src/gles: the fixed function emulated on it, the path

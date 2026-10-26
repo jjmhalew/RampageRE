@@ -41,7 +41,8 @@ Without a path (or with a city name first: `rampage.exe NewYork 6`) it looks, in
 5. the disc image or `RAMPAGE.VOL` chosen at an earlier start: the path in that folder's `disc.txt`, when it is still
    there and readable (a disc drive left empty asks nothing)
 
-On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below), on Android the app folder, then the
+On the Switch `sdmc:/switch/rampagere` comes first ("Nintendo Switch" below), on the PS Vita `ux0:data/rampagere`
+("PS Vita"), on Android the app folder, then the
 app's own APK when it is a bundle of `make_android_bundle.bat` ("Android"; a first start without either asks for the
 disc image).
 
@@ -249,7 +250,7 @@ Homebrew, for a Switch that runs custom firmware such as Atmosphère; experiment
 `./build_switch.sh` builds `rampage.nro` with devkitPro's devkitA64, libnx, switch-sdl2 and switch-mesa
 (`dkp-pacman -S switch-dev switch-sdl2 switch-mesa`); without `$DEVKITPRO` it runs itself in the official
 `devkitpro/devkita64` Docker image, which has all of them. It is the OpenGL ES build above: the SRC list of
-`build.sh` (keep the three scripts in step) with `src/gles/gles2.c`, `-D__SWITCH__ -fsigned-char`, linked
+`build.sh` (keep the scripts in step) with `src/gles/gles2.c`, `-D__SWITCH__ -fsigned-char`, linked
 with `-lSDL2 -lGLESv2 -lEGL -lglapi -ldrm_nouveau -lnx`, then `nacptool` and `elf2nro` with `res/switch_icon.jpg`
 (the ELF, map and NACP stay in `build/switch/`). CI builds it (the `switch` job, in that image) and a release has
 `RampageRE-switch-<tag>.zip`, laid out as on the SD card.
@@ -290,6 +291,47 @@ shim (four lights per vertex, one shader for everything), the error dialog, the 
 docked / handheld changes, several controllers and single Joy-Cons. The build itself is: the `devkitpro/devkita64`
 image's devkitA64 (GCC 15.2), libnx 4.12, switch-sdl2 2.28.5 and switch-mesa 20.1 build `rampage.nro` (7 MB), GCC
 warning only about shared code (collide.c, movie.c, shell.c, water.c), none in the Switch parts.
+
+### PS Vita
+Homebrew, for a PS Vita or PS TV with HENkaku / Ensō; experimental and **not yet tried on a Vita**.
+`./build_vita.sh` builds `rampage.vpk` with VitaSDK, its SDL2 and vitaGL; without `$VITASDK` it runs itself in the
+official `vitasdk/vitasdk` Docker image, which has all of them (from Git Bash on Windows too). It is the OpenGL ES build
+above on ES 2.0: VitaSDK's SDL2 makes its GL contexts with vitaGL, which answers "OpenGL ES 2.0", so the shim takes its
+ES 2.0 path (no GTAO, SMAA or MSAA). The SRC list of `build.sh` (keep the four lists in step) with `src/gles/gles2.c`,
+`-fsigned-char -mcpu=cortex-a9 -mfpu=neon`, linked with `-lSDL2 -lvitaGL -lvitashark` and the system's stubs, then
+`vita-elf-create`, `vita-make-fself`, `vita-mksfoex` (title ID `RMPR00001`, `ATTRIBUTE2=12`) and `vita-pack-vpk` with
+the LiveArea images of `res/vita/` (made from `res/switch_icon.jpg` by `tools/mkvita.py`; the ELF, map, eboot.bin and
+param.sfo stay in `build/vita/`). CI builds it (the `vita` job, in that image) and a release has
+`RampageRE-vita-<tag>.zip` with `rampage.vpk`.
+
+| | |
+|---|---|
+| Install | `rampage.vpk` with VitaShell; it starts from its LiveArea bubble. `ux0:data/rampagere` is made at start and becomes the current folder |
+| Shader compiler | vitaGL compiles the shim's shaders with the system's own compiler, `ur0:data/libshacccg.suprx` (or `ur0:data/external/`), which is not shipped: install and run **ShaRKBR33D** once, which extracts it. Without it RampageRE says so at start |
+| Game data | in `ux0:data/rampagere`: your disc image (`*.iso`, read in place) or `RAMPAGE.VOL` with `RAMPAGE.ELF` or `SLES_538.00`; `data_find` looks there first (`__vita__` only) |
+| Files | `rampage.cfg`, `rampage_profile.bin` (the save), `mods/textures/` and `rampage.log` there: stdout and stderr go to the log, a new one each start. A message goes to the log and to SDL's message box, which may not show once vitaGL holds the screen |
+| Start | without arguments the front end (`--shell`); the Pause menu's Quit goes back to its main menu, the PS button goes to LiveArea, which closes it |
+| Screen | the whole screen at 960×544; `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` report "not supported" (ES 2.0) |
+| Clocks | the highest at start: CPU 444 MHz, bus 222, GPU 222, its crossbar 166 (`plat_vita_home`) |
+
+**Controls.** The handheld's own buttons through `pad_sdl.c` as a DualShock 4 would be: Cross jump, Circle grab,
+Square punch, Triangle kick, L / R as L1 / R1, Start, Select, the sticks. The handheld has no L2 / R2: the rear touch
+pad stands for them, its left half L2 and its right half R2 (roar). It has no L3 / R3 either. A PS TV should play with its
+DualShock 3 / 4 as a pad (L2 / R2 / L3 / R3 included), up to four. The front touch screen does nothing (no mouse, no
+on-screen pad). No rumble on the handheld.
+
+**Memory.** `plat_sdl.c` gives newlib's heap 256 MB (`_newlib_heap_size_user`) and the main thread a 4 MB stack;
+`ATTRIBUTE2=12` in param.sfo asks the system for the larger memory budget, and vitaGL takes the 128 MB of video memory
+and what is left of main memory for textures and buffers, as TheFloW's ports on vitaGL do. The game needs 187 - 246 MB
+on Linux with its textures ("Nintendo Switch" above); without them it should fit the heap, but four players on New
+York 6 are the likeliest to run out.
+
+**Untested** (no Vita here): that it starts at all; the speed (a Cortex-A9 at 444 MHz is far slower than the
+Switch's A57: four players, cloth and the crowds are the question, as is the shim's one shader with four lights per
+vertex on the SGX543 at 960×544); whether vitaGL's GLSL translator takes the shim's shaders; memory; the message box;
+sound (SDL's audio); the rear touch as L2 / R2; a PS TV with several pads. The build itself is: the `vitasdk/vitasdk`
+image's arm-vita-eabi GCC 15.2 and SDL 2.32.8 build `rampage.vpk` (1.9 MB), GCC warning only about shared code
+(army.c, collide.c, main.c, movie.c, water.c), none in the Vita parts.
 
 ### Android
 An app for phones, tablets and Chromebooks (Android 7.0 and up, arm64-v8a and x86_64), WoodyRE's `android/` renamed:
@@ -534,8 +576,9 @@ are laid one under another a step apart (four of them a step higher, clear of th
 | `src/building.c` | a building's cells and the game's hit on them: 0x2BC150, 0x2BB7B0, 0x2BB950, the roof stomp's 0x2BBE80 (docs/FORMAT_BDP.md "Damage") |
 | `src/moves.c` | the monster's move graph (`MONSTER_DATA`) and the game's runner for it: 0x2EBFE0, 0x2EC3D0, 0x2ECBE0 (docs/FORMAT_MONSTER.md) |
 | `src/render_gl.c` | Win32 window, WGL and OpenGL 1.1 drawing |
-| `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms"); the Switch's folder, log and error dialog |
+| `src/plat_sdl.c`, `src/plat.h` | the window, keys and OS bits on SDL2 outside Windows; what is taken from the OS ("Platforms"); the Switch's and the Vita's folder and log, the Switch's error dialog |
 | `build_switch.sh`, `res/switch_icon.jpg` | the Switch homebrew `rampage.nro` and its icon ("Nintendo Switch") |
+| `build_vita.sh`, `res/vita/`, `tools/mkvita.py` | the PS Vita homebrew `rampage.vpk` and its LiveArea images ("PS Vita") |
 | `android/`, `src/android.c`, `src/touch.c`, `src/touch.h` | the Android app: Gradle project, `RampageActivity` (file picker, dialogs), SDL's Java glue; logcat, the app folder, the installed APK's path (a bundle's data) and the first start's copy out of the disc image; the on-screen pad ("Android") |
 | `src/gles/GL/gl.h`, `src/gles/gles2.c` | the fixed function on OpenGL ES 2.0 / 3.0 (`GLES=1`, WoodyRE's shim with lighting, fog and sphere maps; "OpenGL ES") |
 | `src/pad.h`, `src/pad.c`, `src/pad_sdl.c` | the controllers: Sony HID and XInput on Windows, SDL's game controllers elsewhere; a slot per player, rumble, lights ("Input") |

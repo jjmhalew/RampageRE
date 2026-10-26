@@ -8,12 +8,13 @@ SLES_*
 *.VOL
 __pycache__/
 
-# The native viewer and its compiler (build.bat, build.sh, build_switch.sh); the standalone exe of make_standalone.bat
+# The native viewer and its compiler (build.bat, build.sh, build_switch.sh, build_vita.sh); the standalone exe of make_standalone.bat
 # holds the game's data (its tools are in build/)
 rampage.exe
 RampageRE*.exe
 /rampage
 rampage.nro
+rampage.vpk
 shot_*.png
 tools/zig/
 *.pdb

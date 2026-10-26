@@ -69,7 +69,7 @@ static int campaign_index(const char *city)
     return 0;
 }
 #define NCITIES 7
-#if defined RAMPAGE_GUI || !defined _WIN32
+#if (defined RAMPAGE_GUI || !defined _WIN32) && !defined __SWITCH__ && !defined __vita__ && !defined __ANDROID__
 static int city_named(const char *s)                 /* "rampage Chicago": a city, not the data's path */
 {
     for (int i = 0; i < NCITIES; i++)
@@ -8414,6 +8414,11 @@ static int viewer_main(int argc, char **argv)
     plat_switch_home();                              /* sdmc:/switch/rampagere: the data, rampage.cfg, the profile,
                                                       * rampage.log */
     if (argc < 2)                                    /* from the Homebrew Menu: the front end, played on the pads */
+        v.shell_mode = 1;
+#elif defined __vita__
+    plat_vita_home();                                /* ux0:data/rampagere: the data, rampage.cfg, the profile,
+                                                      * rampage.log; the clocks */
+    if (argc < 2)                                    /* from LiveArea: the front end, played on the pads */
         v.shell_mode = 1;
 #elif defined __ANDROID__
     android_init();                                  /* logcat; the app folder the current one: the data, rampage.cfg,

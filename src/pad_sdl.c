@@ -24,6 +24,21 @@ static int nx_single(SDL_JoystickID id)          /* one Joy-Con held sideways, a
     u32 s = hidGetNpadStyleSet((HidNpadIdType)id);
     return (s & (HidNpadStyleTag_NpadJoyLeft | HidNpadStyleTag_NpadJoyRight)) && !(s & HidNpadStyleTag_NpadJoyDual);
 }
+#elif defined __vita__
+static unsigned vita_rear(void)                  /* the handheld has no L2 / R2: the rear touch pad's halves are */
+{
+    unsigned m = 0;
+    for (int d = 0; d < SDL_GetNumTouchDevices(); d++) {
+        SDL_TouchID t = SDL_GetTouchDevice(d);
+        const char *name = SDL_GetTouchName(d);
+        if (!name || strcmp(name, "Back") != 0) continue;   /* (SDL's names: "Front", "Back") */
+        for (int f = 0; f < SDL_GetNumTouchFingers(t); f++) {
+            SDL_Finger *g = SDL_GetTouchFinger(t, f);
+            if (g) m |= 1u << (g->x < 0.5f ? PAD_LT : PAD_RT);
+        }
+    }
+    return m;
+}
 #endif
 
 static const char *penv(const char *n) { const char *v = getenv(n); return v && *v ? v : NULL; }
@@ -84,6 +99,8 @@ static void open_new(void)
 #endif
 #ifdef __SWITCH__
         kind = PADK_SWITCH;                      /* the Joy-Cons, handheld, a Pro Controller */
+#elif defined __vita__
+        kind = PADK_DS4;                         /* the handheld's own buttons (or a PS TV's DualShock): Cross, Circle */
 #endif
         memset(&P.p[i], 0, sizeof P.p[i]);
         P.p[i].c = c; P.p[i].id = id; P.p[i].kind = kind; P.p[i].sent = -1; P.p[i].slot = -1;
@@ -118,6 +135,14 @@ static void read_pad(int i)
     st->lt = ax(c, SDL_CONTROLLER_AXIS_TRIGGERLEFT); st->rt = ax(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
     if (st->lt >= 0.25f) m |= 1u << PAD_LT;
     if (st->rt >= 0.25f) m |= 1u << PAD_RT;
+#ifdef __vita__
+    if (P.p[i].id == 0) {                        /* the handheld's own controls: the rear touch pad as L2 / R2 */
+        unsigned r = vita_rear();
+        if (r & 1u << PAD_LT) st->lt = 1.0f;
+        if (r & 1u << PAD_RT) st->rt = 1.0f;
+        m |= r;
+    }
+#endif
 #ifdef __SWITCH__
     if (nx_single(P.p[i].id)) {                  /* SDL reads no axes of it: its stick comes as the d-pad */
         float x = (float)((m >> PAD_RIGHT & 1) - (m >> PAD_LEFT & 1)), y = (float)((m >> PAD_DOWN & 1) - (m >> PAD_UP & 1));

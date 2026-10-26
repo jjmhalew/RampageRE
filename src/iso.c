@@ -387,8 +387,8 @@ static void exe_dir(char *out, size_t cap)
     DWORD n = GetModuleFileNameA(NULL, out, (DWORD)cap);
     if (n == 0 || n >= cap)
         out[0] = 0;
-#elif defined __SWITCH__
-    (void)cap;                                   /* no /proc: SWITCH_HOME stands for it */
+#elif defined __SWITCH__ || defined __vita__
+    (void)cap;                                   /* no /proc: SWITCH_HOME / VITA_HOME stands for it */
 #else
     ssize_t n = readlink("/proc/self/exe", out, cap - 1);
     out[n > 0 ? n : 0] = 0;
@@ -484,6 +484,9 @@ int data_find(char *out, size_t cap)
 #ifdef __SWITCH__
     if (vol_in(SWITCH_HOME, out, cap) || iso_in(SWITCH_HOME, out, cap))   /* the SD card's sdmc:/switch/rampagere */
         return 1;
+#elif defined __vita__
+    if (vol_in(VITA_HOME, out, cap) || iso_in(VITA_HOME, out, cap))       /* the memory card's ux0:data/rampagere */
+        return 1;
 #elif defined __ANDROID__
     if (vol_in(android_home(), out, cap) || iso_in(android_home(), out, cap))   /* the app folder (android.c) */
         return 1;
@@ -505,6 +508,8 @@ const char *data_where(void)
            "chosen at an earlier start)";
 #elif defined __SWITCH__
     return SWITCH_HOME " (the disc image, or RAMPAGE.VOL with RAMPAGE.ELF or SLES_538.00)";
+#elif defined __vita__
+    return VITA_HOME " (the disc image, or RAMPAGE.VOL with RAMPAGE.ELF or SLES_538.00)";
 #elif defined __ANDROID__
     return "the app folder, Android/data/io.github.jjmhalew.rampagere/files (the disc image, or RAMPAGE.VOL with "
            "RAMPAGE.ELF or SLES_538.00), and the APK itself (make_android_bundle.bat)";

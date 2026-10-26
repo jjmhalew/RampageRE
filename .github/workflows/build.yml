@@ -1,7 +1,8 @@
 # Builds the native port on every push to main, every pull request and every tag v*: RampageRE.exe (the player build)
 # and rampage.exe (the developer build with a console) with build.bat (Windows, Zig), and the helpers of tools/native
 # (build.bat tools: the standalone launcher, its packer, apkbundle), rampage with build.sh (Linux, SDL2), the APK with
-# android/ (Gradle) and rampage.nro with build_switch.sh (Switch homebrew, devkitPro). No game data is involved: the
+# android/ (Gradle), rampage.nro with build_switch.sh (Switch homebrew, devkitPro) and rampage.vpk with build_vita.sh
+# (PS Vita homebrew, VitaSDK). No game data is involved: the
 # programs hold only the port's own code, the submodules (PS2Recomp, which with recomp/ needs the disc) are not checked
 # out and build.ps1 never runs (the standalone and the APK bundle, which hold the user's own data, are made by the user
 # with make_standalone.bat / make_android_bundle.bat, never here). Each package is listed file by file and checked for
@@ -9,7 +10,8 @@
 # GitHub release with RampageRE-windows-<tag>.zip (RampageRE.exe, rampage.exe, README.md, LICENSE, docs/NATIVE.md,
 # docs/TEXTURES.md), RampageRE-linux-x86_64-<tag>.tar.gz (rampage and the same files), RampageRE-android-<tag>.zip
 # (RampageRE-<tag>.apk, README.md, LICENSE, docs/NATIVE.md) and RampageRE-switch-<tag>.zip (switch/rampagere/ with
-# rampage.nro, README.md, LICENSE: unpacked onto the SD card as it is).
+# rampage.nro, README.md, LICENSE: unpacked onto the SD card as it is) and RampageRE-vita-<tag>.zip (rampage.vpk,
+# README.md, LICENSE).
 name: build
 
 on:
@@ -328,11 +330,57 @@ jobs:
           name: RampageRE-switch
           path: ${{ env.PKG }}
 
+  # PS Vita homebrew (.vpk) in VitaSDK's own image, which holds the toolchain, SDL2 and vitaGL (and sets VITASDK). The
+  # same sources on OpenGL ES 2.0 through src/gles, as linux-gles; nothing to run it on here.
+  vita:
+    runs-on: ubuntu-latest
+    container: vitasdk/vitasdk
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Build
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then RAMPAGE_VERSION="$GITHUB_REF_NAME"; else RAMPAGE_VERSION=$(printf '%.7s' "$GITHUB_SHA"); fi
+          export RAMPAGE_VERSION
+          sh build_vita.sh rampage && ls -l rampage.vpk
+
+      - name: Package
+        run: |
+          apt-get update -qq && apt-get install -y -qq zip unzip > /dev/null
+          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="$GITHUB_REF_NAME"; else ver=$(printf '%.7s' "$GITHUB_SHA"); fi
+          name="RampageRE-vita-$ver"
+          # file by file, never a folder or a glob: nothing else can end up in the zip
+          mkdir -p pkg
+          cp rampage.vpk README.md LICENSE pkg/
+          (cd pkg && zip -q "../$name.zip" rampage.vpk README.md LICENSE)
+          echo "PKG=$name.zip" >> "$GITHUB_ENV"
+
+      - name: Check the package (no game data)
+        run: |
+          unzip -Z1 "$PKG" | tee pkg.txt
+          unzip -Z1 rampage.vpk | tee -a pkg.txt
+          if grep -iE '\.(vol|elf|iso|cue)$|(^|/)SLES_|(^|/)build/' pkg.txt; then
+            echo "::error::game data in the package"; exit 1
+          fi
+          printf '%s\n' rampage.vpk README.md LICENSE eboot.bin sce_sys/param.sfo sce_sys/icon0.png \
+            sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/startup.png \
+            sce_sys/livearea/contents/template.xml | sort > want.txt
+          sort pkg.txt > have.txt
+          diff want.txt have.txt || { echo "::error::the package does not hold exactly the listed files"; exit 1; }
+          rm -f pkg.txt want.txt have.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RampageRE-vita
+          path: ${{ env.PKG }}
+
   # The release notes: the annotated tag's message (what is new; its first line is the title of the tag), then how to start;
   # a tag with a suffix (v1.2.3-rc1) is published as a pre-release, a plain one (v1.2.3) as a release.
   release:
     if: github.ref_type == 'tag'
-    needs: [windows, linux, android, switch]
+    needs: [windows, linux, android, switch, vita]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -353,7 +401,7 @@ jobs:
         run: |
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           new=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed -e 's/[[:space:]]*$//')
-          start="Windows: unzip and start RampageRE.exe; at the first start it asks for your own disc image (.iso) of the European (SLES-53800) or USA (SLUS-21323) PS2 disc, or its RAMPAGE.VOL, reads it where it is and remembers it (rampage.exe is the same with a console and the command line of docs/NATIVE.md, e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1). Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/your.iso (or RAMPAGE.VOL; needs SDL2), which opens the front end; on the Steam Deck add rampage to Steam as a non-Steam game with that path as its launch option, so the Deck's controls work as a pad. Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
+          start="Windows: unzip and start RampageRE.exe; at the first start it asks for your own disc image (.iso) of the European (SLES-53800) or USA (SLUS-21323) PS2 disc, or its RAMPAGE.VOL, reads it where it is and remembers it (rampage.exe is the same with a console and the command line of docs/NATIVE.md, e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1). Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/your.iso (or RAMPAGE.VOL; needs SDL2), which opens the front end; on the Steam Deck add rampage to Steam as a non-Steam game with that path as its launch option, so the Deck's controls work as a pad. Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. PS Vita (homebrew, experimental): install the .vpk from the -vita.zip with VitaShell and put your disc image into ux0:data/rampagere/; it needs ur0:data/libshacccg.suprx (ShaRKBR33D). Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
           if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
           ls -l dist
           pre=; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease;; esac   # v1.2.3-rc1: a pre-release
