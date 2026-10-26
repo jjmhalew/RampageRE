@@ -70,8 +70,42 @@ python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and
   name table, which stays little endian. `bdp.Bundle` reads both and keeps the byte order in `.endian`.
 - **`.zip`:** a real zip archive holding the `.cmg` of the same name (George.zip: 679 KB for a 1.55 MB `George.cmg`),
   not a copy as on the PS2.
-- **Entry types:** the same, but there are no palettes (type 13). Mesh vertices look like GX display lists; not
-  decoded yet: `mesh.py` and `anim.py` read only the PS2's.
+- **Entry types:** the same, but there are no palettes (type 13). `anim.py`, `city.py` and `prb.py` read only the
+  PS2's yet.
+- **Materials:** the PS2's layout, big endian, 0x70 bytes; kind 4 names the texture at +0x38 and the monster's
+  `_512_B` bump map at +0x3A.
+- **Meshes** (`tools/mesh.py --verify DATA/files/Game`: 6,656 meshes, 7,484 parts; Shell 11 and 12): the type 0
+  and type 17 data and part records are the PS2's, big endian (material +0x0A / +0x38, the block +0x3C / +0x40, the
+  descriptor +0x40 / +0x44, a type 17 part's bone list +0x48). The record's first word is not the triangle count:
+  it is the display list's vertex count − 2 in 5,376 parts, its quad or triangle count in 565. The block is a GX
+  display list:
+
+  | Block (5 × u32) | | Descriptor (6 × u32) | |
+  |---|---|---|---|
+  | +0x00 | vertices in the list | +0x00 | vertices |
+  | +0x04 | 1: u8 indices, 0: u16 | +0x04 | stride |
+  | +0x08, +0x0C | offset and size of the list in data2 | +0x08 | format (below) |
+  | +0x10 | indices per vertex | +0x0C | 0 |
+  | | | +0x10, +0x14 | offset and size (vertices × stride) of the vertices in data2 |
+
+  The list: per primitive a command, 0x80 quads, 0x90 triangles, 0x98 strip or 0xA0 fan (39,496 strips, 11,527
+  quads, 6,766 triangle lists, 2,436 fans), a u16 vertex count, then per vertex one index per attribute, all equal
+  (the vertices are interleaved); zero padding to its size. Triangles wind counter-clockwise about the normals.
+  The vertices, in this order (formats 0x002 to 0x1010C, 12 of them):
+
+  | Bit | Attribute |
+  |---|---|
+  | (always) | position, 3 × f32 |
+  | type 17 | weights: 3 × f32 with 0x004 (four bones; the fourth's weight is the rest), else 1 × f32; then the bones, skeleton node indices: 4 × u16 with 0x004, else 2 × u16 |
+  | 0x10000 | bump mapped: uv 2 × f32, then tangent (along u), binormal and normal, 3 × f32 each; nothing else follows |
+  | 0x010 | normal, 3 × f32 |
+  | 0x040 | colour, 4 × u8 RGBA, 255 = 1.0 |
+  | 0x100 | uv, 2 × f32 |
+  | 0x200 | uv, 4 × f32 (u, v, 0, 0; one skybox) |
+
+  In every vertex of every format the normal, tangent and binormal are unit length and the weights add up to at
+  most 1. George's vertices lie where the PS2's do (seven sampled: the same positions, the same first two bones in
+  six). The monster bodies skin with four bones (0x1010C parts) or two (0x10108), the PS2's always with two.
 - **Textures** (`tools/tex.py --all DATA/files/Game OUTDIR`: all 1,725, and Shell's 194): data 0x68 bytes, big
   endian: u32 kind, u32 GX format, u16 width, u16 height, u16 mip levels, u16 0xFFFF (no palette), the rest zero.
   data2 is every mip level, largest first, each in whole GX tiles; its size is that sum in all 1,919.

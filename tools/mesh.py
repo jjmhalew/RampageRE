@@ -16,6 +16,8 @@ The vertices are in data2 as separate streams, each starting on a 16-byte bounda
   0x100 uv        2 x s16, 4.12 fixed point
   (0x008 = skinned vertices; 0x002 is set on almost every mesh, meaning unknown)
 Triangles are strips: every vertex flagged "closes" makes a triangle with the two before it, alternating winding.
+The Wii's meshes (.bdg / .cmg) have the same records, big endian, pointing at a GX display list and interleaved
+vertices instead: see read_wii_section and docs/FORMAT_BDP.md.
 
 Usage: python tools/mesh.py --verify VOLDIR                check every mesh's triangle count
        python tools/mesh.py BUNDLE OUTDIR                   write OUTDIR/<bundle>.gltf (+ .bin and textures)
@@ -31,10 +33,12 @@ import sys
 import bdp
 import tex
 
-Section = collections.namedtuple('Section', 'count format positions normals colours uvs closes weights bones')
+Section = collections.namedtuple('Section', 'count format positions normals colours uvs closes weights bones tris',
+                                 defaults=(None,))     # tris: the Wii's triangles (the PS2's come from the strip flags)
 Part = collections.namedtuple('Part', 'material triangles_expected sections')
 
 NORMAL, COLOUR, UV, SKINNED = 0x010, 0x040, 0x100, 0x008
+FOUR_BONES, UV4, NBT = 0x004, 0x200, 0x10000          # Wii only
 
 
 def align16(n):
@@ -82,8 +86,106 @@ def read_section(data, at, data2, skinned):
     return Section(count, fmt, positions, normals, colours, uvs, closes, weights or None, bones or None)
 
 
-def read_mesh(etype, data, data2):
+def wii_layout(skinned, fmt):
+    """[(attribute, bytes)] of one Wii vertex, in order."""
+    out = [('position', 12)]
+    if skinned:
+        out += [('weights', 12 if fmt & FOUR_BONES else 4), ('bones', 8 if fmt & FOUR_BONES else 4)]
+    if fmt & NBT:                                    # bump mapped: uv first, then tangent (along u), binormal, normal
+        return out + [('uv', 8), ('tangent', 12), ('binormal', 12), ('normal', 12)]
+    if fmt & NORMAL:
+        out.append(('normal', 12))
+    if fmt & COLOUR:
+        out.append(('colour', 4))
+    if fmt & UV:
+        out.append(('uv', 8))
+    if fmt & UV4:
+        out.append(('uv4', 16))
+    return out
+
+
+def wii_triangles(data2, at, size, attrs, wide, count):
+    """Triangles of a GX display list: per primitive u8 command, u16 vertex count, then per vertex one index per
+    attribute (u8, or u16 when `wide`); the attributes are interleaved, so every index of a vertex is the same."""
+    out = []
+    p, end = at, at + size
+    code = '>' + ('H' if wide else 'B') * attrs
+    while p < end and data2[p]:
+        op, n = data2[p], struct.unpack_from('>H', data2, p + 1)[0]
+        p += 3
+        idx = []
+        for _ in range(n):
+            v = struct.unpack_from(code, data2, p)
+            if len(set(v)) != 1 or v[0] >= count:
+                raise ValueError(f'display list vertex {v} at {p:#x}')
+            idx.append(v[0])
+            p += struct.calcsize(code)
+        if op == 0x80:                               # quads
+            for k in range(0, n - 3, 4):
+                out += [(idx[k], idx[k + 1], idx[k + 2]), (idx[k], idx[k + 2], idx[k + 3])]
+        elif op == 0x90:                             # triangles
+            out += [tuple(idx[k:k + 3]) for k in range(0, n - 2, 3)]
+        elif op == 0x98:                             # strip
+            out += [(idx[k], idx[k + 1], idx[k + 2]) if k % 2 == 0 else (idx[k + 1], idx[k], idx[k + 2])
+                    for k in range(n - 2)]
+        elif op == 0xA0:                             # fan
+            out += [(idx[0], idx[k], idx[k + 1]) for k in range(1, n - 1)]
+        else:
+            raise ValueError(f'display list command {op:#x} at {p - 3:#x}')
+    if p > end or any(data2[p:end]):
+        raise ValueError(f'display list at {at:#x} does not end at {end:#x}')
+    return out
+
+
+def read_wii_section(data, block, desc, data2, skinned):
+    """A Wii part: the display list block (u32 vertices, u32 1 = u8 indices, u32 offset in data2, u32 size, u32
+    indices per vertex) and the vertex descriptor (u32 count, u32 stride, u32 format, u32 0, u32 offset, u32 size)."""
+    dl_count, narrow, dl_at, dl_size, attrs = struct.unpack_from('>5I', data, block)
+    count, stride, fmt, zero, offset, size = struct.unpack_from('>6I', data, desc)
+    layout = wii_layout(skinned, fmt)
+    if zero or size != count * stride or sum(n for _, n in layout) != stride or offset + size > len(data2):
+        raise ValueError(f'vertex descriptor at {desc:#x} (format {fmt:#x}, stride {stride})')
+    tris = wii_triangles(data2, dl_at, dl_size, attrs, not narrow, count)
+    streams = collections.defaultdict(list)
+    for i in range(count):
+        o = offset + stride * i
+        for name, n in layout:
+            if name == 'colour':
+                streams[name].append(tuple(c / 255 for c in data2[o:o + 4]))
+            elif name == 'bones':
+                streams[name].append(struct.unpack_from(f'>{n // 2}H', data2, o))
+            else:
+                streams[name].append(struct.unpack_from(f'>{n // 4}f', data2, o))
+            o += n
+    weights = [w + (1.0 - sum(w),) for w in streams['weights']] or None   # the last bone's weight is the rest
+    uvs = streams['uv'] or [u[:2] for u in streams['uv4']] or None
+    return Section(count, fmt, streams['position'], streams['normal'] or None, streams['colour'] or None, uvs, None,
+                   weights, streams['bones'] or None, tris)
+
+
+def read_wii_mesh(etype, data, data2):
+    """[Part] of a Wii type 0 or 17 entry: the PS2's records, big endian, pointing at display lists."""
+    if etype == 0:
+        count = struct.unpack_from('>I', data, 0)[0]
+        records = [(0x20 + 0x50 * i, 0x0A, 0x3C, 0x40) for i in range(count)]
+    elif etype == 17:
+        count, nbones = struct.unpack_from('>HH', data, 0)
+        first = 4 + 4 * nbones + 12
+        records = [(first + 0x58 * i, 0x38, 0x40, 0x44) for i in range(count)]
+    else:
+        raise ValueError(f'entry type {etype} is not a mesh')
+    parts = []
+    for rec, mat, block, desc in records:
+        material = struct.unpack_from('>H', data, rec + mat)[0]
+        block, desc = (rec + struct.unpack_from('>I', data, rec + o)[0] for o in (block, desc))
+        parts.append(Part(material, None, [read_wii_section(data, block, desc, data2, etype == 17)]))
+    return parts
+
+
+def read_mesh(etype, data, data2, endian='<'):
     """[Part] of a type 0 or type 17 entry."""
+    if endian == '>':
+        return read_wii_mesh(etype, data, data2)
     parts = []
     if etype == 0:
         count = struct.unpack_from('<I', data, 0)[0]
@@ -109,6 +211,8 @@ def read_mesh(etype, data, data2):
 
 def triangles(section):
     """Triangle list from the strip flags, winding alternating within a strip."""
+    if section.tris is not None:
+        return section.tris
     out = []
     run = 0
     for i, closes in enumerate(section.closes):
@@ -267,7 +371,10 @@ class BundleAssets:
                 file = bdp.safe_name(self.b.name(name_index)) + '.png'
                 path = os.path.join(self.out, self.texdir, file)
                 if not os.path.exists(path):
-                    tex.image(entry[1], entry[2], self.palettes).save(path)
+                    if self.b.endian == '>':
+                        tex.wii_image(entry[1], entry[2]).save(path)
+                    else:
+                        tex.image(entry[1], entry[2], self.palettes).save(path)
                 png = f'{self.texdir}/{file}'
             self.textures[name_index] = png
         return self.textures[name_index]
@@ -277,7 +384,7 @@ class BundleAssets:
         png = None
         mat = self.by_name.get((name_index, 6))
         if mat:
-            png = self.texture(struct.unpack_from('<H', mat[1], 0x38)[0])
+            png = self.texture(struct.unpack_from(self.b.endian + 'H', mat[1], 0x38)[0])
         elif (name_index, 9) in self.by_name:
             png = self.texture(name_index)
         return self.g.material(name_index, self.clean(name_index), png)
@@ -286,7 +393,7 @@ class BundleAssets:
         """glTF mesh index of a mesh entry (written once), or None if it draws nothing."""
         e, a, d2 = entry
         if (e.index, skinned) not in self.meshes:
-            parts = read_mesh(e.type, a, d2)
+            parts = read_mesh(e.type, a, d2, self.b.endian)
             self.meshes[e.index, skinned] = self.g.mesh(
                 self.clean(e.name), [(self.material(p.material), s) for p in parts for s in p.sections], skinned)
         return self.meshes[e.index, skinned]
@@ -324,7 +431,7 @@ def main():
     if len(args) == 2 and args[0] == '--verify':
         meshes = parts = bad = verts = tris = 0
         for f in sorted(os.listdir(args[1])):
-            if not f.lower().endswith(('.bdp', '.cmp')):
+            if not f.lower().endswith(bdp.EXTENSIONS):
                 continue
             with open(os.path.join(args[1], f), 'rb') as h:
                 b = bdp.Bundle(h.read())
@@ -333,12 +440,12 @@ def main():
                     continue
                 meshes += 1
                 try:
-                    for p in read_mesh(e.type, a, d2):
+                    for p in read_mesh(e.type, a, d2, b.endian):
                         parts += 1
                         n = sum(s.count for s in p.sections)
                         verts += n
                         tris += sum(len(triangles(s)) for s in p.sections)
-                        if n - 2 != p.triangles_expected:
+                        if p.triangles_expected is not None and n - 2 != p.triangles_expected:
                             bad += 1
                             if bad <= 10:
                                 print(f'{f} {b.name(e.name)!r}: {n} vertices, header says {p.triangles_expected} + 2')
