@@ -141,7 +141,8 @@ int profile_find_city(const Profile *p, const char *name);      /* the CityData 
 /* 0x33F630: a new profile's block. version 8, size 0x128; the name cleared; the status: seeds 0xA0A0A0A0 / 0x1111,
  * city 0, start block 0, monsters 0 1 2 3, lives 0, George, Lizzie, Ralph, Ramsey, Gilman and Rhett (0 .. 5) 0x80
  * and no upgrade; the cities: Las Vegas 0x80, the others 0; every start block 0; not shown the victory; sound 0.5,
- * music 0.25, vibration on. The changed byte is not touched */
+ * music 0.25, vibration on. The changed byte is not touched. On the Wii's roster profile_create and profile_read
+ * also open its 6 and 7, Boris and Ruby, as the Wii's Profile::reset does (0 .. 7) [R Wii 0x8008FB58] */
 void profile_block_new(ProfileBlock *b);
 
 /* ---- what the shell calls */
@@ -175,6 +176,15 @@ int profile_block_won(Profile *p, uint32_t city_flags, int city_score, int start
 /* 0x3259E4: every city's saved flags (the current city's | 8) AND to 1 | 2 | 4 | 8 -> Boosy's current flags |= 0x80.
  * Returns 1 when he was unlocked now (the game says nothing either) */
 int profile_reveal_boosy(Profile *p);
+/* the Wii's five-star unlocks [R Wii RWorldStateMgr::prepareForResults 0x80081970, docs/WII_NOTES.md], at the same
+ * block's end (profile_block_won calls it after Boosy's): the monsters of the roster whose current flags have every
+ * upgrade are counted; n5StarUnlock (1, 3, 6, 12, 20) walked with its names (Squirmy, Flea, Sarah, Brian, Vern),
+ * stopping at the first above the count; the one equal to it gets PM_UNLOCKED. Every upgrade is the Wii's 0x1F;
+ * until the port has the fifth (SuperJump, docs/WII_PLAN.md decision 6) the four of the PS2 count (0xF) [G].
+ * Without those names in the roster (the PS2's) nothing. Returns the monster unlocked now, -1 none */
+int profile_reveal_five_star(Profile *p);
+/* the PS2's roster index of a monster's name (any case), -1 when it is one of the Wii's own */
+int profile_ps2_monster(const char *name);
 /* updateProfile (0x33DE10; Results.bsf 1.5 s into each block's results), the campaign only:
  *   - when the checkpoint changed or the city is destroyed: the checkpoint is merged into the block's status (its
  *     city and start block kept); the city's start block becomes the checkpoint's (0 when the city is destroyed or was

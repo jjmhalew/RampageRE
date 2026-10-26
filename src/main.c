@@ -762,6 +762,16 @@ static Group world_data(Viewer *v)
     snprintf(book, sizeof book, "%s_Props", CITIES[v->city_index]);
     return city_book_group(v->city, book, "WorldData");
 }
+/* the WorldData whose MonsterRevealDef picks the city's reveal: the Wii's copy when player 1 plays one of the Wii's
+ * own monsters (its lists name them, docs/WII_PLAN.md decision 4); the PS2's monsters keep the PS2's lists */
+static Group reveal_world_data(Viewer *v, const char *player1)
+{
+    char book[64];
+    snprintf(book, sizeof book, "%s_Props", CITIES[v->city_index]);
+    if (v->wii_roster.n && player1 && profile_ps2_monster(player1) < 0)
+        return city_book_group_wii(v->city, book, "WorldData");
+    return world_data(v);
+}
 static int game_all_revealed(void *ctx)
 {
     Viewer *v = ctx;
@@ -1394,7 +1404,8 @@ static void build(Viewer *v)
                 pm[k] = reveal_roster_find(&v->roster, v->monsters[v->mon[k].monster]);
             for (int i = 0; i < v->roster.n; i++)    /* the roster's flags are the profile's (ShellData's order) */
                 v->roster.flags[i] = profile_monster_flags(&v->prof, 0, i);
-            int rm = reveal_load(&v->reveal, world_data(v), play_type(v) == GP_CAMPAIGN,
+            const char *p1 = v->nmon && v->mon[0].monster >= 0 ? v->monsters[v->mon[0].monster] : NULL;
+            int rm = reveal_load(&v->reveal, reveal_world_data(v, p1), play_type(v) == GP_CAMPAIGN,
                                  v->nmon, pm, &v->roster);
             v->ntubes = 0;
             if (rm >= 0)                             /* with one player: the world's extra monster, hidden */
@@ -7162,8 +7173,10 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
 static void prof_init(Viewer *v)
 {
     profile_init(&v->prof);
-    if (v->wii_roster.n)
+    if (v->wii_roster.n) {
         profile_set_roster(&v->prof, v->wii_roster.name, v->wii_roster.n, NULL, 0);
+        profile_create(&v->prof, NULL);              /* (the Wii's start monsters) */
+    }
 }
 
 /* the profile as the shell reads it */

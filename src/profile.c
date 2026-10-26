@@ -18,6 +18,13 @@ const char *const PROFILE_CITY_NAMES[PROFILE_CITIES] = {
     "LasVegas", "SanFrancisco", "London", "LosAngeles", "Chicago", "HongKong", "NewYork"
 };
 
+/* [R Wii] n5StarUnlock / n5StarUnlockNames (0x802F1030, 0x802F1044) */
+static const struct { int count; const char *name; } FIVE_STAR[] = {
+    { 1, "Squirmy" }, { 3, "Flea" }, { 6, "Sarah" }, { 12, "Brian" }, { 20, "Vern" }
+};
+#define FIVE_STARS 0xFu                              /* the Wii's 0x1F, until the port has SuperJump [G] */
+#define WII_START 8                                  /* [R Wii 0x8008FB58] Profile::reset opens 0 .. 7 */
+
 /* [R] 0x3F6770: what updateProfile unlocks once every city is available and all their saved flags have the mask */
 static const struct { const char *name; uint32_t mask; } UNLOCKS[] = {
     { "Philbert", PC_PAR }, { "Eyegore", PC_CHALLENGES }, { "Boosy", 0xF }
@@ -37,6 +44,31 @@ static int same(const char *a, const char *b)
 }
 
 static int city_ok(const Profile *p, int c) { return c >= 0 && c < p->ncities && c < PROFILE_CITIES; }
+
+int profile_ps2_monster(const char *name)
+{
+    for (int k = 0; name && k < PROFILE_PS2_MONSTERS; k++)
+        if (same(PROFILE_MONSTER_NAMES[k], name))
+            return k;
+    return -1;
+}
+
+static int roster_beyond_ps2(const Profile *p)
+{
+    for (int m = 0; m < p->nmonsters; m++)
+        if (profile_ps2_monster(p->monster_name[m]) < 0)
+            return 1;
+    return 0;
+}
+
+/* the Wii's roster: its own start monsters (of 0 .. 7: Boris and Ruby; the PS2's six open as they are) in a status
+ * record */
+static void wii_start(const Profile *p, ProfileStatus *s)
+{
+    for (int i = 0; i < WII_START && i < p->nmonsters; i++)
+        if (profile_ps2_monster(p->monster_name[i]) < 0)
+            s->monster_flags[i] |= PM_UNLOCKED;
+}
 
 /* ---------------------------------------------------------------- the rosters */
 
@@ -161,6 +193,7 @@ void profile_init(Profile *p)
 int profile_create(Profile *p, const char *name)
 {
     profile_block_new(&p->block);                    /* [R] 0x33E480 */
+    wii_start(p, &p->block.status);
     if (name) {                                      /* [R] 16 bytes at +0x08 (strncpy 16, 0x344114; the keyboard */
         strncpy(p->block.name, name, 15);            /* takes 15, 0x3408D0); +0x18 .. +0x1F is padding */
         p->block.name[15] = 0;
@@ -244,12 +277,30 @@ int profile_reveal_boosy(Profile *p)
     return 1;
 }
 
+int profile_reveal_five_star(Profile *p)
+{
+    int n = 0;
+    for (int m = 0; m < p->nmonsters; m++)
+        if ((p->current.monster_flags[m] & FIVE_STARS) == FIVE_STARS)
+            n++;
+    for (size_t k = 0; k < sizeof FIVE_STAR / sizeof *FIVE_STAR && FIVE_STAR[k].count <= n; k++)
+        if (FIVE_STAR[k].count == n) {
+            int m = profile_find_monster(p, FIVE_STAR[k].name);
+            if (m < 0 || (p->current.monster_flags[m] & PM_UNLOCKED))
+                return -1;
+            p->current.monster_flags[m] |= PM_UNLOCKED;
+            return m;
+        }
+    return -1;
+}
+
 int profile_block_won(Profile *p, uint32_t city_flags, int city_score, int start_block, int city_done)
 {
     p->current.city_flags = city_flags;              /* [R] 0x3255B0: the flags 2, 8, 1 at 0x4D7C3C */
     p->current.city_score = city_score;              /* 0x4D7C40 */
     p->current.start_block = start_block;            /* activateNextBlock's 0x4D7BA0 */
     int boosy = (city_flags & PC_REVEAL) ? profile_reveal_boosy(p) : 0;
+    profile_reveal_five_star(p);                     /* [R Wii 0x80081CC4 on]: after Boosy's */
     p->city_destroyed = city_done != 0;              /* 0x4D7E4C */
     profile_save_checkpoint(p, !city_done);          /* [R] 0x325AC4: 0x33E290(.., (done != 0) ^ 1) */
     return boosy;
@@ -544,29 +595,14 @@ void profile_side_path(const char *path, char *out, int size)
         snprintf(out, (size_t)size, "%s.wii", path ? path : "");
 }
 
-static int ps2_monster(const char *name)
-{
-    for (int k = 0; name && k < PROFILE_PS2_MONSTERS; k++)
-        if (same(PROFILE_MONSTER_NAMES[k], name))
-            return k;
-    return -1;
-}
-
-static int roster_beyond_ps2(const Profile *p)
-{
-    for (int m = 0; m < p->nmonsters; m++)
-        if (ps2_monster(p->monster_name[m]) < 0)
-            return 1;
-    return 0;
-}
-
 static int side_write(const Profile *p, const char *path, uint32_t crc)
 {
     static uint8_t buf[16 + 32 * SIDE_MAX];
     int n = 0;
     const ProfileStatus *s = &p->block.status;
     for (int m = 0; m < p->nmonsters && n < SIDE_MAX; m++) {
-        uint32_t f = ps2_monster(p->monster_name[m]) < 0 ? s->monster_flags[m] : s->monster_flags[m] & PM_SUPER_JUMP;
+        uint32_t f = profile_ps2_monster(p->monster_name[m]) < 0 ? s->monster_flags[m] :
+                     s->monster_flags[m] & PM_SUPER_JUMP;
         if (!f)
             continue;
         uint8_t *r = buf + 16 + 32 * n++;
@@ -577,7 +613,7 @@ static int side_write(const Profile *p, const char *path, uint32_t crc)
     }
     for (int i = 0; i < PROFILE_PLAYERS && n < SIDE_MAX; i++) {
         int m = s->monster[i];
-        if (m < 0 || m >= p->nmonsters || ps2_monster(p->monster_name[m]) >= 0)
+        if (m < 0 || m >= p->nmonsters || profile_ps2_monster(p->monster_name[m]) >= 0)
             continue;
         uint8_t *r = buf + 16 + 32 * n++;
         memset(r, 0, 32);
@@ -626,7 +662,7 @@ static void side_read(Profile *p, const char *path, uint32_t crc)
         if (m < 0)
             continue;
         if (get32(r + 16) == SIDE_FLAGS)
-            s->monster_flags[m] |= ps2_monster(name) < 0 ? a & 0xFF : a & PM_SUPER_JUMP;
+            s->monster_flags[m] |= profile_ps2_monster(name) < 0 ? a & 0xFF : a & PM_SUPER_JUMP;
         else if (get32(r + 16) == SIDE_PICK && fresh && a < PROFILE_PLAYERS)
             s->monster[a] = m;
     }
@@ -670,6 +706,7 @@ int profile_read(Profile *p, const char *path)
     if (!profile_unpack_file(&p->block, buf, n)) {   /* [R] 0x33F0F0: a new profile instead */
         p->block.changed = 0;
         profile_block_new(&p->block);
+        wii_start(p, &p->block.status);
         profile_restore(p);
         return f ? 0 : -1;
     }
@@ -677,6 +714,7 @@ int profile_read(Profile *p, const char *path)
     status_in(p, &s, &p->block.status);
     if (roster_beyond_ps2(p))
         side_read(p, path, get32(buf + 0x0C));
+    wii_start(p, &p->block.status);                  /* a PS2 profile on the Wii's roster: Boris and Ruby too */
     profile_restore(p);                              /* [R] 0x33F120 with 1 */
     p->block.status.changed = 0;
     p->block.changed = 0;
