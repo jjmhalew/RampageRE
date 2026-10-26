@@ -914,7 +914,8 @@ int city_shape_sphere(City *c, const char *shape, float centre[3], float *radius
         if (e->type != ET_MESH || !c->model_key[i][0] || strcmp(c->model_key[i], key) != 0 || e->size < 0x14)
             continue;
         float b[4];
-        memcpy(b, e->data + 4, sizeof b);
+        for (int k = 0; k < 4; k++)                  /* the Wii's: the same header, big endian (FORMAT_BDP.md) */
+            b[k] = e->wii ? rdfbe(e->data + 4 + 4 * k) : rdf(e->data + 4 + 4 * k);
         float r = b[3] > 0 ? sqrtf(b[3]) : 0;
         if (!found) {
             memcpy(sc, b, sizeof sc);
