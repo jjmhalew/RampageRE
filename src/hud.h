@@ -136,6 +136,13 @@ int hud_challenge_items(Hud *h, int collected, int required);
  * returns 1: the caller adds ChallengeDef.Points (5000) / players to each player's GPT_CHALLENGE (the script does
  * this on every call at 0) */
 int hud_boss_health(Hud *h, float fraction);
+/* the same for a bar (the Wii's updateChallengeHudById, boss.h BE_BOSS_HEALTH's level): 0 ChallengeStatus's, 1
+ * ChallengeBoss2's. With the second bar loaded each counts as met only once the other is beaten too: the banner and 1
+ * then, at the second [R the Wii's ChallengeStatus / ChallengeBoss2 updateBossHealth, bossDefeated] */
+int hud_boss_health_id(Hud *h, int id, float fraction);
+/* the Wii's Dallas::onPostInit: gCommon.setChallengeHud2(screen.loadInterface("ChallengeBoss2")), from the bundle
+ * that has it (the Wii's WorldGui.bdg); player 1's HUD only. Hidden until the boss block's setup (hud_challenge) */
+void hud_challenge_hud2(Hud *h, const Bundle *b);
 /* game.h GE_GUI "ChallengeText" (screen.loadInterface, BeginBlockNI): the challenge card for 3 s (the boss's for
  * 8 s), with the data of the last hud_challenge(); it unloads at once unless there is an identifier, items required
  * and the campaign [R ChallengeText.scr]. Any other name loads nothing (returns 0). */

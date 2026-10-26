@@ -155,7 +155,8 @@ enum {
     BE_PUSH,            /* the monster is pushed by v (not sent any more: the PushOutMonsters parts' and the DoPushout
                          * triggers' pushes are the collision world's, collide_monster) */
     BE_STATS,           /* gCommon.addStats(part obj, monster, level): army_add_stats(army, monster, tmpl, level) */
-    BE_BOSS_HEALTH,     /* gCommon.updateChallengeHud(amount): the boss's health bar, 0 .. 1 */
+    BE_BOSS_HEALTH,     /* gCommon.updateChallengeHud(amount): the boss's health bar, 0 .. 1; level the bar (the Wii's
+                         * HudId: 1 ChallengeBoss2's) */
     BE_DEFEATED,        /* the boss's CompletionCallback `name` (gWorld.iCallScriptV): see BOSS_NOTES "The block" */
     BE_CAMERA_RMH,      /* Levels::changeTwoTiltCameraRMH(amount): the TwoTilts camera's RepMonsterHeight */
     BE_COLLAPSE,        /* building.collapseBuilding() */

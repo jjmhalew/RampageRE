@@ -392,7 +392,18 @@ static void camera_rmh(Boss *b, float h)             /* gWorld.fCallScriptF("Lev
 static void challenge_hud(Boss *b, Obj *o, float frac)   /* gCommon.updateChallengeHud */
 {
     o->p.hp_frac = frac;
-    emit(b, BE_BOSS_HEALTH, o, NULL, NULL)->amount = frac;
+    BossEvent *e = emit(b, BE_BOSS_HEALTH, o, NULL, NULL);
+    e->amount = frac;
+    e->level = 0;                                    /* ChallengeStatus's bar */
+}
+/* the Wii's Boss_Tank.bsf: gCommon.updateChallengeHudById(HudId, ..), its AIInstance's HudId (0 the ChallengeStatus
+ * bar, 1 ChallengeBoss2's: Dallas's tank); the PS2's data has no HudId, so it is the same there */
+static void challenge_hud_by_id(Boss *b, Obj *o, float frac)
+{
+    o->p.hp_frac = frac;
+    BossEvent *e = emit(b, BE_BOSS_HEALTH, o, NULL, NULL);
+    e->amount = frac;
+    e->level = (int)unum(o, "HudId", 0);
 }
 static void add_stats(Boss *b, Obj *o, int monster, int type)   /* gCommon.addStats(obj, slot, type) */
 {
@@ -1522,7 +1533,7 @@ static int tank_damage(Boss *b, Obj *o, int monster, float amount)   /* TakeDama
         }
     }
     t->hp -= amount;
-    challenge_hud(b, o, t->hp / t->start_hp);
+    challenge_hud_by_id(b, o, t->hp / t->start_hp);
     fx_on(b, o, ustr(o, "HitEffect"), NULL, NULL, -1, 0);
     char key[32];
     const char *e = ustr(o, numbered(key, sizeof key, "HitEffect", (int)(t->hp / (t->start_hp / 3))));

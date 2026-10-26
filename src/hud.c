@@ -1597,6 +1597,11 @@ typedef struct {
     Node *icon_shadow, *icon, *status, *boss_health, *boss_group, *boss_icon;
     int cur, goal, show_points, boss, completed, upgrade;
     float upgrade_delay;
+    /* the Wii's second boss bar, ChallengeBoss2.ifc (Dallas: gCommon.setChallengeHud2): its bar; boss2 0 hidden, 1
+     * shown, 2 beaten (fading out), 3 gone */
+    Layout *L2;
+    Node *boss2_health;
+    int boss2;
 } ChStatus;
 
 typedef struct {
@@ -1797,6 +1802,7 @@ void hud_close(Hud *h)
     free(h->clock);
     free(h->attract);
     free(h->cs.L);
+    free(h->cs.L2);
     ctext_free(h->ct);
     for (int i = 0; i < h->nrages; i++)
         rage_free(h->rages[i]);
@@ -2263,6 +2269,14 @@ void hud_challenge(Hud *h, const HudChallenge *c)
         if (icon[0] && cs->boss_icon)
             cs->boss_icon->has_tex = tex_find(&h->gui, icon, &cs->boss_icon->tex);
         cs->upgrade = 0;
+        if (cs->L2) {                                    /* the Wii's: ChallengeBoss2::setupUI [R] */
+            show(layout_find(cs->L2->root, "boss_group"), 1);
+            set_fade(layout_find(cs->L2->root, "boss_group"), 1);
+            if (cs->boss2_health) cs->boss2_health->val = 100;
+            cs->L2->root->fade = 1;
+            cs->L2->root->visible = 1;
+            cs->boss2 = 1;
+        }
     } else {
         char s[32];
         snprintf(s, sizeof s, "0/%d", cs->goal);
@@ -2314,21 +2328,51 @@ int hud_challenge_items(Hud *h, int count, int goal)
     return cs_items(h, count, goal);
 }
 
-int hud_boss_health(Hud *h, float percent)
+int hud_boss_health(Hud *h, float percent) { return hud_boss_health_id(h, 0, percent); }
+
+int hud_boss_health_id(Hud *h, int id, float percent)
 {
     if (!h || !h->cs.L)
         return 0;
     ChStatus *cs = &h->cs;
-    if (cs->boss_health)
-        cs->boss_health->val = 100.0f * percent;
-    if (percent > 0)
+    int other;                                       /* the other bar beaten too (bossDefeated) [R the Wii's] */
+    if (id == 1) {                                   /* ChallengeBoss2::updateBossHealth */
+        if (!cs->L2)
+            return 0;
+        if (cs->boss2_health)
+            cs->boss2_health->val = 100.0f * percent;
+        if (percent > 0)
+            return 0;
+        cs->boss2 = 2;
+        other = cs->boss >= 2;
+    } else {                                         /* ChallengeStatus::updateBossHealth */
+        if (cs->boss_health)
+            cs->boss_health->val = 100.0f * percent;
+        if (percent > 0)
+            return 0;
+        cs->boss = 2;
+        other = !cs->L2 || cs->boss2 >= 2;
+    }
+    if (!other)
         return 0;
     if (h->cfg.play_type == HUD_PLAY_CAMPAIGN) {
         static const float green[4] = { 0, 1, 0, 1 };
         hud_banner_text(h, "Challenge_Met", green, 1.0f, "v_challenge_complete");
     }
-    cs->boss = 2;
     return 1;
+}
+
+void hud_challenge_hud2(Hud *h, const Bundle *b)
+{
+    if (!h || !b || h->cfg.player != 0 || h->cs.L2)
+        return;
+    ChStatus *cs = &h->cs;
+    if ((cs->L2 = layout_load(&h->gui, b, "ChallengeBoss2.ifc")) == NULL)
+        return;
+    cs->boss2_health = layout_find(cs->L2->root, "bossHealth");   /* doInterface 8192: setupUI, then hidden [R] */
+    if (cs->boss2_health) cs->boss2_health->val = 100;
+    cs->L2->root->visible = 0;
+    cs->boss2 = 0;
 }
 
 static void cs_update(Hud *h, float dt)
@@ -2353,6 +2397,14 @@ static void cs_update(Hud *h, float dt)
             cs->boss = 3;
         }
         cs->boss_group->fade = f;
+    }
+    if (cs->L2 && cs->boss2 == 2) {                      /* ChallengeBoss2's: the whole interface, 0.5 a second */
+        float f = cs->L2->root->fade - 0.5f * dt;
+        if (f <= 0) {
+            f = 0;
+            cs->boss2 = 3;
+        }
+        cs->L2->root->fade = f;
     }
 }
 
@@ -4835,6 +4887,7 @@ int hud_quads(const Hud *h, HudQuad *out, int max)
     n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->clock));
     n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->attract));
     n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->cs.L));
+    n += to_side(out + n, emit_layout(out + n, max - n, &h->gui, h->cs.L2));
     if (h->ct)
         n += emit_layout(out + n, max - n, &h->gui, h->ct->L);
     for (int i = 0; i < h->nrages; i++)

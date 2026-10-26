@@ -1473,6 +1473,9 @@ static void build(Viewer *v)
                     hud_add_bundle(mo->hud, &v->wii_world);
                 if (v->have_wii_common)
                     hud_add_bundle(mo->hud, &v->wii_common);
+                if (v->have_wii_world && !strcmp(CITIES[v->city_index], "Dallas"))   /* Dallas::onPostInit's second
+                                                      * boss bar (setChallengeHud2) */
+                    hud_challenge_hud2(mo->hud, &v->wii_world);
                 hud_results_auto(mo->hud, v->unattended ? 2.0f : 0);
             }
         }
@@ -3735,7 +3738,7 @@ static void boss_step(Viewer *v, float dt, const ArmyMonster *am, int nm)
             case BE_PUSH: mo->mx += e->v[0]; mo->my += e->v[1]; break;
             case BE_STATS: if (v->army) army_add_stats(v->army, mo->slot, e->tmpl, e->level); break;
             case BE_BOSS_HEALTH:                     /* the boss bar; at 0 the challenge is met: 5000 points */
-                if (v->hud && hud_boss_health(v->hud, e->amount))
+                if (v->hud && hud_boss_health_id(v->hud, e->level, e->amount))
                     challenge_points_all(v, 5000);
                 break;
             case BE_DEFEATED:                        /* New York's callback finishes the block (isBossBlockFinished) */
@@ -6847,7 +6850,8 @@ static void game_next_block(Viewer *v)
  * "fx name" starts that effect 6 units in front of the monster, 3 up; "rage" fills its energy (the rage starts);
  * "airstrike" starts the time-up airstrike;
  * "monfn name" calls that monster function (doFart, doBarf); "hitcell b floor col [amount]" hits that front cell of
- * building b as an attack of that amount would (2, the roar's 10); "bosshit n" is one blow of n on the block's boss;
+ * building b as an attack of that amount would (2, the roar's 10); "bosshit n [part]" is one blow of n on the block's
+ * boss (or that part);
  * "spawn name" makes vehicle.c's object of that template (the FireTruck); "soldier name" a window soldier on the front ahead; "unit name" an army unit
  * of that template 2.5 ahead on the street; "strike k" a blow on street object k; "p2" (p1 .. p4): the words after it
  * play that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back
@@ -7058,9 +7062,17 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
                 }
             continue;
         }
-        if (_stricmp(word, "bosshit") == 0) {        /* bosshit n: one blow of n (1 without) on the block's boss, by
-                                                      * this monster, as an armed attack sphere at its middle would */
-            const BossPart *bp = v->boss ? boss_part(v->boss, boss_main(v->boss)) : NULL;
+        if (_stricmp(word, "bosshit") == 0) {        /* bosshit n [part]: one blow of n (1 without) on the block's
+                                                      * boss (or that part: Dallas's tank 0), by this monster, as an
+                                                      * armed attack sphere at its middle would */
+            int part = v->boss ? boss_main(v->boss) : -1;
+            while (*p == ' ') p++;
+            if (*p >= '0' && *p <= '9') {
+                char *end;
+                part = (int)strtol(p, &end, 10);
+                p = end;
+            }
+            const BossPart *bp = v->boss ? boss_part(v->boss, part) : NULL;
             static unsigned record = 0x40000000u;    /* a record of its own each time (one blow a record) */
             if (bp && bp->alive)
                 boss_hit(v->boss, mo->slot, bp->pos, 1, seconds > 0 ? seconds : 1, record++);
