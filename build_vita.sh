@@ -15,9 +15,13 @@ if [ -z "$VITASDK" ]; then
     exec docker run --rm -e RAMPAGE_VERSION="$VERSION" -v "$PWD":/src -w /src vitasdk/vitasdk sh ./build_vita.sh "$@"
 fi
 OUT=${1:-rampage}
-APP_VER=00.00                                       # param.sfo's XX.YY: v1.1.1 is 01.11, anything else (a commit) 00.00
-case ${VERSION#v} in
-[0-9].[0-9].[0-9] | [0-9][0-9].[0-9].[0-9]) APP_VER=$(echo "${VERSION#v}" | awk -F. '{ printf "%02d.%d%d", $1, $2, $3 }') ;;
+# param.sfo's APP_VER, XX.YY: v1.1.1 (v1.1.1-rc1, v1.1.1-5-g4b254b0) is 01.11, anything else (CI's 4b254b0) 00.00
+APP_VER=00.00
+V=${VERSION#v}
+V=${V%%-*}
+case $V in
+[0-9].[0-9].[0-9] | [0-9][0-9].[0-9].[0-9])
+    APP_VER=$(echo "$V" | awk -F. '{ printf "%02d.%d%d", $1, $2, $3 }') ;;
 esac
 TITLE_ID=RMPR00001                                  # four letters, five digits: the folder ux0:app/RMPR00001
 PATH=$VITASDK/bin:$PATH
