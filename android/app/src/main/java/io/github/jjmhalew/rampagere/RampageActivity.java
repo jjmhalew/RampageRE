@@ -1,6 +1,9 @@
 // RampageActivity - SDL's activity plus what the viewer's first start needs on Android (src/android.c): the system's
 // file picker for a disc image (.iso) of the game, or a folder with RAMPAGE.VOL and the game's ELF, the folder copy, a
 // progress dialog and the viewer's messages. Without an "args" extra the viewer starts in the front end (--shell).
+// The Wii's data (docs/WII_PLAN.md): the launcher's shortcut "Add the Wii's data" (res/xml/shortcuts.xml, the "wii"
+// extra) copies the Game, Shell and Audio folders of an extracted Wii disc into the app folder's wii (wiiSetup): before
+// the viewer reads its data on a fresh start (--wii-pick, src/android.c), else at once and read at the next start.
 // Testing: am start -n io.github.jjmhalew.rampagere/.RampageActivity -e args "Chicago 1 --monster George" -e env "RAMPAGE_TRACE=1"
 package io.github.jjmhalew.rampagere;
 
@@ -24,6 +27,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 public class RampageActivity extends SDLActivity {
@@ -32,11 +38,15 @@ public class RampageActivity extends SDLActivity {
     // the files the viewer reads from a folder (docs/NATIVE.md "Game data"), saved under these names; RAMPAGE.VOL last
     // (src/android.c takes the folder as complete once it is there, so a copy that Android cut short is asked for again)
     private static final String[] FOLDER_FILES = { "SYSTEM.CNF", "SLES_538.00", "SLUS_213.23", "RAMPAGE.ELF", "RAMPAGE.VOL" };
+    // the Wii disc's folders the viewer reads (src/vol.c vol_add_wii), in the picked folder, its DATA/files or its files
+    private static final String[] WII_DIRS = { "Game", "Shell", "Audio" };
+    private static final String[][] WII_UNDER = { {}, { "DATA", "files" }, { "files" } };
 
     private static final Object sLock = new Object();
     private static boolean sPicked;
     private static Uri sPick;
     private static AlertDialog sProgress;
+    private static volatile boolean sWiiBusy;
 
     @Override
     protected String[] getLibraries() {
@@ -46,7 +56,20 @@ public class RampageActivity extends SDLActivity {
     @Override
     protected String[] getArguments() {                  // testing: the command line of src/main.c; else the front end
         String a = getIntent() != null ? getIntent().getStringExtra("args") : null;
-        return a == null || a.trim().isEmpty() ? new String[] { "--shell" } : a.trim().split("\\s+");
+        String[] r = a == null || a.trim().isEmpty() ? new String[] { "--shell" } : a.trim().split("\\s+");
+        if (getIntent() == null || !getIntent().hasExtra("wii")) return r;
+        String[] w = Arrays.copyOf(r, r.length + 1);     // the shortcut: wiiSetup before the data is read
+        w[r.length] = "--wii-pick";
+        return w;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {          // the shortcut while the viewer runs: the copy now, read next start
+        super.onNewIntent(intent);
+        if (intent == null || !intent.hasExtra("wii") || sWiiBusy) return;
+        File ext = getExternalFilesDir(null);
+        final String home = (ext != null ? ext : getFilesDir()).getPath();
+        new Thread(() -> wiiSetup(home, 1), "wiiSetup").start();
     }
 
     @Override
@@ -62,7 +85,9 @@ public class RampageActivity extends SDLActivity {
     // ---- called from the viewer's thread (src/android.c, src/plat_sdl.c) ---------------------------------------------
 
     /** kind 1: a disc image, returns a file descriptor the caller closes; kind 2: a folder, its game files copied into
-     *  dest, returns 0. -1 = cancelled, -2 = failed, -3 = not enough room (kind 2). Blocks until the user is done. */
+     *  dest, returns 0; kind 3: an extracted Wii disc, its Game, Shell and Audio copied into dest/wii, returns 0.
+     *  -1 = cancelled, -2 = failed, -3 = not enough room (kinds 2, 3), -4 = no Game folder (kind 3). Blocks until the
+     *  user is done. */
     public static int pickGameData(int kind, String dest) {
         final Activity a = (Activity) SDLActivity.getContext();
         if (a == null) return -2;
@@ -85,13 +110,43 @@ public class RampageActivity extends SDLActivity {
                 ParcelFileDescriptor pfd = a.getContentResolver().openFileDescriptor(u, "r");
                 return pfd != null ? pfd.detachFd() : -2;
             }
-            int r = copyFolder(a.getContentResolver(), u, new File(dest));
+            int r = kind == 3 ? copyWii(a.getContentResolver(), u, new File(dest)) : copyFolder(a.getContentResolver(), u, new File(dest));
             progress(null);
             return r;
         } catch (Exception e) {
             Log.e(TAG, "pickGameData", e);
             progress(null);
             return -2;
+        }
+    }
+
+    /** the Wii's data: asks for the folder of an extracted Wii disc and copies its Game, Shell and Audio into dest/wii,
+     *  until that is done or "Not now". running: the viewer has read its data already, so the copy counts from the next
+     *  start. 1 = copied, 0 = not. Blocks (not on the UI thread). */
+    public static int wiiSetup(String dest, int running) {
+        if (sWiiBusy) return 0;
+        sWiiBusy = true;
+        try {
+            for (;;) {
+                if (dialog("The Wii's monsters and Dallas (optional): choose the folder of your own extracted Wii disc of "
+                        + "Rampage - Total Destruction (Dolphin's Extract Entire Disc), or its DATA/files. Its Game, Shell "
+                        + "and Audio folders (about 320 MB) are copied once into the app's folder.\n\nOr copy those three "
+                        + "folders with a USB cable into\n" + dest + "/wii", "Folder", null, "Not now") != 1)
+                    return 0;
+                int r = pickGameData(3, dest);
+                if (r == -1) continue;
+                if (r == 0) {
+                    if (running != 0) dialog("The Wii's files are in. RampageRE reads them at its next start: close it in "
+                            + "the recent apps and start it again.", "OK", null, null);
+                    return 1;
+                }
+                dialog(r == -3 ? "Not enough free room on the device for the Wii's files."
+                     : r == -4 ? "That folder holds no Game folder (nor DATA/files/Game): choose the extracted Wii disc, "
+                                 + "the folder with DATA in it, or DATA/files."
+                     : "Could not copy the Wii's files.", "OK", null, null);
+            }
+        } finally {
+            sWiiBusy = false;
         }
     }
 
@@ -162,11 +217,73 @@ public class RampageActivity extends SDLActivity {
         new File(dest, "RAMPAGE.VOL").delete();                            // not complete until the new one is there
         long[] done = { 0, 0, total };
         for (int k = 0; k < FOLDER_FILES.length; k++)
-            if (ids[k] != null) copyFile(cr, DocumentsContract.buildDocumentUriUsingTree(tree, ids[k]), dest, FOLDER_FILES[k], sizes[k], done);
+            if (ids[k] != null) copyFile(cr, DocumentsContract.buildDocumentUriUsingTree(tree, ids[k]), dest, FOLDER_FILES[k], sizes[k], done, "the game files");
         return 0;
     }
 
-    private static void copyFile(ContentResolver cr, Uri doc, File dest, String name, long size, long[] done) throws IOException {
+    /** a folder's entries: { id, name, mime type, size } */
+    private static List<String[]> children(ContentResolver cr, Uri tree, String id) throws IOException {
+        String[] cols = { Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE, Document.COLUMN_SIZE };
+        List<String[]> r = new ArrayList<>();
+        try (Cursor q = cr.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), cols, null, null, null)) {
+            if (q == null) throw new IOException("cannot list a folder");
+            while (q.moveToNext()) r.add(new String[] { q.getString(0), q.getString(1), q.getString(2), q.isNull(3) ? "0" : q.getString(3) });
+        }
+        return r;
+    }
+
+    private static String subfolder(ContentResolver cr, Uri tree, String id, String name) throws IOException {
+        for (String[] c : children(cr, tree, id))
+            if (Document.MIME_TYPE_DIR.equals(c[2]) && name.equalsIgnoreCase(c[1])) return c[0];
+        return null;
+    }
+
+    private static void deleteTree(File f) {
+        File[] in = f.listFiles();
+        if (in != null) for (File g : in) deleteTree(g);
+        f.delete();
+    }
+
+    /** the files of the Wii's Game, Shell and Audio (names in any case) into dest/wii, through dest/wii.part (renamed
+     *  when complete, so a copy that Android cut short leaves no wii): 0, -2 = failed, -3 = no room, -4 = no Game */
+    private static int copyWii(ContentResolver cr, Uri tree, File dest) throws IOException {
+        String[] dirs = null;
+        for (String[] under : WII_UNDER) {
+            String at = DocumentsContract.getTreeDocumentId(tree);
+            for (String p : under) if (at != null) at = subfolder(cr, tree, at, p);
+            String game = at != null ? subfolder(cr, tree, at, WII_DIRS[0]) : null;
+            if (game == null) continue;
+            dirs = new String[WII_DIRS.length];
+            dirs[0] = game;
+            for (int k = 1; k < WII_DIRS.length; k++) dirs[k] = subfolder(cr, tree, at, WII_DIRS[k]);
+            break;
+        }
+        if (dirs == null) return -4;
+        List<List<String[]>> files = new ArrayList<>();
+        long total = 0;
+        for (String d : dirs) {
+            List<String[]> f = new ArrayList<>();
+            if (d != null) for (String[] c : children(cr, tree, d))
+                if (!Document.MIME_TYPE_DIR.equals(c[2]) && c[1] != null) { f.add(c); total += Long.parseLong(c[3]); }
+            files.add(f);
+        }
+        File part = new File(dest, "wii.part"), wii = new File(dest, "wii");
+        deleteTree(part);
+        if (dest.getUsableSpace() < total + (16L << 20)) { Log.e(TAG, "no room: " + total + " bytes"); return -3; }
+        long[] done = { 0, 0, total };
+        for (int k = 0; k < WII_DIRS.length; k++) {
+            File d = new File(part, WII_DIRS[k]);
+            if (!d.mkdirs()) throw new IOException("cannot make " + d);
+            for (String[] c : files.get(k))
+                copyFile(cr, DocumentsContract.buildDocumentUriUsingTree(tree, c[0]), d, c[1], Long.parseLong(c[3]), done, "the Wii's files");
+        }
+        deleteTree(wii);
+        if (!part.renameTo(wii)) throw new IOException("cannot write " + wii);
+        Log.i(TAG, "wii: " + (total >> 20) + " MB copied");
+        return 0;
+    }
+
+    private static void copyFile(ContentResolver cr, Uri doc, File dest, String name, long size, long[] done, String what) throws IOException {
         File f = new File(dest, name), part = new File(dest, name + ".part");
         try (InputStream in = cr.openInputStream(doc); OutputStream out = new FileOutputStream(part)) {
             if (in == null) throw new IOException("cannot open " + name);
@@ -174,7 +291,7 @@ public class RampageActivity extends SDLActivity {
             for (int n; (n = in.read(buf)) > 0; ) {
                 out.write(buf, 0, n);
                 done[0] += n;
-                if (done[0] - done[1] >= 8 << 20) { done[1] = done[0]; progress("Copying the game files... " + (done[0] >> 20) + " of " + (done[2] >> 20) + " MB"); }
+                if (done[0] - done[1] >= 8 << 20) { done[1] = done[0]; progress("Copying " + what + "... " + (done[0] >> 20) + " of " + (done[2] >> 20) + " MB"); }
             }
         }
         if (size > 0 && part.length() != size) { part.delete(); throw new IOException(name + ": " + part.length() + " of " + size + " bytes"); }

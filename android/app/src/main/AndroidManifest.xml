@@ -37,6 +37,8 @@
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
+            <!-- a long press on the icon: "Add the Wii's data" (res/xml/shortcuts.xml, docs/WII_PLAN.md) -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
     </application>
 </manifest>

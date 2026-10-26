@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">RampageRE</string>
+    <string name="wii_short">Add the Wii\'s data</string>
+    <string name="wii_long">Add the Wii\'s monsters and Dallas</string>
 </resources>

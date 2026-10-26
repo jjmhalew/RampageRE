@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the launcher's shortcut (a long press on the icon): the Wii's data, picked and copied into the app folder's wii
+     (RampageActivity.wiiSetup, docs/WII_PLAN.md) -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="wii"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/wii_short"
+        android:shortcutLongLabel="@string/wii_long">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="io.github.jjmhalew.rampagere"
+            android:targetClass="io.github.jjmhalew.rampagere.RampageActivity">
+            <extra android:name="wii" android:value="1" />
+        </intent>
+    </shortcut>
+</shortcuts>

@@ -71,6 +71,8 @@ const char *android_apk(void);                   /* the installed APK (getPackag
                                                   * data is read from it in place (iso.c) */
 int android_data_setup(char *out, size_t cap);   /* the first start: the game's data through the file picker, copied
                                                   * into the app folder; 1 = found (out, as data_find), 0 = cancelled */
+int android_wii_setup(void);                     /* the Wii's Game, Shell and Audio through the file picker, copied into
+                                                  * the app folder's wii (RampageActivity.wiiSetup); 1 = copied */
 #endif
 /* the free room in KB on the file system that holds path's folder, -1 unknown */
 static inline long long plat_free_kb(const char *path)

@@ -9,7 +9,9 @@
  * that already holds them is copied by RampageActivity.java. A disc image put into the app folder by hand is read in
  * place (data_find), nothing copied. A bundle of make_android_bundle.bat (tools/native/apkbundle.c) carries the disc's
  * files inside the APK (stored assets): data_find reads them in place from the installed APK (android_apk), so such an
- * app neither asks nor copies anything. */
+ * app neither asks nor copies anything. The Wii's data (docs/WII_PLAN.md) goes into the app folder's wii, which main.c
+ * finds on its own: by cable, or picked and copied by RampageActivity.wiiSetup (android_wii_setup), offered after the
+ * first start's copy and by the launcher's shortcut. */
 #ifdef __ANDROID__
 #include "plat.h"
 #include "iso.h"
@@ -263,6 +265,28 @@ static int iso_copy(int fd)
         plat_message(m, 1);
     }
     return ok;
+}
+
+int android_wii_setup(void)
+{
+    JNIEnv *env;
+    jclass c = activity_class(&env);
+    int r = 0;
+    if (!c)
+        return 0;
+    jmethodID m = (*env)->GetStaticMethodID(env, c, "wiiSetup", "(Ljava/lang/String;I)I");
+    if (m) {
+        jstring s = (*env)->NewStringUTF(env, g_home);
+        r = (*env)->CallStaticIntMethod(env, c, m, s, 0);
+        (*env)->DeleteLocalRef(env, s);
+    }
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        r = 0;
+    }
+    (*env)->DeleteLocalRef(env, c);
+    printf("wii data: %s\n", r == 1 ? "copied into wii" : "not copied");
+    return r == 1;
 }
 
 int android_data_setup(char *out, size_t cap)

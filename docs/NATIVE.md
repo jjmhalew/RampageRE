@@ -367,7 +367,7 @@ copied data and the save with it.
 | Screen | the whole screen in landscape (either way round); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` need ES 3.0 |
 | Messages | a dialog (`RampageActivity.dialog`, `plat_dialog`); stdout and stderr go to logcat: `adb logcat -s RampageRE` |
 | Bundle | `make_android_bundle.bat` (below) makes an APK with the disc's files inside; such an app reads them from its own APK (`getPackageCodePath`, `android_apk`) and neither asks nor copies |
-| The Wii's data | optional (docs/WII_PLAN.md): the `Game`, `Shell` and `Audio` folders of your extracted Wii disc (Dolphin's Extract Entire Disc, under `DATA/files`; 317 MB) in the app folder's `wii`, copied there by USB cable; found on its own as the game's data is, `wii_data=` in `rampage.cfg` points elsewhere |
+| The Wii's data | optional (docs/WII_PLAN.md): the `Game`, `Shell` and `Audio` folders of your extracted Wii disc (Dolphin's Extract Entire Disc, under `DATA/files`; 317 MB) in the app folder's `wii`, found on its own as the game's data is (`wii_data=` in `rampage.cfg` points elsewhere). Copied there by USB cable, or picked and copied by the app (`RampageActivity.wiiSetup`): after the first start's copy it asks for them (**Folder** or **Not now**), and later the launcher's shortcut **Add the Wii's data** (a long press on the icon) asks again. The system's folder picker takes the extracted disc (the folder with `DATA`), its `DATA/files` or that folder's parent of `Game`; the three folders' files are copied into `wii.part` and renamed `wii` when all are in (a progress dialog counts the MB, the free room is checked first). Started from the shortcut the copy comes before the data is read; while RampageRE runs it copies at once and says the Wii's data counts from the next start |
 
 **The APK bundle** (`make_android_bundle.bat [RampageRE.apk] [disc image or RAMPAGE.VOL]`, WoodyRE's, with
 `tools/native/apkbundle.c`): the APK of a release (or the one `android\` built: release, else debug) and the three
@@ -402,9 +402,12 @@ entry, which types from a keyboard (an attached one works; there is no on-screen
 **Testing.** `adb shell am start -n io.github.jjmhalew.rampagere/.RampageActivity -e args "'Chicago 1 --monster George'" -e env "RAMPAGE_TRACE=1;RAMPAGE_TOUCHLOG=1"`
 passes a command line (instead of `--shell`) and environment variables. Tried on the SDK's emulator (Android 16,
 x86_64, SwiftShader's ES 3.0, headless): the first-start dialog, the picker, the free-room check, the copy out of an
-image, the front end and a game with the on-screen pad, the back button into the Pause menu. **Untested**: a real
+image, the front end and a game with the on-screen pad, the back button into the Pause menu. On Android 15 (x86_64,
+16 KB pages): the folder copy, and the Wii's data: a `wii` put in the app folder (Dallas with Boris), the shortcut's
+copy before the data is read (the extracted disc picked) and while running (its `DATA/files` picked), a folder
+without `Game`, the question after the first start's copy and its Not now, `wii_data=none`. **Untested**: a real
 phone or tablet (arm64, a real GPU's ES driver, its speed with four players, cloth and the effects), ES 2.0-only
-devices, controllers on Android, rumble, sound output, the folder copy, a picker's cloud files (a file that cannot be
+devices, controllers on Android, rumble, sound output, a USB cable's copy (MTP) of the `wii` folder, a picker's cloud files (a file that cannot be
 read where it is: copy it onto the device), an app sent to the background while copying, Chromebooks.
 
 ## Input

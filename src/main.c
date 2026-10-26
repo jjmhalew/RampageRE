@@ -8487,6 +8487,9 @@ static int viewer_main(int argc, char **argv)
     v.left_block = -1;
     v.lang = -1;                                     /* (no --lang: the console's, below) */
     int newprofile = 0;
+#ifdef __ANDROID__
+    int wii_pick = 0;                                /* the Wii's data through the file picker first */
+#endif
     const char *cheat = NULL;
     double shot_time = 0;
     const char *script = NULL;
@@ -8545,6 +8548,9 @@ static int viewer_main(int argc, char **argv)
         else if (strcmp(argv[i], "--nohud") == 0) v.no_hud = 1;
         else if (strcmp(argv[i], "--newprofile") == 0) newprofile = 1;
         else if (strcmp(argv[i], "--shell") == 0) v.shell_mode = 1;
+#ifdef __ANDROID__
+        else if (strcmp(argv[i], "--wii-pick") == 0) wii_pick = 1;   /* the launcher's shortcut (RampageActivity.java) */
+#endif
         else if (strcmp(argv[i], "--lang") == 0 && i + 1 < argc) v.lang = atoi(argv[++i]);
         else if (strcmp(argv[i], "--card-free-kb") == 0 && i + 1 < argc) v.card_free_kb = atoi(argv[++i]);
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) v.prof_path = argv[++i];
@@ -8587,6 +8593,7 @@ static int viewer_main(int argc, char **argv)
 #ifdef __ANDROID__                                   /* the first start: the disc image through the file picker */
             if (!android_data_setup(found, sizeof found))
                 return 1;
+            wii_pick = !plat_exists("wii");          /* and the Wii's, which may be left for later */
 #else
             int asked = 0;
 #ifdef _WIN32
@@ -8620,6 +8627,10 @@ static int viewer_main(int argc, char **argv)
     if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
         plat_message(msg, 1);
     v.region = data_region(pos[0], &v.vol);
+#ifdef __ANDROID__
+    if (wii_pick)                                    /* the Wii's data through the file picker, copied into wii */
+        android_wii_setup();
+#endif
 #if defined __SWITCH__ || defined __vita__ || defined __ANDROID__
     if (!gfx.wii_data[0] && plat_exists("wii"))      /* the home folder's wii, found as the game's data there is
                                                       * (docs/NATIVE.md); wii_data= another path (none) leaves it */
