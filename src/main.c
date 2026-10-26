@@ -7873,6 +7873,17 @@ static void shell_start_game(Viewer *v)
         if (pick[k] < 0)
             pick[k] = pick[0];
     setup_players(v, n, g->num_bots, pick);
+    if (v->play_type == GP_CAMPAIGN) {               /* the shell's picks into the current game [R]: MonsterSelect's
+                                                      * setMonsterIdx, CitySelect's setCityIdx / setNight /
+                                                      * setStartBlock and the world's start (profile_city_start: the
+                                                      * checkpoint, 0x33DB90); so a block won counts for this city */
+        for (int k = 0; k < n && k < PROFILE_PLAYERS; k++) {
+            int pm = pick[k] >= 0 ? profile_find_monster(&v->prof, v->monsters[pick[k]]) : -1;
+            if (pm >= 0)
+                v->prof.current.monster[k] = pm;
+        }
+        profile_city_start(&v->prof, campaign_index(v, CITIES[city]), g->night, 0);
+    }
     v->clip = -1;
     v->play = have_monster(v);
     v->last_game = *g;
