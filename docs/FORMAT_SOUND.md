@@ -71,6 +71,16 @@ game) and `RShell.uber` + `RShell.samp` (27 events, 34 samples, the front end), 
   `NoDucking` 0; RShell `Loading` 19, `Shell` 8.
 - **names** (`u32 n, n × u32 offset`): one per PROJ entry.
 
+**The Wii's banks** (`DATA/files/Audio`; `tools/sound.py --verify DIR` checks either platform's): `Rampage` (881
+events, 662 samples, 1,359 s) and `RShell` (27 events, 34 samples). The same layout, big endian, so the tags read
+backwards (`REBU`, `JORP`, `RIDS`); the counts of the names and group names are u16 (then 2 bytes), as on the PS2.
+The event programs are the same instructions. An SDIR entry is 64 bytes: u32 nibble address of the first sample (the
+frame's two header nibbles count), u32 nibbles, u32 flags, u32 rate, s16[16] the DSP-ADPCM coefficients, u16 gain,
+u16 the first frame's header, zeros. The `.samp` is DSP-ADPCM: 8-byte frames, a header (predictor << 4 | scale) and
+14 nibbles; every sample follows the one before and starts with the header its entry gives. RShell's 34 samples
+decode like the PS2's (the same rates and lengths within a frame, correlation 0.989 to 0.999). There are no `.mic`:
+the Wii's 11 music tracks are Bink files in `Video` (`bbop.bik` ... `yeahyeah.bik`), not read by these tools.
+
 ## .samp
 Raw PS-ADPCM (SPU format): 16-byte frames `shift | filter << 4, flags, 14 bytes = 28 nibbles`, filters (0,0),
 (60,0), (115,−52), (98,−55), (122,−60) / 64; flags bit 0 end, bit 1 repeat, bit 2 loop start.
