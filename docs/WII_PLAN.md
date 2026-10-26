@@ -174,6 +174,21 @@ Left for phase 5: SuperJump and the fifth star.
 **Phase 5 (optional): SuperJump** (decision 6), and the other platforms (Android, Switch, Vita: where the Wii
 folder goes).
 
+**Phase 5's SuperJump done** (c220768 .. b005948). The other platforms are not started. With a Wii folder the
+block's upgrade comes from the Wii's lists, for all 40 monsters (chosen: the Wii's ten were in no PS2 list, and the
+Wii moved some PS2 monsters to make room for SuperJump). Taking SuperJump sets bit 16, which is saved in the side
+file. The Wii's ten can do the move: a fresh Cross press while landing (the Wii's B) goes into `Jump_Super`. The PS2's
+thirty have no such state in their graphs, so for them it is the flag and its star only. The monster select and card
+sheet use the Wii's layouts with five stars, and the five-star rule counts 0x1F, so Squirmy, Flea, Sarah, Brian and
+Vern can all be reached. Found on the way:
+- the Wii's monsters never got an upgrade from the PS2's lists, which don't name them; phase 3 had missed this;
+- the Wii's card layouts need their own pictures first (its star bar has five slots, the PS2's of the same name
+  four), so a Wii layout now looks in its own bundle first;
+- the Wii's card sheet stamps locked monsters with its padlock and keeps black for another player's pick; in four-
+  player games it puts the mutation text on the card itself;
+- SuperJump's instruction text reads "Press and Hold 1.25Controller_Back while Landing": a Wii button name inside
+  the text, shown as it is.
+
 ## Risks and unknowns
 - The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
   check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].
