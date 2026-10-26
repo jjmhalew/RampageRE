@@ -63,6 +63,14 @@ Japanese (Shift-JIS), French, German, Italian, Spanish, Dutch, Portuguese; the W
 The game picks a column with `getLanguage`; which of the two English columns a European console gets is not
 checked. `tools/loc.py` checks the layout (`--verify`) and writes one TSV per table.
 
+**The Wii's** (`.bdg`; 10 tables in `Game`, 5 in `Shell`, 760 keys, every byte accounted for): the same layout, big
+endian from 0x1C. `Common.loc` has 85 keys against the PS2's 63: the ten monsters, `Dallas`, the Pause screen's
+moves (`Pause_Grab`, `Pause_Jump`, `Pause_Kick`, `Pause_Move`, `Pause_Punch`, `Pause_Roar`, `Pause_Smash`,
+`Pause_SuperAttack`, `Pause_Swing`), `ControllerWarning` and `wii_strapWarning`; Flea is "Fabio" in every language
+(as Dick is "Edwin" on both). Two English strings changed: "Rumble:" (the PS2's "Vibration:") and the attract mode's
+"Press" followed by a controller picture code (`\x0b1.25Controller_Select\x0b`). The Japanese column is the English
+text but for 7 strings of `MemoryCard.loc` still in Japanese.
+
 ## GUI layouts (`.ifc`, type 24)
 43 layouts in the GUI bundles, XML with one- or two-letter tags, read directly by the GUI code (the tag names
 sit as plain strings near 0x421D80 and 0x422058; there is no dictionary). What the files show:
