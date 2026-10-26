@@ -25,6 +25,9 @@ typedef struct {
      * 3 Player and 4 Player as the game's other consoles do (King of the City, King of the World, the Timed Run; never
      * the campaign); 0 the PS2's one or two */
     int four_players;
+    /* wii_data= (port extra, docs/WII_PLAN.md): the player's own extracted Wii disc (Dolphin's Extract Entire Disc: the
+     * folder holding DATA, or its DATA/files), whose ten monsters and Dallas the port adds; "" (the default) none */
+    char wii_data[512];
 } Settings;
 
 void settings_unset(Settings *flags);                /* nothing given yet (for settings_arg) */

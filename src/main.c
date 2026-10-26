@@ -8486,6 +8486,8 @@ static int viewer_main(int argc, char **argv)
         else if (npos < 3) pos[npos++] = argv[i];
     }
     settings_resolve(&gfx, &gfx_flags, !shot);       /* a --shot run: the flags alone, never rampage.cfg */
+    if (gfx.wii_data[0])
+        printf("wii data: %s\n", gfx.wii_data);
     char found[1024], msg[1024];
     for (int i = 0; pos[0] && npos < 3 && i < NCITIES; i++)   /* "rampage Chicago 1": no path, a city */
         if (_stricmp(pos[0], CITIES[i]) == 0 && !plat_exists(pos[0])) {
