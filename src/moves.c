@@ -17,6 +17,76 @@ static const char *name_at(const Bundle *b, int32_t i)
     return strncmp(n, "000", 3) == 0 ? n + 3 : n;
 }
 
+/* a Wii graph's conditions in the PS2's input numbers (docs/WII_NOTES.md "The Wii's controls"), so the pad drives it
+ * as it drives the PS2's: the Wii put its ten motion inputs at 30 .. 39, its 40 .. are the PS2's 30 .. ; its buttons
+ * 14 (A), 15 (B), 17 (2) and 12 do what the PS2's Square, Cross, Circle and Triangle do; a hard swing of the remote
+ * (its magnitude, 33, with the axes 30 .. 32) stands for a new press of Circle when it tests the sideways axis 30,
+ * else of Triangle; A and B pressed together (the roar) is R2. So the 30 monsters both have show it, transition by
+ * transition (A Square in 5,794 of 6,037, B Cross in 3,932 of 3,938, 2 Circle in 480 of 483, 12 Triangle in all 540,
+ * every swing that tests 30 Circle (1,651), A + B R2 (961); the other swings mostly Triangle, but wii_ground) */
+static void wii_inputs(MoveTrans *t)
+{
+    MoveCond kept[4];
+    int n = 0, motion = 0, sideways = 0;
+    for (int c = 0; c < t->ncond; c++) {
+        uint32_t v = t->cond[c].var;
+        if (v >= 30 && v <= 39) {
+            motion = 1;
+            sideways |= v == 30;
+            continue;
+        }
+        if (v >= 40) v -= 10;
+        else if (v == 12) v = MV_TRIANGLE;
+        else if (v == 14) v = MV_SQUARE;
+        else if (v == 15) v = MV_CROSS;
+        else if (v == 17) v = MV_CIRCLE;
+        kept[n] = t->cond[c];
+        kept[n++].var = v;
+    }
+    if (motion && n < 4)                             /* op 4 ==, flags 0: new this frame */
+        kept[n++] = (MoveCond){ 4, sideways ? MV_CIRCLE : MV_TRIANGLE, 0, 1 };
+    int a = -1, bb = -1;                             /* the roar: A and B pressed together, the PS2's R2 */
+    for (int c = 0; c < n; c++) {
+        if (kept[c].op == 4 && kept[c].value == 1 && !(kept[c].flags & 1) && kept[c].var == MV_SQUARE) a = c;
+        if (kept[c].op == 4 && kept[c].value == 1 && !(kept[c].flags & 1) && kept[c].var == MV_CROSS) bb = c;
+    }
+    if (a >= 0 && bb >= 0) {
+        kept[a].var = MV_R2;
+        memmove(kept + bb, kept + bb + 1, sizeof *kept * (size_t)(n - bb - 1));
+        n--;
+    }
+    memcpy(t->cond, kept, sizeof kept);
+    t->ncond = n;
+}
+
+/* on the ground the Wii swapped two moves the PS2 and its own walls keep: its punch down is the downward swing
+ * (Triangle by wii_inputs) and its kick A with the stick down; on the walls (Side_L_, Front_) the swing kicks and A
+ * down punches down, as the PS2's Triangle and Square + down do everywhere. So a Wii monster on the PS2's pad, the
+ * ground's two get the PS2's inputs: Ground_Punch_Down Square (new) and the stick down (held), Ground_Kick Triangle */
+static void wii_ground(MoveGraph *g)
+{
+    for (int k = 0; k < g->n; k++)
+        for (int i = 0; i < g->states[k].ntrans; i++) {
+            MoveTrans *t = &g->states[k].trans[i];
+            const char *to = t->target >= 0 && g->states[t->target].name ? g->states[t->target].name : "";
+            int triangle = 0, square = 0, down = 0;          /* only the swapped inputs; the rest (combos) stay */
+            for (int c = 0; c < t->ncond; c++) {
+                triangle |= t->cond[c].var == MV_TRIANGLE;
+                square |= t->cond[c].var == MV_SQUARE;
+                down |= t->cond[c].var == MV_L_DOWN;
+            }
+            int square_down = square && down;
+            if (!strcmp(to, "Ground_Punch_Down") && triangle) {
+                t->cond[0] = (MoveCond){ 4, MV_SQUARE, 0, 1 };
+                t->cond[1] = (MoveCond){ 4, MV_L_DOWN, 1, 1 };
+                t->ncond = 2;
+            } else if (!strcmp(to, "Ground_Kick") && square_down) {
+                t->cond[0] = (MoveCond){ 4, MV_TRIANGLE, 0, 1 };
+                t->ncond = 1;
+            }
+        }
+}
+
 int moves_read(const Bundle *b, MoveGraph *g)
 {
     memset(g, 0, sizeof *g);
@@ -221,12 +291,16 @@ int moves_read(const Bundle *b, MoveGraph *g)
                 const uint8_t *r = q + 0x20 + 16 * c;
                 t->cond[c] = (MoveCond){ rd32(r), rd32(r + 4), rd32(r + 12), rd32(r + 8) };
             }
+            if (b->wii)
+                wii_inputs(t);
             t->call = name_at(b, (int32_t)rd32(q + 0x60));
             for (int j = 0; j < 4; j++)
                 t->args[j] = rdf(q + 0x64 + 4 * j);
         }
     }
     free(offset);
+    if (b->wii)
+        wii_ground(g);
     for (int k = 0; k < 3; k++)
         g->react[k] = rdf(d + 0x12C + 4 * k);
     g->hp_max = rdf(d + 0x138);
