@@ -46,9 +46,9 @@ typedef struct {
     int32_t *mat_by_name, *tex_by_name;                  /* the same for the materials and the textures alone */
     const char *scope;                                   /* texture packs: its dump folder (texpack.c), set by the loader; NULL = Common */
     /* the Wii's ("version 1.4", docs/FORMAT_BDP.md "The Wii's bundles"): big endian but its name table; bdp_load swaps
-     * its node trees, clips, materials, cloth (its particles moved into the PS2's 64 bytes) and MONSTER_DATA into the
-     * PS2's layout, so they read as the PS2's, and its textures' headers (u32 kind, u32 GX format, u16 width, height,
-     * mips: tex_decode reads their GX pixels) */
+     * its node trees, clips, materials, cloth (its particles moved into the PS2's 64 bytes), property books, string
+     * tables and MONSTER_DATA into the PS2's layout, so they read as the PS2's, and its textures' headers (u32 kind,
+     * u32 GX format, u16 width, height, mips: tex_decode reads their GX pixels) */
     int wii;
 } Bundle;
 int bdp_load(Bundle *b, uint8_t *file, uint32_t size);   /* takes the buffer; 0 = ok */

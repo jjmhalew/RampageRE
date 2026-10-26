@@ -125,6 +125,59 @@ static void map_cloth(Map *m, uint8_t *d)
     }
 }
 
+/* property book (tools/prb.py, prb.c): the header's count, size and group table, each group's five words and its
+ * records {kind, name, value} 32-bit, but a record's kind is bytes on the Wii (u8 type, u8 form, u16 length of
+ * "Type"), as the PS2's little endian u32 reads it; the groups found from the table and every group-valued record */
+static void map_book(Map *m, const uint8_t *d)
+{
+    uint32_t count = be32_at(m, d, 0x1C), table = be32_at(m, d, 0x24);
+    if (count > 65536)
+        return;
+    mark(m, 0x1C, 0x28, 4);
+    mark(m, table, table + 4 * count, 4);
+    uint32_t cap = count + 64, n = 0, *todo = malloc(sizeof *todo * cap);
+    uint8_t *seen = calloc(m->n / 4 + 1, 1);
+    for (uint32_t i = 0; todo && i < count; i++)
+        todo[n++] = be32_at(m, d, table + 4 * i);
+    while (todo && seen && n) {
+        uint32_t g = todo[--n], records = be32_at(m, d, g + 8);
+        if (g % 4 || g + 0x14 > m->n || seen[g / 4] || records > 65536 || g + 0x14 + 12ull * records > m->n)
+            continue;
+        seen[g / 4] = 1;
+        mark(m, g, g + 0x14, 4);
+        for (uint32_t r = 0; r < records; r++) {
+            uint32_t at = g + 0x14 + 12 * r;
+            mark(m, at, at + 2, 0);
+            mark(m, at + 2, at + 4, 2);
+            mark(m, at + 4, at + 12, 4);
+            if (d[at] == PK_GROUP) {
+                if (n == cap) {
+                    uint32_t *grown = realloc(todo, sizeof *todo * (cap *= 2));
+                    if (!grown)
+                        break;
+                    todo = grown;
+                }
+                todo[n++] = g + be32_at(m, d, at + 8);
+            }
+        }
+    }
+    free(todo);
+    free(seen);
+}
+
+/* string table (tools/loc.py, hud.c and shell.c loc_find): the header from 0x1C (u32 4, languages, count, the 11
+ * columns' offsets) and every column of string offsets 32-bit; the strings themselves as they are */
+static void map_loc(Map *m, const uint8_t *d)
+{
+    uint32_t count = be32_at(m, d, 0x24);
+    mark(m, 0x1C, 0x54, 4);
+    for (uint32_t c = 0; c < 11 && count < 65536; c++) {
+        uint32_t at = be32_at(m, d, 0x28 + 4 * c);
+        if (at)
+            mark(m, at, at + 4 * count, 4);
+    }
+}
+
 /* texture (0x68 bytes on the Wii): u32 kind, u32 GX format, u16 width, height, mip levels, 0xFFFF; its pixels
  * (data2) stay as they are, tex.c reads them as GX tiles */
 static void map_texture(Map *m)
@@ -200,7 +253,7 @@ static void swap_entry(const Bundle *b, BdpEntry *e)
     size_t len = strlen(name);
     int monster = e->type == ET_RAW && len >= 12 && strcmp(name + len - 12, "MONSTER_DATA") == 0;
     if (!e->data || (e->type != ET_TREE && e->type != ET_ANIM && e->type != ET_MATERIAL && e->type != ET_TEXTURE &&
-                     e->type != ET_CLOTH && !monster))
+                     e->type != ET_CLOTH && e->type != ET_BOOK && e->type != ET_LOC && !monster))
         return;                                          /* raw files (scripts, fonts, .ifl) stay little endian */
     uint8_t *d = (uint8_t *)e->data;
     Map m = { calloc(e->size ? e->size : 1, 1), e->size };
@@ -211,6 +264,8 @@ static void swap_entry(const Bundle *b, BdpEntry *e)
     else if (e->type == ET_MATERIAL) map_material(&m, d);
     else if (e->type == ET_TEXTURE) map_texture(&m);
     else if (e->type == ET_CLOTH) map_cloth(&m, d);
+    else if (e->type == ET_BOOK) map_book(&m, d);
+    else if (e->type == ET_LOC) map_loc(&m, d);
     else map_monster(&m, d);
     swap_marked(d, &m);
     free(m.w);
