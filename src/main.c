@@ -8636,6 +8636,15 @@ static int viewer_main(int argc, char **argv)
                                                       * (docs/NATIVE.md); wii_data= another path (none) leaves it */
         snprintf(gfx.wii_data, sizeof gfx.wii_data, "wii");
 #endif
+#if defined RAMPAGE_GUI && defined _WIN32
+    if (!gfx.wii_data[0] && !shot && !v.unattended && !plat_quiet) {   /* the player build: asked once */
+        char wd[512];
+        int got = wii_ask(wd, sizeof wd);
+        settings_put("rampage.cfg", "wii_data", got ? wd : "none");    /* none: not asked again */
+        if (got)
+            snprintf(gfx.wii_data, sizeof gfx.wii_data, "%s", wd);
+    }
+#endif
     int wii_maybe = 0;                               /* a place that may well hold none: not said */
 #ifdef __ANDROID__
     if (!gfx.wii_data[0] && android_apk()[0]) {      /* else a bundle's assets/wii (make_android_bundle.bat) */
@@ -8643,7 +8652,8 @@ static int viewer_main(int argc, char **argv)
         wii_maybe = 1;
     }
 #endif
-    if (gfx.wii_data[0]) {                           /* the Wii's extra content (docs/WII_PLAN.md) */
+    if (gfx.wii_data[0] && _stricmp(gfx.wii_data, "none") != 0) {   /* the Wii's extra content (docs/WII_PLAN.md);
+                                                                      * none: left out, unsaid */
         uint32_t n = vol_add_wii(&v.vol, gfx.wii_data);
         if (n)
             printf("wii data: %s, %u files\n", gfx.wii_data, n);

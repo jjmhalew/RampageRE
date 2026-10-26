@@ -32,6 +32,9 @@ typedef struct {
 } Settings;
 
 void settings_unset(Settings *flags);                /* nothing given yet (for settings_arg) */
+/* key=value into the rampage.cfg at path: its line replaced (its comment kept), else added; the rest as it was.
+ * 0 = written */
+int settings_put(const char *path, const char *key, const char *value);
 /* the flag at argv[*i] (with its value, *i moves past it) into flags: 1 = it was one of ours */
 int  settings_arg(Settings *flags, int argc, char **argv, int *i);
 /* the defaults, then rampage.cfg (use_cfg), then RAMPAGE_*, then the flags given */

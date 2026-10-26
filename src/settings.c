@@ -281,6 +281,48 @@ void settings_graphics(Settings *s, Window *w, const Settings *to)
     print(s);
 }
 
+int settings_put(const char *path, const char *key, const char *value)
+{
+    enum { MAXL = 256 };
+    char *lines[MAXL], line[1100];
+    int n = 0, done = 0;
+    size_t kl = strlen(key);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        while (n < MAXL && fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!(lines[n] = strdup(line)))
+                break;
+            n++;
+        }
+        fclose(f);
+    }
+    f = fopen(path, "w");
+    for (int i = 0; i < n; i++) {
+        const char *k = lines[i];
+        while (isspace((unsigned char)*k)) k++;
+        const char *after = k + kl;
+        while (*after == ' ' || *after == '\t') after++;
+        int it = !_strnicmp(k, key, kl) && *after == '=' && (isspace((unsigned char)k[kl]) || k[kl] == '=');
+        if (f && !it)
+            fprintf(f, "%s\n", lines[i]);
+        else if (f && !done) {                       /* the key's line, its comment kept; a second one dropped */
+            const char *hash = strchr(lines[i], '#');
+            fprintf(f, "%s=%s%s%s\n", key, value, hash ? " " : "", hash ? hash : "");
+            done = 1;
+        }
+        free(lines[i]);
+    }
+    if (f && !done)
+        fprintf(f, "%s=%s\n", key, value);
+    if (!f || fclose(f) != 0) {
+        printf("settings: could not write %s\n", path);
+        return -1;
+    }
+    printf("settings: %s=%s written to %s\n", key, value, path);
+    return 0;
+}
+
 int settings_save(const Settings *s, const char *path)
 {
     static const char *const KEYS[] = { "fullscreen", "vsync", "ao", "smaa", "msaa", "aniso", "mips", "language" };

@@ -213,6 +213,10 @@ does a folder, which Android uses when nothing else names the Wii's data.
 launcher unpacks them into `%LOCALAPPDATA%\RampageRE\wii` and hands `RampageRE.exe` that folder through
 `RAMPAGE_WII_DATA` when neither that variable nor the folder's `rampage.cfg` names another.
 
+**Asked once on Windows** (afterwards): `RampageRE.exe` asks for the extracted Wii disc at a start when nothing names
+it, as it asks for the PS2 disc at the first: Yes, the folder dialog (checked for Game); No or Cancel, `wii_data=none`.
+The answer goes into `rampage.cfg`, so it is asked once, existing setups included; `wii_data=none` is now silent.
+
 ## Risks and unknowns
 - The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
   check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].

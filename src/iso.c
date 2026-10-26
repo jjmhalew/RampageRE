@@ -633,6 +633,7 @@ int data_check(const char *path, const Vol *v, char *msg, size_t cap)
 #if defined _WIN32 && !defined RAMPAGE_TOOL
 /* ---- the first start on Windows: the disc image chosen in a file dialog (never a search of the drives), remembered */
 #include <commdlg.h>
+#include <shobjidl.h>
 
 /* a wide path as the ANSI one fopen takes, else its short (8.3) name; 0 = neither spells it */
 static int ansi_path(const wchar_t *w, char *out, size_t cap)
@@ -690,6 +691,83 @@ int data_ask(char *out, size_t cap)
         }
         if (!data_remember(out))
             printf("data: could not write %s; the disc image is asked for again at the next start\n", where);
+        ok = 1;
+        break;
+    }
+    if (SUCCEEDED(co))
+        CoUninitialize();
+    return ok;
+}
+
+/* the Wii's: Game in dir, dir/DATA/files or dir/files (as vol_add_wii looks) */
+static int wii_usable(const char *dir)
+{
+    static const char *const UNDER[] = { "", "\\DATA\\files", "\\files" };
+    char p[1100];
+    for (int k = 0; k < 3; k++) {
+        snprintf(p, sizeof p, "%s%s\\Game", dir, UNDER[k]);
+        DWORD a = GetFileAttributesA(p);
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+            return 1;
+    }
+    return 0;
+}
+
+/* a folder through the system's folder dialog (IFileOpenDialog, FOS_PICKFOLDERS); 0 = cancelled */
+static int pick_folder(wchar_t *out, size_t cap, const wchar_t *title)
+{
+    static const GUID clsid = { 0xdc1c5a9c, 0xe88a, 0x4dde, { 0xa5, 0xa1, 0x60, 0xf8, 0x2a, 0x20, 0xae, 0xf7 } };
+    static const GUID iid = { 0xd57c7288, 0xd4ad, 0x4768, { 0xbe, 0x02, 0x9d, 0x96, 0x95, 0x32, 0xd9, 0x60 } };
+    IFileOpenDialog *d = NULL;
+    IShellItem *item = NULL;
+    PWSTR path = NULL;
+    FILEOPENDIALOGOPTIONS o;
+    int ok = 0;
+    if (FAILED(CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER, &iid, (void **)&d)))
+        return 0;
+    if (SUCCEEDED(d->lpVtbl->GetOptions(d, &o)))
+        d->lpVtbl->SetOptions(d, o | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    d->lpVtbl->SetTitle(d, title);
+    if (SUCCEEDED(d->lpVtbl->Show(d, NULL)) && SUCCEEDED(d->lpVtbl->GetResult(d, &item)) &&
+        SUCCEEDED(item->lpVtbl->GetDisplayName(item, SIGDN_FILESYSPATH, &path)) && wcslen(path) < cap) {
+        wcscpy(out, path);
+        ok = 1;
+    }
+    if (path)
+        CoTaskMemFree(path);
+    if (item)
+        item->lpVtbl->Release(item);
+    d->lpVtbl->Release(d);
+    return ok;
+}
+
+int wii_ask(char *out, size_t cap)
+{
+    if (MessageBoxA(NULL, "RampageRE can also play what the Wii version of the game adds: ten more monsters, Dallas "
+                    "and the fifth upgrade, SuperJump, from your own Wii disc of Rampage - Total Destruction, extracted "
+                    "with Dolphin (the game's Properties, Filesystem, right-click the disc: Extract Entire Disc).\n\n"
+                    "Choose that folder now? It is read where it is, nothing is copied.\n\nNo: RampageRE asks no "
+                    "more (wii_data= in rampage.cfg can name it later).", "RampageRE",
+                    MB_YESNO | MB_ICONQUESTION) != IDYES)
+        return 0;
+    HRESULT co = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    int ok = 0;
+    for (;;) {
+        wchar_t dir[1024];
+        if (!pick_folder(dir, 1024, L"Your extracted Wii disc of Rampage - Total Destruction (the folder with DATA)"))
+            break;
+        if (!ansi_path(dir, out, cap)) {
+            MessageBoxA(NULL, "RampageRE cannot open a folder of that name (its letters do not fit this system's code "
+                        "page): move or rename it.", "RampageRE", MB_ICONWARNING);
+            continue;
+        }
+        if (!wii_usable(out)) {
+            char m[1400];
+            snprintf(m, sizeof m, "%s holds no Game folder (nor DATA\\files\\Game): choose the extracted Wii disc, "
+                     "the folder with DATA in it, or its DATA\\files.", out);
+            MessageBoxA(NULL, m, "RampageRE", MB_ICONWARNING);
+            continue;
+        }
         ok = 1;
         break;
     }

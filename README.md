@@ -144,14 +144,15 @@ extract the disc with Dolphin (the game's *Properties*, *Filesystem*, right-clic
 
 | Where | How |
 |---|---|
-| Windows, Linux | `wii_data=` in `rampage.cfg` set to the extracted disc (the folder with `DATA`, or its `DATA/files`), or `rampage.exe ... --wii DIR`, or `RAMPAGE_WII_DATA` |
+| Windows | `RampageRE.exe` asks once, at a start when nothing names it: *Yes* opens a folder dialog for the extracted disc (the folder with `DATA`, or its `DATA/files`), *No* asks no more; the answer is kept in `rampage.cfg` as `wii_data=` (delete that line to be asked again). Or `rampage.exe ... --wii DIR`, or `RAMPAGE_WII_DATA` |
+| Linux | `wii_data=` in `rampage.cfg` set to the extracted disc, or `--wii DIR`, or `RAMPAGE_WII_DATA` |
 | Switch, PS Vita | a `wii` folder with `Game`, `Shell` and `Audio` in `/switch/rampagere/` or `ux0:data/rampagere/`, found on its own |
 | Android | the same `wii` folder in the app folder by USB cable, or the launcher's shortcut **Add the Wii's data** (a long press on the icon), which copies it from the folder you pick; after the first start's copy the app asks once |
 | `make_standalone.bat`, `make_android_bundle.bat` | drag the extracted disc's folder onto the .bat with the rest (or leave `wii_data=` in the `rampage.cfg` beside it): it goes into the exe or APK and is used from there |
 
 Without it the port is the PS2 game, byte for byte, and saves as it did. With it the shell, the profile and the
 unlocks follow the Wii's roster of 40 monsters and its city order; the save stays the PS2's (`rampage_profile.bin`),
-with what the PS2 file cannot hold in `rampage_profile.wii.bin` beside it. `wii_data=none` leaves a `wii` folder out.
+with what the PS2 file cannot hold in `rampage_profile.wii.bin` beside it. `wii_data=none` leaves it out (and a `wii` folder too).
 It has been played on Windows (and on the Android emulator); the Linux build, the Switch, the Vita and phones are not yet tried with it. As with the PS2 data, the bundles that hold it
 are for your own use only.
 

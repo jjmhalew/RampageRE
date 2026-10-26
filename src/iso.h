@@ -42,6 +42,9 @@ int data_remember(const char *path);                     /* path into the user's
 /* the first start on Windows (not under --shot): a message, then a file dialog for the disc image or RAMPAGE.VOL,
  * checked (data_usable) and remembered (data_remember). 1 = chosen (out), 0 = cancelled (plat_told set) */
 int data_ask(char *out, size_t cap);
+/* the Wii's extras (docs/WII_PLAN.md), asked for once by the player build: a message, then a folder dialog for the
+ * extracted Wii disc, checked (Game in it, DATA/files or files). 1 = chosen (out), 0 = not now or cancelled */
+int wii_ask(char *out, size_t cap);
 #endif
 const char *data_where(void);                            /* that list in words, for the message when none is there */
 /* the supported releases, SLES-53800 version 1.00 (Europe) and SLUS-21323 version 1.01 (USA; the same ELF and
