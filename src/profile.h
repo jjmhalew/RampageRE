@@ -176,7 +176,9 @@ void profile_save_checkpoint(Profile *p, int keep_head);
  * Returns 1 when Boosy was unlocked now */
 int profile_block_won(Profile *p, uint32_t city_flags, int city_score, int start_block, int city_done);
 /* 0x3259E4: every city's saved flags (the current city's | 8) AND to 1 | 2 | 4 | 8 -> Boosy's current flags |= 0x80.
- * Returns 1 when he was unlocked now (the game says nothing either) */
+ * Every city is the roster's: with the Wii's 8 Dallas's flags count too (the Wii runs the same rules, its
+ * updateProfile 0x800911A4 [R]; over its 8 cities [G]). Returns 1 when he was unlocked now (the game says nothing
+ * either) */
 int profile_reveal_boosy(Profile *p);
 /* the Wii's five-star unlocks [R Wii RWorldStateMgr::prepareForResults 0x80081970, docs/WII_NOTES.md], at the same
  * block's end (profile_block_won calls it after Boosy's): the monsters of the roster whose current flags have every
@@ -194,7 +196,8 @@ int profile_ps2_monster(const char *name);
  *   - the city destroyed: the city's saved flags |= the checkpoint's; the next city is the first that is not both
  *     available and destroyed (all done: the one after it, wrapping); it gets 0x80, the status points at it (its
  *     start block); then, with every city available: Philbert unlocks when all have flag 2, Eyegore when all have 4,
- *     Boosy when all have 1 | 2 | 4 | 8 (table 0x3F6770; the status and the checkpoint);
+ *     Boosy when all have 1 | 2 | 4 | 8 (table 0x3F6770; the status and the checkpoint), all being the roster's
+ *     cities (Dallas among them on the Wii's);
  *   - not destroyed: only the city's flag 8 is saved at once;
  *   - in every case current = checkpoint (the lives kept) */
 void profile_update(Profile *p);

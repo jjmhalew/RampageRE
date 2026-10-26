@@ -25,7 +25,8 @@ static const struct { int count; const char *name; } FIVE_STAR[] = {
 #define FIVE_STARS 0xFu                              /* the Wii's 0x1F, until the port has SuperJump [G] */
 #define WII_START 8                                  /* [R Wii 0x8008FB58] Profile::reset opens 0 .. 7 */
 
-/* [R] 0x3F6770: what updateProfile unlocks once every city is available and all their saved flags have the mask */
+/* [R] 0x3F6770: what updateProfile unlocks once every city is available and all their saved flags have the mask (the
+ * roster's cities: the Wii's 8 with its folder; the Wii's table 0x802F1640 is the same [R], over its 8 [G]) */
 static const struct { const char *name; uint32_t mask; } UNLOCKS[] = {
     { "Philbert", PC_PAR }, { "Eyegore", PC_CHALLENGES }, { "Boosy", 0xF }
 };
