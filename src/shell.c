@@ -1012,9 +1012,22 @@ static Layout *layout_load(Gui *g, const Bundle *b, const char *name, int extra)
         free(L);
         return NULL;
     }
+    int at = -1;                                         /* a Wii layout's pictures from its own bundle first: its
+                                                          * names over the PS2's (the five-star bar of its cards) */
+    for (int i = 0; b->wii && i < g->nb; i++)
+        if (g->bundles[i] == b)
+            at = i;
+    for (int i = at; i > 0; i--)
+        g->bundles[i] = g->bundles[i - 1];
+    if (at > 0)
+        g->bundles[0] = b;
     Xml x = { (const char *)e->data, (const char *)e->data + e->size };
     while (x.p < x.end && *x.p && xml_element(g, L, &x, NULL))
         xml_skip_ws(&x);
+    for (int i = 0; i < at; i++)                         /* the order as it was */
+        g->bundles[i] = g->bundles[i + 1];
+    if (at > 0)
+        g->bundles[at] = b;
     if (!L->root) {
         free(L->nodes);
         free(L);
@@ -2111,6 +2124,9 @@ struct Shell {
     Group ps2_monster_data;
     int ncities;                                         /* CityData's City<n> groups (7; the Wii's 8, its own
                                                           * CitySelect.ifc then, which has Dallas) */
+    /* the Wii's rosters in use: its CitySelect, MonsterSelect and MonsterSheet.ifc (Dallas; five upgrade stars,
+     * upgrade0 .. 4, and the card sheet's "locked"); nstars 5, else the PS2's 4 */
+    int wii_layouts, nstars;
     ShellProfile prof;
     ShellGame gs;                                        /* gCommon.getGameStatus() and the players / bots */
     ShellStart st;
@@ -4346,7 +4362,7 @@ static void ms_card_face(Shell *s, const char *name, int p)
     set_tex(&s->gui, head, t);
     node_localize(&s->gui, find(card, "name"), name);
     Node *fu = find(card, "front_upgrades");
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < s->nstars; i++)
         show(child_at(fu, i), (up & (1 << i)) != 0);
     Node *cb = find(card, "card_back_name"), *face = find(card, "card_back_face");
     Node *climb = find(find(card, "ability0"), "slider"), *jump = find(find(card, "ability1"), "slider");
@@ -4358,7 +4374,11 @@ static void ms_card_face(Shell *s, const char *name, int p)
     snprintf(t, sizeof t, "MS_MUTATION_%s", name);
     if (four) {
         Node *c = child_at(mut, 0);
-        if (c && c->kind == N_TEXT) node_localize(&s->gui, c, t);
+        if (c && c->kind == N_TEXT && s->wii_layouts) {  /* the Wii's: the child hidden, the text its parent's */
+            show(c, 0);
+            node_localize(&s->gui, mut, t);
+        } else if (c && c->kind == N_TEXT)
+            node_localize(&s->gui, c, t);
         else four = 0;
     }
     if (!four) {                                         /* "MUTATION: Ape" */
@@ -4376,7 +4396,7 @@ static void ms_card_face(Shell *s, const char *name, int p)
     col_255(yellow, 223, 203, 31, 255);
     col_255(grey, 128, 128, 128, 255);
     Node *bu = find(card, "back_upgrades");
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < s->nstars; i++) {
         Node *ut = findf(bu, "upgrade%d", i), *star = find(ut, "star_flat");
         set_col(ut, (up & (1 << i)) ? yellow : grey);
         set_col(star, (up & (1 << i)) ? yellow : grey);
@@ -4756,12 +4776,13 @@ void shell_buddy_profile(Shell *s, int p)
 }
 
 /* ---------------------------------------------------------------- MonsterSheet.scr [R] */
-static int sheet_available(Shell *s, int monster)       /* isMonsterAvailable */
+static int sheet_available(Shell *s, int monster)       /* isMonsterAvailable: 1, 0 locked, -1 another player's
+                                                         * (the Wii's -1; the PS2's 0: both <= 0 here) */
 {
     MonsterSheet *h = &s->sh;
     int ok = (monster_flags(s, h->map_controller, monster) & 128) != 0;
     for (int i = 0; i < 3; i++)
-        if (h->in_use[i] == monster) return 0;
+        if (h->in_use[i] == monster) return -1;
     if ((s->cheats & 1) && strcmp(monster_name(s, monster), "Blank") != 0 &&
         !(int)monster_prop(s, monster, "NotFinished", 0))
         ok = 1;
@@ -4774,7 +4795,7 @@ static void sheet_mini_upgrades(Shell *s, Node *card, int monster)
 {
     int up = monster_flags(s, s->sh.map_controller, monster);
     Node *g = find(card, "small_upgrades");
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < s->nstars; i++)
         show(child_at(g, i), (up & (1 << i)) != 0);
 }
 
@@ -4790,7 +4811,7 @@ static void sheet_update_selection(Shell *s, int playsound)
     Node *r = ifc_root(s, IF_MONSTERSHEET);
     h->selection = h->row + h->col * 2;
     int prev = h->valid;
-    h->valid = sheet_available(s, h->selection);
+    h->valid = sheet_available(s, h->selection) > 0;
     if (!h->valid && prev) {
         set_fade(find(r, "nb_select"), 0.25f);
         set_fade(find(r, "nb_grow"), 0.25f);
@@ -4892,7 +4913,7 @@ static void sheet_card_face(Shell *s, const char *name)   /* setupCardFace */
     set_tex(&s->gui, find(h->blowup, "head"), t);
     node_localize(&s->gui, find(h->blowup, "name"), name);
     Node *fu = find(h->blowup, "front_upgrades");
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < s->nstars; i++)
         show(child_at(fu, i), (up & (1 << i)) != 0);
     Node *card = find(h->blowup, "backside");
     Node *cb = find(card, "card_back_name"), *face = find(card, "card_back_face");
@@ -4915,7 +4936,7 @@ static void sheet_card_face(Shell *s, const char *name)   /* setupCardFace */
     col_255(yellow, 223, 203, 31, 255);
     col_255(grey, 128, 128, 128, 255);
     Node *bu = find(h->blowup, "back_upgrades");
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < s->nstars; i++) {
         Node *ut = findf(bu, "upgrade%d", i), *star = find(ut, "star_flat");
         set_col(ut, (up & (1 << i)) ? yellow : grey);
         set_col(star, (up & (1 << i)) ? yellow : grey);
@@ -5000,7 +5021,7 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
                 sheet_create_card(s, item, monster_name(s, i + k));
                 set_pos(item, (float)(i / 2) * 130.0f, 0, 0);
                 show(item, 1);
-                if (!sheet_available(s, i + k))
+                if (sheet_available(s, i + k) <= 0)
                     show(find(item, "black"), 1);
             }
         h->right_bounds = 130.0f * (s->nmonsters / 2 - 1);
@@ -5016,7 +5037,11 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
         for (int i = 0; i < s->nmonsters / 2; i++)
             for (int k = 0; k < 2; k++) {
                 Node *item = child_at(k ? row1 : row0, i);
-                show(find(item, "black"), !sheet_available(s, i * 2 + k));
+                int st = sheet_available(s, i * 2 + k);
+                Node *lk = find(item, "locked");        /* the Wii's: its picture on a locked monster, black on
+                                                         * another player's [R its MonsterSheet.scr] */
+                show(find(item, "black"), lk ? st < 0 : st <= 0);
+                show(lk, st == 0);
                 show(find(item, "facePlayerId"), 0);
                 sheet_mini_upgrades(s, item, i * 2 + k);
             }
@@ -5464,7 +5489,8 @@ static void cr_open(Shell *s)
     for (int i = 0; i < IF_COUNT; i++) {
         char name[32];
         snprintf(name, sizeof name, "%s.ifc", IFC_NAMES[i]);
-        const Bundle *b = i == IF_CITYSELECT && s->ncities > 7 && s->have_wii[0] ? &s->b_wii[0] : &s->b_shell;
+        const Bundle *b = s->wii_layouts && (i == IF_CITYSELECT || i == IF_MONSTERSELECT || i == IF_MONSTERSHEET) ?
+                          &s->b_wii[0] : &s->b_shell;
         s->ifc[i] = layout_load(&s->gui, b, name, i == IF_MONSTERSHEET ? SHELL_MONSTERS * 24 : i == IF_OPTIONS ? 128 :
                                 16);                     /* (Options: its Graphics page, op_graphics_build) */
     }
@@ -5595,6 +5621,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
         s->nmonsters++;
     while (s->ncities < SHELL_CITIES && city_name(s, s->ncities)[0])
         s->ncities++;
+    s->wii_layouts = (s->ncities > 7 || s->nmonsters > 30) && s->have_wii[0];
+    s->nstars = s->wii_layouts ? 5 : 4;
     if (p) s->prof = *p;
     else {
         s->prof.sound = 0.5f;                            /* a new profile's (0x33F630) [R] */
