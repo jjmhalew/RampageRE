@@ -208,6 +208,11 @@ rampage.nro, rampage.vpk and the APK, and the Android flows on the emulator (NAT
 and aligned as the disc's files (about 1.6 GB in all, still under 2 GB); `vol_add_wii` reads a ZIP's `assets/wii` as it
 does a folder, which Android uses when nothing else names the Wii's data.
 
+**The Windows standalone exe** (afterwards): `make_standalone.bat` takes the Wii folder the same way (the file list is
+`tools/native/wiifiles.h`, shared with the Android bundle); `pack.c` adds Game, Shell and Audio as `wii/...`, the
+launcher unpacks them into `%LOCALAPPDATA%\RampageRE\wii` and hands `RampageRE.exe` that folder through
+`RAMPAGE_WII_DATA` when neither that variable nor the folder's `rampage.cfg` names another.
+
 ## Risks and unknowns
 - The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
   check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].

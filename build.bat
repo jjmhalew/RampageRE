@@ -4,9 +4,10 @@ rem   build.bat                     RampageRE.exe, the player build: no console,
 rem                                 disc image at the first start, logs to rampage.log
 rem   build.bat dev                 rampage.exe, the developer build: a console that prints what each block holds (the
 rem                                 build the tests and docs\NATIVE.md use; build_viewer.bat builds this one)
-rem   build.bat standalone [DATA]   RampageRE-standalone.exe: RampageRE.exe + YOUR game data in one exe, for your own use
-rem                                 only (make_standalone.bat); DATA = your disc image or RAMPAGE.VOL, else the data the
-rem                                 viewer finds (docs\NATIVE.md "Game data")
+rem   build.bat standalone [DATA] [WII]  RampageRE-standalone.exe: RampageRE.exe + YOUR game data in one exe, for your
+rem                                 own use only (make_standalone.bat); DATA = your disc image or RAMPAGE.VOL, else the
+rem                                 data the viewer finds (docs\NATIVE.md "Game data"); WII = your extracted Wii disc,
+rem                                 else rampage.cfg's wii_data= or a wii folder here, if any (docs\WII_PLAN.md)
 rem   build.bat apkbundle           only build\apkbundle.exe, the tool of make_android_bundle.bat
 rem   build.bat tools               only the helpers of tools\native\ in build\: bundle_stub.exe and pack.exe (standalone),
 rem                                 apkbundle.exe (the CI builds them)
@@ -56,8 +57,10 @@ rem ---- standalone: the launcher stub + RampageRE.exe + RAMPAGE.VOL, the ELF an
 call :standalone_tools || goto :fail
 set "DATA=%~2"
 if not defined DATA set "DATA=auto"
-echo Packing the game data ^(%DATA%^) ...
-build\pack.exe build\bundle_stub.exe RampageRE.exe "%DATA%" RampageRE-standalone.exe || goto :fail
+set "WII=%~3"
+if not defined WII set "WII=auto"
+echo Packing the game data ^(%DATA%; the Wii's: %WII%^) ...
+build\pack.exe build\bundle_stub.exe RampageRE.exe "%DATA%" RampageRE-standalone.exe "%WII%" || goto :fail
 echo.
 echo Done: RampageRE-standalone.exe. It contains the game's data - keep it for yourself, never share or upload it.
 exit /b 0
@@ -66,7 +69,7 @@ exit /b 0
 if not exist build mkdir build
 echo Building build\bundle_stub.exe and build\pack.exe...
 %ZIG% cc -std=c99 -O2 -Wall %CPU% -Wl,--subsystem,windows -o build\bundle_stub.exe tools\native\bundle.c res\rampagere.rc -luser32 -lgdi32 || exit /b 1
-%ZIG% cc %TOOL% -o build\pack.exe tools\native\pack.c src\iso.c || exit /b 1
+%ZIG% cc %TOOL% -o build\pack.exe tools\native\pack.c src\iso.c -lshell32 || exit /b 1
 exit /b 0
 
 :apkbundle

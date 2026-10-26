@@ -2,12 +2,20 @@
  * (bundle.c) + RampageRE.exe + the game data of YOUR disc that the port reads (RAMPAGE.VOL, the ELF, SYSTEM.CNF; about
  * 1.35 GB), in the payload layout bundle.c documents. After WoodyRE's tools/native/pack.c.
  * The result holds the game's data: it is for your own machine only, never share or upload it.
- * Usage: pack <stub.exe> <RampageRE.exe> <data> <out.exe>
+ * Usage: pack <stub.exe> <RampageRE.exe> <data> <out.exe> [wii]
  *   data: your disc image (.iso), or a RAMPAGE.VOL with SLES_538.00 (or RAMPAGE.ELF) and SYSTEM.CNF beside it, or "auto":
  *   the data the viewer finds by itself (src/iso.c data_find: build\disc, the current folder, %LOCALAPPDATA%\RampageRE...)
+ *   wii: your extracted Wii disc (the folder with DATA, its DATA\files, or the folder with Game in it), or "auto":
+ *   RAMPAGE_WII_DATA, else rampage.cfg's wii_data= (the current folder's), else a wii folder here; none without it.
+ *   The files of its Game, Shell and Audio go in as wii/Game/NAME ..., which bundle.c unpacks into a wii folder and
+ *   hands RampageRE.exe (docs/WII_PLAN.md); about 320 MB more
  * Every file is copied in 4 MB pieces with 64-bit offsets (the VOL alone is 1.34 GB); the result must stay below 4 GB,
  * which Windows' loader takes as the most an exe may be.
- * Build (build.bat standalone): zig cc -std=c99 -O2 -DRAMPAGE_TOOL -Isrc -o pack.exe tools/native/pack.c src/iso.c */
+ * Build (build.bat standalone): zig cc -std=c99 -O2 -DRAMPAGE_TOOL -Isrc -o pack.exe tools/native/pack.c src/iso.c
+ * -lshell32 */
+#include <windows.h>
+#include <shellapi.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -29,10 +37,27 @@ static void fail(const char *what, const char *path)
     exit(1);
 }
 
-/* size bytes of path from at on to o; FNV-1a 64 of them into *hash (bundle.c skips a file it already holds) */
-static void copy(FILE *o, const char *path, int64_t at, uint64_t size, uint64_t *hash, uint64_t *done, uint64_t total)
+static void die(const char *fmt, ...)
 {
-    FILE *f = fopen(path, "rb");
+    va_list a;
+    va_start(a, fmt);
+    fputs("pack: ", stderr);
+    vfprintf(stderr, fmt, a);
+    fputc('\n', stderr);
+    va_end(a);
+    if (g_out)
+        remove(g_out);
+    exit(1);
+}
+
+#include "wiifiles.h"
+
+/* size bytes of path (wpath when given) from at on to o; FNV-1a 64 of them into *hash (bundle.c skips a file it
+ * already holds) */
+static void copy(FILE *o, const char *path, const wchar_t *wpath, int64_t at, uint64_t size, uint64_t *hash,
+                 uint64_t *done, uint64_t total)
+{
+    FILE *f = wpath ? _wfopen(wpath, L"rb") : fopen(path, "rb");
     if (!f || _fseeki64(f, at, SEEK_SET) != 0)
         fail("cannot read", path);
     uint64_t h = 0xcbf29ce484222325ull;
@@ -72,8 +97,9 @@ static void put(FILE *o, const void *p, size_t n)
 
 int main(int argc, char **argv)
 {
-    if (argc != 5) {
-        fprintf(stderr, "usage: pack <stub.exe> <RampageRE.exe> <disc image | RAMPAGE.VOL | auto> <out.exe>\n");
+    if (argc != 5 && argc != 6) {
+        fprintf(stderr, "usage: pack <stub.exe> <RampageRE.exe> <disc image | RAMPAGE.VOL | auto> <out.exe> "
+                "[extracted Wii disc | auto]\n");
         return 2;
     }
     char found[1024];
@@ -92,16 +118,29 @@ int main(int argc, char **argv)
     printf("pack: the game data from %s\n", data);
     if (!part[1].size)
         printf("pack: no %s there: the effects' words will be missing\n", part[1].name);
+    if (argc == 6) {                                 /* the Wii's (docs/WII_PLAN.md), from the wide command line */
+        int wc;
+        wchar_t **wv = CommandLineToArgvW(GetCommandLineW(), &wc);
+        if (!wv || wc != 6)
+            die("cannot read the command line");
+        wii_take(wv[5]);
+    }
 
-    /* the entries: the program as RampageRE.exe, then the data as the viewer reads it beside a RAMPAGE.VOL */
-    struct { const char *name, *file; int64_t at; uint64_t size, off, hash; } e[4] = {
-        { "RampageRE.exe", argv[2], 0, size_of(argv[2]), 0, 0 },
-        { "SYSTEM.CNF", part[0].file, part[0].at, part[0].size, 0, 0 },
-        { "RAMPAGE.ELF", part[1].file, part[1].at, part[1].size, 0, 0 },
-        { "RAMPAGE.VOL", part[2].file, part[2].at, part[2].size, 0, 0 },   /* the largest last */
-    };
+    /* the entries: the program as RampageRE.exe, then the data as the viewer reads it beside a RAMPAGE.VOL (the
+     * largest last of those), then the Wii's */
+    typedef struct { const char *name, *file; const wchar_t *wfile; int64_t at; uint64_t size, off, hash; } Entry;
+    int ne = 4 + (int)g_nwii;
+    Entry *e = calloc((size_t)ne, sizeof *e);
+    if (!e)
+        die("out of memory");
+    e[0] = (Entry){ "RampageRE.exe", argv[2], NULL, 0, size_of(argv[2]), 0, 0 };
+    e[1] = (Entry){ "SYSTEM.CNF", part[0].file, NULL, part[0].at, part[0].size, 0, 0 };
+    e[2] = (Entry){ "RAMPAGE.ELF", part[1].file, NULL, part[1].at, part[1].size, 0, 0 };
+    e[3] = (Entry){ "RAMPAGE.VOL", part[2].file, NULL, part[2].at, part[2].size, 0, 0 };
+    for (unsigned i = 0; i < g_nwii; i++)
+        e[4 + i] = (Entry){ g_wii[i].rel, g_wii[i].rel, g_wii[i].path, 0, g_wii[i].size, 0, 0 };
     uint64_t stub = size_of(argv[1]), total = 0, done = 0;
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < ne; i++)
         total += e[i].size;
     if (stub + total > MAX_EXE)
         fail("the result would be 4 GB or more, more than Windows runs as an exe", NULL);
@@ -111,18 +150,18 @@ int main(int argc, char **argv)
     if (!o)
         fail("cannot write", g_out);
     uint64_t h;
-    copy(o, argv[1], 0, stub, &h, &done, 0);
+    copy(o, argv[1], NULL, 0, stub, &h, &done, 0);
     uint32_t count = 0;
-    for (int i = 0; i < 4; i++) {
-        if (!e[i].size)
+    for (int i = 0; i < ne; i++) {
+        if (!e[i].size && i < 4)
             continue;
         e[i].off = (uint64_t)_ftelli64(o);
-        copy(o, e[i].file, e[i].at, e[i].size, &e[i].hash, &done, total);
+        copy(o, e[i].file, e[i].wfile, e[i].at, e[i].size, &e[i].hash, &done, total);
         count++;
     }
     uint64_t ioff = (uint64_t)_ftelli64(o);
-    for (int i = 0; i < 4; i++) {
-        if (!e[i].size)
+    for (int i = 0; i < ne; i++) {
+        if (!e[i].size && i < 4)
             continue;
         uint32_t nl = (uint32_t)strlen(e[i].name);
         put(o, &nl, 4);
@@ -132,7 +171,7 @@ int main(int argc, char **argv)
         put(o, &e[i].hash, 8);
     }
     uint64_t id = ((uint64_t)time(NULL) * 1000003u) ^ ioff;
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < ne; i++)
         id = (id ^ e[i].hash) * 0x100000001b3ull;
     put(o, &ioff, 8);
     put(o, &count, 4);

@@ -175,14 +175,14 @@ and every blow between them one of its attack records' damage (+0x2C); a failed 
 |---|---|
 | `build.bat` | `RampageRE.exe`, the player build (`-DRAMPAGE_GUI -Wl,--subsystem,windows`, the icon and version of `res/rampagere.rc`): no console; started without arguments it opens the front end (`--shell`); stdout and stderr go to `rampage.log` in the current folder (a new one each start, started again past 32 MB; `RAMPAGE_CONSOLE=1` keeps the streams, a `--shot` run too), the window title stays plain (`RAMPAGE_DEBUGTITLE=1`: as rampage.exe's); a message box when it cannot start; started from a read-only folder (Program Files) or a temporary one (from inside a zip) without arguments it works in `%LOCALAPPDATA%\RampageRE` |
 | `build.bat dev` | `rampage.exe`, the developer build: a console, the same command line; what this document and the tests use (`build_viewer.bat` calls this) |
-| `build.bat standalone [DATA]` | `RampageRE.exe`, then `RampageRE-standalone.exe` (`make_standalone.bat`, below) |
+| `build.bat standalone [DATA] [WII]` | `RampageRE.exe`, then `RampageRE-standalone.exe` (`make_standalone.bat`, below) |
 | `build.bat apkbundle` | `build\apkbundle.exe`, the tool of `make_android_bundle.bat` ("Android") |
 | `build.bat tools` | only `build\bundle_stub.exe`, `build\pack.exe` and `build\apkbundle.exe` (the CI builds them) |
 
 Both exes ask for the disc image at a first start without data ("Game data"), never under `--shot`, which keeps every
 run of either offscreen and silent: no window, no message box, no question, messages on stderr.
 
-**The standalone exe** (`make_standalone.bat [disc image or RAMPAGE.VOL]`, WoodyRE's): `tools/native/pack.c` appends
+**The standalone exe** (`make_standalone.bat [disc image or RAMPAGE.VOL] [Wii folder]`, WoodyRE's): `tools/native/pack.c` appends
 `RampageRE.exe` and the disc's files the port reads (`RAMPAGE.VOL`, the ELF as `RAMPAGE.ELF`, `SYSTEM.CNF`: 1.35 GB),
 taken from the disc image, from beside the VOL, or (no argument) from the data `RampageRE.exe` finds, to the launcher
 `tools/native/bundle.c`. At its first start it unpacks them into `%LOCALAPPDATA%\RampageRE` (a progress window; the free
@@ -193,6 +193,19 @@ profile, `rampage.log` and `mods\` live in that folder. The payload's offsets ar
 packer refuses a result of 4 GB or more (what Windows runs as an exe); the 1.35 GB one starts as any exe. With `--shot`
 in its command line it shows nothing (stderr only); `RAMPAGE_STANDALONE_DIR` unpacks elsewhere (testing). It holds the
 game's data: for your own use only, never share or upload it.
+
+**The Wii's data in the standalone exe** (optional, docs/WII_PLAN.md): a folder dragged onto `make_standalone.bat` with
+the disc image is your extracted Wii disc (the folder with `DATA`, its `DATA\files`, or the folder with `Game` in it);
+without one `pack` takes `RAMPAGE_WII_DATA`, else the `wii_data=` of the `rampage.cfg` beside the script, else a `wii`
+folder there, else none (`tools/native/wiifiles.h`, shared with the Android bundle). The files of its `Game`, `Shell`
+and `Audio` (379, 315 MB) go in as `wii/Game/NAME` ..., and the exe is about 1.6 GB. The launcher unpacks them into
+`%LOCALAPPDATA%\RampageRE\wii` with the rest (the index takes folder/name now, plain parts only) and, when the bundle
+holds them, starts `RampageRE.exe` with `RAMPAGE_WII_DATA` that folder, unless `RAMPAGE_WII_DATA` or that folder's
+`rampage.cfg` (`wii_data=`) names another or none; a standalone without them leaves a `wii` folder of an earlier one
+unused. Tested with `build/rw.exe` in it (`RAMPAGE_STANDALONE_DIR`): Dallas 4 with Boris byte for byte the shot of
+`--wii` on the folder; a second start unpacks nothing; `wii_data=` in that `rampage.cfg` and `RAMPAGE_WII_DATA` (none,
+or the folder) win; one without the Wii's over the same folder plays the PS2's (Chicago for Dallas, its shot byte for
+byte the plain run's); CI's fake-VOL standalone test as before.
 
 ## Platforms
 As in WoodyRE (its docs/PLATFORM.md): the Windows build keeps its own Win32 + WGL window, and everything else runs on

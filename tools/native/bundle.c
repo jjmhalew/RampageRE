@@ -3,7 +3,9 @@
  * SYSTEM.CNF) to this exe; at start it unpacks them once to %LOCALAPPDATA%\RampageRE (again only what a new bundle
  * changes), then runs RampageRE.exe from there with RAMPAGE_VOL set to that RAMPAGE.VOL and passes the command line on
  * (e.g. "RampageRE-standalone.exe --shell" or "... Chicago 1 --monster George"). rampage.cfg, rampage_profile.bin,
- * rampage.log and mods\ are written there too and survive a new bundle.
+ * rampage.log and mods\ are written there too and survive a new bundle. The Wii's files, when pack.c was given them
+ * (wii/Game/NAME ..., docs/WII_PLAN.md), are unpacked into its wii folder, and RAMPAGE_WII_DATA names that folder unless
+ * RAMPAGE_WII_DATA or that rampage.cfg's wii_data= names another (or none).
  * The data inside makes the result for your own use only: never share or upload it.
  *
  * Payload layout (after the launcher itself): the file bodies, then the index (per entry: u32 name length, the name,
@@ -125,6 +127,60 @@ static const wchar_t *skip_argv0(const wchar_t *c)
     return c;
 }
 
+/* a plain name, or folder/name with plain parts (no \\ or :, no empty, . or .. part): inside the folder */
+static int safe_name(const wchar_t *n)
+{
+    if (!n[0] || wcspbrk(n, L"\\:"))
+        return 0;
+    for (const wchar_t *p = n;;) {
+        const wchar_t *sl = wcschr(p, L'/');
+        size_t l = sl ? (size_t)(sl - p) : wcslen(p);
+        if (l == 0 || (l == 1 && p[0] == L'.') || (l == 2 && p[0] == L'.' && p[1] == L'.'))
+            return 0;
+        if (!sl)
+            return 1;
+        p = sl + 1;
+    }
+}
+
+/* base\name with name's / as \; make: its folders made */
+static void out_path(wchar_t *out, size_t cap, const wchar_t *base, const wchar_t *name, int make)
+{
+    size_t bl = wcslen(base);
+    swprintf(out, cap, L"%ls\\%ls", base, name);
+    for (wchar_t *c = out + bl + 1; *c; c++)
+        if (*c == L'/') {
+            *c = 0;
+            if (make)
+                CreateDirectoryW(out, NULL);
+            *c = L'\\';
+        }
+}
+
+/* 1 = base\rampage.cfg has a wii_data= with a value (the player's own choice, none included) */
+static int cfg_names_wii(const wchar_t *base)
+{
+    wchar_t path[MAX_PATH + 16];
+    char line[1200];
+    int yes = 0;
+    swprintf(path, MAX_PATH + 16, L"%ls\\rampage.cfg", base);
+    FILE *f = _wfopen(path, L"rb");
+    while (f && !yes && fgets(line, sizeof line, f)) {
+        const char *k = line;
+        while (*k == ' ' || *k == '\t') k++;
+        if (_strnicmp(k, "wii_data", 8) != 0)
+            continue;
+        for (k += 8; *k == ' ' || *k == '\t'; k++) { }
+        if (*k++ != '=')
+            continue;
+        while (*k == ' ' || *k == '\t') k++;
+        yes = *k && *k != '#' && *k != '\r' && *k != '\n';
+    }
+    if (f)
+        fclose(f);
+    return yes;
+}
+
 /* the .bundle list: "hash size name" lines of the files unpacked whole */
 static int listed(const wchar_t *state, const Entry *e)
 {
@@ -181,7 +237,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show)
     Trailer t;
     if (!GetFileSizeEx(f, &fsz) || (uint64_t)fsz.QuadPart < sizeof t ||
         !read_at(f, (uint64_t)fsz.QuadPart - sizeof t, &t, sizeof t) || memcmp(t.magic, "RAMPPK01", 8) != 0 ||
-        t.index_off > (uint64_t)fsz.QuadPart - sizeof t || t.count == 0 || t.count > 64) {
+        t.index_off > (uint64_t)fsz.QuadPart - sizeof t || t.count == 0 || t.count > 4096) {
         SetLastError(0);
         fail(L"No game data is attached to this exe (make it with make_standalone.bat).", NULL);
     }
@@ -204,9 +260,8 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show)
         memcpy(&e[i].size, q + 8, 8);
         memcpy(&e[i].hash, q + 16, 8);
         q += 24;
-        /* plain file names only, inside the bundle's bytes */
-        if (!e[i].name[0] || wcspbrk(e[i].name, L"\\/:") || wcscmp(e[i].name, L"..") == 0 ||
-            e[i].off > t.index_off || e[i].size > t.index_off - e[i].off)
+        /* plain names (the Wii's in wii/Game/ ...) inside the folder, inside the bundle's bytes */
+        if (!safe_name(e[i].name) || e[i].off > t.index_off || e[i].size > t.index_off - e[i].off)
             fail(L"The bundle's index is damaged.", NULL);
     }
     free(idx);
@@ -225,9 +280,11 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show)
 
     /* what is there already; the free room for the rest */
     uint64_t total = 0, done = 0;
+    int wii = 0;
     for (uint32_t i = 0; i < t.count; i++) {
         wchar_t out[MAX_PATH * 2];
-        swprintf(out, MAX_PATH * 2, L"%ls\\%ls", base, e[i].name);
+        out_path(out, MAX_PATH * 2, base, e[i].name, 0);
+        wii |= wcsncmp(e[i].name, L"wii/", 4) == 0;
         e[i].skip = disk_size(out) == e[i].size && listed(state, &e[i]);
         if (!e[i].skip)
             total += e[i].size;
@@ -249,7 +306,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show)
             if (e[i].skip)
                 continue;
             wchar_t out[MAX_PATH * 2], part[MAX_PATH * 2 + 8];
-            swprintf(out, MAX_PATH * 2, L"%ls\\%ls", base, e[i].name);
+            out_path(out, MAX_PATH * 2, base, e[i].name, 1);
             swprintf(part, MAX_PATH * 2 + 8, L"%ls.part", out);
             HANDLE o = CreateFileW(part, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
             if (o == INVALID_HANDLE_VALUE)
@@ -289,6 +346,11 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show)
     swprintf(exe, MAX_PATH + 16, L"%ls\\RampageRE.exe", base);
     swprintf(vol, MAX_PATH + 16, L"%ls\\RAMPAGE.VOL", base);
     SetEnvironmentVariableW(L"RAMPAGE_VOL", vol);
+    if (wii && !GetEnvironmentVariableW(L"RAMPAGE_WII_DATA", NULL, 0) && !cfg_names_wii(base)) {
+        wchar_t wd[MAX_PATH + 16];                         /* the Wii's, unpacked (docs/WII_PLAN.md) */
+        swprintf(wd, MAX_PATH + 16, L"%ls\\wii", base);
+        SetEnvironmentVariableW(L"RAMPAGE_WII_DATA", wd);
+    }
     size_t cl = wcslen(args) + MAX_PATH + 8;
     wchar_t *line = malloc(cl * sizeof *line);
     if (!line)
