@@ -95,6 +95,14 @@ static void map_material(Map *m, const uint8_t *d)
         mark(m, region[kind], region[kind] + 16u, 4);
 }
 
+/* texture (0x68 bytes on the Wii): u32 kind, u32 GX format, u16 width, height, mip levels, 0xFFFF; its pixels
+ * (data2) stay as they are, tex.c reads them as GX tiles */
+static void map_texture(Map *m)
+{
+    mark(m, 0, 8, 4);
+    mark(m, 8, 0x10, 2);
+}
+
 /* MONSTER_DATA (tools/monster.py; the fields moves.c and director.c read): 32-bit but for the u16 coded item
  * offsets, the attack items' parts and count (+0x8 .. +0x13) and the effect items' slot, effect, on, flags (+0x8 ..
  * +0xF), each state's +0xC / +0xE and its 16 bytes at +0x18, each transition's priority and count (+0x1C, +0x1E),
@@ -161,7 +169,8 @@ static void swap_entry(const Bundle *b, BdpEntry *e)
     const char *name = bdp_name(b, e->name);
     size_t len = strlen(name);
     int monster = e->type == ET_RAW && len >= 12 && strcmp(name + len - 12, "MONSTER_DATA") == 0;
-    if (!e->data || (e->type != ET_TREE && e->type != ET_ANIM && e->type != ET_MATERIAL && !monster))
+    if (!e->data || (e->type != ET_TREE && e->type != ET_ANIM && e->type != ET_MATERIAL && e->type != ET_TEXTURE &&
+                     !monster))
         return;                                          /* raw files (scripts, fonts, .ifl) stay little endian */
     uint8_t *d = (uint8_t *)e->data;
     Map m = { calloc(e->size ? e->size : 1, 1), e->size };
@@ -170,6 +179,7 @@ static void swap_entry(const Bundle *b, BdpEntry *e)
     if (e->type == ET_TREE) map_tree(&m, d);
     else if (e->type == ET_ANIM) map_clip(&m, d);
     else if (e->type == ET_MATERIAL) map_material(&m, d);
+    else if (e->type == ET_TEXTURE) map_texture(&m);
     else map_monster(&m, d);
     swap_marked(d, &m);
     free(m.w);
