@@ -101,6 +101,22 @@ stays byte for byte the same with and without `--wii`. Found on the way:
 Check: each of the 10 in `--autoplay` through a Las Vegas block: punches, climbs, eats, roars, dies and respawns;
 the event log shows no unanswered call.
 
+**Phase 2 done** (397cadd .. 9beca6d): a Wii monster plays on the PS2's pad, with its own voice, effects, HUD head and
+script calls. In a Wii graph, 23,664 of the 32,337 transitions the 30 shared monsters have now carry the PS2's exact
+conditions. The rest differ by the Wii's own thresholds. The Wii's sound bank decodes all 696 samples, and its
+fx.bdg adds the four effects only it has. Each of the ten autoplays a Las Vegas block with every call answered, and
+the PS2 game stays byte for byte the same with `--wii`. Found on the way:
+- on the ground the Wii swapped punch down and kick; the PS2's inputs are put back (`moves.c` `wii_ground`);
+- `fx_open` kept its caller's bundle list, which was on the stack; it is now copied;
+- the HUD looked the monster's head up before any bundle was added; it now looks again (`find_head`);
+- a Wii monster's property book is the Wii's copy. Brian has Rhett's, where the Wii has `Weapon|Brain` in place of
+  the PS2's Breath (`mon_props`, `city_book_group_wii`);
+- the ten's own calls: `Brian::fireWeapon` ("brain"), `Cyril::crazyCyril` (setSpeedScale 1.5 for 35 s, on his
+  Expression_Zap), Cyril's and Fifi's swaps (Hazard_Cyril_Shock, Powerup_Crock_Cat), `Monsters::hasSuperJump`
+  (upgrade 16, cheat 8 or the rage: the upgrade waits for phase 5); `<Name>::EnableWeapon` stays without effect,
+  as on the PS2 (no `Expression_Weapon` node);
+- Sarah's `aqua_aha_2` and `aqua_growl_8` are in neither platform's bank.
+
 **Phase 3, the 40-monster roster and the save.**
 1. Lists sized by the data, not 30: `PROFILE_MONSTERS`, `SHELL_MONSTERS`, `MsPlayer.monsters`,
    `ShellProfile.monster_flags`, the reveal glue (`main.c:1377`, `4258`), `gs_from` (`shell.c:3620`), the attract
