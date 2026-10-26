@@ -70,9 +70,24 @@ python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and
   name table, which stays little endian. `bdp.Bundle` reads both and keeps the byte order in `.endian`.
 - **`.zip`:** a real zip archive holding the `.cmg` of the same name (George.zip: 679 KB for a 1.55 MB `George.cmg`),
   not a copy as on the PS2.
-- **Entry types:** the same, but there are no palettes (type 13). Textures have a 0x68-byte header instead of 0x104;
-  `George_512_C` is 512 × 512 in format 14 (probably GX CMPR). Mesh vertices look like GX display lists. Neither is
-  decoded yet: `tex.py`, `mesh.py` and `anim.py` read only the PS2's.
+- **Entry types:** the same, but there are no palettes (type 13). Mesh vertices look like GX display lists; not
+  decoded yet: `mesh.py` and `anim.py` read only the PS2's.
+- **Textures** (`tools/tex.py --all DATA/files/Game OUTDIR`: all 1,725, and Shell's 194): data 0x68 bytes, big
+  endian: u32 kind, u32 GX format, u16 width, u16 height, u16 mip levels, u16 0xFFFF (no palette), the rest zero.
+  data2 is every mip level, largest first, each in whole GX tiles; its size is that sum in all 1,919.
+
+  | GX format | Tile | Textures | Kind |
+  |---|---|---|---|
+  | 14 CMPR (DXT1 blocks, 4 per tile in Z order, big endian colours) | 8 × 8 | 1,353 | 7 |
+  | 5 RGB5A3 | 4 × 4 | 490 | 9 |
+  | 3 IA8 (alpha, intensity): the monsters' new `_512_B` bump maps | 4 × 4 | 40 | 14 |
+  | 1 I8 (fonts, stars: alpha the intensity, as GX does) | 8 × 4 | 33 | 17 |
+  | 6 RGBA8 (a tile's AR pairs, then its GB pairs) | 4 × 4 | 2 | 1 |
+  | 0 I4 | 8 × 8 | 1 | 16 |
+
+  The monster skins are 512 × 512 (256 × 256 with a palette on the PS2). Of the 194 textures that Chicago and
+  WorldGui share with the PS2, the median differs by 1.1 (of 255) in mean colour; the far ones were redrawn (`Chicago_skyline` is
+  1024 × 256, 256 × 128 on the PS2). Flea's textures are named `Eek_512_C` / `_B`.
 - **Skeletons:** George's node tree is the PS2's byte-swapped: 1,513 of its 1,555 words, the rest names and 16-bit
   fields.
 - **`MONSTER_DATA`:** the same layout, big endian. The move graphs have 181 states instead of 176, adding
