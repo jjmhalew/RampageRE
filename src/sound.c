@@ -31,7 +31,7 @@
 #define NEAREST 16                       /* [R] 0x273CF0 looks after the 16 nearest 3D objects */
 #define NGROUPS 64                       /* [R] 0x26E0D8 */
 #define GROUP_MUSIC 3                    /* [R] setMusicVolume = group 3 (0x26B5E0) */
-#define MAX_BANKS 2
+#define MAX_BANKS 4                      /* the PS2's Rampage and RShell, the Wii's with a Wii folder */
 
 static inline int be16(const uint8_t *p) { return p[0] << 8 | p[1]; }
 static inline int pack_vol(int v) { return (v & 0xFF) << 7; }        /* [R] 0x26FC80 */
@@ -56,6 +56,7 @@ typedef struct {
     int nproj, npool, nsdir;
     const char **names;                  /* one per PROJ entry */
     Sample *smp;
+    int wii;                             /* the Wii's ("REBU"): its tables swapped at load, its samples DSP-ADPCM */
 } Bank;
 
 /* ---- an instance of an event program (0x3C bytes at 0x4CFAB0 +0x4C) */
@@ -176,6 +177,41 @@ static void adpcm_frame(const uint8_t *f, int16_t *out, int *h1, int *h2)
     }
 }
 
+/* a Wii sample (tools/sound.py dsp_decode, FORMAT_SOUND.md "The Wii's banks"): its SDIR entry (64 bytes, big endian)
+ * u32 nibble address of the first sample, u32 nibbles, u32 flags, u32 rate, s16[16] the DSP-ADPCM coefficients; the
+ * .samp 8-byte frames of a header (predictor << 4 | scale, its two nibbles counted in the addresses) and 14 nibbles. A
+ * looping one (flags bit 0, 27 as on the PS2) loops from its start: the entry keeps no other place */
+static Sample *wii_sample(Bank *b, int idx, Sample *s)
+{
+    const uint8_t *e = b->sdir + 0x10 + 64 * idx;
+    uint32_t start = rd32be(e), count = rd32be(e + 4), flags = rd32be(e + 8);
+    int16_t coef[16];
+    for (int k = 0; k < 16; k++)
+        coef[k] = (int16_t)rd16be(e + 16 + 2 * k);
+    if (start == 0xFFFFFFFFu || ((uint64_t)start + count + 15) / 16 * 8 > b->samp_size)
+        return NULL;
+    s->pcm = malloc(sizeof(int16_t) * (count ? count : 1));
+    if (!s->pcm)
+        return NULL;
+    s->rate = (int)rd32be(e + 12);
+    int h1 = 0, h2 = 0, n = 0;
+    for (uint32_t a = start; a < start + count; a++) {
+        if (a % 16 < 2)                  /* the frame's header */
+            continue;
+        uint8_t ps = b->samp[a / 16 * 8], byte = b->samp[a / 2];
+        int nib = a % 2 ? byte & 15 : byte >> 4;
+        int v = ((nib ^ 8) - 8) * (1 << (ps & 15)) * 2048;   /* the signed nibble, scaled */
+        v = (v + 1024 + coef[2 * (ps >> 4)] * h1 + coef[2 * (ps >> 4) + 1] * h2) >> 11;
+        v = v < -32768 ? -32768 : v > 32767 ? 32767 : v;
+        s->pcm[n++] = (int16_t)v;
+        h2 = h1;
+        h1 = v;
+    }
+    s->n = n;
+    s->loop = flags & 1 ? 0 : -1;
+    return s;
+}
+
 static Sample *sample_get(Bank *b, int idx)
 {
     if (idx <= 0 || idx >= b->nsdir)
@@ -184,6 +220,8 @@ static Sample *sample_get(Bank *b, int idx)
     if (s->tried)
         return s->pcm ? s : NULL;
     s->tried = 1;
+    if (b->wii)
+        return wii_sample(b, idx, s);
     const uint8_t *e = b->sdir + 0x10 + 16 * idx;
     uint32_t off = rd32(e), size = rd32(e + 4), flags = rd32(e + 8);
     if (off == 0xFFFFFFFFu || off > b->samp_size || size > b->samp_size - off)
@@ -211,15 +249,55 @@ static Sample *sample_get(Bank *b, int idx)
 }
 
 /* ---- banks */
-static int bank_load(Bank *b, const Vol *v, const char *name)
+static void swap32(uint8_t *p) { uint8_t t = p[0]; p[0] = p[3]; p[3] = t; t = p[1]; p[1] = p[2]; p[2] = t; }
+static void swap16(uint8_t *p) { uint8_t t = p[0]; p[0] = p[1]; p[1] = t; }
+
+/* a Wii bank ("REBU", big endian) into the PS2's layout where this file reads it: the six section offsets, the
+ * PROJ entries (f32 scale, u32 flags, u16 event; the group and max bytes as they are), the POOL offset table, the
+ * SDIR's .samp size and count, the names' u16 count and offsets. The programs' operands are big endian on both;
+ * the SDIR entries stay the Wii's, wii_sample reads them. 0 = ok */
+static int wii_tables(Bank *b)
+{
+    uint8_t *u = b->uber;
+    for (int i = 0; i < 6; i++)
+        swap32(u + 8 + 4 * i);
+    uint32_t o[6];
+    for (int i = 0; i < 6; i++)
+        if ((o[i] = rd32(u + 8 + 4 * i)) + 16 > b->uber_size)
+            return -1;
+    swap32(u + o[0] + 8);
+    swap32(u + o[1] + 8);
+    swap32(u + o[2] + 8);
+    swap32(u + o[2] + 12);
+    swap16(u + o[5]);
+    uint32_t nproj = rd32(u + o[0] + 8), npool = rd32(u + o[1] + 8), nnames = rd16(u + o[5]);
+    if (o[0] + 16 + 12ull * nproj > b->uber_size || o[1] + 16 + 4ull * npool > b->uber_size ||
+        o[5] + 4 + 4ull * nnames > b->uber_size)
+        return -1;
+    for (uint32_t i = 0; i < nproj; i++) {
+        uint8_t *e = u + o[0] + 16 + 12 * i;
+        swap32(e);
+        swap32(e + 4);
+        swap16(e + 8);
+    }
+    for (uint32_t i = 0; i < npool; i++)
+        swap32(u + o[1] + 16 + 4 * i);
+    for (uint32_t i = 0; i < nnames; i++)
+        swap32(u + o[5] + 4 + 4 * i);
+    return 0;
+}
+
+static int bank_load(Bank *b, const Vol *v, const char *name, int wii)
 {
     char path[64];
     snprintf(path, sizeof path, "%s.uber", name);
-    b->uber = vol_read(v, path, &b->uber_size);
+    b->uber = wii ? vol_read_wii(v, path, &b->uber_size) : vol_read(v, path, &b->uber_size);
     snprintf(path, sizeof path, "%s.samp", name);
-    b->samp = vol_read(v, path, &b->samp_size);
-    if (!b->uber || !b->samp || b->uber_size < 0x20 || memcmp(b->uber, "UBER", 4) != 0)
+    b->samp = wii ? vol_read_wii(v, path, &b->samp_size) : vol_read(v, path, &b->samp_size);
+    if (!b->uber || !b->samp || b->uber_size < 0x20 || memcmp(b->uber, wii ? "REBU" : "UBER", 4) != 0 ||
+        (wii && wii_tables(b) != 0))
         goto bad;
+    b->wii = wii;
     uint32_t o[6];
     for (int i = 0; i < 6; i++) {
         o[i] = rd32(b->uber + 8 + 4 * i);
@@ -234,7 +312,7 @@ static int bank_load(Bank *b, const Vol *v, const char *name)
     b->nsdir = (int)rd32(b->sdir + 12);
     uint32_t nnames = rd32(b->uber + o[5]);
     if (nnames != (uint32_t)b->nproj || o[0] + 16 + 12u * b->nproj > b->uber_size ||
-        o[2] + 16 + 16u * b->nsdir > b->uber_size || o[1] + 16 + 4u * b->npool > b->uber_size)
+        o[2] + 16 + (b->wii ? 64u : 16u) * b->nsdir > b->uber_size || o[1] + 16 + 4u * b->npool > b->uber_size)
         goto bad;
     b->names = calloc(nnames, sizeof *b->names);
     b->smp = calloc(b->nsdir, sizeof *b->smp);
@@ -1253,9 +1331,10 @@ int sound_init(const Vol *v)
     sound_free();
     memset(&S, 0, sizeof S);
     S.vol = v;
-    static const char *const banks[MAX_BANKS] = { "Rampage", "RShell" };   /* [R] 0x28C270 loads <name>.uber/.samp */
-    for (int i = 0; i < MAX_BANKS; i++)
-        if (bank_load(&S.bank[S.nbanks], v, banks[i]) == 0)
+    static const char *const banks[2] = { "Rampage", "RShell" };   /* [R] 0x28C270 loads <name>.uber/.samp */
+    for (int i = 0; i < 4; i++)          /* then the Wii's (vol_add_wii): find_event asks the PS2's first, so they
+                                          * give only the events the PS2's have not got (the Wii monsters' voices) */
+        if ((i < 2 || v->nwii) && bank_load(&S.bank[S.nbanks], v, banks[i % 2], i >= 2) == 0)
             S.nbanks++;
     for (int i = 0; i < MAX_INST; i++) {
         inst_free(&S.inst[i]);

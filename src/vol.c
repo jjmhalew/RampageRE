@@ -90,6 +90,23 @@ uint8_t *vol_read(const Vol *v, const char *name, uint32_t *size)
     return buf;
 }
 
+uint8_t *vol_read_wii(const Vol *v, const char *name, uint32_t *size)
+{
+    const VolFile *f = find_in(v->wii, v->nwii, name);
+    FILE *h = f ? fopen(f->path, "rb") : NULL;
+    uint8_t *buf = h ? malloc(f->size ? f->size : 1) : NULL;
+    int ok = buf && fread(buf, 1, f->size, h) == f->size;
+    if (h)
+        fclose(h);
+    if (!ok) {
+        free(buf);
+        return NULL;
+    }
+    if (size)
+        *size = f->size;
+    return buf;
+}
+
 /* ---- the Wii folder */
 static void add_file(Vol *v, uint32_t *cap, const char *dir, const char *name, uint32_t size)
 {

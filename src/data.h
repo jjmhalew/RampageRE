@@ -30,6 +30,8 @@ uint8_t *vol_read(const Vol *v, const char *name, uint32_t *size);   /* malloc'd
 /* the player's extracted Wii disc (wii_data=, docs/WII_PLAN.md): the files of its Game, Shell and Audio folders, found
  * under dir, dir/DATA/files or dir/files, added after the VOL's (vol_find). Returns how many, 0 none */
 uint32_t vol_add_wii(Vol *v, const char *dir);
+/* the Wii folder's own file of that name, even where the VOL has one (its sound banks: Rampage.uber ...); NULL if none */
+uint8_t *vol_read_wii(const Vol *v, const char *name, uint32_t *size);
 
 /* ---- bundles (.bdp/.cmp, "Pipeworks Bundle File version 1.3", segment 0) */
 enum { ET_MESH = 0, ET_RAW = 2, ET_TREE = 3, ET_ANIM = 4, ET_MATERIAL = 6, ET_TEXTURE = 9, ET_PALETTE = 13,
