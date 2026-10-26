@@ -2100,10 +2100,11 @@ struct Shell {
     float wide_extra;                                /* shell_set_wide */
     Bundle b_shell, b_vshell, b_data, b_common, b_mc, b_loading;
     int have_shell, have_vshell, have_data, have_common, have_mc, have_loading;
-    Bundle b_wii[3]; int have_wii[3];                    /* the Wii folder's Shell, VShell, CommonGUI.bdg: after the PS2's */
+    Bundle b_wii[3]; int have_wii[3];               /* the Wii folder's Shell, VShell, CommonGUI.bdg, after the PS2's */
     Gui gui;
     Book book;
     Group monster_data, city_data;
+    int nmonsters;                                       /* MonsterData's Monster<n> groups (30; the Wii's 40) */
     ShellProfile prof;
     ShellGame gs;                                        /* gCommon.getGameStatus() and the players / bots */
     ShellStart st;
@@ -2205,7 +2206,7 @@ static const char *city_name(const Shell *s, int i)
 /* gCommon.getMonsterFlags(player, monster) [R 0x33D760: 0 outside 0 .. 30; a buddy's for players 1 .. 3] */
 static int monster_flags(const Shell *s, int player, int monster)
 {
-    if (monster < 0 || monster >= SHELL_MONSTERS)
+    if (monster < 0 || monster >= s->nmonsters)
         return 0;
     if (player < 0 || player > 3)
         player = 0;
@@ -3618,7 +3619,7 @@ static void gs_from(Shell *s, int city, int night, int start_block, const int mo
     s->gs.night = night != 0;
     s->gs.start_block = start_block;
     for (int i = 0; i < 4; i++) {
-        s->gs.monster[i] = monster[i] >= 0 && monster[i] < SHELL_MONSTERS ? monster[i] : 0;
+        s->gs.monster[i] = monster[i] >= 0 && monster[i] < s->nmonsters ? monster[i] : 0;
         snprintf(s->gs.monster_name[i], sizeof s->gs.monster_name[i], "%s", monster_name(s, s->gs.monster[i]));
     }
 }
@@ -4429,7 +4430,7 @@ static int ms_fill(Shell *s, int p, int prev)
     MsPlayer *pl = &s->ms.pl[p];
     int found = 0;
     pl->nmon = 0;
-    for (int i = 0; i < SHELL_MONSTERS; i++)
+    for (int i = 0; i < s->nmonsters; i++)
         if (ms_available(s, p, i)) {
             if (i == prev) {
                 pl->selection = pl->nmon;
@@ -4816,9 +4817,9 @@ static void sheet_select_card(Shell *s, const char *name)   /* selectMonsterCard
 {
     MonsterSheet *h = &s->sh;
     int i;
-    for (i = 0; i < SHELL_MONSTERS; i++)
+    for (i = 0; i < s->nmonsters; i++)
         if (strcmp(monster_name(s, i), name) == 0) break;
-    if (i >= SHELL_MONSTERS) i = 0;
+    if (i >= s->nmonsters) i = 0;
     h->state = 0;
     h->sub = 0;
     h->col = -1;
@@ -4973,7 +4974,7 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
         h->arrow_r = find(h->arrows, "ArrowR");
         h->arrow_l = find(h->arrows, "ArrowL");
         Node *tpl = find(r, "card_template"), *row0 = find(r, "row0"), *row1 = find(r, "row1");
-        for (int i = 0; i + 1 < SHELL_MONSTERS; i += 2)
+        for (int i = 0; i + 1 < s->nmonsters; i += 2)
             for (int k = 0; k < 2; k++) {
                 Node *item = node_copy(s->ifc[IF_MONSTERSHEET], tpl, k ? row1 : row0);
                 if (!item) continue;
@@ -4983,7 +4984,7 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
                 if (!sheet_available(s, i + k))
                     show(find(item, "black"), 1);
             }
-        h->right_bounds = 130.0f * (SHELL_MONSTERS / 2 - 1);
+        h->right_bounds = 130.0f * (s->nmonsters / 2 - 1);
         h->left_edge = 0;
         h->right_edge = 3 * 130.0f;
         sheet_select_card(s, monster_name(s, s->gs.monster[0]));
@@ -4993,7 +4994,7 @@ static void sheet_event(Shell *s, int ev, int button, int pad, float dt)
         if (!h->initialized)
             return;
         Node *row0 = find(r, "row0"), *row1 = find(r, "row1");
-        for (int i = 0; i < SHELL_MONSTERS / 2; i++)
+        for (int i = 0; i < s->nmonsters / 2; i++)
             for (int k = 0; k < 2; k++) {
                 Node *item = child_at(k ? row1 : row0, i);
                 show(find(item, "black"), !sheet_available(s, i * 2 + k));
@@ -5444,7 +5445,7 @@ static void cr_open(Shell *s)
     for (int i = 0; i < IF_COUNT; i++) {
         char name[32];
         snprintf(name, sizeof name, "%s.ifc", IFC_NAMES[i]);
-        s->ifc[i] = layout_load(&s->gui, &s->b_shell, name, i == IF_MONSTERSHEET ? 30 * 24 : i == IF_OPTIONS ? 128 :
+        s->ifc[i] = layout_load(&s->gui, &s->b_shell, name, i == IF_MONSTERSHEET ? SHELL_MONSTERS * 24 : i == IF_OPTIONS ? 128 :
                                 16);                     /* (Options: its Graphics page, op_graphics_build) */
     }
     for (int i = 0; i < IF_COUNT; i++)
@@ -5561,6 +5562,8 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
             s->gui.bundles[s->gui.nb++] = &s->b_wii[i];
     if (book_open(&s->book, &s->b_data) == 0) {          /* gShell.loadPropertyBook("ShellData") */
         s->monster_data = book_group(&s->book, "MonsterData");
+        while (s->nmonsters < SHELL_MONSTERS && monster_name(s, s->nmonsters)[0])
+            s->nmonsters++;
         s->city_data = book_group(&s->book, "CityData");
     }
     if (p) s->prof = *p;
@@ -5908,7 +5911,7 @@ static void soak(Shell *s)
     } else if (!strcmp(name, "MonsterSelect")) {
         MonsterSel *ms = &s->ms;
         if (soak_new)
-            soak_next_pair(SHELL_MONSTERS);
+            soak_next_pair(s->nmonsters);
         soak_new = 0;
         for (int p = 0; p < 2; p++) {
             /* "2 Player"'s Player<p>: a card showing the body (head's picture <name>_Body: not ready yet), its name

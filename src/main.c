@@ -7166,7 +7166,7 @@ static void shell_profile(Viewer *v, ShellProfile *sp)
     sp->four_players = v->four_players;
     snprintf(sp->name, sizeof sp->name, "%s", v->prof.block.name);
     for (int p = 0; p < 4; p++)
-        for (int m = 0; m < SHELL_MONSTERS; m++)
+        for (int m = 0; m < v->prof.nmonsters && m < SHELL_MONSTERS; m++)
             sp->monster_flags[p][m] = (uint8_t)profile_monster_flags(&v->prof, p, m);
     for (int c = 0; c < SHELL_CITIES; c++) {
         sp->city_flags[c] = (uint8_t)profile_city_flags(&v->prof, c);

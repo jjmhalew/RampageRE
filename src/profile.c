@@ -8,7 +8,7 @@
 #define CAMPAIGN 2                                   /* gCommon.getPlayType */
 
 /* [R] ShellData.bdp MonsterData Monster0 .. Monster29 { Name }: the loader 0x33E850 puts Monster<n> at index n */
-const char *const PROFILE_MONSTER_NAMES[PROFILE_MONSTERS] = {
+const char *const PROFILE_MONSTER_NAMES[PROFILE_PS2_MONSTERS] = {
     "George", "Lizzie", "Ralph", "Ramsey", "Gilman", "Rhett", "Cal", "Leon", "Crock", "Kyle",
     "Marco", "Rojo", "Icky", "Venus", "Wally", "Harry", "Snapper", "Amanda", "Kingston", "Natalie",
     "Rock", "Dick", "Furby", "Batty", "Jack", "Jill", "Nick", "Philbert", "Eyegore", "Boosy"
@@ -43,7 +43,7 @@ static int city_ok(const Profile *p, int c) { return c >= 0 && c < p->ncities &&
 void profile_set_roster(Profile *p, const char *const *monsters, int nmonsters, const char *const *cities,
                         int ncities)
 {
-    if (monsters) {                                  /* [R] 0x33EDD8: 31 or more are cut to 30 */
+    if (monsters) {                                  /* [R] 0x33EDD8: 31 or more are cut to 30 (here 40) */
         p->nmonsters = nmonsters < 0 ? 0 : nmonsters > PROFILE_MONSTERS ? PROFILE_MONSTERS : nmonsters;
         for (int i = 0; i < PROFILE_MONSTERS; i++)
             p->monster_name[i] = i < p->nmonsters ? monsters[i] : NULL;
@@ -149,7 +149,7 @@ void profile_block_new(ProfileBlock *b)
 void profile_init(Profile *p)
 {
     memset(p, 0, sizeof *p);
-    profile_set_roster(p, PROFILE_MONSTER_NAMES, PROFILE_MONSTERS, PROFILE_CITY_NAMES, PROFILE_CITIES);
+    profile_set_roster(p, PROFILE_MONSTER_NAMES, PROFILE_PS2_MONSTERS, PROFILE_CITY_NAMES, PROFILE_CITIES);
     p->play_type = CAMPAIGN;
     /* allow_save 0 [R]: flag 4 is clear in .bss and the boot's card check does not set it */
     p->last_city = 0;
@@ -375,7 +375,7 @@ static void pack_status(const ProfileStatus *s, uint8_t *o)   /* 0xB8 bytes */
         put32(o + 0x14 + 4 * i, (uint32_t)s->monster[i]);
         put32(o + 0x24 + 4 * i, (uint32_t)s->lives[i]);
     }
-    for (int i = 0; i < PROFILE_MONSTERS; i++)
+    for (int i = 0; i < PROFILE_PS2_MONSTERS; i++)
         put32(o + 0x34 + 4 * i, s->monster_flags[i]);
     put32(o + 0xAC, s->city_flags);
     put32(o + 0xB0, (uint32_t)s->city_score);
@@ -393,7 +393,7 @@ static void unpack_status(ProfileStatus *s, const uint8_t *i)
         s->monster[k] = (int32_t)get32(i + 0x14 + 4 * k);
         s->lives[k] = (int32_t)get32(i + 0x24 + 4 * k);
     }
-    for (int k = 0; k < PROFILE_MONSTERS; k++)
+    for (int k = 0; k < PROFILE_PS2_MONSTERS; k++)
         s->monster_flags[k] = get32(i + 0x34 + 4 * k);
     s->city_flags = get32(i + 0xAC);
     s->city_score = (int32_t)get32(i + 0xB0);
@@ -541,22 +541,22 @@ int profile_read(Profile *p, const char *path)
 
 uint32_t profile_monster_flags(const Profile *p, int player, int monster)
 {
-    if (monster < 0 || monster > PROFILE_MONSTERS)   /* [R] 0x33D760: 0 .. 30 */
+    if (monster < 0 || monster > p->nmonsters)       /* [R] 0x33D760: 0 .. 30 */
         return 0;
     if (player > 0 && player < PROFILE_PLAYERS && p->player_flags[player][PROFILE_MONSTERS])
         return p->player_flags[player][monster];
-    if (monster == PROFILE_MONSTERS)                 /* [R] +0x234 + 4 x 30 is the city's flags (+0x2AC) */
+    if (monster == p->nmonsters)                     /* [R] +0x234 + 4 x 30 is the city's flags (+0x2AC) */
         return p->current.city_flags;
     return p->current.monster_flags[monster];
 }
 
 void profile_set_monster_flags(Profile *p, int player, int monster, uint32_t flags)
 {
-    if (monster < 0 || monster > PROFILE_MONSTERS)   /* [R] 0x33D7C0 */
+    if (monster < 0 || monster > p->nmonsters)       /* [R] 0x33D7C0 */
         return;
     if (player > 0 && player < PROFILE_PLAYERS)
         p->player_flags[player][monster] = (uint8_t)flags;
-    else if (monster == PROFILE_MONSTERS)
+    else if (monster == p->nmonsters)
         p->current.city_flags = flags & 0xFF;
     else
         p->current.monster_flags[monster] = flags & 0xFF;

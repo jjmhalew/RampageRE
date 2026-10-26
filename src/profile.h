@@ -26,8 +26,11 @@
 #define PROFILE_VERSION 8                            /* [R] 0x33F630: the block's +0x00 */
 #define PROFILE_SIZE 0x128                           /* [R] its +0x04: the bytes saved (0x4D79B0 .. 0x4D7AD8) */
 #define PROFILE_CITIES 7                             /* [R] 0x33E850: CityData City0 .. City6 (at most 7) */
-#define PROFILE_MONSTERS 30                          /* [R] 0x33E850: MonsterData Monster0 .. 29 (at most 30); the
-                                                      * records keep 30 flags (0x33D820 copies 15 x 8 bytes) */
+#define PROFILE_PS2_MONSTERS 30                      /* [R] 0x33E850: MonsterData Monster0 .. 29 (at most 30); the
+                                                      * records keep 30 flags (0x33D820 copies 15 x 8 bytes), and so
+                                                      * does the file */
+#define PROFILE_MONSTERS 40                          /* the room: the Wii's ShellData has 40 (docs/WII_PLAN.md); the
+                                                      * PS2's roster fills the first 30 */
 #define PROFILE_PLAYERS 4
 
 /* ---- the monsters' flags (ProfileStatus.monster_flags, getMonsterFlags) [R] */
@@ -74,7 +77,8 @@ typedef struct {
                                                       * (0x2B6600) sets the current block's BlockList index */
     int32_t monster[PROFILE_PLAYERS];                /* +0x14: getMonsterIdx(i) / setMonsterIdx */
     int32_t lives[PROFILE_PLAYERS];                  /* +0x24: getNumLives(i) / setNumLives */
-    uint32_t monster_flags[PROFILE_MONSTERS];        /* +0x34: PM_* (getMonsterFlags reads the current one's) */
+    uint32_t monster_flags[PROFILE_MONSTERS];        /* +0x34: PM_* (getMonsterFlags reads the current one's); the
+                                                      * file keeps the first 30 */
     uint32_t city_flags;                             /* +0xAC: getCityFlags / setCityFlags: PC_* of this city */
     int32_t city_score;                              /* +0xB0: getCityScore: the city's total (against ParScore) */
     uint8_t changed;                                 /* +0xB4: set by the merge (0x33F730) when anything changed */
@@ -105,7 +109,8 @@ typedef struct {
     ProfileStatus checkpoint;                        /* +0x148 */
     ProfileStatus current;                           /* +0x200 */
     uint8_t player_flags[PROFILE_PLAYERS][PROFILE_MONSTERS + 1];   /* +0x299 + 31 p: players 1 .. 3's own flags
-                                                      * (0x307EE0, a second profile); [30] = in use */
+                                                      * (0x307EE0, a second profile); the last = in use (the game's
+                                                      * [30]) */
     int play_type;                                   /* +0x4B4: gCommon.getPlayType (2 the campaign) */
     int city_destroyed;                              /* +0x4BC: isCityDestroyed (the city's last block won) */
     int last_city;                                   /* +0x4D4: getLastCityIdx */
@@ -122,12 +127,12 @@ typedef struct {
 } Profile;
 
 /* ShellData's rosters as built in (MonsterData Monster0 .. 29, CityData City0 .. 6) */
-extern const char *const PROFILE_MONSTER_NAMES[PROFILE_MONSTERS];
+extern const char *const PROFILE_MONSTER_NAMES[PROFILE_PS2_MONSTERS];
 extern const char *const PROFILE_CITY_NAMES[PROFILE_CITIES];
 
 /* everything 0 (the bss at boot), the built-in rosters, then createProfile's new profile; campaign play type */
 void profile_init(Profile *p);
-/* 0x33E850's rosters (the names are kept, not copied); n above the room is cut (30 / 7, as the loader does) */
+/* 0x33E850's rosters (the names are kept, not copied); n above the room is cut (40 / 7; the game cuts at 30 / 7) */
 void profile_set_roster(Profile *p, const char *const *monsters, int nmonsters, const char *const *cities, int ncities);
 int profile_find_monster(const Profile *p, const char *name);   /* 0x33DAF0: any case, -1 */
 int profile_find_city(const Profile *p, const char *name);      /* the CityData index, any case, -1 */
@@ -212,8 +217,8 @@ uint32_t profile_crc32(uint32_t crc, const uint8_t *data, unsigned long n);   /*
 void profile_card_dir(const char *name, char out[24]);
 
 /* ---- gCommon's getters and setters (Common binding ids) */
-/* getMonsterFlags (0x19, 0x33D760): monster 0 .. 30 (else 0); players 1 .. 3 with their own flags in use: theirs;
- * otherwise the current game's */
+/* getMonsterFlags (0x19, 0x33D760): monster 0 .. the roster's count (30 on the PS2; else 0); players 1 .. 3 with
+ * their own flags in use: theirs; otherwise the current game's, the count itself its city flags */
 uint32_t profile_monster_flags(const Profile *p, int player, int monster);
 /* setMonsterFlags (0x1A, 0x33D7C0): players 1 .. 3 their own (a byte); otherwise current (flags & 0xFF) */
 void profile_set_monster_flags(Profile *p, int player, int monster, uint32_t flags);

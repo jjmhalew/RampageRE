@@ -35,7 +35,7 @@
 #include "data.h"
 #include "hud.h"
 
-#define SHELL_MONSTERS 30           /* MonsterData.Monster0 .. 29 of ShellData.bdp */
+#define SHELL_MONSTERS 40           /* room for MonsterData.Monster0 .. 29 of ShellData.bdp, 0 .. 39 of the Wii's */
 #define SHELL_CITIES 7              /* CityData.City0 .. 6: LasVegas SanFrancisco London LosAngeles Chicago HongKong
                                      * NewYork (the campaign's order) */
 #define SHELL_PROFILES 16           /* profiles on the "memory card" the popup lists */
