@@ -174,7 +174,7 @@ Left for phase 5: SuperJump and the fifth star.
 **Phase 5 (optional): SuperJump** (decision 6), and the other platforms (Android, Switch, Vita: where the Wii
 folder goes).
 
-**Phase 5's SuperJump done** (c220768 .. b005948). The other platforms are not started. With a Wii folder the
+**Phase 5's SuperJump done** (c220768 .. b005948). With a Wii folder the
 block's upgrade comes from the Wii's lists, for all 40 monsters (chosen: the Wii's ten were in no PS2 list, and the
 Wii moved some PS2 monsters to make room for SuperJump). Taking SuperJump sets bit 16, which is saved in the side
 file. The Wii's ten can do the move: a fresh Cross press while landing (the Wii's B) goes into `Jump_Super`. The PS2's
@@ -189,10 +189,24 @@ Vern can all be reached. Found on the way:
 - SuperJump's instruction text reads "Press and Hold 1.25Controller_Back while Landing": a Wii button name inside
   the text, shown as it is.
 
+**Phase 5's other platforms done** (12d8940 .. 45889e3). On the Switch, the Vita and Android a `wii` folder in the home
+folder (`sdmc:/switch/rampagere`, `ux0:data/rampagere`, the app folder) holding the Wii's Game, Shell and Audio is
+used on its own, as the game's data there is; `wii_data=` still points elsewhere and `wii_data=none` leaves it out. The
+PC builds stay explicit. On Android the app also copies it: its picker takes the extracted disc, its `DATA/files` or
+the folder with `Game` in it, from the launcher's shortcut "Add the Wii's data" (before the data is read on a fresh
+start, at once while running) and once after the first start's copy. Found on the way:
+- nothing in the Wii code was Windows-only: `vol_add_wii` already read folders with opendir / stat elsewhere;
+- the port reads Game, Shell and Audio alone, 317 MB of the disc's 716 MB (88 MB of it the .zip files, which it does
+  not read either), so only those go onto a card or a phone;
+- on the emulator, folders that `adb shell` makes in the app folder before the app's first start are not the app's to
+  open (the files folder is then the shell's): the data goes in after a first start, or through the picker.
+Untested: a real Switch, Vita or phone (no hardware here), a USB cable's (MTP) copy on Android. The builds are:
+rampage.nro, rampage.vpk and the APK, and the Android flows on the emulator (NATIVE.md "Android").
+
 ## Risks and unknowns
 - The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
   check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].
-- The five-star unlocks need SuperJump (decision 6) or a stand-in rule.
+- The five-star unlocks need SuperJump (decision 6) or a stand-in rule: SuperJump came in phase 5.
 - Dallas's second boss bar and its two-boss finish are new C, not data.
 - Size: phase 1 is the biggest (the GX mesh reader and the byte swapping); phases 3 and 4 touch many files but are
   mostly widening arrays.
