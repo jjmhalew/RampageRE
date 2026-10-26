@@ -132,7 +132,7 @@ struct FxLib {
     int nshapes;
     float *pts;
     uint32_t npts, cap;
-    const Bundle *const *bundles;
+    const Bundle *bundles[4];                        /* fx_open's, copied: its callers' lists are on the stack */
     int nbundles;
 };
 
@@ -876,7 +876,9 @@ FxLib *fx_open(const char *data_path, const Bundle *const *bundles, int nbundles
         fx_close(L);
         return NULL;
     }
-    L->bundles = bundles;
+    if (nbundles > 4)
+        nbundles = 4;
+    memcpy(L->bundles, bundles, sizeof *bundles * (size_t)nbundles);
     L->nbundles = nbundles;
     for (int bi = 0; bi < nbundles; bi++) {
         const Bundle *b = bundles[bi];

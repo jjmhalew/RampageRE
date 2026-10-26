@@ -1671,6 +1671,17 @@ static void sound(Hud *h, const char *name, int kill)
 }
 
 /* ---------------------------------------------------------------- the HUD */
+/* the monster's head (heads, and the King modes' blocks): again as bundles are added, for the Wii's monsters */
+static void find_head(Hud *h, int again)
+{
+    char tname[64];
+    snprintf(tname, sizeof tname, "Hud_%s_Head", h->monster);
+    if (h->heads && !(again && h->heads->has_tex))
+        h->heads->has_tex = tex_find(&h->gui, tname, &h->heads->tex);
+    if (h->blocks && !(again && h->blocks->has_tex))
+        h->blocks->has_tex = tex_find(&h->gui, tname, &h->blocks->tex);
+}
+
 Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg)
 {
     if (!worldgui || !cfg)
@@ -1706,15 +1717,11 @@ Hud *hud_open(const Bundle *worldgui, const Bundle *common, const HudConfig *cfg
     h->num_text = layout_find(r, "numText");
     h->block = layout_find(r, "block");
     h->block_text = layout_find(r, "blockText");
-    char tname[64];
-    snprintf(tname, sizeof tname, "Hud_%s_Head", h->monster);
+    find_head(h, 0);
     int gt = cfg->play_type, king = gt >= 3 && gt <= 4;
-    if (h->heads) {
-        h->heads->has_tex = tex_find(&h->gui, tname, &h->heads->tex);
+    if (h->heads)
         h->heads->visible = !king;
-    }
     if (h->blocks) {
-        h->blocks->has_tex = tex_find(&h->gui, tname, &h->blocks->tex);
         h->blocks->visible = king;
         int i = 0;
         for (Node *c = h->blocks->child; c; c = c->next, i++) {
@@ -1806,6 +1813,7 @@ void hud_add_bundle(Hud *h, const Bundle *b)
         if (h->gui.bundles[i] == b)
             return;
     h->gui.bundles[h->gui.nb++] = b;
+    find_head(h, 1);
 }
 
 const char *hud_string(const Hud *h, const char *key) { return h ? loc_find(&h->gui, key) : NULL; }

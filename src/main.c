@@ -272,6 +272,9 @@ typedef struct Viewer {
     int unattended;                                  /* --shot: the results screens are answered for the player */
     SceneMesh fx_shapes[32][8]; int fx_nshapes[32]; /* the effects' debris models (fx.bdp's .pwk), by shape */
     Bundle gui_world, gui_common; int have_gui;      /* WorldGui.bdp, CommonGUI.bdp: the HUD (hud.c) */
+    /* the Wii folder's fx.bdg, WorldGui.bdg and CommonGUI.bdg (docs/WII_PLAN.md): after the PS2's, for the effects,
+     * pictures and texts only the Wii has (its monsters' effects and HUD heads, ChallengeBoss2) */
+    Bundle wii_fx, wii_world, wii_common; int have_wii_fx, have_wii_world, have_wii_common;
     Hud *hud; int no_hud;                            /* player 1's HUD, which has the screens; --nohud: none */
     Camera hud_cam;                                  /* the frame's camera, for the floating scores */
     Challenge challenge;                             /* the block's challenge, its goals counted (challenge.c) */
@@ -1445,6 +1448,10 @@ static void build(Viewer *v)
                 if (v->have_fx_bundle)               /* the challenge icons that are fx.bdp's pictures (Chocolate_bar,
                                                       * Powerup_HotDog, moneybag, Ace_Sp ...: 20 of the 63 blocks') */
                     hud_add_bundle(mo->hud, &v->fx_bundle);
+                if (v->have_wii_world)               /* last: names only the Wii has (Hud_Boris_Head ...) */
+                    hud_add_bundle(mo->hud, &v->wii_world);
+                if (v->have_wii_common)
+                    hud_add_bundle(mo->hud, &v->wii_common);
                 hud_results_auto(mo->hud, v->unattended ? 2.0f : 0);
             }
         }
@@ -7256,9 +7263,9 @@ static int gui_lib(Viewer *v, GuiDraw *g, const Bundle *b)
     if (!b || g->nlib >= 4)
         return -1;
     GuiFxLib *l = &g->lib[g->nlib];
-    const Bundle *bl[2] = { b, &v->fx_bundle };
+    const Bundle *bl[3] = { b, &v->fx_bundle, &v->wii_fx };
     l->b = b;
-    l->lib = v->data_path[0] ? fx_open(v->data_path, bl, v->have_fx_bundle ? 2 : 1) : NULL;
+    l->lib = v->data_path[0] ? fx_open(v->data_path, bl, v->have_fx_bundle ? 2 + v->have_wii_fx : 1) : NULL;
     l->w = l->lib ? fx_world(l->lib) : NULL;
     return l->w ? g->nlib++ : (g->nlib++, -1);
 }
@@ -8584,12 +8591,23 @@ static int viewer_main(int argc, char **argv)
         uint8_t *gui = vol_read(&v.vol, "WorldGui.bdp", &gsize), *common = vol_read(&v.vol, "CommonGUI.bdp", &csize);
         v.have_gui = gui && common && bdp_load(&v.gui_world, gui, gsize) == 0 && bdp_load(&v.gui_common, common, csize) == 0;
         v.gui_world.scope = v.gui_common.scope = "GUI";   /* texture packs: the dump folders (texpack.c) */
+        static const char *const wii_names[3] = { "fx.bdg", "WorldGui.bdg", "CommonGUI.bdg" };
+        Bundle *wii_b[3] = { &v.wii_fx, &v.wii_world, &v.wii_common };
+        int *wii_have[3] = { &v.have_wii_fx, &v.have_wii_world, &v.have_wii_common };
+        for (int k = 0; k < 3 && v.vol.nwii; k++) {  /* the Wii's (the VOL has no .bdg: its folder's) */
+            uint32_t wsize = 0;
+            uint8_t *wd = vol_read(&v.vol, wii_names[k], &wsize);
+            *wii_have[k] = wd && bdp_load(wii_b[k], wd, wsize) == 0;
+            if (wd && !*wii_have[k])
+                free(wd);
+            wii_b[k]->scope = k ? "GUI" : "fx";
+        }
         if (data && bdp_load(&v.fx_bundle, data, size) == 0) {
             v.fx_bundle.scope = "fx";
-            const Bundle *bl[1] = { &v.fx_bundle };
+            const Bundle *bl[2] = { &v.fx_bundle, &v.wii_fx };   /* the PS2's first: its names win */
             snprintf(v.data_path, sizeof v.data_path, "%s", pos[0]);
             v.have_fx_bundle = 1;
-            v.fxlib = fx_open(v.data_path, bl, 1);
+            v.fxlib = fx_open(v.data_path, bl, 1 + v.have_wii_fx);
             v.fxw = v.fxlib ? fx_world(v.fxlib) : NULL;
             if (v.fxw) {
                 fx_set_step(v.fxw, TIMESTEP);        /* the world's effects: its step (0x2852E0 -> 0x282260) [R] */

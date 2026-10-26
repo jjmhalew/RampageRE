@@ -29,7 +29,7 @@
 #define SH_PI 3.14159265f
 #define MAX_TEXT 640
 #define MAX_FONTS 8
-#define MAX_BUNDLES 8
+#define MAX_BUNDLES 12
 #define MAX_LINES 16
 #define MAX_FADERS 12
 #define MAX_EVENTS 64
@@ -2100,6 +2100,7 @@ struct Shell {
     float wide_extra;                                /* shell_set_wide */
     Bundle b_shell, b_vshell, b_data, b_common, b_mc, b_loading;
     int have_shell, have_vshell, have_data, have_common, have_mc, have_loading;
+    Bundle b_wii[3]; int have_wii[3];                    /* the Wii folder's Shell, VShell, CommonGUI.bdg: after the PS2's */
     Gui gui;
     Book book;
     Group monster_data, city_data;
@@ -5554,6 +5555,10 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
                          s->have_mc ? &s->b_mc : NULL, s->have_loading ? &s->b_loading : NULL, &s->b_data };
     for (int i = 0; i < 6; i++)
         if (order[i]) s->gui.bundles[s->gui.nb++] = order[i];
+    static const char *const wii[3] = { "Shell.bdg", "VShell.bdg", "CommonGUI.bdg" };
+    for (int i = 0; i < 3 && vol->nwii; i++)             /* the names only the Wii has (its monsters' pictures) */
+        if ((s->have_wii[i] = load_bundle(vol, wii[i], &s->b_wii[i])) != 0)
+            s->gui.bundles[s->gui.nb++] = &s->b_wii[i];
     if (book_open(&s->book, &s->b_data) == 0) {          /* gShell.loadPropertyBook("ShellData") */
         s->monster_data = book_group(&s->book, "MonsterData");
         s->city_data = book_group(&s->book, "CityData");
@@ -5642,6 +5647,8 @@ void shell_close(Shell *s)
     if (s->have_common) bdp_free(&s->b_common);
     if (s->have_mc) bdp_free(&s->b_mc);
     if (s->have_loading) bdp_free(&s->b_loading);
+    for (int i = 0; i < 3; i++)
+        if (s->have_wii[i]) bdp_free(&s->b_wii[i]);
     free(s->quads);
     free(s);
 }
