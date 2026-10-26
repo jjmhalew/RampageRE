@@ -1,8 +1,8 @@
-"""List and extract Rampage bundles (.bdp/.cmp, "Pipeworks Bundle File version 1.3").
+"""List and extract Rampage bundles (.bdp/.cmp, "Pipeworks Bundle File version 1.3"; the Wii's .bdg/.cmg, 1.4).
 
 Read by the game at 0x1A8740 (BundleVolume). See docs/FORMAT_BDP.md.
 
-Layout (little endian):
+Layout (little endian; in the Wii's 1.4, version 1400, big endian except the name table):
   0x00  char[0x2C]  "Pipeworks Bundle File version 1.3", zero padded
   0x2C  u32         segments that are absent: bit n set = segment n is empty
   0x30  u32         version, 1300 (0x514; the game refuses anything else)
@@ -17,15 +17,17 @@ Segment 0 holds every entry. Another segment replaces some of them (by entry ind
 
 Usage: python tools/bdp.py FILE                list the entries
        python tools/bdp.py FILE OUTDIR         extract each entry's data (and data2) blocks
-       python tools/bdp.py --verify VOLDIR     parse every bundle and check that every byte is accounted for
+       python tools/bdp.py --verify VOLDIR     parse every bundle (PS2 or Wii) and check that every byte is accounted
+                                               for
 """
 import collections
 import os
 import struct
 import sys
 
-MAGIC = b'Pipeworks Bundle File version 1.3'
-VERSION = 1300
+MAGIC = b'Pipeworks Bundle File version 1.'
+VERSIONS = {b'3': (1300, '<'), b'4': (1400, '>')}    # PS2, Wii (big endian but for the name table)
+EXTENSIONS = ('.bdp', '.cmp', '.bdg', '.cmg')
 SEGMENTS = 10
 
 Entry = collections.namedtuple('Entry', 'index flags type extra name word8 wordC')
@@ -36,17 +38,20 @@ Segment = collections.namedtuple('Segment', 'number header entries_offset data_o
 
 class Bundle:
     def __init__(self, data):
-        if not data.startswith(MAGIC):
+        minor = data[len(MAGIC):len(MAGIC) + 1]
+        if not data.startswith(MAGIC) or minor not in VERSIONS:
             raise ValueError('not a Pipeworks bundle')
         self.data = data
-        self.absent, version, names_at = struct.unpack_from('<III', data, 0x2C)
-        if version != VERSION:
-            raise ValueError(f'version {version}, expected {VERSION}')
+        expected, self.endian = VERSIONS[minor]
+        e = self.endian
+        self.absent, version, names_at = struct.unpack_from(e + 'III', data, 0x2C)
+        if version != expected:
+            raise ValueError(f'version {version}, expected {expected}')
         self.names_at = names_at
         count = struct.unpack_from('<I', data, names_at)[0]
         self.name_offsets = struct.unpack_from(f'<{count}I', data, names_at + 4)
         self.names = [self.cstr(names_at + o) for o in self.name_offsets]
-        self.segment_offsets = struct.unpack_from(f'<{SEGMENTS}I', data, 0x38)
+        self.segment_offsets = struct.unpack_from(f'{e}{SEGMENTS}I', data, 0x38)
         self.segments = [self.read_segment(n) for n in range(SEGMENTS)]
 
     def cstr(self, offset):
@@ -54,11 +59,12 @@ class Bundle:
 
     def read_segment(self, n):
         at = self.segment_offsets[n]
-        number, count, entries_offset, d_off, d_size, d2_off, d2_size = struct.unpack_from('<HHIIIII', self.data, at)
-        records = [Record(*struct.unpack_from('<HIIII', self.data, at + 0x18 + 0x12 * i)) for i in range(count)]
+        e = self.endian
+        number, count, entries_offset, d_off, d_size, d2_off, d2_size = struct.unpack_from(e + 'HHIIIII', self.data, at)
+        records = [Record(*struct.unpack_from(e + 'HIIII', self.data, at + 0x18 + 0x12 * i)) for i in range(count)]
         entries = []
         for i in range(count):
-            flags, etype, extra, name, w8, wc = struct.unpack_from('<HBBIII', self.data, entries_offset + 16 * i)
+            flags, etype, extra, name, w8, wc = struct.unpack_from(e + 'HBBIII', self.data, entries_offset + 16 * i)
             entries.append(Entry(records[i].entry if n else i, flags, etype, extra, name, w8, wc))
         return Segment(n, at, entries_offset, d_off, d_size, d2_off, d2_size, records, entries)
 
@@ -122,7 +128,7 @@ def safe_name(name):
 def main():
     args = sys.argv[1:]
     if len(args) == 2 and args[0] == '--verify':
-        files = sorted(f for f in os.listdir(args[1]) if f.lower().endswith(('.bdp', '.cmp')))
+        files = sorted(f for f in os.listdir(args[1]) if f.lower().endswith(EXTENSIONS))
         types = collections.Counter()
         unexplained = 0
         for f in files:

@@ -53,6 +53,35 @@ entry's data and data2.
 asks for that segment. Only `Shell.bdp` has any: segments 1, 2 and 7 hold other versions of `MonsterSelect.ifc`,
 `MonsterSheet.ifc` and `MainMenu.ifc` (probably language or video-mode variants of these menu layouts).
 
+## The Wii's bundles (.bdg / .cmg, version 1.4)
+The Wii version (RPGP5D, built 30 October 2006) has no `RAMPAGE.VOL`. Its files lie loose on the disc, in `Game/` and
+`Shell/` (Dolphin's Extract Entire Disc, or `DolphinTool extract`, puts them in `DATA/files`). There are
+**40 monsters**: the PS2's 30, plus Boris, Brian, Cyril, Fifi, Flea ("Fabio" in one string table), Plucky, Ruby,
+Sarah, Squirmy and VERN. There is an eighth city, **Dallas** (`Dallas.bdg`, `_Props`, `_buildings`, `_scripts`,
+`DALLAS.bsf`). `Rampage.elf` on the disc keeps its symbol table: 10,233 functions by name.
+
+```
+python tools/bdp.py --verify DATA/files/Game          # 128 bundles, 0 unexplained ranges (Shell: 16)
+python tools/monster.py --verify DATA/files/Game      # 40 of 40 MONSTER_DATA, tables in order
+python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and Shell, byte for byte
+```
+
+- **Header:** `"Pipeworks Bundle File version 1.4"`, version 1400. The layout is that of 1.3, big endian, except the
+  name table, which stays little endian. `bdp.Bundle` reads both and keeps the byte order in `.endian`.
+- **`.zip`:** a real zip archive holding the `.cmg` of the same name (George.zip: 679 KB for a 1.55 MB `George.cmg`),
+  not a copy as on the PS2.
+- **Entry types:** the same, but there are no palettes (type 13). Textures have a 0x68-byte header instead of 0x104;
+  `George_512_C` is 512 × 512 in format 14 (probably GX CMPR). Mesh vertices look like GX display lists. Neither is
+  decoded yet: `tex.py`, `mesh.py` and `anim.py` read only the PS2's.
+- **Skeletons:** George's node tree is the PS2's byte-swapped: 1,513 of its 1,555 words, the rest names and 16-bit
+  fields.
+- **`MONSTER_DATA`:** the same layout, big endian. The move graphs have 181 states instead of 176, adding
+  `Ground_Walk_Slow`, `Ground_Walk_Medium`, `Jump_Super`, `Jump_Super_Release` and `Jump_Air_Borne_Roar`. The
+  condition variables are numbered otherwise (George walks on v41, `|L|` on the PS2), so `monster.py` prints them as
+  numbers.
+- **Scripts:** the same `"Compiled PPToken Stream version 1.03"`, little endian. 108 of the 138 that the PS2 also has
+  are identical.
+
 ## Entry types
 | Type | Count | What | data / data2 |
 |---|---|---|---|

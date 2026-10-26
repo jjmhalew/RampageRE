@@ -1,8 +1,8 @@
-"""Read MONSTER_DATA, a monster's move graph (raw entry in <Monster>.cmp; docs/FORMAT_MONSTER.md).
+"""Read MONSTER_DATA, a monster's move graph (raw entry in <Monster>.cmp, or the Wii's .cmg; docs/FORMAT_MONSTER.md).
 
 Loaded by 0x2F3A50 (version 11 or it is refused) and fixed up in place by 0x2F3C10: name indices become strings
 (the bundle's name table holds the clip, state, callback and effect names) and offsets pointers. Layout (offsets from
-the start of the entry, little endian):
+the start of the entry, little endian; big endian in the Wii's .cmg, where the graph has 181 states):
   0x000         u32 version 11
   0x004..0x128  74 event slots: index of a start list (+0xA5C) per event, the defaults for every mode
   0x12C..0x9C0  not decoded
@@ -26,7 +26,8 @@ the start of the entry, little endian):
          {u32 op, u32 variable, u32 value, u32 flags}, +0x60 script check)
   then byte tables to the end (not decoded)
 
-Usage: python tools/monster.py --verify VOLDIR          parse every monster, check that the tables follow each other
+Usage: python tools/monster.py --verify VOLDIR          parse every monster (PS2 or Wii), check that the tables follow
+                                                       each other
        python tools/monster.py VOLDIR MONSTER [OUT]     print the move graph
 """
 import os
@@ -61,11 +62,12 @@ def is_bool(var):
     return 4 <= var < 0x16 or 0x30 <= var < 0x3A
 
 
-def condition_text(c):
-    """{op, variable, value, flags}: flags bit 0 tests the held value, otherwise the input must be new this frame."""
+def condition_text(c, wii=False):
+    """{op, variable, value, flags}: flags bit 0 tests the held value, otherwise the input must be new this frame.
+    The Wii numbers its variables otherwise (George walks on v41 there, |L| on the PS2), so they stay numbers."""
     op, var, value, flags = c
-    name = VARIABLES.get(var, f'v{var}')
-    if is_bool(var):
+    name = f'v{var}' if wii else VARIABLES.get(var, f'v{var}')
+    if is_bool(var) if not wii else not value >> 23:     # Wii: a small integer is a boolean
         v = str(value & 0xFF)
     else:
         v = f'{struct.unpack("<f", struct.pack("<I", value))[0]:g}'
@@ -74,9 +76,10 @@ def condition_text(c):
 
 
 class MonsterData:
-    def __init__(self, data, names):
+    def __init__(self, data, names, endian='<'):
         self.d = data
         self.names = names
+        self.e = endian
         if self.u(0) != VERSION:
             raise ValueError(f'version {self.u(0)}')
         self.slots = [self.i(4 + 4 * k) for k in range(SLOTS)]
@@ -91,14 +94,14 @@ class MonsterData:
         self.part('coded item offsets', item_offsets, (2 * n_items + 3) & ~3)
         n_bodyparts, bodydata, bodyptrs = self.u(0xA6C), self.u(0xA70), self.u(0xA74)
         self.part('coded items', items, bodydata - items)
-        self.item_at = [items + struct.unpack_from('<H', data, item_offsets + 2 * k)[0] for k in range(n_items)]
+        self.item_at = [items + struct.unpack_from(self.e + 'H', data, item_offsets + 2 * k)[0] for k in range(n_items)]
         self.item_types = [self.u(o) for o in self.item_at]
         self.part('body part data', bodydata, bodyptrs - bodydata)
         self.part('body part pointers', bodyptrs, 4 * n_bodyparts)
         self.bodyparts = [self.name(self.i(self.u(bodyptrs + 4 * k))) for k in range(n_bodyparts)]
         n_lists, lists = self.u(0xA58), self.u(0xA5C)
         self.part('start lists', lists, 12 * n_lists)
-        self.lists = [struct.unpack_from('<III', data, lists + 12 * k) for k in range(n_lists)]
+        self.lists = [struct.unpack_from(self.e + 'III', data, lists + 12 * k) for k in range(n_lists)]
         n_modes, modes = self.u(0xA94), self.u(0xA98)
         self.part('modes', modes, 0x128 * n_modes)
         self.modes = [[self.i(modes + 0x128 * m + 4 * k) for k in range(SLOTS)] for m in range(n_modes)]
@@ -117,20 +120,20 @@ class MonsterData:
         first = at
         self.states = []
         for k in range(n_states):
-            count = struct.unpack_from('<h', data, at + 0xE)[0]
+            count = struct.unpack_from(self.e + 'h', data, at + 0xE)[0]
             if self.u(at) != k or self.u(at + 0x28) != at + 0x2C:
                 raise ValueError(f'state {k} at {at:#x}')
             transitions = []
             for t in range(count):
                 o = at + 0x2C + 0x74 * t
-                nc = struct.unpack_from('<h', data, o + 0x1E)[0]
-                conds = [struct.unpack_from('<IIII', data, o + 0x20 + 16 * c) for c in range(nc)]
+                nc = struct.unpack_from(self.e + 'h', data, o + 0x1E)[0]
+                conds = [struct.unpack_from(self.e + 'IIII', data, o + 0x20 + 16 * c) for c in range(nc)]
                 transitions.append(dict(blend=self.u(o) & 0xF, target=self.u(o + 4), flags=self.u(o + 8),
                                         window=(self.f(o + 0xC),
                                         self.f(o + 0x10)), exit=(self.f(o + 0x14), self.f(o + 0x18)),
-                                        priority=struct.unpack_from('<h', data, o + 0x1C)[0], conditions=conds,
+                                        priority=struct.unpack_from(self.e + 'h', data, o + 0x1C)[0], conditions=conds,
                                         call=self.name(self.i(o + 0x60)),
-                                        args=struct.unpack_from('<4f', data, o + 0x64)))
+                                        args=struct.unpack_from(self.e + '4f', data, o + 0x64)))
             self.states.append(dict(at=at, node=self.u(at + 4), length=self.f(at + 8), next=self.u(at + 0x14),
                                     end_blend=self.u(at + 0x10) & 0xF, transitions=transitions))
             at += 0x2C + 0x74 * count
@@ -141,13 +144,13 @@ class MonsterData:
         self.node_by_offset = {n[0]: n for n in self.nodes}
 
     def u(self, o):
-        return struct.unpack_from('<I', self.d, o)[0]
+        return struct.unpack_from(self.e + 'I', self.d, o)[0]
 
     def i(self, o):
-        return struct.unpack_from('<i', self.d, o)[0]
+        return struct.unpack_from(self.e + 'i', self.d, o)[0]
 
     def f(self, o):
-        return struct.unpack_from('<f', self.d, o)[0]
+        return struct.unpack_from(self.e + 'f', self.d, o)[0]
 
     def name(self, i):
         if i < 0 or i >= len(self.names):
@@ -183,15 +186,16 @@ class MonsterData:
             o = self.item_at[k]
             t, at = self.u(o), self.f(o + 4)
             if t == 21:
-                text = f'{self.name(self.i(o + 8))}({", ".join(f"{x:g}" for x in struct.unpack_from("<4f", self.d, o + 12))})'
+                args = struct.unpack_from(self.e + '4f', self.d, o + 12)
+                text = f'{self.name(self.i(o + 8))}({", ".join(f"{x:g}" for x in args)})'
             elif t == 6:
                 text = f'sound {self.name(self.i(o + 12))}'
             elif t == 0:                                 # body parts' collision shapes armed with this attack
-                parts = [p for p in struct.unpack_from('<4h', self.d, o + 8)[:self.u(o + 0x10)] if p >= 0]
+                parts = [p for p in struct.unpack_from(self.e + '4h', self.d, o + 8)[:self.u(o + 0x10)] if p >= 0]
                 names = '+'.join(self.bodyparts[p] if p < len(self.bodyparts) else str(p) for p in parts)
                 if self.u(o + 0x14) & 6:
-                    a, b, c = struct.unpack_from('<3I', self.d, o + 0x20)
-                    x = struct.unpack_from('<4f', self.d, o + 0x2C)
+                    a, b, c = struct.unpack_from(self.e + '3I', self.d, o + 0x20)
+                    x = struct.unpack_from(self.e + '4f', self.d, o + 0x2C)
                     text = f'attack {names} on ({a} {b} {c}; {" ".join(f"{v:g}" for v in x)})'
                 else:
                     text = f'attack {names} off'
@@ -200,7 +204,7 @@ class MonsterData:
             elif t == 9:
                 text = f'camera shake {self.f(o + 8):g}'
             elif t == 12:
-                slot, fx, on = struct.unpack_from('<HHI', self.d, o + 8)
+                slot, fx, on = struct.unpack_from(self.e + 'HHI', self.d, o + 8)
                 name = self.effects[fx] if fx < len(self.effects) else str(fx)
                 text = f'effect {slot} {name} {"on" if on else "off"}'
             elif t in (15, 16):
@@ -248,7 +252,7 @@ class MonsterData:
                 if ev:
                     out.append('    events: ' + '; '.join(ev))
             for t in s['transitions']:
-                conds = ' '.join(condition_text(c) for c in t['conditions'])
+                conds = ' '.join(condition_text(c, self.e == '>') for c in t['conditions'])
                 call = f' call {t["call"]}({", ".join(f"{a:g}" for a in t["args"][:3])})' if t['call'] else ''
                 out.append(f'    -> {self.state_name(t["target"])}  [{conds}]  input {t["window"][0]:.3g}..'
                            f'{t["window"][1]:.3g}  switch {t["exit"][0]:.3g}..{t["exit"][1]:.3g}  priority '
@@ -262,18 +266,21 @@ class MonsterData:
 
 
 def monster_data(voldir, name):
-    with open(os.path.join(voldir, name + '.cmp'), 'rb') as f:
+    path = os.path.join(voldir, name + '.cmp')
+    if not os.path.exists(path):
+        path = path[:-1] + 'g'                           # the Wii's .cmg
+    with open(path, 'rb') as f:
         b = bdp.Bundle(f.read())
     for e, a, _ in b.items(0):
         if b.name(e.name).lstrip('\x13').endswith('MONSTER_DATA'):
-            return MonsterData(a, b.names)
+            return MonsterData(a, b.names, b.endian)
     raise ValueError('no MONSTER_DATA')
 
 
 def main():
     args = sys.argv[1:]
     if len(args) == 2 and args[0] == '--verify':
-        monsters = sorted(f[:-10] for f in os.listdir(args[1]) if f.lower().endswith('_anims.cmp'))
+        monsters = sorted(f[:-10] for f in os.listdir(args[1]) if f.lower().endswith(('_anims.cmp', '_anims.cmg')))
         bad = 0
         for m in monsters:
             try:
