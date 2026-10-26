@@ -445,7 +445,8 @@ int scene_boss_node_at(const Scene *s, int part, const char *node, int id, float
 int scene_vehicle_node(const Scene *s, int obj, const char *node, float out[16]);
 int scene_person_node(const Scene *s, int who, const char *node, float out[16]);   /* person who's look (people.c) */
 void scene_free(Scene *s);
-uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);   /* the 30 monsters (NAME_anims.cmp) */
+/* the 30 monsters (NAME_anims.cmp), and with a Wii folder (vol_add_wii) its ten (NAME_anims.cmg); sorted */
+uint32_t monster_names(const Vol *vol, const char **names, uint32_t max);
 
 /* Mat4 helpers */
 Mat4 mat_identity(void);

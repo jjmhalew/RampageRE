@@ -3888,14 +3888,21 @@ void city_build_left(City *c, const char *block_name, Scene *s)
 uint32_t monster_names(const Vol *vol, const char **names, uint32_t max)
 {
     uint32_t k = 0;
-    for (uint32_t i = 0; i < vol->count && k < max; i++) {
-        size_t len = strlen(vol->files[i].name);
-        if (len > 10 && _stricmp(vol->files[i].name + len - 10, "_anims.cmp") == 0) {
-            char *n = malloc(len - 9);
-            memcpy(n, vol->files[i].name, len - 10);
-            n[len - 10] = 0;
+    for (uint32_t i = 0; i < vol->count + vol->nwii && k < max; i++) {   /* the VOL's, then the Wii folder's new ones */
+        const char *f = i < vol->count ? vol->files[i].name : vol->wii[i - vol->count].name;
+        size_t len = strlen(f);
+        if (len <= 10 || _stricmp(f + len - 10, i < vol->count ? "_anims.cmp" : "_anims.cmg") != 0)
+            continue;
+        char *n = malloc(len - 9);
+        memcpy(n, f, len - 10);
+        n[len - 10] = 0;
+        int known = 0;                                   /* the 30 the PS2 has keep the PS2's */
+        for (uint32_t j = 0; j < k && !known; j++)
+            known = _stricmp(names[j], n) == 0;
+        if (known)
+            free(n);
+        else
             names[k++] = n;
-        }
     }
     for (uint32_t i = 1; i < k; i++)                     /* sorted */
         for (uint32_t j = i; j > 0 && _stricmp(names[j - 1], names[j]) > 0; j--) {
