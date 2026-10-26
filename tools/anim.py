@@ -53,14 +53,16 @@ Cloth (type 25, hair, whiskers, ...; used in place, vtable 0x446500, fixed up by
     u8[4] flags, u8[4], f32 100, u32 0, then count/offset pairs: pinned particles (u32 index), springs (24 bytes: u32 a,
     u32 b, f32 rest length, its square, f32 stiffness?, f32 ?), bend links (flags only; 32 bytes: u32[4]
     particles, f32[3] 0, f32 20), triangles (3 x u32), and
-    particles (count twice, then the offset; 64 bytes: f32[3] position in the bind pose's model space, f32[3]
+    particles (count twice, then the offset; 64 bytes (the Wii's 72: 8 bytes 0xEA after the normal): f32[3]
+    position in the bind pose's model space, f32[3]
     normal, f32 ?, f32[4] bone weights, u16[4] skeleton node indices (0xFFFF = none; flags have none), u8 bone
     count, u8 0xEA,
-    u8 1 = held by its bones, u8 0, 8 x 0xFF). Every vertex of the cloth mesh sits on one particle.
+    u16 1 = held by its bones, 8 x 0xFF). Every vertex of the cloth mesh sits on one particle.
 
 Usage: python tools/anim.py --verify VOLDIR                check every skeleton and animation
        python tools/anim.py VOLDIR MONSTER OUTDIR            write OUTDIR/MONSTER.gltf: mesh, skeleton, animations
-       python tools/anim.py VOLDIR --all OUTDIR              every monster (each NAME with NAME.cmp + NAME_anims.cmp)
+       python tools/anim.py VOLDIR --all OUTDIR              every monster (each NAME with NAME.cmp + NAME_anims.cmp,
+                                                             or the Wii's .cmg)
        python tools/anim.py VOLDIR --models BUNDLE OUTDIR    every animated node-tree model of BUNDLE (people,
                                                              vehicles, bosses, ...) to OUTDIR/BUNDLE/models
 """
@@ -99,26 +101,27 @@ def align4(n):
 class Skeleton:
     """A node tree (type 3), with the bind pose when it is a skeleton."""
 
-    def __init__(self, data, names):
+    def __init__(self, data, names, endian='<'):
+        self.e = endian
         (self.first, n, self.depth, self.size, table, by_name, self.mirror_pairs,
-         mirror) = struct.unpack_from('<8I', data, 0x1C)
+         mirror) = struct.unpack_from(self.e + '8I', data, 0x1C)
         self.nodes = []
-        offsets = struct.unpack_from(f'<{n}I', data, table)
+        offsets = struct.unpack_from(f'{self.e}{n}I', data, table)
         for at in offsets:
-            index, parent, count, name = struct.unpack_from('<iiII', data, at)
+            index, parent, count, name = struct.unpack_from(self.e + 'iiII', data, at)
             self.nodes.append(Node(index, parent, names[name].lstrip('\x13'),
-                                   [offsets.index(c) for c in struct.unpack_from(f'<{count}I', data, at + 16)]))
+                                   [offsets.index(c) for c in struct.unpack_from(f'{self.e}{count}I', data, at + 16)]))
         self.node_offsets = offsets
-        self.by_name = [offsets.index(o) for o in struct.unpack_from(f'<{n}I', data, by_name)]
-        self.name_indices = [struct.unpack_from('<I', data, o + 12)[0] for o in offsets]
-        self.mirror = list(struct.unpack_from(f'<{n}H', data, mirror)) if mirror else None
+        self.by_name = [offsets.index(o) for o in struct.unpack_from(f'{self.e}{n}I', data, by_name)]
+        self.name_indices = [struct.unpack_from(self.e + 'I', data, o + 12)[0] for o in offsets]
+        self.mirror = list(struct.unpack_from(f'{self.e}{n}H', data, mirror)) if mirror else None
         self.poses = None
         if self.first == 0x40:
-            at = struct.unpack_from('<I', data, 0x3C)[0]
+            at = struct.unpack_from(self.e + 'I', data, 0x3C)[0]
             self.poses_at = at
             self.poses = []
             for i in range(n):
-                r = struct.unpack_from('<I19f', data, at + 0x50 * i)
+                r = struct.unpack_from(self.e + 'I19f', data, at + 0x50 * i)
                 if r[0]:
                     raise ValueError(f'bind pose {i} starts with {r[0]:#x}')
                 self.poses.append(Pose(r[1:13], r[13:16], r[16:20]))
@@ -167,9 +170,9 @@ def matmul(a, b):
     return [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
 
 
-def decode_rotation(data, at):
+def decode_rotation(data, at, endian='<'):
     """(time, (x, y, z, w)) of the compressed rotation key at `at`, as 0x192010 does it."""
-    time, a, b, c = struct.unpack_from('<Hhhh', data, at)
+    time, a, b, c = struct.unpack_from(endian + 'Hhhh', data, at)
     x, y, z = (a >> 3) * ROTATION_UNIT, (b >> 3) * ROTATION_UNIT, (c >> 3) * ROTATION_UNIT
     s = min(x * x + y * y + z * z, 1.0)
     r = (a & 3) << 6 | (b & 7) << 3 | (c & 7)
@@ -187,20 +190,22 @@ def decode_rotation(data, at):
 class Animation:
     """A KeyInterpAnim: per bone a translation and a rotation track."""
 
-    def __init__(self, data, names):
+    def __init__(self, data, names, endian='<'):
+        self.e = endian
         (self.duration, self.kind, self.size, self.skeleton, pad, self.bones, bones2, mask, translations,
-         rotations, self.work_size) = struct.unpack_from('<fIIHHIIIIII', data, 0x1C)
+         rotations, self.work_size) = struct.unpack_from(self.e + 'fIIHHIIIIII', data, 0x1C)
         if self.kind != KEY_INTERP or pad or bones2 != self.bones:
             raise ValueError(f'not a KeyInterpAnim header (kind {self.kind})')
         self.skeleton_name = names[self.skeleton].lstrip('\x13')
-        self.mask = int.from_bytes(data[mask:translations], 'little')
+        words = struct.unpack_from(f'{endian}{(translations - mask) // 4}I', data, mask)
+        self.mask = sum(w << 32 * i for i, w in enumerate(words))     # u32 words, the first the lowest
         self.translations, self.rotations = [], []
         at = translations
         for i in range(self.bones):
-            sx, sy, sz, bone, count, last, zero = struct.unpack_from('<3fBBBB', data, at)
+            sx, sy, sz, bone, count, last, zero = struct.unpack_from(self.e + '3fBBBB', data, at)
             if bone != i or last != count - 1 or zero:
                 raise ValueError(f'translation track {i} at {at:#x} is for bone {bone}')
-            keys = [struct.unpack_from('<Hhhh', data, at + 0x10 + 8 * k) for k in range(count)]
+            keys = [struct.unpack_from(self.e + 'Hhhh', data, at + 0x10 + 8 * k) for k in range(count)]
             self.translations.append(Track(bone, [(t & 0xFFFE) / TIME_SCALE for t, *_ in keys],
                                            [(x * sx * TRANSLATION_UNIT, y * sy * TRANSLATION_UNIT,
                                              z * sz * TRANSLATION_UNIT) for _, x, y, z in keys]))
@@ -211,7 +216,7 @@ class Animation:
             bone, count = data[at], data[at + 1]
             if bone != i:
                 raise ValueError(f'rotation track {i} at {at:#x} is for bone {bone}')
-            keys = [decode_rotation(data, at + 2 + 8 * k) for k in range(count)]
+            keys = [decode_rotation(data, at + 2 + 8 * k, endian) for k in range(count)]
             self.rotations.append(Track(bone, [t / TIME_SCALE for t, _ in keys], [q for _, q in keys]))
             at += 2 + 8 * count
         self.end = at
@@ -220,32 +225,33 @@ class Animation:
 class RawAnim:
     """A RawAnim: per node, translation and rotation segments spread evenly over the clip."""
 
-    def __init__(self, data, names):
+    def __init__(self, data, names, endian='<'):
+        self.e = endian
         self.duration, self.kind, self.size, self.skeleton, count, table, first = struct.unpack_from(
-            '<fIIHxxIII', data, 0x1C)
+            self.e + 'fIIHxxIII', data, 0x1C)
         if self.kind != RAW:
             raise ValueError(f'not a RawAnim header (kind {self.kind})')
         self.skeleton_name = names[self.skeleton].lstrip('\x13')
         self.records = {}
-        offsets = struct.unpack_from(f'<{count}I', data, table)
+        offsets = struct.unpack_from(f'{self.e}{count}I', data, table)
         if table + 4 * count != first:
             raise ValueError('RawAnim records do not follow the table')
         at = first
         for o in offsets:
             if o != at:
                 raise ValueError(f'RawAnim record at {o:#x}, expected {at:#x}')
-            bone, value, nt, nr, start, stop, scale, t_at, r_at = struct.unpack_from('<IfIIfffII', data, at)
+            bone, value, nt, nr, start, stop, scale, t_at, r_at = struct.unpack_from(self.e + 'IfIIfffII', data, at)
             if t_at != 0x24 or r_at != 0x24 + 24 * nt or not nt or not nr:
                 raise ValueError(f'RawAnim record at {at:#x}: keys at {t_at:#x} / {r_at:#x}')
             if (start, stop, scale) != (0.0, 1.0, 1.0):
                 raise ValueError(f'RawAnim record at {at:#x}: times {start}, {stop}, {scale}')
             translations = []
             for k in range(nt):
-                v = struct.unpack_from('<6f', data, at + t_at + 24 * k)
+                v = struct.unpack_from(self.e + '6f', data, at + t_at + 24 * k)
                 translations.append((v[:3], v[3:]))
             rotations = []
             for k in range(nr):
-                v = struct.unpack_from('<9f', data, at + r_at + 36 * k)
+                v = struct.unpack_from(self.e + '9f', data, at + r_at + 36 * k)
                 rotations.append((v[:4], v[4:8], v[8]))
             self.records[bone] = RawTrack(value, translations, rotations)
             at += r_at + 36 * nr
@@ -299,10 +305,12 @@ def raw_rotation(key, f):
 class Cloth:
     """Cloth settings (type 25): parts of particles held by skeleton bones, springs and triangles."""
 
-    def __init__(self, data):
+    def __init__(self, data, endian='<'):
+        self.e = endian
+        self.particle_size = 64 if endian == '<' else 72   # the Wii's has 8 bytes 0xEA after the normal
         (*self.sphere, self.size, count, parts, nbones, bones, self.zero, self.offset) = struct.unpack_from(
-            '<5f7I', data, 0x1C)
-        self.bones = list(struct.unpack_from(f'<{nbones}I', data, bones))
+            self.e + '5f7I', data, 0x1C)
+        self.bones = list(struct.unpack_from(f'{self.e}{nbones}I', data, bones))
         self.parts = []
         at = bones + 4 * nbones
         if parts != at:
@@ -310,32 +318,32 @@ class Cloth:
         at = parts + 0x8C * count
         for k in range(count):
             r = parts + 0x8C * k
-            settings = struct.unpack_from('<19fI4B4BfI', data, r)
+            settings = struct.unpack_from(self.e + '19fI4B4BfI', data, r)
             if settings[-1]:
                 raise ValueError(f'part {k}: word at +0x5C is {settings[-1]:#x}')
             (n_pins, pins_at, n_springs, springs_at, n_bends, bends_at, n_tris, tris_at, n_particles, n2,
-             particles_at) = struct.unpack_from('<11I', data, r + 0x60)
+             particles_at) = struct.unpack_from(self.e + '11I', data, r + 0x60)
             if n2 != n_particles:
                 raise ValueError(f'part {k}: particle counts {n_particles} / {n2}')
             for name, offset, size in (('pins', pins_at, 4 * n_pins), ('springs', springs_at, 24 * n_springs),
                                        ('bends', bends_at, 32 * n_bends), ('triangles', tris_at, 12 * n_tris),
-                                       ('particles', particles_at, 64 * n_particles)):
+                                       ('particles', particles_at, self.particle_size * n_particles)):
                 if offset != at:
                     raise ValueError(f'part {k}: {name} at {offset:#x}, expected {at:#x}')
                 at += size
             particles = []
             for i in range(n_particles):
-                q = particles_at + 64 * i
-                v = struct.unpack_from('<11f4HBBBB2I', data, q)
+                q = particles_at + self.particle_size * i
+                v = struct.unpack_from(self.e + ('11f' if endian == '<' else '6f8x5f') + '4HBBH2I', data, q)
                 bones_ = [b for b in v[11:15] if b != 0xFFFF]
-                if len(bones_) != v[15] or v[16] != 0xEA or v[18] or v[19:21] != (0xFFFFFFFF, 0xFFFFFFFF):
+                if len(bones_) != v[15] or v[16] != 0xEA or v[17] > 1 or v[18:20] != (0xFFFFFFFF, 0xFFFFFFFF):
                     raise ValueError(f'part {k} particle {i}: unexpected fields {v[11:]}')
                 particles.append(Particle(v[0:3], v[3:6], v[6], v[7:7 + len(bones_)], bones_, bool(v[17])))
             self.parts.append(ClothPart(
-                settings, list(struct.unpack_from(f'<{n_pins}I', data, pins_at)),
-                [struct.unpack_from('<IIffff', data, springs_at + 24 * i) for i in range(n_springs)],
-                [struct.unpack_from('<4I4f', data, bends_at + 32 * i) for i in range(n_bends)],
-                [struct.unpack_from('<3I', data, tris_at + 12 * i) for i in range(n_tris)], particles))
+                settings, list(struct.unpack_from(f'{self.e}{n_pins}I', data, pins_at)),
+                [struct.unpack_from(self.e + 'IIffff', data, springs_at + 24 * i) for i in range(n_springs)],
+                [struct.unpack_from(self.e + '4I4f', data, bends_at + 32 * i) for i in range(n_bends)],
+                [struct.unpack_from(self.e + '3I', data, tris_at + 12 * i) for i in range(n_tris)], particles))
         self.end = at
 
     def skinning(self):
@@ -354,15 +362,16 @@ def verify(voldir):
     worst_bind = worst_raw = worst_norm = worst_join = 0.0
     problems = []
     for f in sorted(os.listdir(voldir)):
-        if not f.lower().endswith(('.bdp', '.cmp')):
+        if not f.lower().endswith(bdp.EXTENSIONS):
             continue
         b, items = bundle_items(os.path.join(voldir, f))
+        e_ = b.endian
         skeletons = {}
         for e, a, _ in items:
             if e.type != 3:
                 continue
             try:
-                s = Skeleton(a, b.names)
+                s = Skeleton(a, b.names, e_)
                 if s.layout_end != len(a) or s.size != len(a):
                     raise ValueError(f'parts end at {s.layout_end:#x}, entry is {len(a):#x}')
                 if (e.extra == 1) != (s.poses is not None):
@@ -383,7 +392,7 @@ def verify(voldir):
             if e.type != 25:
                 continue
             try:
-                c = Cloth(a)
+                c = Cloth(a, e_)
                 if c.end != len(a) or c.size != len(a):
                     raise ValueError(f'parts end at {c.end:#x}, entry is {len(a):#x}')
                 for part in c.parts:
@@ -398,8 +407,8 @@ def verify(voldir):
             if e.type != 4:
                 continue
             try:
-                kind = struct.unpack_from('<I', a, 0x20)[0]
-                anim = Animation(a, b.names) if kind == KEY_INTERP else RawAnim(a, b.names)
+                kind = struct.unpack_from(e_ + 'I', a, 0x20)[0]
+                anim = Animation(a, b.names, e_) if kind == KEY_INTERP else RawAnim(a, b.names, e_)
                 if anim.end != len(a) or anim.size != len(a):
                     raise ValueError(f'tracks end at {anim.end:#x}, entry is {len(a):#x}')
                 s = skeletons.get(anim.skeleton)
@@ -524,15 +533,15 @@ class Models:
         items = list(bundle.items(0))
         for e, a, _ in items:
             if e.type == 3:
-                self.trees[self.key(bundle.name(e.name))] = Skeleton(a, bundle.names)
+                self.trees[self.key(bundle.name(e.name))] = Skeleton(a, bundle.names, bundle.endian)
         for e, a, _ in items:
             if e.type != 4:
                 continue
-            if struct.unpack_from('<I', a, 0x20)[0] == RAW:
-                raw = RawAnim(a, bundle.names)
+            if struct.unpack_from(bundle.endian + 'I', a, 0x20)[0] == RAW:
+                raw = RawAnim(a, bundle.names, bundle.endian)
                 self.raws[self.key(raw.skeleton_name)] = raw
             else:
-                clip = Animation(a, bundle.names)
+                clip = Animation(a, bundle.names, bundle.endian)
                 self.clips[self.key(clip.skeleton_name)].append((anim_name(bundle.name(e.name)), clip))
                 self.clip_by_name[anim_name(bundle.name(e.name)).lower()] = clip
 
@@ -585,7 +594,8 @@ class Models:
 def export_models(voldir, bundle_name, out):
     """Every node-tree model of a bundle that has more than one node, clips or a moving RawAnim."""
     files = {f.lower(): f for f in os.listdir(voldir)}
-    path = os.path.join(voldir, files.get(bundle_name.lower()) or files[bundle_name.lower() + '.bdp'])
+    path = os.path.join(voldir, files.get(bundle_name.lower()) or files.get(bundle_name.lower() + '.bdp') or
+                        files[bundle_name.lower() + '.bdg'])
     b, _ = bundle_items(path)
     stem = os.path.splitext(os.path.basename(path))[0]
     models = Models(b)
@@ -614,10 +624,11 @@ def export_models(voldir, bundle_name, out):
 
 def export_monster(voldir, monster, out):
     files = {f.lower(): f for f in os.listdir(voldir)}
-    b, items = bundle_items(os.path.join(voldir, files[monster.lower() + '.cmp']))
+    file = files.get(monster.lower() + '.cmp') or files[monster.lower() + '.cmg']
+    b, items = bundle_items(os.path.join(voldir, file))
     g = mesh.Gltf()
     assets = mesh.BundleAssets(b, g, out, monster + '_textures')
-    skel = next(Skeleton(a, b.names) for e, a, _ in items if e.type == 3 and e.extra == 1)
+    skel = next(Skeleton(a, b.names, b.endian) for e, a, _ in items if e.type == 3 and e.extra == 1)
     joints = []
     for i, node in enumerate(skel.nodes):
         j = g.node(node.name, parent=0 if node.parent < 0 else joints[node.parent])
@@ -630,7 +641,7 @@ def export_monster(voldir, monster, out):
     cloth_skin = {}
     for e, a, _ in items:
         if e.type == 25:
-            cloth_skin.update(Cloth(a).skinning())
+            cloth_skin.update(Cloth(a, b.endian).skinning())
     for entry in items:
         e = entry[0]
         if e.type == 17:
@@ -642,7 +653,7 @@ def export_monster(voldir, monster, out):
             # cloth (hair, whiskers, ...): the game simulates it (type 25) from particles held by bones; here each
             # vertex is skinned to its particle's bones and weights (the bone nearest to it if it has none)
             prims = []
-            for part in mesh.read_mesh(0, entry[1], entry[2]):
+            for part in mesh.read_mesh(0, entry[1], entry[2], b.endian):
                 for s in part.sections:
                     bones, weights = [], []
                     for p in s.positions:
@@ -658,14 +669,14 @@ def export_monster(voldir, monster, out):
             if m is not None:
                 n = g.node(assets.clean(e.name), m)
                 g.doc['nodes'][n]['skin'] = 0
-    anims_file = files.get(monster.lower() + '_anims.cmp')
+    anims_file = files.get(monster.lower() + '_anims.cmp') or files.get(monster.lower() + '_anims.cmg')
     count = 0
     if anims_file:
         ab, aitems = bundle_items(os.path.join(voldir, anims_file))
         for e, a, _ in aitems:
-            if e.type != 4 or struct.unpack_from('<I', a, 0x20)[0] != KEY_INTERP:
+            if e.type != 4 or struct.unpack_from(ab.endian + 'I', a, 0x20)[0] != KEY_INTERP:
                 continue
-            anim = Animation(a, ab.names)
+            anim = Animation(a, ab.names, ab.endian)
             if anim.bones != len(joints):
                 continue
             add_animation(g, anim_name(ab.name(e.name)), anim.duration, keyframe_channels(anim, joints))
@@ -686,7 +697,8 @@ def main():
     elif len(args) == 3:
         voldir, monster, out = args
         if monster == '--all':
-            names = sorted(f[:-len('_anims.cmp')] for f in os.listdir(voldir) if f.lower().endswith('_anims.cmp'))
+            names = sorted(f[:-len('_anims.cmp')] for f in os.listdir(voldir)
+                           if f.lower().endswith(('_anims.cmp', '_anims.cmg')))
         else:
             names = [monster]
         for name in names:

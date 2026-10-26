@@ -70,8 +70,7 @@ python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and
   name table, which stays little endian. `bdp.Bundle` reads both and keeps the byte order in `.endian`.
 - **`.zip`:** a real zip archive holding the `.cmg` of the same name (George.zip: 679 KB for a 1.55 MB `George.cmg`),
   not a copy as on the PS2.
-- **Entry types:** the same, but there are no palettes (type 13). `anim.py`, `city.py` and `prb.py` read only the
-  PS2's yet.
+- **Entry types:** the same, but there are no palettes (type 13). `city.py` and `prb.py` read only the PS2's yet.
 - **Materials:** the PS2's layout, big endian, 0x70 bytes; kind 4 names the texture at +0x38 and the monster's
   `_512_B` bump map at +0x3A.
 - **Meshes** (`tools/mesh.py --verify DATA/files/Game`: 6,656 meshes, 7,484 parts; Shell 11 and 12): the type 0
@@ -122,8 +121,15 @@ python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and
   The monster skins are 512 × 512 (256 × 256 with a palette on the PS2). Of the 194 textures that Chicago and
   WorldGui share with the PS2, the median differs by 1.1 (of 255) in mean colour; the far ones were redrawn (`Chicago_skyline` is
   1024 × 256, 256 × 128 on the PS2). Flea's textures are named `Eek_512_C` / `_B`.
-- **Skeletons:** George's node tree is the PS2's byte-swapped: 1,513 of its 1,555 words, the rest names and 16-bit
-  fields.
+- **Skeletons, animations and cloth** (`tools/anim.py --verify DATA/files/Game`: 80 skeletons, 655 node trees,
+  6,446 keyframed animations with 9,359,002 keys, 735 RawAnims, 51 cloths with 5,004 particles; 0 problems, the
+  same bind pose, key and segment errors as the PS2's): the PS2's layouts, big endian (George's node tree is the
+  PS2's byte-swapped: 1,513 of its 1,555 words, the rest names and 16-bit fields). The compressed rotation keys
+  are the same s16 fields. A keyframed animation's channel mask is u32 words, the first the lowest bits. A cloth
+  particle is 72 bytes: 8 bytes 0xEA follow the normal; its "held" flag is a u16 on both (`01 00` / `00 01`).
+  `tools/anim.py DATA/files/Game --all OUTDIR` exports all 40 monsters animated, with more clips than on the PS2
+  (George 149 against 145: all the PS2's and `JUMP_CHARGE`, `JUMP_SUPER`, `WALK_MEDIUM`, `WALK_SLOW`; Cal 128
+  against 123). Every vertex of the cloth meshes of George, Boris, Fifi and Flea sits on one of its particles.
 - **`MONSTER_DATA`:** the same layout, big endian. The move graphs have 181 states instead of 176, adding
   `Ground_Walk_Slow`, `Ground_Walk_Medium`, `Jump_Super`, `Jump_Super_Release` and `Jump_Air_Borne_Roar`. The
   condition variables are numbered otherwise (George walks on v41, `|L|` on the PS2), so `monster.py` prints them as
