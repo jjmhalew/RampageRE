@@ -500,7 +500,7 @@ static void status_out(const Profile *p, const ProfileStatus *s, ProfileStatus *
     *o = *s;
     for (int k = 0; k < PROFILE_PS2_MONSTERS; k++) {
         int m = profile_find_monster(p, PROFILE_MONSTER_NAMES[k]);
-        o->monster_flags[k] = m >= 0 ? s->monster_flags[m] : 0;
+        o->monster_flags[k] = m >= 0 ? s->monster_flags[m] & ~(uint32_t)PM_SUPER_JUMP : 0;
     }
     for (int k = PROFILE_PS2_MONSTERS; k < PROFILE_MONSTERS; k++)
         o->monster_flags[k] = 0;
@@ -529,6 +529,109 @@ static void status_in(const Profile *p, const ProfileStatus *s, ProfileStatus *o
         }
 }
 
+/* ---- the side file (profile.h) */
+#define SIDE_MAGIC 0x49575052u                       /* "RPWI" */
+#define SIDE_VERSION 1
+#define SIDE_MAX 128
+enum { SIDE_FLAGS = 1, SIDE_PICK = 2 };
+
+void profile_side_path(const char *path, char *out, int size)
+{
+    size_t n = path ? strlen(path) : 0;
+    if (n >= 4 && same(path + n - 4, ".bin"))
+        snprintf(out, (size_t)size, "%.*s.wii.bin", (int)(n - 4), path);
+    else
+        snprintf(out, (size_t)size, "%s.wii", path ? path : "");
+}
+
+static int ps2_monster(const char *name)
+{
+    for (int k = 0; name && k < PROFILE_PS2_MONSTERS; k++)
+        if (same(PROFILE_MONSTER_NAMES[k], name))
+            return k;
+    return -1;
+}
+
+static int roster_beyond_ps2(const Profile *p)
+{
+    for (int m = 0; m < p->nmonsters; m++)
+        if (ps2_monster(p->monster_name[m]) < 0)
+            return 1;
+    return 0;
+}
+
+static int side_write(const Profile *p, const char *path, uint32_t crc)
+{
+    static uint8_t buf[16 + 32 * SIDE_MAX];
+    int n = 0;
+    const ProfileStatus *s = &p->block.status;
+    for (int m = 0; m < p->nmonsters && n < SIDE_MAX; m++) {
+        uint32_t f = ps2_monster(p->monster_name[m]) < 0 ? s->monster_flags[m] : s->monster_flags[m] & PM_SUPER_JUMP;
+        if (!f)
+            continue;
+        uint8_t *r = buf + 16 + 32 * n++;
+        memset(r, 0, 32);
+        snprintf((char *)r, 16, "%s", p->monster_name[m]);
+        put32(r + 16, SIDE_FLAGS);
+        put32(r + 20, f);
+    }
+    for (int i = 0; i < PROFILE_PLAYERS && n < SIDE_MAX; i++) {
+        int m = s->monster[i];
+        if (m < 0 || m >= p->nmonsters || ps2_monster(p->monster_name[m]) >= 0)
+            continue;
+        uint8_t *r = buf + 16 + 32 * n++;
+        memset(r, 0, 32);
+        snprintf((char *)r, 16, "%s", p->monster_name[m]);
+        put32(r + 16, SIDE_PICK);
+        put32(r + 20, (uint32_t)i);
+    }
+    put32(buf, SIDE_MAGIC);
+    put32(buf + 4, SIDE_VERSION);
+    put32(buf + 8, crc);
+    put32(buf + 12, (uint32_t)n);
+    char side[1024];
+    profile_side_path(path, side, sizeof side);
+    errno = 0;
+    FILE *f = fopen(side, "wb");
+    if (!f)
+        return errno == ENOSPC ? -2 : -1;
+    size_t len = 16 + 32 * (size_t)n;
+    int ok = fwrite(buf, 1, len, f) == len;
+    int room = errno != ENOSPC;
+    ok = (fclose(f) == 0) && ok;
+    return ok ? 1 : room && errno != ENOSPC ? -1 : -2;
+}
+
+static void side_read(Profile *p, const char *path, uint32_t crc)
+{
+    static uint8_t buf[16 + 32 * SIDE_MAX];
+    char side[1024];
+    profile_side_path(path, side, sizeof side);
+    FILE *f = fopen(side, "rb");
+    size_t len = f ? fread(buf, 1, sizeof buf, f) : 0;
+    if (f)
+        fclose(f);
+    if (len < 16 || get32(buf) != SIDE_MAGIC || get32(buf + 4) != SIDE_VERSION)
+        return;
+    uint32_t n = get32(buf + 12);
+    int fresh = get32(buf + 8) == crc;               /* the PS2's file is the one it was written with */
+    ProfileStatus *s = &p->block.status;
+    for (uint32_t k = 0; k < n && 16 + 32 * (size_t)(k + 1) <= len; k++) {
+        const uint8_t *r = buf + 16 + 32 * k;
+        char name[16];
+        memcpy(name, r, 15);
+        name[15] = 0;
+        int m = profile_find_monster(p, name);
+        uint32_t a = get32(r + 20);
+        if (m < 0)
+            continue;
+        if (get32(r + 16) == SIDE_FLAGS)
+            s->monster_flags[m] |= ps2_monster(name) < 0 ? a & 0xFF : a & PM_SUPER_JUMP;
+        else if (get32(r + 16) == SIDE_PICK && fresh && a < PROFILE_PLAYERS)
+            s->monster[a] = m;
+    }
+}
+
 int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
 {
     if (!force && !(profile_needs_save(p) && p->allow_save))
@@ -549,6 +652,9 @@ int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
     if (!ok)
         return room && errno != ENOSPC ? -1 : -2;    /* the host's full drive as the card's -3, no room [no PS2
                                                       * meaning] */
+    int side = roster_beyond_ps2(p) ? side_write(p, path, get32(buf + 0x0C)) : 1;
+    if (side < 0)
+        return side;
     profile_saved(p);                                /* [R] 0x33F230 with 1 */
     p->loaded = 1;
     return 1;
@@ -569,6 +675,8 @@ int profile_read(Profile *p, const char *path)
     }
     ProfileStatus s = p->block.status;
     status_in(p, &s, &p->block.status);
+    if (roster_beyond_ps2(p))
+        side_read(p, path, get32(buf + 0x0C));
     profile_restore(p);                              /* [R] 0x33F120 with 1 */
     p->block.status.changed = 0;
     p->block.changed = 0;

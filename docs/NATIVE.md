@@ -95,7 +95,9 @@ see "Graphics settings"); `--card-free-kb N` the "memory card"'s free room
 (a save needs 140; else the drive's). The profile (profile.c, [PROFILE_NOTES.md](PROFILE_NOTES.md)) is read from and written to
 `rampage_profile.bin` (`--profile FILE` another one, `--newprofile` a new one; a `--shot` run starts new and writes
 nothing unless `--profile` is given): a new profile has six monsters and none of the four upgrade moves, which the
-upgrade challenges teach; `--cheat 011235` gives every move. `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
+upgrade challenges teach; `--cheat 011235` gives every move. With the Wii's data (`wii_data=`) the file stays the
+PS2's, its monsters by name, and what it has no room for (the Wii's monsters, their picks) goes to
+`rampage_profile.wii.bin` beside it (profile.h, docs/WII_PLAN.md). `--shell` starts in the front end (shell.c, [SHELL_NOTES.md](SHELL_NOTES.md)): the
 autosave notice, the movies (the logos and the intro, each press of Enter, Space, P or the pad's A / Start skips one, a tap on the movie on Android; the
 Victory movie and the credits after the campaign), the profile popup (one profile, its file; letters and digits type
 the name, Enter is DONE; it opens from Back on the main menu, "Profiles", and autosave is on once a profile is

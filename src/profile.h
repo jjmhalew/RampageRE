@@ -39,6 +39,7 @@ enum {
     PM_SPINS = 2,
     PM_ROAR = 4,
     PM_JUMP_SMASH = 8,
+    PM_SUPER_JUMP = 0x10,    /* the Wii's fifth upgrade (its Monsters.bsf hasSuperJump): kept in the side file */
     PM_UNLOCKED = 0x80       /* MonsterSelect.isMonsterAvailable: flags & 128 */
 };
 /* ---- the cities' flags (ProfileStatus.city_flags = GameStatus +0x2AC; ProfileBlock.city_flags[]) [R] */
@@ -202,9 +203,17 @@ void profile_saved(Profile *p);
 /* saveProfile: writes when profile_needs_save and allow_save (force: always); 1 written, 0 nothing to do, -1 the
  * file could not be written, -2 no room on its drive (ENOSPC). now_ms: the block's +0x20 stamp (0: left as it is) */
 int profile_write(Profile *p, const char *path, int force, uint64_t now_ms);
+/* the side file's name for a profile file's: "x.bin" -> "x.wii.bin", else + ".wii" */
+void profile_side_path(const char *path, char *out, int size);
 /* The file holds the PS2's roster (PROFILE_MONSTER_NAMES): with another one set (the Wii's, docs/WII_PLAN.md) each
  * monster's flags and each player's pick go by name, and a pick the PS2 has not got is saved as that player's start
  * pick (George, Lizzie, Ralph, Ramsey). With the PS2's roster the file is the block as it is.
+ * What the PS2's file has no room for goes to a side file beside it (profile_side_path: rampage_profile.wii.bin),
+ * written with the file whenever the roster has monsters the PS2's has not, and read after it: the flags of those
+ * monsters and every monster's PM_SUPER_JUMP (ORed in: flags only grow), and the players' picks of them (taken only
+ * while the PS2's file is the one the side file was written with: its data's CRC). Little endian: "RPWI", u32 version
+ * 1, u32 that CRC, u32 the count, then 32-byte records: char[16] a name, u32 the kind (1 a monster's flags: a; 2 a
+ * pick: a the player), u32 a, b, c. A profile used without the Wii folder leaves the side file as it is.
  * loadProfile: reads the file; a missing one (-1) or a bad one (0: shorter than its sizes, not the magic, a CRC that
  * is not 0 and does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C]; the version is not checked
  * [R 0x3445E0]) gives a
