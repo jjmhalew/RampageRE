@@ -183,9 +183,9 @@ int profile_reveal_boosy(Profile *p);
 /* the Wii's five-star unlocks [R Wii RWorldStateMgr::prepareForResults 0x80081970, docs/WII_NOTES.md], at the same
  * block's end (profile_block_won calls it after Boosy's): the monsters of the roster whose current flags have every
  * upgrade are counted; n5StarUnlock (1, 3, 6, 12, 20) walked with its names (Squirmy, Flea, Sarah, Brian, Vern),
- * stopping at the first above the count; the one equal to it gets PM_UNLOCKED. Every upgrade is the Wii's 0x1F;
- * until the port has the fifth (SuperJump, docs/WII_PLAN.md decision 6) the four of the PS2 count (0xF) [G].
- * Without those names in the roster (the PS2's) nothing. Returns the monster unlocked now, -1 none */
+ * stopping at the first above the count; the one equal to it gets PM_UNLOCKED. Every upgrade is the Wii's 0x1F,
+ * SuperJump (PM_SUPER_JUMP) with the four. Without those names in the roster (the PS2's) nothing. Returns the
+ * monster unlocked now, -1 none */
 int profile_reveal_five_star(Profile *p);
 /* the PS2's roster index of a monster's name (any case), -1 when it is one of the Wii's own */
 int profile_ps2_monster(const char *name);

@@ -22,7 +22,7 @@ const char *const PROFILE_CITY_NAMES[PROFILE_PS2_CITIES] = {
 static const struct { int count; const char *name; } FIVE_STAR[] = {
     { 1, "Squirmy" }, { 3, "Flea" }, { 6, "Sarah" }, { 12, "Brian" }, { 20, "Vern" }
 };
-#define FIVE_STARS 0xFu                              /* the Wii's 0x1F, until the port has SuperJump [G] */
+#define FIVE_STARS 0x1Fu                             /* [R Wii] every upgrade: the four and SuperJump (16) */
 #define WII_START 8                                  /* [R Wii 0x8008FB58] Profile::reset opens 0 .. 7 */
 
 /* [R] 0x3F6770: what updateProfile unlocks once every city is available and all their saved flags have the mask (the
