@@ -8620,6 +8620,11 @@ static int viewer_main(int argc, char **argv)
     if (!data_check(pos[0], &v.vol, msg, sizeof msg))   /* another release: say so, carry on */
         plat_message(msg, 1);
     v.region = data_region(pos[0], &v.vol);
+#if defined __SWITCH__ || defined __vita__ || defined __ANDROID__
+    if (!gfx.wii_data[0] && plat_exists("wii"))      /* the home folder's wii, found as the game's data there is
+                                                      * (docs/NATIVE.md); wii_data= another path (none) leaves it */
+        snprintf(gfx.wii_data, sizeof gfx.wii_data, "wii");
+#endif
     if (gfx.wii_data[0]) {                           /* the Wii's extra content (docs/WII_PLAN.md) */
         uint32_t n = vol_add_wii(&v.vol, gfx.wii_data);
         if (n)

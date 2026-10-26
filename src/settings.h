@@ -26,7 +26,8 @@ typedef struct {
      * the campaign); 0 the PS2's one or two */
     int four_players;
     /* wii_data= (port extra, docs/WII_PLAN.md): the player's own extracted Wii disc (Dolphin's Extract Entire Disc: the
-     * folder holding DATA, or its DATA/files), whose ten monsters and Dallas the port adds; "" (the default) none */
+     * folder holding DATA, or its DATA/files), whose ten monsters and Dallas the port adds; "" (the default) none, on
+     * the Switch, the Vita and Android the home folder's wii when there is one (main.c) */
     char wii_data[512];
 } Settings;
 

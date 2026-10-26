@@ -263,6 +263,7 @@ with `-lSDL2 -lGLESv2 -lEGL -lglapi -ldrm_nouveau -lnx`, then `nacptool` and `el
 |---|---|
 | Where | `/switch/rampagere/rampage.nro` on the SD card, started from the Homebrew Menu. That folder (`sdmc:/switch/rampagere`) is made at start and becomes the current one |
 | Game data | in the same folder: your disc image (`*.iso`, read in place as on a PC) or `RAMPAGE.VOL` with `RAMPAGE.ELF` or `SLES_538.00`; `data_find` looks there first (`__SWITCH__` only). `RAMPAGE.VOL` is 1.34 GB; an image larger than 4 GB does not fit on a FAT32 card (exFAT, or copy the two files out of it) |
+| The Wii's data | optional (docs/WII_PLAN.md): the `Game`, `Shell` and `Audio` folders of your extracted Wii disc (Dolphin's Extract Entire Disc, under `DATA/files`; 317 MB) in `sdmc:/switch/rampagere/wii`, found on its own as the game's data is; `wii_data=` in `rampage.cfg` points elsewhere |
 | Files | `rampage.cfg`, `rampage_profile.bin` (the save), `mods/textures/` and `rampage.log` there: stdout and stderr go to the log, a new one each start. A message (no game data, another release) shows in the system's error dialog |
 | Start | without arguments the front end (`--shell`); the Pause menu's Quit goes back to its main menu, HOME closes the program |
 | Screen | the whole screen at 1280×720 (docked the system scales it up); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` work (ES 3.0) at a cost not measured |
@@ -313,6 +314,7 @@ param.sfo stay in `build/vita/`). CI builds it (the `vita` job, in that image) a
 | Install | `rampage.vpk` with VitaShell; it starts from its LiveArea bubble. `ux0:data/rampagere` is made at start and becomes the current folder |
 | Shader compiler | vitaGL compiles the shim's shaders with the system's own compiler, `ur0:data/libshacccg.suprx` (or `ur0:data/external/`), which is not shipped: install and run **ShaRKBR33D** once, which extracts it. Without it RampageRE says so at start |
 | Game data | in `ux0:data/rampagere`: your disc image (`*.iso`, read in place) or `RAMPAGE.VOL` with `RAMPAGE.ELF` or `SLES_538.00`; `data_find` looks there first (`__vita__` only) |
+| The Wii's data | optional (docs/WII_PLAN.md): the `Game`, `Shell` and `Audio` folders of your extracted Wii disc (Dolphin's Extract Entire Disc, under `DATA/files`; 317 MB) in `ux0:data/rampagere/wii`, found on its own as the game's data is; `wii_data=` in `rampage.cfg` points elsewhere |
 | Files | `rampage.cfg`, `rampage_profile.bin` (the save), `mods/textures/` and `rampage.log` there: stdout and stderr go to the log, a new one each start. A message goes to the log and to SDL's message box, which may not show once vitaGL holds the screen |
 | Start | without arguments the front end (`--shell`); the Pause menu's Quit goes back to its main menu, the PS button goes to LiveArea, which closes it |
 | Screen | the whole screen at 960×544; `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` report "not supported" (ES 2.0) |
@@ -365,6 +367,7 @@ copied data and the save with it.
 | Screen | the whole screen in landscape (either way round); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` need ES 3.0 |
 | Messages | a dialog (`RampageActivity.dialog`, `plat_dialog`); stdout and stderr go to logcat: `adb logcat -s RampageRE` |
 | Bundle | `make_android_bundle.bat` (below) makes an APK with the disc's files inside; such an app reads them from its own APK (`getPackageCodePath`, `android_apk`) and neither asks nor copies |
+| The Wii's data | optional (docs/WII_PLAN.md): the `Game`, `Shell` and `Audio` folders of your extracted Wii disc (Dolphin's Extract Entire Disc, under `DATA/files`; 317 MB) in the app folder's `wii`, copied there by USB cable; found on its own as the game's data is, `wii_data=` in `rampage.cfg` points elsewhere |
 
 **The APK bundle** (`make_android_bundle.bat [RampageRE.apk] [disc image or RAMPAGE.VOL]`, WoodyRE's, with
 `tools/native/apkbundle.c`): the APK of a release (or the one `android\` built: release, else debug) and the three
@@ -484,7 +487,7 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | anisotropy | `aniso=1` | `--aniso N` | `RAMPAGE_ANISO` | F8 (cycles) | `GL_TEXTURE_MAX_ANISOTROPY` 1 (off), 2, 4, 8, 16 on the world's textures: streets and walls at a grazing angle stay sharp |
 | the profile at launch | `profile_autoload=1` | `--autoload`, `--noautoload` | `RAMPAGE_PROFILE_AUTOLOAD` | | not graphics, but read the same way: see "The profile at launch" below |
 | four players in the menu | `four_players=1` | `--four-players`, `--no-four-players` | `RAMPAGE_FOUR_PLAYERS` | | not graphics either: see "Four players in the menu" below |
-| the Wii's extra content | `wii_data=` | `--wii DIR` | `RAMPAGE_WII_DATA` | | not graphics either: your own extracted Wii disc (Dolphin's Extract Entire Disc: the folder with `DATA`, or its `DATA/files`), for its ten monsters and Dallas; empty (the default) leaves the PS2 game as it is. Work in progress, docs/WII_PLAN.md |
+| the Wii's extra content | `wii_data=` | `--wii DIR` | `RAMPAGE_WII_DATA` | | not graphics either: your own extracted Wii disc (Dolphin's Extract Entire Disc: the folder with `DATA`, or its `DATA/files`), for its ten monsters and Dallas; empty (the default) leaves the PS2 game as it is, except on the Switch, the Vita and Android, where a `wii` folder in the home folder is used when there is one (see each below; `wii_data=none` leaves it out). Work in progress, docs/WII_PLAN.md |
 | language | `language=english` | `--language NAME` | `RAMPAGE_LANGUAGE` | | not graphics either: the console's language (`english`, `french`, `german`, `italian`, `spanish`; `japanese`, `dutch`, `portuguese` as the game takes them, English), which the PS2 game reads at start-up (sceScfGetLanguage, 0x10D300) for its texts and movies (the intro and Victory have French, German, Italian and Spanish cuts); `--lang N` picks a .loc column itself |
 | mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
 
