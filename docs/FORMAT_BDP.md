@@ -137,7 +137,14 @@ python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and
   `tools/anim.py DATA/files/Game --all OUTDIR` exports all 40 monsters animated, with more clips than on the PS2
   (George 149 against 145: all the PS2's and `JUMP_CHARGE`, `JUMP_SUPER`, `WALK_MEDIUM`, `WALK_SLOW`; Cal 128
   against 123). Every vertex of the cloth meshes of George, Boris, Fifi and Flea sits on one of its particles.
-- **`MONSTER_DATA`:** the same layout, big endian. The move graphs have 181 states instead of 176, adding
+- **`MONSTER_DATA`:** the same layout, big endian, with fields of 16 bits and bytes where the PS2's little endian
+  hid them (found by matching George's PS2 and Wii records field by field; the port's `bundle.c` swaps them so):
+  the coded item offsets; an attack item's parts and count (+0x8 .. +0x13) and an effect item's slot, effect, on and
+  flags (+0x8 .. +0xF), all u16 (`tools/monster.py` reads the attack count as a u32, wrong on the Wii); a state's
+  +0xC and its transition count +0xE (u16), its 16 bytes at +0x18; a transition's priority and condition count
+  (+0x1C, +0x1E); a state node's clip events (u16 count, u16 first at +0x28), u8 +0x60 and +0x61, u16 +0x62 ..
+  +0x66; an attachment node's u16 bone and index (+0x34); a shape's bone and part (+0x14, +0x16); a body part's u16
+  count and bones (+0xC ..); an effect node's bone and mirror (+0x30, +0x32); the bytes after the states. The move graphs have 181 states instead of 176, adding
   `Ground_Walk_Slow`, `Ground_Walk_Medium`, `Jump_Super`, `Jump_Super_Release` and `Jump_Air_Borne_Roar`. The
   condition variables are numbered otherwise (George walks on v41, `|L|` on the PS2), so `monster.py` prints them as
   numbers.

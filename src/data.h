@@ -9,6 +9,10 @@
 static inline uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
 static inline uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static inline float rdf(const uint8_t *p) { union { uint32_t u; float f; } v; v.u = rd32(p); return v.f; }
+/* the Wii's big endian (bundle.c swaps its entries into the PS2's layout; its textures and meshes are read so) */
+static inline uint16_t rd16be(const uint8_t *p) { return (uint16_t)(p[0] << 8 | p[1]); }
+static inline uint32_t rd32be(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+static inline float rdfbe(const uint8_t *p) { union { uint32_t u; float f; } v; v.u = rd32be(p); return v.f; }
 
 /* ---- RAMPAGE.VOL ("PVOL" 0x1001: u32 count, u32 name block size, count x {u32 offset, u32 size, u32 index}, names) */
 typedef struct { const char *name; uint32_t offset, size; const char *path; } VolFile;   /* path: a Wii file's, else NULL */
@@ -38,6 +42,9 @@ typedef struct {
     int32_t *by_name;                                    /* per name index: entry index or -1 */
     int32_t *mat_by_name, *tex_by_name;                  /* the same for the materials and the textures alone */
     const char *scope;                                   /* texture packs: its dump folder (texpack.c), set by the loader; NULL = Common */
+    /* the Wii's ("version 1.4", docs/FORMAT_BDP.md "The Wii's bundles"): big endian but its name table; bdp_load swaps
+     * its node trees, clips, materials and MONSTER_DATA into the PS2's layout, so they read as the PS2's */
+    int wii;
 } Bundle;
 int bdp_load(Bundle *b, uint8_t *file, uint32_t size);   /* takes the buffer; 0 = ok */
 void bdp_free(Bundle *b);
