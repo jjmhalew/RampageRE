@@ -4,6 +4,9 @@ How the game draws its 2D interface, and the in-play HUD that `src/hud.c` rebuil
 banners, the challenge status and the results screens it also runs are in [SCREENS_NOTES.md](SCREENS_NOTES.md)). The
 layout files (`.ifc`, type 24) are introduced in [FORMAT_EDF.md](FORMAT_EDF.md). `tools/gui.py` lists layouts and fonts
 (`list BUNDLE [NAME]`) and parses all of them (`--verify build/vol`: 38 layouts and 6 fonts in the bundles).
+The Wii's `.bdg` (`--verify DATA/files/Game` and `Shell`: 42 layouts, 6 fonts) hold the same layouts, XML, and
+three more: `ChallengeBoss2.ifc` (WorldGui), `ControllerWarning.ifc` (CommonGUI) and `Loading_Controller.ifc`.
+Its fonts are raw files like the scripts and stay little endian (`ArialBlack24`: 7 rows, 126 glyphs, as on the PS2).
 Code addresses refer to `RAMPAGE.ELF`. **[R]** means read in the code or files. **[G]** means inferred.
 
 ## Where the HUD lives

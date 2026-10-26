@@ -3,7 +3,7 @@
 Layouts are XML with one- or two-letter tags; `list` prints each as an indented tree of its objects (i interface,
 o object, q quad, t text, sl slider, DD the 2D root) with their properties.
 
-Fonts (read by OFontData 0x1B7CD0):
+Fonts (read by OFontData 0x1B7CD0; little endian, also in the Wii's .bdg, where raw files keep their bytes):
   0x000 char[0x100] font name      0x100 char[0x100] bitmap file ("ARIALBLACK24.BMP")
   0x200 char[0x100] Windows LOGFONT as text ("0;-13;0;0;0;400;...;MS Sans Serif")
   0x300 u32 0    0x304 u32 rows of glyphs in the bitmap    0x308 u32 size of the character list at 0x358
@@ -29,7 +29,7 @@ NODES = {'i', 'o', 'q', 't', 'sl', 'DD', 'X'}
 def font_info(data):
     rows, nchars, nalias = struct.unpack_from('<3I', data, 0x304)
     at = 0x358 + nchars + nalias
-    if (len(data) - at) % 0x24:
+    if at > len(data) or (len(data) - at) % 0x24:
         raise ValueError(f'glyphs at {at:#x} do not fill the entry ({len(data):#x})')
     head = {
         'name': data[:0x100].split(b'\0')[0].decode('latin1'),
@@ -72,7 +72,7 @@ def main():
     if len(args) == 2 and args[0] == '--verify':
         layouts = fonts = bad = 0
         for f in sorted(os.listdir(args[1])):
-            if not f.lower().endswith(('.bdp', '.cmp')):
+            if not f.lower().endswith(bdp.EXTENSIONS):
                 continue
             for name, typ, data in entries(os.path.join(args[1], f)):
                 try:
