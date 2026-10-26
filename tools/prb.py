@@ -3,13 +3,13 @@
 A property book is used in place by the game: 0x1B00E0 puts a PropertyBook object (vtable 0x445380) over the
 entry's data and 0x1B0170 turns its offsets into pointers. (0x1AFC80 builds the same thing from a text book.)
 
-Layout (little endian; offsets are from the start of the entry data unless noted):
+Layout (little endian, big endian in the Wii's .bdg; offsets are from the start of the entry data unless noted):
   0x00  0x1C bytes  room for the runtime object (vtable, ...); zero apart from two 1s
   0x1C  u32         number of top-level groups
   0x20  u32         size
   0x24  u32         offset of the group table: one u32 offset per group
 Group:   u32 0, u32 name index, u32 record count, u32 ?, u32 header size (0x14), then the records
-Record:  u32 kind, u32 name index, u32 value
+Record:  u32 kind, u32 name index, u32 value (the kind is u8 type, u8 form, u16 length: on the Wii `03 00 00 00`)
   kind & 0xFF: 0 int, 1 float, 2 name (value = name index), 3 group (value = offset from the containing group)
   (kind >> 8) & 0xFF: 0 plain, 1 typed key "Type|Name" (kind >> 16 = length of "Type"), 2 list element without
   a name (the name index is 0, a placeholder), 3 list element of a type "Type|" (kind >> 16 = length of "Type")
@@ -25,30 +25,31 @@ INT, FLOAT, NAME, GROUP = 0, 1, 2, 3
 
 
 class Book:
-    def __init__(self, data, names):
+    def __init__(self, data, names, endian='<'):
         self.data = data
         self.names = names
-        count, self.size, table = struct.unpack_from('<III', data, 0x1C)
-        self.groups = [struct.unpack_from('<I', data, table + 4 * i)[0] for i in range(count)]
+        self.e = endian
+        count, self.size, table = struct.unpack_from(endian + 'III', data, 0x1C)
+        self.groups = [struct.unpack_from(endian + 'I', data, table + 4 * i)[0] for i in range(count)]
 
     def name(self, i):
         return self.names[i] if i < len(self.names) else f'#{i}'
 
     def group(self, at):
         """(name, [(kind, name, value)]) of the group at `at`; group values are absolute offsets."""
-        zero, name, count, _, header = struct.unpack_from('<5I', self.data, at)
+        zero, name, count, _, header = struct.unpack_from(self.e + '5I', self.data, at)
         if zero or header != 0x14:
             raise ValueError(f'no group at {at:#x}')
         records = []
         for i in range(count):
-            kind, rname, value = struct.unpack_from('<III', self.data, at + header + 12 * i)
-            t = kind & 0xFF
+            t, form, length, rname, value = struct.unpack_from(self.e + 'BBHII', self.data, at + header + 12 * i)
+            kind = t | form << 8 | length << 16
             if t == FLOAT:
-                value = struct.unpack_from('<f', self.data, at + header + 12 * i + 8)[0]
+                value = struct.unpack_from(self.e + 'f', self.data, at + header + 12 * i + 8)[0]
             elif t == GROUP:
                 value = at + value
             elif t == INT:
-                value = struct.unpack_from('<i', self.data, at + header + 12 * i + 8)[0]
+                value = struct.unpack_from(self.e + 'i', self.data, at + header + 12 * i + 8)[0]
             records.append((kind, self.name(rname), value))
         return self.name(name), records
 
@@ -92,7 +93,7 @@ def main():
     for e, a, _ in b.items(0):
         if e.type != 22:
             continue
-        book = Book(a, b.names)
+        book = Book(a, b.names, b.endian)
         print(f'// {b.name(e.name)}: {len(book.groups)} groups')
         for g in book.groups:
             if len(sys.argv) == 3 and book.group(g)[0] != sys.argv[2]:

@@ -3,7 +3,8 @@
 A city is played block by block. `<City>_Props.prb` (WorldData) lists the blocks; each block definition gives
 its ground shape, the buildings (template, left edge X, front or back row) and the street objects (template,
 location, rotation). Building templates are in `<City>_buildings.prb`: a ground-floor shape, a top shape, a
-texture sheet and one `Floor|` per storey with a facade tile per cell. The meshes are in `<City>.bdp`.
+texture sheet and one `Floor|` per storey with a facade tile per cell. The meshes are in `<City>.bdp`. The Wii's
+cities (the PS2's seven and Dallas) are read the same way from its .bdg files.
 See docs/FORMAT_BDP.md ("City layout").
 
 Building geometry (game units; one cell is 5 x 5, Z up, the street is towards -Y):
@@ -56,17 +57,21 @@ class Books:
         self.files = {f.lower(): f for f in os.listdir(voldir)}
         self.cache = {}
 
+    def file(self, name):
+        """The bundle `name` (the PS2's .bdp or the Wii's .bdg), or None."""
+        return self.files.get(name.lower() + '.bdp') or self.files.get(name.lower() + '.bdg')
+
     def book(self, name):
         key = name.lower()
         if key not in self.cache:
-            f = self.files.get(key + '.bdp')
+            f = self.file(key)
             if f is None:
                 self.cache[key] = None
             else:
                 with open(os.path.join(self.voldir, f), 'rb') as h:
                     b = bdp.Bundle(h.read())
                 entry = next(((e, a) for e, a, _ in b.items(0) if e.type == 22), None)
-                self.cache[key] = prb.Book(entry[1], b.names) if entry else None
+                self.cache[key] = prb.Book(entry[1], b.names, b.endian) if entry else None
         return self.cache[key]
 
     def group(self, book_name, group_name):
@@ -196,7 +201,7 @@ class CityExporter:
         self.books = Books(voldir)
         self.city = city
         self.out = os.path.join(out, city)
-        with open(os.path.join(voldir, self.books.files[city.lower() + '.bdp']), 'rb') as f:
+        with open(os.path.join(voldir, self.books.file(city)), 'rb') as f:
             self.bundle = bdp.Bundle(f.read())
         self.name_index = {n.lower(): i for i, n in enumerate(self.bundle.names)}
         self.models = anim.Models(self.bundle)
@@ -361,7 +366,7 @@ class CityExporter:
         return len(block.values('BuildingInstance|'))
 
     def light_file(self, name):
-        with open(os.path.join(self.voldir, self.books.files['common.bdp']), 'rb') as f:
+        with open(os.path.join(self.voldir, self.books.file('common')), 'rb') as f:
             common = bdp.Bundle(f.read())
         for e, a, _ in common.items(0):
             if e.type == 2 and common.name(e.name).lower() == name.lower():

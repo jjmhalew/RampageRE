@@ -70,7 +70,14 @@ python tools/bsf.py --verify DIR                      # the 151 .bsf of Game and
   name table, which stays little endian. `bdp.Bundle` reads both and keeps the byte order in `.endian`.
 - **`.zip`:** a real zip archive holding the `.cmg` of the same name (George.zip: 679 KB for a 1.55 MB `George.cmg`),
   not a copy as on the PS2.
-- **Entry types:** the same, but there are no palettes (type 13). `city.py` and `prb.py` read only the PS2's yet.
+- **Entry types:** the same, but there are no palettes (type 13).
+- **Property books** (`tools/prb.py`): the PS2's layout, big endian, but a record's kind is bytes: u8 type, u8
+  form, u16 length of "Type" (`03 00 00 00` is a group), as it is on the PS2 read as a little endian u32. Las
+  Vegas's book reads like the PS2's but for the Wii's monsters: they are added to the upgrade groups, there is a
+  fifth (`SuperJump`, Gilman), and the BlockList ends with `LV10_BufferBlock01` once more.
+- **Cities** (`tools/city.py DATA/files/Game CITY OUTDIR`): Dallas assembles into 11 blocks (DA01_Outskirts to
+  DA09_FortWorth, DA11 and DA12, buffer blocks; 88 buildings), every model found. The other seven have as many
+  blocks and buildings as on the PS2.
 - **Materials:** the PS2's layout, big endian, 0x70 bytes; kind 4 names the texture at +0x38 and the monster's
   `_512_B` bump map at +0x3A.
 - **Meshes** (`tools/mesh.py --verify DATA/files/Game`: 6,656 meshes, 7,484 parts; Shell 11 and 12): the type 0
