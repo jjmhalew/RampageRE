@@ -106,6 +106,8 @@ memory card's CHECKING / SAVING / LOADING and its errors for the profile file (o
 corrupt one, a full drive), and the SaveIcon while an autosave writes, in the menus and over the Results; the Pause menu's Quit
 goes back to the main menu. Its keys: the arrows, Enter / Space accept, Backspace back, P Start, C / V / R the
 square, triangle and R2 buttons, F2 the cheat entry. With `--shot` the `--do` words drive it first (`wait S`,
+`until NAME` (frames until that interface has the focus: `MainMenu`, `MonsterSelect`, `MonsterSheet`, ...; the boot's
+movies run on the clock, so a script waits for its menus this way),
 `menu up|down|left|right|accept|back|start`, `button N`, `type TEXT`, `done`; `p2` .. `p4` the menu words after it from that player's pad, `p1` again player 1's), the words left once a game
 starts play in it, and those left once it goes back play on in the shell. After 120 s untouched in the menus the
 attract mode runs its movies and then a demo game: a random city, block, day or night and one or two monsters, all

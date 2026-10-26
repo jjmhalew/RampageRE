@@ -8119,7 +8119,8 @@ static void shell_frame(Viewer *v, const Window *w, float dt)
         v->shell_go = 1;                             /* after this frame: the loading screen is drawn once */
 }
 
-/* --shell with --shot: the --do words for the shell (wait S at 1/60 s, menu <ev>, button N, type TEXT, done; p2 ..
+/* --shell with --shot: the --do words for the shell (wait S at 1/60 s, until NAME: frames until that interface has
+ * the focus (MainMenu, MonsterSelect, MonsterSheet, ...; 120 s at most), menu <ev>, button N, type TEXT, done; p2 ..
  * p4 the menu words after it from that player's pad, p1 again player 1's); the words left once a game starts (they
  * play in it), NULL none */
 static const char *shell_script(Viewer *v, const char *script)
@@ -8146,6 +8147,14 @@ static const char *shell_script(Viewer *v, const char *script)
         arg[k] = 0;
         if (!_stricmp(word, "wait"))
             for (int f = 0, frames = (int)(atof(arg) * 60 + 0.5); f < frames && !v->shell_go; f++) {
+                card_free(v, 1.0f / 60);
+                shell_update(v->shell, 1.0f / 60);
+                gui3d_step(v, v->shell, 1.0f / 60);
+                if (shell_answer(v))
+                    v->shell_go = 1;
+            }
+        else if (!_stricmp(word, "until"))
+            for (int f = 0; f < 120 * 60 && !v->shell_go && _stricmp(shell_focus(v->shell), arg); f++) {
                 card_free(v, 1.0f / 60);
                 shell_update(v->shell, 1.0f / 60);
                 gui3d_step(v, v->shell, 1.0f / 60);
