@@ -45,6 +45,10 @@ int.emitter_count = 4
 `tools/edf.py` writes this readable form (dictionary words bare, literals bare or in double quotes) and compiles it
 back; `--verify` rebuilds all 297 files byte for byte. The files use 128 of the 342 words.
 
+**The Wii's** (`.bdg`; `--verify DATA/files/Game`: 291, `Shell`: 10, all rebuilt byte for byte with the PS2's
+dictionary): the 296 effects named as on the PS2 are the same bytes, and there are four more, `brain_attack`,
+`debris_boots`, `oilwell` and `plucky_feathers`.
+
 ## String tables (`.loc`, type 23)
 13 tables: one per city (block names, challenge texts), `Shell.loc` (menus), `Common.loc`, `Game.loc` and
 `MemoryCard.loc`; 574 keys in 9 languages.

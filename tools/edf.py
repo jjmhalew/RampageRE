@@ -148,7 +148,7 @@ def compile_source(text, words):
 
 def effects(voldir):
     for f in sorted(os.listdir(voldir)):
-        if not f.lower().endswith(('.bdp', '.cmp')):
+        if not f.lower().endswith(bdp.EXTENSIONS):
             continue
         with open(os.path.join(voldir, f), 'rb') as h:
             b = bdp.Bundle(h.read())
