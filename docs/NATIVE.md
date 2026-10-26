@@ -366,10 +366,10 @@ copied data and the save with it.
 | Start | the front end (`--shell`); the Pause menu's Quit goes back to its main menu. The app is left with Home, not quit |
 | Screen | the whole screen in landscape (either way round); `window=`, `fullscreen=` and F11 do nothing, the effects of `rampage.cfg` need ES 3.0 |
 | Messages | a dialog (`RampageActivity.dialog`, `plat_dialog`); stdout and stderr go to logcat: `adb logcat -s RampageRE` |
-| Bundle | `make_android_bundle.bat` (below) makes an APK with the disc's files inside; such an app reads them from its own APK (`getPackageCodePath`, `android_apk`) and neither asks nor copies |
+| Bundle | `make_android_bundle.bat` (below) makes an APK with the disc's files inside, and the Wii's if given; such an app reads them from its own APK (`getPackageCodePath`, `android_apk`) and neither asks nor copies |
 | The Wii's data | optional (docs/WII_PLAN.md): the `Game`, `Shell` and `Audio` folders of your extracted Wii disc (Dolphin's Extract Entire Disc, under `DATA/files`; 317 MB) in the app folder's `wii`, found on its own as the game's data is (`wii_data=` in `rampage.cfg` points elsewhere). Copied there by USB cable, or picked and copied by the app (`RampageActivity.wiiSetup`): after the first start's copy it asks for them (**Folder** or **Not now**), and later the launcher's shortcut **Add the Wii's data** (a long press on the icon) asks again. The system's folder picker takes the extracted disc (the folder with `DATA`), its `DATA/files` or that folder's parent of `Game`; the three folders' files are copied into `wii.part` and renamed `wii` when all are in (a progress dialog counts the MB, the free room is checked first). Started from the shortcut the copy comes before the data is read; while RampageRE runs it copies at once and says the Wii's data counts from the next start |
 
-**The APK bundle** (`make_android_bundle.bat [RampageRE.apk] [disc image or RAMPAGE.VOL]`, WoodyRE's, with
+**The APK bundle** (`make_android_bundle.bat [RampageRE.apk] [disc image or RAMPAGE.VOL] [Wii folder]`, WoodyRE's, with
 `tools/native/apkbundle.c`): the APK of a release (or the one `android\` built: release, else debug) and the three
 files the port reads (`SYSTEM.CNF`, the ELF it boots as `SLES_538.00`, `RAMPAGE.VOL`), taken from the disc image or
 from beside the VOL (or from the data the PC build finds), become `RampageRE-bundle.apk`. Every entry of the APK stays
@@ -387,6 +387,18 @@ updates of it; it does not install over a release APK (another key): uninstall t
 the game's data: for your own devices only, never share or upload it. Tested here on an APK made with aapt2 and signed by
 apksigner (v2 + v3), with the real 1.34 GB RAMPAGE.VOL: verified, aligned, and read as the data by the Windows and Linux
 builds (`--shot` byte for byte the one from the VOL); not yet installed on a device or the emulator.
+
+**The Wii's data in the bundle** (optional, docs/WII_PLAN.md): a folder dragged onto `make_android_bundle.bat` with
+the rest is your extracted Wii disc (the folder with `DATA`, its `DATA\files`, or the folder with `Game` in it);
+without one `apkbundle` takes `RAMPAGE_WII_DATA`, else the `wii_data=` of the `rampage.cfg` beside the script, else a
+`wii` folder there, else none. The files of its `Game`, `Shell` and `Audio` (379, 315 MB) go in as
+`assets/wii/Game/...`, stored and 4096-byte aligned as the disc's, and the bundle is about 1.6 GB. The app reads them in
+place from its APK (`vol_add_wii` takes a ZIP as well as a folder, `iso.c` `zip_each`) when neither `wii_data=` nor the
+app folder's `wii` names others; a bundle without them says nothing. On a PC `--wii RampageRE-bundle.apk` reads them the
+same way. Tested: `apksigner verify` and `zipalign -c -P 16 4` pass; on Windows Dallas 4, three PS2 shots and the
+shell's autoplay with `--wii` the bundle are byte for byte those with the Wii folder (the profile too, but for its save
+time); installed on the emulator (Android 15 x86_64) with nothing in the app folder: the game's data and the Wii's from
+`base.apk`, the roster of 40, Dallas 4 with Boris.
 
 **Controls.** The on-screen pad (`src/touch.c`, WoodyRE's with the PS2 pad's buttons): a floating stick on the left
 half of the screen (where the finger lands; move), on the right Cross (jump), Square (punch), Triangle (kick) and

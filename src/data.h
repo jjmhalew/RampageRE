@@ -15,7 +15,8 @@ static inline uint32_t rd32be(const uint8_t *p) { return (uint32_t)p[0] << 24 | 
 static inline float rdfbe(const uint8_t *p) { union { uint32_t u; float f; } v; v.u = rd32be(p); return v.f; }
 
 /* ---- RAMPAGE.VOL ("PVOL" 0x1001: u32 count, u32 name block size, count x {u32 offset, u32 size, u32 index}, names) */
-typedef struct { const char *name; uint32_t offset, size; const char *path; } VolFile;   /* path: a Wii file's, else NULL */
+/* path: a Wii file's, else NULL (offset: in it, 0 but in a bundle APK's assets/wii) */
+typedef struct { const char *name; uint32_t offset, size; const char *path; } VolFile;
 typedef struct {
     FILE *f; VolFile *files; uint32_t count; char *names; int64_t base;   /* base: its start in f */
     VolFile *wii; uint32_t nwii;                         /* the Wii folder's files (vol_add_wii), after the VOL's */
@@ -28,7 +29,8 @@ int vol_open(Vol *v, const char *path);
 const VolFile *vol_find(const Vol *v, const char *name);
 uint8_t *vol_read(const Vol *v, const char *name, uint32_t *size);   /* malloc'd copy of a file, NULL if absent */
 /* the player's extracted Wii disc (wii_data=, docs/WII_PLAN.md): the files of its Game, Shell and Audio folders, found
- * under dir, dir/DATA/files or dir/files, added after the VOL's (vol_find). Returns how many, 0 none */
+ * under dir, dir/DATA/files or dir/files, or in a bundle APK's assets/wii (dir the APK, make_android_bundle.bat), added
+ * after the VOL's (vol_find). Returns how many, 0 none */
 uint32_t vol_add_wii(Vol *v, const char *dir);
 /* the Wii folder's own file of that name, even where the VOL has one (its sound banks: Rampage.uber ...); NULL if none */
 uint8_t *vol_read_wii(const Vol *v, const char *name, uint32_t *size);

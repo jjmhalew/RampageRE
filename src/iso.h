@@ -15,6 +15,9 @@ int iso_is(FILE *f);                                     /* 1 = an ISO 9660 imag
 /* a file by its path in the image ("RAMPAGE.VOL", "MODULES/PADMAN.IRX"; case and ";1" ignored): 1 = found, its
  * bytes at *offset (from the start of the image), *size long */
 int iso_find(FILE *f, const char *path, int64_t *offset, uint32_t *size);
+/* a ZIP's (an APK of make_android_bundle.bat) stored files in assets/<prefix> ("wii/Game/"), not in its subfolders:
+ * fn(ctx, the name past the prefix, its bytes at offset, size) for each. How many */
+int zip_each(FILE *f, const char *prefix, void (*fn)(void *ctx, const char *name, int64_t at, uint32_t size), void *ctx);
 
 /* the game's ELF for fx.c's words: in a disc image (path) the one SYSTEM.CNF boots (SLES_538.00, SLUS_213.23); beside
  * a RAMPAGE.VOL RAMPAGE.ELF (build.ps1's split copy), else SLES_538.00, else SLUS_213.23. malloc'd, NULL if none */

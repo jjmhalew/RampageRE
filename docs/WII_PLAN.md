@@ -203,6 +203,11 @@ start, at once while running) and once after the first start's copy. Found on th
 Untested: a real Switch, Vita or phone (no hardware here), a USB cable's (MTP) copy on Android. The builds are:
 rampage.nro, rampage.vpk and the APK, and the Android flows on the emulator (NATIVE.md "Android").
 
+**The Android bundle** (afterwards): `make_android_bundle.bat` takes the Wii folder too (dragged on, else
+`rampage.cfg`'s `wii_data=` or a `wii` folder beside it) and adds its Game, Shell and Audio as `assets/wii/...`, stored
+and aligned as the disc's files (about 1.6 GB in all, still under 2 GB); `vol_add_wii` reads a ZIP's `assets/wii` as it
+does a folder, which Android uses when nothing else names the Wii's data.
+
 ## Risks and unknowns
 - The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
   check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].

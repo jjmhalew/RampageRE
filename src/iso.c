@@ -35,18 +35,17 @@ static int iso_root(FILE *f, uint32_t *lba, uint32_t *len)
 
 /* ---- an APK of make_android_bundle.bat (tools/native/apkbundle.c): a ZIP whose entries assets/RAMPAGE.VOL,
  * assets/<the ELF SYSTEM.CNF boots> and assets/SYSTEM.CNF are the disc's files, stored (not compressed), so they are read
- * in place as from the image: path "RAMPAGE.VOL" is the entry assets/RAMPAGE.VOL. No ZIP64 (the bundle stays below 2 GB) */
-static int zip_find(FILE *f, const char *path, int64_t *offset, uint32_t *size)
+ * in place as from the image: path "RAMPAGE.VOL" is the entry assets/RAMPAGE.VOL. No ZIP64 (the bundle stays below 2 GB).
+ * The Wii's files may be in it too, assets/wii/Game/..., Shell/ and Audio/ (zip_each, vol_add_wii) */
+typedef int (*ZipFn)(void *ctx, const char *name, size_t n, int64_t at, uint32_t size);
+/* each stored entry whose name starts with prefix (case ignored): fn(ctx, its name (n bytes, no 0), its bytes at, size)
+ * until fn returns nonzero; that value, else 0 */
+static int zip_walk(FILE *f, const char *prefix, ZipFn fn, void *ctx)
 {
     uint8_t tail[22 + 1024], *cd = NULL;
-    char want[128];
     int64_t end;
-    if (_fseeki64(f, 0, SEEK_END) != 0 || (end = _ftelli64(f)) < 22 || snprintf(want, sizeof want, "assets/%s", path) >=
-        (int)sizeof want)
+    if (_fseeki64(f, 0, SEEK_END) != 0 || (end = _ftelli64(f)) < 22)
         return 0;
-    for (char *c = want; *c; c++)
-        if (*c == '\\')
-            *c = '/';
     size_t tn = end < (int64_t)sizeof tail ? (size_t)end : sizeof tail, e = tn - 22;   /* the end record, a short comment */
     if (!read_at(f, end - (int64_t)tn, tail, tn))
         return 0;
@@ -58,28 +57,80 @@ static int zip_find(FILE *f, const char *path, int64_t *offset, uint32_t *size)
         free(cd);
         return 0;
     }
-    size_t wl = strlen(want);
-    int found = 0;
-    for (uint32_t o = 0; o + 46 <= cd_size && rd32(cd + o) == 0x02014b50; ) {
+    size_t pl = strlen(prefix);
+    int r = 0;
+    for (uint32_t o = 0; !r && o + 46 <= cd_size && rd32(cd + o) == 0x02014b50; ) {
         uint32_t nl = rd16(cd + o + 28), len = 46 + nl + rd16(cd + o + 30) + rd16(cd + o + 32);
         if (o + len > cd_size)
             break;
-        if (nl == wl && _strnicmp((const char *)cd + o + 46, want, wl) == 0) {
+        if (nl >= pl && _strnicmp((const char *)cd + o + 46, prefix, pl) == 0) {
             uint8_t lh[30];
             uint32_t at = rd32(cd + o + 42), n = rd32(cd + o + 24);
-            found = rd16(cd + o + 10) == 0 && rd32(cd + o + 20) == n && read_at(f, at, lh, sizeof lh) &&
-                    rd32(lh) == 0x04034b50;                  /* stored, and its local header */
-            if (found) {
-                *offset = (int64_t)at + 30 + rd16(lh + 26) + rd16(lh + 28);
-                *size = n;
-                found = *offset + n <= end;
+            if (rd16(cd + o + 10) == 0 && rd32(cd + o + 20) == n && read_at(f, at, lh, sizeof lh) &&
+                rd32(lh) == 0x04034b50) {                    /* stored, and its local header */
+                int64_t data = (int64_t)at + 30 + rd16(lh + 26) + rd16(lh + 28);
+                if (data + n <= end)
+                    r = fn(ctx, (const char *)cd + o + 46, nl, data, n);
             }
-            break;
         }
         o += len;
     }
     free(cd);
-    return found;
+    return r;
+}
+
+typedef struct { size_t n; int64_t at; uint32_t size; } ZipOne;
+static int zip_one(void *ctx, const char *name, size_t n, int64_t at, uint32_t size)
+{
+    ZipOne *z = ctx;
+    (void)name;
+    if (n != z->n)                                       /* a longer name with this one as its start */
+        return 0;
+    z->at = at;
+    z->size = size;
+    return 1;
+}
+
+static int zip_find(FILE *f, const char *path, int64_t *offset, uint32_t *size)
+{
+    char want[128];
+    if (snprintf(want, sizeof want, "assets/%s", path) >= (int)sizeof want)
+        return 0;
+    for (char *c = want; *c; c++)
+        if (*c == '\\')
+            *c = '/';
+    ZipOne z = { strlen(want), 0, 0 };
+    if (!zip_walk(f, want, zip_one, &z))
+        return 0;
+    *offset = z.at;
+    *size = z.size;
+    return 1;
+}
+
+typedef struct { size_t pl; void (*fn)(void *, const char *, int64_t, uint32_t); void *ctx; int count; } ZipEach;
+static int zip_each_one(void *ctx, const char *name, size_t n, int64_t at, uint32_t size)
+{
+    ZipEach *z = ctx;
+    char rest[256];
+    if (n - z->pl >= sizeof rest || n == z->pl)
+        return 0;
+    memcpy(rest, name + z->pl, n - z->pl);
+    rest[n - z->pl] = 0;
+    if (strchr(rest, '/'))                               /* the folder's own files, not a subfolder's */
+        return 0;
+    z->fn(z->ctx, rest, at, size);
+    z->count++;
+    return 0;
+}
+
+int zip_each(FILE *f, const char *prefix, void (*fn)(void *ctx, const char *name, int64_t at, uint32_t size), void *ctx)
+{
+    char want[128];
+    if (snprintf(want, sizeof want, "assets/%s", prefix) >= (int)sizeof want)
+        return 0;
+    ZipEach z = { strlen(want), fn, ctx, 0 };
+    zip_walk(f, want, zip_each_one, &z);
+    return z.count;
 }
 
 int iso_is(FILE *f)

@@ -1,9 +1,13 @@
 /* apkbundle.c - makes the one-file Android build for your own use (make_android_bundle.bat): the app's APK + the game data
  * of YOUR disc that the port reads, as the assets assets/SYSTEM.CNF, assets/SLES_538.00 (the ELF SYSTEM.CNF boots) and
  * assets/RAMPAGE.VOL (1.34 GB). After WoodyRE's tools/native/apkbundle.c, which adds a whole CD image.
- * Usage: apkbundle <in.apk> <data> <out.apk> <key file> <certificate name>
+ * Usage: apkbundle <in.apk> <data> <out.apk> <key file> <certificate name> [wii]
  *   data: your disc image (.iso), or a RAMPAGE.VOL with SLES_538.00 (or RAMPAGE.ELF) and SYSTEM.CNF beside it, or "auto":
  *   the data the viewer finds by itself (src/iso.c data_find)
+ *   wii: your extracted Wii disc (the folder with DATA, its DATA/files, or the folder with Game in it), or "auto":
+ *   RAMPAGE_WII_DATA, else rampage.cfg's wii_data= (the current folder's), else a wii folder here; none without it.
+ *   The files of its Game, Shell and Audio (docs/WII_PLAN.md) go in as assets/wii/Game/..., stored and aligned as the
+ *   rest, which the app reads in place (src/vol.c vol_add_wii, src/main.c); about 320 MB more
  * Every entry of the APK stays byte for byte at its offset (so the 16 KB alignment of the native libraries holds); the
  * game's files are added behind them stored, not compressed, and 4096-byte aligned (zipalign's 0xd935 extra field), so the
  * app reads them in place in the installed APK: src/iso.c takes such an APK as a disc image (zip_find) and data_find
@@ -310,6 +314,129 @@ static void chunk_digests(Buf *out, const uint8_t *d, size_t n)
 }
 
 /* the data path as the ANSI one src/iso.c's fopen takes (else its 8.3 name) */
+static uint8_t g_buf[4 << 20];
+
+/* one entry behind the others: a local header with an alignment extra field (zipalign's 0xd935), so its data starts on
+ * 4096, then src's isz bytes, stored; its record into dir. what: the source, for the messages */
+static void add_stored(FILE *o, Buf *dir, const char *asset, FILE *src, uint32_t isz, const wchar_t *partname, const char *what)
+{
+    size_t al = strlen(asset), lh = (size_t)_ftelli64(o), xl = 6;
+    while ((lh + 30 + al + xl) % 4096)
+        xl++;
+    Buf h = { 0 };
+    put32(&h, 0x04034b50); put16(&h, 10); put16(&h, 0); put16(&h, 0); put16(&h, 0); put16(&h, 0x21);   /* stored, 1980-01-01 */
+    put32(&h, 0); put32(&h, isz); put32(&h, isz); put16(&h, (unsigned)al); put16(&h, (unsigned)xl);
+    put(&h, asset, al); put16(&h, 0xd935); put16(&h, (unsigned)(xl - 4)); put16(&h, 4096);
+    while (h.n < 30 + al + xl)
+        put8(&h, 0);
+    if (fwrite(h.p, 1, h.n, o) != h.n)
+        die("cannot write %ls (disk full?)", partname);
+    free(h.p);
+    uint32_t crc = 0;
+    for (uint32_t left = isz; left; ) {
+        size_t k = left < sizeof g_buf ? left : sizeof g_buf;
+        if (fread(g_buf, 1, k, src) != k)
+            die("cannot read all of %s", what);
+        crc = crc32_add(crc, g_buf, k);
+        if (fwrite(g_buf, 1, k, o) != k)
+            die("cannot write %ls (disk full?)", partname);
+        left -= (uint32_t)k;
+    }
+    uint8_t c4[4];
+    wr32(c4, crc);
+    if (_fseeki64(o, (long long)lh + 14, SEEK_SET) != 0 || fwrite(c4, 1, 4, o) != 4 || _fseeki64(o, 0, SEEK_END) != 0)
+        die("cannot write %ls", partname);
+    put32(dir, 0x02014b50); put16(dir, 10); put16(dir, 10); put16(dir, 0); put16(dir, 0); put16(dir, 0); put16(dir, 0x21);
+    put32(dir, crc); put32(dir, isz); put32(dir, isz); put16(dir, (unsigned)al); put16(dir, 0); put16(dir, 0);
+    put16(dir, 0); put16(dir, 0); put32(dir, 0); put32(dir, (uint32_t)lh); put(dir, asset, al);
+}
+
+/* ---- the Wii's files: Game, Shell and Audio under the extracted disc, its DATA/files or the folder itself */
+typedef struct { wchar_t path[MAX_PATH * 2]; char asset[128]; uint32_t size; } WiiFile;
+static WiiFile *g_wii;
+static unsigned g_nwii;
+
+static int is_dir(const wchar_t *p)
+{
+    DWORD a = GetFileAttributesW(p);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+/* 1 = dir holds the Wii's Game (or DATA/files/Game, files/Game): its files listed into g_wii */
+static int wii_collect(const wchar_t *dir)
+{
+    static const wchar_t *const UNDER[] = { L"", L"\\DATA\\files", L"\\files" };
+    static const wchar_t *const SUB[] = { L"Game", L"Shell", L"Audio" };
+    wchar_t root[MAX_PATH * 2], p[MAX_PATH * 2];
+    for (int k = 0; k < 3; k++) {
+        _snwprintf(root, MAX_PATH * 2, L"%ls%ls", dir, UNDER[k]);
+        root[MAX_PATH * 2 - 1] = 0;
+        _snwprintf(p, MAX_PATH * 2, L"%ls\\Game", root);
+        p[MAX_PATH * 2 - 1] = 0;
+        if (!is_dir(p))
+            continue;
+        for (int i = 0; i < 3; i++) {
+            WIN32_FIND_DATAW fd;
+            _snwprintf(p, MAX_PATH * 2, L"%ls\\%ls\\*", root, SUB[i]);
+            p[MAX_PATH * 2 - 1] = 0;
+            HANDLE h = FindFirstFileW(p, &fd);
+            if (h == INVALID_HANDLE_VALUE)
+                continue;
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                    continue;
+                if (fd.nFileSizeHigh)
+                    die("%ls is 4 GB or more: not the Wii's", fd.cFileName);
+                WiiFile *w = realloc(g_wii, sizeof *g_wii * (g_nwii + 1));
+                if (!w)
+                    die("out of memory");
+                g_wii = w;
+                w += g_nwii++;
+                _snwprintf(w->path, MAX_PATH * 2, L"%ls\\%ls\\%ls", root, SUB[i], fd.cFileName);
+                w->path[MAX_PATH * 2 - 1] = 0;
+                if (snprintf(w->asset, sizeof w->asset, "assets/wii/%ls/%ls", SUB[i], fd.cFileName) >= (int)sizeof w->asset)
+                    die("%ls: too long a name", fd.cFileName);
+                for (const char *c = w->asset; *c; c++)
+                    if ((unsigned char)*c < 32 || (unsigned char)*c > 126)
+                        die("%ls: not a Wii file name (letters outside ASCII)", fd.cFileName);
+                w->size = fd.nFileSizeLow;
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* "auto": RAMPAGE_WII_DATA, else rampage.cfg's wii_data= here (src/settings.c reads them so), else a wii folder */
+static void wii_auto(wchar_t *out, size_t cap)
+{
+    char v[1024] = "", line[1200];
+    const char *env = getenv("RAMPAGE_WII_DATA");
+    FILE *f = env && env[0] ? NULL : fopen("rampage.cfg", "r");
+    if (env && env[0])
+        snprintf(v, sizeof v, "%s", env);
+    while (f && fgets(line, sizeof line, f)) {
+        char *k = line, *e;
+        while (*k == ' ' || *k == '\t') k++;
+        if (_strnicmp(k, "wii_data", 8) != 0)
+            continue;
+        for (k += 8; *k == ' ' || *k == '\t'; k++) { }
+        if (*k++ != '=')
+            continue;
+        while (*k == ' ' || *k == '\t') k++;
+        if ((e = strchr(k, '#')) != NULL) *e = 0;
+        e = k + strlen(k);
+        while (e > k && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t')) *--e = 0;
+        snprintf(v, sizeof v, "%s", k);
+    }
+    if (f)
+        fclose(f);
+    if (!v[0] || !MultiByteToWideChar(CP_ACP, 0, v, -1, out, (int)cap))
+        _snwprintf(out, cap, L"wii");
+    out[cap - 1] = 0;
+}
+
 static void ansi(const wchar_t *w, char *out, size_t cap)
 {
     BOOL bad = FALSE;
@@ -328,8 +455,9 @@ int main(void)
 {
     int argc;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (!argv || argc != 6) {
-        fprintf(stderr, "usage: apkbundle <in.apk> <disc image | RAMPAGE.VOL | auto> <out.apk> <key file> <certificate name>\n");
+    if (!argv || (argc != 6 && argc != 7)) {
+        fprintf(stderr, "usage: apkbundle <in.apk> <disc image | RAMPAGE.VOL | auto> <out.apk> <key file> <certificate name> "
+                "[extracted Wii disc | auto]\n");
         return 2;
     }
     char cn[200], data[1024];
@@ -346,6 +474,24 @@ int main(void)
     printf("Game data: %s\n", data);
     if (!part[1].size)
         printf("(no %s there: the effects' words will be missing)\n", part[1].name);
+    if (argc == 7 && argv[6][0]) {                             /* the Wii's (docs/WII_PLAN.md) */
+        wchar_t wd[MAX_PATH * 2];
+        int any = wcscmp(argv[6], L"auto") == 0;
+        if (any)
+            wii_auto(wd, MAX_PATH * 2);
+        else
+            _snwprintf(wd, MAX_PATH * 2, L"%ls", argv[6]);
+        wd[MAX_PATH * 2 - 1] = 0;
+        if (wii_collect(wd)) {
+            uint64_t n = 0;
+            for (unsigned i = 0; i < g_nwii; i++)
+                n += g_wii[i].size;
+            printf("Wii data: %ls, %u files, %u MB\n", wd, g_nwii, (unsigned)(n >> 20));
+        } else if (!any)
+            die("%ls holds no Game folder (nor DATA\\files\\Game): not your extracted Wii disc", wd);
+        else
+            printf("(no Wii data: give your extracted Wii disc for its monsters and Dallas)\n");
+    }
     if (BCryptOpenAlgorithmProvider(&g_sha, BCRYPT_SHA256_ALGORITHM, NULL, 0) ||
         BCryptOpenAlgorithmProvider(&g_rsa, BCRYPT_RSA_ALGORITHM, NULL, 0))
         die("Windows' crypto (bcrypt) is not available");
@@ -382,7 +528,7 @@ int main(void)
         for (int i = 0; i < 3; i++) {
             char a[80];
             int al = snprintf(a, sizeof a, "assets/%s", part[i].name);
-            if ((size_t)al == nl && !_strnicmp(nm, a, nl))
+            if (((size_t)al == nl && !_strnicmp(nm, a, nl)) || (nl > 11 && !_strnicmp(nm, "assets/wii/", 11)))
                 die("%ls already holds the game's data: start from the APK of a release (or of your own build)", argv[1]);
         }
         if (!v1_signature_file(nm, nl)) {
@@ -394,6 +540,8 @@ int main(void)
     uint64_t total = end;
     for (int i = 0; i < 3; i++)
         total += part[i].size + 30 + 80 + 4096;
+    for (unsigned i = 0; i < g_nwii; i++)
+        total += g_wii[i].size + 30 + 128 + 4096 + 46 + 128;
     if (total + dir.n + (1u << 16) > MAX_APK)
         die("the bundle would be 2 GB or more");
 
@@ -408,49 +556,30 @@ int main(void)
         die("cannot write %ls", partname);
     free(apk);
 
-    /* the new entries, RAMPAGE.VOL last: a local header with an alignment extra field (zipalign's 0xd935), so each one's
-     * data starts on 4096, then the bytes, stored */
-    static uint8_t buf[4 << 20];
+    /* the new entries, RAMPAGE.VOL last of the disc's, then the Wii's */
     for (int i = 0; i < 3; i++) {
         if (!part[i].size)
             continue;
         char asset[80];
         snprintf(asset, sizeof asset, "assets/%s", part[i].name);
-        size_t al = strlen(asset), lh = (size_t)_ftelli64(o), xl = 6;
-        while ((lh + 30 + al + xl) % 4096)
-            xl++;
-        uint32_t isz = part[i].size;
-        Buf h = { 0 };
-        put32(&h, 0x04034b50); put16(&h, 10); put16(&h, 0); put16(&h, 0); put16(&h, 0); put16(&h, 0x21);   /* stored, 1980-01-01 */
-        put32(&h, 0); put32(&h, isz); put32(&h, isz); put16(&h, (unsigned)al); put16(&h, (unsigned)xl);
-        put(&h, asset, al); put16(&h, 0xd935); put16(&h, (unsigned)(xl - 4)); put16(&h, 4096);
-        while (h.n < 30 + al + xl)
-            put8(&h, 0);
-        if (fwrite(h.p, 1, h.n, o) != h.n)
-            die("cannot write %ls (disk full?)", partname);
-        free(h.p);
-        printf("Adding %s (%u MB) ...\n", asset, isz >> 20);
+        printf("Adding %s (%u MB) ...\n", asset, part[i].size >> 20);
         FILE *src = fopen(part[i].file, "rb");
         if (!src || _fseeki64(src, part[i].at, SEEK_SET) != 0)
             die("cannot read %s", part[i].file);
-        uint32_t crc = 0;
-        for (uint32_t left = isz; left; ) {
-            size_t k = left < sizeof buf ? left : sizeof buf;
-            if (fread(buf, 1, k, src) != k)
-                die("cannot read all of %s", part[i].file);
-            crc = crc32_add(crc, buf, k);
-            if (fwrite(buf, 1, k, o) != k)
-                die("cannot write %ls (disk full?)", partname);
-            left -= (uint32_t)k;
-        }
+        add_stored(o, &dir, asset, src, part[i].size, partname, part[i].file);
         fclose(src);
-        uint8_t c4[4];
-        wr32(c4, crc);
-        if (_fseeki64(o, (long long)lh + 14, SEEK_SET) != 0 || fwrite(c4, 1, 4, o) != 4 || _fseeki64(o, 0, SEEK_END) != 0)
-            die("cannot write %ls", partname);
-        put32(&dir, 0x02014b50); put16(&dir, 10); put16(&dir, 10); put16(&dir, 0); put16(&dir, 0); put16(&dir, 0); put16(&dir, 0x21);
-        put32(&dir, crc); put32(&dir, isz); put32(&dir, isz); put16(&dir, (unsigned)al); put16(&dir, 0); put16(&dir, 0);
-        put16(&dir, 0); put16(&dir, 0); put32(&dir, 0); put32(&dir, (uint32_t)lh); put(&dir, asset, al);
+        count++;
+    }
+    if (g_nwii)
+        printf("Adding the Wii's %u files ...\n", g_nwii);
+    for (unsigned i = 0; i < g_nwii; i++) {
+        char what[MAX_PATH * 2];
+        snprintf(what, sizeof what, "%ls", g_wii[i].path);
+        FILE *src = _wfopen(g_wii[i].path, L"rb");
+        if (!src)
+            die("cannot read %s", what);
+        add_stored(o, &dir, g_wii[i].asset, src, g_wii[i].size, partname, what);
+        fclose(src);
         count++;
     }
     size_t e = (size_t)_ftelli64(o);
@@ -467,9 +596,9 @@ int main(void)
     _fseeki64(o, 0, SEEK_SET);
     for (size_t at = 0; at < e; ) {
         size_t n = e - at < CHUNK ? e - at : CHUNK;
-        if (fread(buf, 1, n, o) != n)
+        if (fread(g_buf, 1, n, o) != n)
             die("cannot read %ls back", partname);
-        chunk_digests(&digs, buf, n);
+        chunk_digests(&digs, g_buf, n);
         at += n;
         chunks++;
     }

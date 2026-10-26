@@ -8636,11 +8636,18 @@ static int viewer_main(int argc, char **argv)
                                                       * (docs/NATIVE.md); wii_data= another path (none) leaves it */
         snprintf(gfx.wii_data, sizeof gfx.wii_data, "wii");
 #endif
+    int wii_maybe = 0;                               /* a place that may well hold none: not said */
+#ifdef __ANDROID__
+    if (!gfx.wii_data[0] && android_apk()[0]) {      /* else a bundle's assets/wii (make_android_bundle.bat) */
+        snprintf(gfx.wii_data, sizeof gfx.wii_data, "%s", android_apk());
+        wii_maybe = 1;
+    }
+#endif
     if (gfx.wii_data[0]) {                           /* the Wii's extra content (docs/WII_PLAN.md) */
         uint32_t n = vol_add_wii(&v.vol, gfx.wii_data);
         if (n)
             printf("wii data: %s, %u files\n", gfx.wii_data, n);
-        else
+        else if (!wii_maybe)
             printf("wii data: %s holds no Game folder (nor DATA/files/Game): not used\n", gfx.wii_data);
         if (vol_find(&v.vol, "Dallas.bdp"))
             ncities = NCITIES + 1;

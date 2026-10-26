@@ -77,7 +77,7 @@ uint8_t *vol_read(const Vol *v, const char *name, uint32_t *size)
         return NULL;
     uint8_t *buf = malloc(f->size ? f->size : 1);
     FILE *h = f->path ? fopen(f->path, "rb") : v->f;
-    int ok = buf && h && (f->path || _fseeki64(h, v->base + f->offset, SEEK_SET) == 0) &&
+    int ok = buf && h && _fseeki64(h, (f->path ? 0 : v->base) + f->offset, SEEK_SET) == 0 &&
              fread(buf, 1, f->size, h) == f->size;
     if (f->path && h)
         fclose(h);
@@ -95,7 +95,7 @@ uint8_t *vol_read_wii(const Vol *v, const char *name, uint32_t *size)
     const VolFile *f = find_in(v->wii, v->nwii, name);
     FILE *h = f ? fopen(f->path, "rb") : NULL;
     uint8_t *buf = h ? malloc(f->size ? f->size : 1) : NULL;
-    int ok = buf && fread(buf, 1, f->size, h) == f->size;
+    int ok = buf && _fseeki64(h, f->offset, SEEK_SET) == 0 && fread(buf, 1, f->size, h) == f->size;
     if (h)
         fclose(h);
     if (!ok) {
@@ -107,8 +107,8 @@ uint8_t *vol_read_wii(const Vol *v, const char *name, uint32_t *size)
     return buf;
 }
 
-/* ---- the Wii folder */
-static void add_file(Vol *v, uint32_t *cap, const char *dir, const char *name, uint32_t size)
+/* ---- the Wii folder; sep '/': dir/name is the file, 0: name is in dir (a bundle APK) at offset */
+static void add_file(Vol *v, uint32_t *cap, const char *dir, const char *name, uint32_t size, uint32_t offset, char sep)
 {
     if (v->nwii == *cap) {
         VolFile *grown = realloc(v->wii, sizeof *v->wii * (*cap = *cap ? *cap * 2 : 256));
@@ -121,9 +121,16 @@ static void add_file(Vol *v, uint32_t *cap, const char *dir, const char *name, u
     if (!path)
         return;
     memcpy(path, dir, dn);
-    path[dn] = '/';
+    path[dn] = sep;
     memcpy(path + dn + 1, name, nn + 1);
-    v->wii[v->nwii++] = (VolFile){ path + dn + 1, 0, size, path };
+    v->wii[v->nwii++] = (VolFile){ path + dn + 1, offset, size, path };
+}
+
+typedef struct { Vol *v; uint32_t *cap; const char *apk; } Zipped;
+static void add_zipped(void *ctx, const char *name, int64_t at, uint32_t size)
+{
+    Zipped *z = ctx;
+    add_file(z->v, z->cap, z->apk, name, size, (uint32_t)at, 0);
 }
 
 static void add_dir(Vol *v, uint32_t *cap, const char *dir)
@@ -137,7 +144,7 @@ static void add_dir(Vol *v, uint32_t *cap, const char *dir)
         return;
     do
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-            add_file(v, cap, dir, fd.cFileName, fd.nFileSizeLow);
+            add_file(v, cap, dir, fd.cFileName, fd.nFileSizeLow, 0, '/');
     while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
@@ -150,7 +157,7 @@ static void add_dir(Vol *v, uint32_t *cap, const char *dir)
         struct stat st;
         snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
         if (stat(path, &st) == 0 && S_ISREG(st.st_mode))
-            add_file(v, cap, dir, de->d_name, (uint32_t)st.st_size);
+            add_file(v, cap, dir, de->d_name, (uint32_t)st.st_size, 0, '/');
     }
     closedir(d);
 #endif
@@ -159,14 +166,27 @@ static void add_dir(Vol *v, uint32_t *cap, const char *dir)
 uint32_t vol_add_wii(Vol *v, const char *dir)
 {
     static const char *const UNDER[] = { "", "/DATA/files", "/files" };
+    static const char *const SUB[] = { "Game", "Shell", "Audio" };
     char root[1024], probe[1100];
+    FILE *apk = fopen(dir, "rb");                        /* a bundle APK: its assets/wii/Game/ ... (a folder: none) */
+    if (apk) {
+        uint32_t cap = 0;
+        Zipped z = { v, &cap, dir };
+        for (size_t s = 0; s < sizeof SUB / sizeof *SUB; s++) {
+            snprintf(probe, sizeof probe, "wii/%s/", SUB[s]);
+            if (!zip_each(apk, probe, add_zipped, &z) && !s)
+                break;                                   /* no Game: not the Wii's */
+        }
+        fclose(apk);
+        if (v->nwii)
+            return v->nwii;
+    }
     for (size_t k = 0; k < sizeof UNDER / sizeof *UNDER; k++) {
         snprintf(root, sizeof root, "%s%s", dir, UNDER[k]);
         snprintf(probe, sizeof probe, "%s/Game", root);
         if (!plat_exists(probe))
             continue;
         uint32_t cap = 0;
-        static const char *const SUB[] = { "Game", "Shell", "Audio" };
         for (size_t s = 0; s < sizeof SUB / sizeof *SUB; s++) {
             snprintf(probe, sizeof probe, "%s/%s", root, SUB[s]);
             add_dir(v, &cap, probe);
