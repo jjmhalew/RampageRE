@@ -255,7 +255,7 @@ uint32_t profile_monster_flags(const Profile *p, int player, int monster);
 /* setMonsterFlags (0x1A, 0x33D7C0): players 1 .. 3 their own (a byte); otherwise current (flags & 0xFF) */
 void profile_set_monster_flags(Profile *p, int player, int monster, uint32_t flags);
 int profile_monster_available(const Profile *p, int player, int monster);   /* MonsterSelect: & 0x80, or cheat 1 */
-uint32_t profile_moves(const Profile *p, int player, int monster);         /* the upgrades: & 0xF, all with cheat 8 */
+uint32_t profile_moves(const Profile *p, int player, int monster);         /* the upgrades: & 0x1F, all with cheat 8 */
 float profile_sound_volume(const Profile *p);        /* 0x1E */
 float profile_music_volume(const Profile *p);        /* 0x20 */
 /* setSoundVolume (0x1D, 0x2C2F68) / setMusicVolume (0x1F): a new value is stored and raises the changed byte; the

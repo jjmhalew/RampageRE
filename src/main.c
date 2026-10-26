@@ -771,6 +771,17 @@ static Group reveal_world_data(Viewer *v, const char *player1)
         return city_book_group_wii(v->city, book, "WorldData");
     return world_data(v);
 }
+/* with a Wii folder the Wii's copy of the block's BlockDef (its upgrade lists name its own monsters and SuperJump,
+ * docs/WII_PLAN.md phase 5); {0} without */
+static Group wii_block_def(Viewer *v)
+{
+    char book[64], key[96];
+    if (!v->wii_roster.n || v->block >= v->nblocks)
+        return (Group){ 0 };
+    snprintf(book, sizeof book, "%s_Props", CITIES[v->city_index]);
+    snprintf(key, sizeof key, "BlockDef|%s", v->blocks[v->block]);
+    return group_sub(group_sub(city_book_group_wii(v->city, book, "WorldData"), "BlockData"), key);
+}
 static int game_all_revealed(void *ctx)
 {
     Viewer *v = ctx;
@@ -1485,8 +1496,15 @@ static void build(Viewer *v)
     if (v->have_scene && have_monster(v))           /* player 1's monster and its upgrades whoever plays [R 0x346D34:
                                                       * gCommon +0x214, the current record's monster 0; 0x346D9C its
                                                       * flags at +0x234] */
-        challenge_load(&v->challenge, v->scene.block, v->game ? game_play_type(v->game) : GP_CAMPAIGN, v->boss_block,
-                       v->monsters[v->mon[0].monster], v->upgrades[v->mon[0].monster & 63]);
+    {
+        challenge_load(&v->challenge, v->scene.block, wii_block_def(v), v->game ? game_play_type(v->game) : GP_CAMPAIGN,
+                       v->boss_block, v->monsters[v->mon[0].monster], v->upgrades[v->mon[0].monster & 63]);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("challenge %s: %d goals, the upgrade for %s %s\n",
+                   v->challenge.identifier ? v->challenge.identifier : "-", v->challenge.ngoals,
+                   v->monsters[v->mon[0].monster],
+                   v->challenge.upgrade ? challenge_upgrade_move(v->challenge.upgrade) : "none");
+    }
     if (v->hud) {                                    /* Levels::onActivateBlock: ChallengeStatus (the count, or the
                                                       * boss bar on the boss block) and ChallengeText's card */
         HudChallenge ch;
@@ -6705,7 +6723,7 @@ static void power_from_profile(Mon *mo)
                                                       * getMonsterFlags(monster.getSlot(), ..): a player's own flags
                                                       * when it has them (player_flags), else the profile's */
     mo->power.cheats = profile_cheat_flags(&v->prof);
-    v->upgrades[mo->monster & 63] = profile_monster_flags(&v->prof, 0, pm) & 0xF;
+    v->upgrades[mo->monster & 63] = profile_monster_flags(&v->prof, 0, pm) & 0x1F;
 }
 
 /* Start on pad `pad` (0 = player 1): the Pause menu (WorldGuiDriver::process, event 128) */

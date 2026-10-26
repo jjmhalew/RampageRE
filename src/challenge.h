@@ -23,7 +23,8 @@
                                                       * 5000); no book sets Points */
 
 /* the moves an Upgrade| group can give (the table 0x3F67A0), as gCommon.getMonsterFlags has them */
-enum { CH_CHARGE_PUNCH = 1, CH_DOUBLE_JUMP = 2, CH_ROAR_ATTACK = 4, CH_JUMP_SMASH = 8 };
+enum { CH_CHARGE_PUNCH = 1, CH_DOUBLE_JUMP = 2, CH_ROAR_ATTACK = 4, CH_JUMP_SMASH = 8,
+       CH_SUPER_JUMP = 16 };                         /* the Wii's fifth: its blocks' Upgrade| groups name it */
 
 /* a goal (0x4C bytes from +0x0 of the object, one per Goal| group) */
 typedef struct {
@@ -75,9 +76,12 @@ int challenge_upgrade_props(Challenge *c, Group monster_upgrade);
  * read only in the campaign (play_type 2, game.h GP_CAMPAIGN), and in the Timed Run (5) on its last block
  * (BlockEnd: last_block != 0); otherwise there are none (required -1), though the getters still read the book.
  * monster: player 1's monster ("George"), flags: its getMonsterFlags (the moves it has: an upgrade it has is not
- * offered). block_def: the block's BlockDef| group (city.h's scene.block). Returns the goals read. */
-int challenge_load(Challenge *c, Group block_def, int play_type, int last_block, const char *monster,
-                   uint32_t flags);
+ * offered). block_def: the block's BlockDef| group (city.h's scene.block). upgrade_def: the BlockDef whose
+ * ChallengeDef's Upgrade| groups are read instead of block_def's ({0}: block_def's): with a Wii folder the Wii's
+ * copy of the block, whose lists name its own monsters and SuperJump (docs/WII_PLAN.md phase 5). Returns the goals
+ * read. */
+int challenge_load(Challenge *c, Group block_def, Group upgrade_def, int play_type, int last_block,
+                   const char *monster, uint32_t flags);
 
 /* the gWorld getters (World bindings 0x48 .. 0x4F; ChallengeStatus, ChallengeText and Pause read them) */
 const char *challenge_identifier(const Challenge *c);   /* getChallengeIdentifier: Name, "" none (0x2B4970) */
@@ -123,9 +127,11 @@ int challenge_upgrade_tick(Challenge *c, float dt);
  * (hideChallengeCompletionUI), show hud_banner_text(c->up.text, c->up.colour, 1, "v_upgrade") and stop the effect.
  * 0: missed, or too early (the blow is taken all the same) */
 uint32_t challenge_upgrade_hit(Challenge *c, const float centre[3], float radius, uint32_t *flags);
-const char *challenge_upgrade_key(uint32_t move);       /* "Upgrade1" .. "Upgrade8" (Game.loc: "CHARGE PUNCH" ...) */
+const char *challenge_upgrade_key(uint32_t move);       /* "Upgrade1" .. "Upgrade8" (Game.loc: "CHARGE PUNCH" ...),
+                                                         * the Wii's "Upgrade16" */
 const char *challenge_upgrade_inst(uint32_t move);      /* "Inst_Upgrade1" .. (how to do it) */
-const char *challenge_upgrade_move(uint32_t move);      /* "ChargePunch", "DoubleJump", "RoarAttack", "JumpSmash" */
+const char *challenge_upgrade_move(uint32_t move);      /* "ChargePunch", "DoubleJump", "RoarAttack", "JumpSmash",
+                                                         * "SuperJump" */
 
 /* ---- 3. the block's end --------------------------------------------------------------------------------------- */
 

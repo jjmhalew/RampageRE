@@ -49,10 +49,12 @@ static int listed(Record r)
     return ((r.kind >> 8) & 0xFF) >= 2;
 }
 
-/* [R] the table 0x3F67A0: {name, flag} x 4, compared any case (0x32C9C8) */
-static const struct { const char *name; uint32_t flag; } MOVES[4] = {
+/* [R] the table 0x3F67A0: {name, flag} x 4, compared any case (0x32C9C8); the Wii's fifth, SuperJump (16), which
+ * the PS2's data never names [R the Wii's blocks' Upgrade| groups and Monsters.bsf hasSuperJump; its place last, G] */
+#define NMOVES 5
+static const struct { const char *name; uint32_t flag; } MOVES[NMOVES] = {
     { "ChargePunch", CH_CHARGE_PUNCH }, { "DoubleJump", CH_DOUBLE_JUMP },
-    { "RoarAttack", CH_ROAR_ATTACK }, { "JumpSmash", CH_JUMP_SMASH },
+    { "RoarAttack", CH_ROAR_ATTACK }, { "JumpSmash", CH_JUMP_SMASH }, { "SuperJump", CH_SUPER_JUMP },
 };
 
 /* ---- the MonsterUpgrade template ------------------------------------------------------------------------------ */
@@ -138,8 +140,8 @@ int challenge_upgrade_props(Challenge *c, Group t)
  *       name record of the group's list; one whose monster index (0x33DAF0, any case) is player 1's (GameStatus
  *       +0x214) and an Upgrade in the table: the group stops there, and +0x13C = its flag unless the monster's flags
  *       (GameStatus +0x234 + 4 x monster) have it. A later group can therefore overwrite an earlier one. */
-int challenge_load(Challenge *c, Group block_def, int play_type, int last_block, const char *monster,
-                   uint32_t flags)
+int challenge_load(Challenge *c, Group block_def, Group upgrade_def, int play_type, int last_block,
+                   const char *monster, uint32_t flags)
 {
     c->ngoals = 0;
     c->upgrade = 0;
@@ -179,8 +181,15 @@ int challenge_load(Challenge *c, Group block_def, int play_type, int last_block,
                     break;                           /* [R] 0x346B68: the 17th ends the goal's list */
                 goal->name[goal->nnames++] = record_str(g, e);
             }
-        } else if (typed(r, "Upgrade")) {
-            Group g = record_group(d, r);
+        }
+    }
+    Group ud = upgrade_def.at ? group_sub(upgrade_def, "ChallengeDef") : d;   /* (the goals and the upgrade are */
+    for (uint32_t i = 0, n = ud.at ? group_count(ud) : 0; i < n; i++) {       /* apart: one walk each) */
+        Record r = group_record(ud, i);
+        if (!listed(r))
+            continue;
+        if (typed(r, "Upgrade")) {
+            Group g = record_group(ud, r);
             const char *move = group_str(g, "Upgrade");
             if (!move)
                 continue;
@@ -198,7 +207,7 @@ int challenge_load(Challenge *c, Group block_def, int play_type, int last_block,
                 }
                 if (!who || !same(who, monster))
                     continue;
-                for (int t = 0; t < 4 && !found; t++)
+                for (int t = 0; t < NMOVES && !found; t++)
                     if (same(move, MOVES[t].name)) {
                         found = 1;
                         if (!(flags & MOVES[t].flag))
@@ -413,7 +422,7 @@ uint32_t challenge_upgrade_hit(Challenge *c, const float centre[3], float radius
 
 static int move_index(uint32_t move)
 {
-    for (int t = 0; t < 4; t++)
+    for (int t = 0; t < NMOVES; t++)
         if (move == MOVES[t].flag)
             return t;
     return -1;
@@ -422,14 +431,15 @@ static int move_index(uint32_t move)
 /* [R] StreetObject.bsf onPulse: "Upgrade" + nug and "Inst_Upgrade" + nug; ChallengeText "Upgrade" + cupgrade */
 const char *challenge_upgrade_key(uint32_t move)
 {
-    static const char *const K[4] = { "Upgrade1", "Upgrade2", "Upgrade4", "Upgrade8" };
+    static const char *const K[NMOVES] = { "Upgrade1", "Upgrade2", "Upgrade4", "Upgrade8", "Upgrade16" };
     int t = move_index(move);
     return t < 0 ? "Upgrade0" : K[t];
 }
 
 const char *challenge_upgrade_inst(uint32_t move)
 {
-    static const char *const K[4] = { "Inst_Upgrade1", "Inst_Upgrade2", "Inst_Upgrade4", "Inst_Upgrade8" };
+    static const char *const K[NMOVES] = { "Inst_Upgrade1", "Inst_Upgrade2", "Inst_Upgrade4", "Inst_Upgrade8",
+                                           "Inst_Upgrade16" };
     int t = move_index(move);
     return t < 0 ? "Inst_Upgrade0" : K[t];
 }

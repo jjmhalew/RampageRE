@@ -835,7 +835,8 @@ int profile_monster_available(const Profile *p, int player, int monster)
 
 uint32_t profile_moves(const Profile *p, int player, int monster)
 {
-    return (p->cheats & PCH_MOVES) ? 0xFu : profile_monster_flags(p, player, monster) & 0xFu;
+    return (p->cheats & PCH_MOVES) ? 0x1Fu : profile_monster_flags(p, player, monster) & 0x1Fu;   /* (16: the Wii's
+                                                      * SuperJump, which the PS2's graphs never ask for) */
 }
 
 float profile_sound_volume(const Profile *p) { return p->block.sound; }
