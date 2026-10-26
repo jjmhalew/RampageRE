@@ -155,6 +155,22 @@ The cities stay the PS2's seven in the PS2's order until phase 4.
 Check: the campaign through Dallas with `--autoplay`; Dallas's results; the PS2 campaign unchanged without
 `wii_data`.
 
+**Phase 4 done** (ae034ba .. 29f00ae). With a Wii folder the campaign has the Wii's eight cities in its order,
+Dallas the fourth. The city select shows them all, using the Wii's own `CitySelect.ifc`, and its globe turns to
+Texas. The save keeps the PS2's seven cities by name, and Dallas's flags and start block go to the side file. The
+autoplay played Dallas from a saved block, won DA09 Fort Worth and went on to Los Angeles. DA09 shows the Wii's
+second boss bar for the tank. Philbert, Eyegore and Boosy then need Dallas as well, and Dallas reveals Plucky,
+Fifi and Cyril as the Wii's data says. Without the folder the PS2 game is unchanged. Found on the way:
+- Dallas also spells its key `xxIsBlockFinished`, so as in the other cities its block ends when the buildings are
+  down, and `setBossTankFinished` / `setBossHawkFinished` are never read;
+- the Wii's two boss bars count as met only once both are beaten: each bar's `updateBossHealth` asks the other's
+  `bossDefeated`;
+- the Wii's CitySelect script also hides the globe while unfocused and stops only rings below 7, which leaves New
+  York's ring on; the port takes neither;
+- a status in Dallas is saved in the PS2 file as the first PS2 city not both open and destroyed;
+- `--do "bosshit n part"` hits one part of a boss block, such as Dallas's tank.
+Left for phase 5: SuperJump and the fifth star.
+
 **Phase 5 (optional): SuperJump** (decision 6), and the other platforms (Android, Switch, Vita: where the Wii
 folder goes).
 
