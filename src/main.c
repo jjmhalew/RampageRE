@@ -58,7 +58,10 @@
 #include "touch.h"                               /* the on-screen pad, player 1's pad slot */
 #endif
 
-static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas" };
+/* the viewer's cities; the Wii's Dallas eighth, reached with a Wii folder that has it (vol_add_wii, ncities;
+ * docs/WII_PLAN.md: in the campaign from phase 4) */
+static const char *const CITIES[] = { "Chicago", "NewYork", "SanFrancisco", "LosAngeles", "London", "HongKong", "LasVegas",
+                                      "Dallas" };
 /* the campaign's order (ShellData CityData.City0 .. City6, GAME_NOTES.md) */
 static const char *const CAMPAIGN[] = { "LasVegas", "SanFrancisco", "London", "LosAngeles", "Chicago", "HongKong", "NewYork" };
 static int campaign_index(const char *city)
@@ -69,10 +72,11 @@ static int campaign_index(const char *city)
     return 0;
 }
 #define NCITIES 7
+static int ncities = NCITIES;                        /* the viewer's: NCITIES + 1 with the Wii's Dallas */
 #if (defined RAMPAGE_GUI || !defined _WIN32) && !defined __SWITCH__ && !defined __vita__ && !defined __ANDROID__
 static int city_named(const char *s)                 /* "rampage Chicago": a city, not the data's path */
 {
-    for (int i = 0; i < NCITIES; i++)
+    for (int i = 0; i < NCITIES + 1; i++)
         if (_stricmp(s, CITIES[i]) == 0)
             return 1;
     return 0;
@@ -8487,7 +8491,7 @@ static int viewer_main(int argc, char **argv)
     }
     settings_resolve(&gfx, &gfx_flags, !shot);       /* a --shot run: the flags alone, never rampage.cfg */
     char found[1024], msg[1024];
-    for (int i = 0; pos[0] && npos < 3 && i < NCITIES; i++)   /* "rampage Chicago 1": no path, a city */
+    for (int i = 0; pos[0] && npos < 3 && i < NCITIES + 1; i++)   /* "rampage Chicago 1": no path, a city */
         if (_stricmp(pos[0], CITIES[i]) == 0 && !plat_exists(pos[0])) {
             pos[2] = npos > 1 ? pos[1] : pos[2];
             pos[1] = pos[0];
@@ -8538,13 +8542,17 @@ static int viewer_main(int argc, char **argv)
             printf("wii data: %s, %u files\n", gfx.wii_data, n);
         else
             printf("wii data: %s holds no Game folder (nor DATA/files/Game): not used\n", gfx.wii_data);
+        if (vol_find(&v.vol, "Dallas.bdp"))
+            ncities = NCITIES + 1;
     }
     if (v.lang < 0)
         v.lang = console_language(gfx.language, v.region);   /* rampage.cfg's language= (settings.h) */
     int city = 0;
-    for (int i = 0; i < NCITIES; i++)
+    for (int i = 0; i < ncities; i++)
         if (_stricmp(pos[1], CITIES[i]) == 0)
             city = i;
+    if (ncities == NCITIES && !_stricmp(pos[1], CITIES[NCITIES]))
+        printf("%s is the Wii's: it needs wii_data= (or --wii) with its files; Chicago instead\n", CITIES[NCITIES]);
     uint32_t block = (uint32_t)(atoi(pos[2]) > 0 ? atoi(pos[2]) - 1 : 0);
     Window w;
     if (win_open(&w, "RampageRE", gfx.width, gfx.height, shot != NULL) != 0) {   /* a --shot run never shows a window */
@@ -8995,7 +9003,7 @@ static int viewer_main(int argc, char **argv)
             v.clip = w.pressed['L'] ? v.clip + 1 : (v.clip > 0 ? v.clip - 1 : 0);
             build(&v);
         }
-        for (int i = 0; i < NCITIES; i++)
+        for (int i = 0; i < ncities; i++)
             if (w.pressed['1' + i] && i != v.city_index)
                 open_city(&v, i, 0, -1);
         if (w.wheel) speed *= powf(1.25f, (float)w.wheel);

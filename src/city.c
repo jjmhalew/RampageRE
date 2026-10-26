@@ -93,7 +93,8 @@ static LoadedBook *load_book(City *c, const char *name)
     memset(lb, 0, sizeof *lb);
     snprintf(lb->name, sizeof lb->name, "%s", name);
     char file[96];
-    snprintf(file, sizeof file, "%s.bdp", name);
+    size_t len = strlen(name);
+    snprintf(file, sizeof file, "%s%s", name, len > 4 && !_stricmp(name + len - 4, ".bdg") ? "" : ".bdp");
     uint32_t size;
     uint8_t *data = vol_read(c->vol, file, &size);
     if (data && bdp_load(&lb->b, data, size) == 0 && book_open(&lb->book, &lb->b) == 0) {
@@ -105,11 +106,32 @@ static LoadedBook *load_book(City *c, const char *name)
     return lb->ok ? lb : NULL;
 }
 
+/* the Wii's own copy of a book the PS2 has too (Objects1_props: its cows, oil towers, Dallas's people, ...), for
+ * the groups the PS2's has not got (docs/WII_PLAN.md: the PS2's content stays the PS2's); NULL without a Wii folder
+ * or when the PS2 has no such book (load_book then reads the Wii's already) */
+static LoadedBook *wii_twin(City *c, const char *name)
+{
+    char ps2[80], wii[80];
+    snprintf(ps2, sizeof ps2, "%s.bdp", name);
+    snprintf(wii, sizeof wii, "%s.bdg", name);
+    const VolFile *p = vol_find(c->vol, ps2), *w = c->vol->nwii ? vol_find(c->vol, wii) : NULL;
+    return p && !p->path && w && w->path ? load_book(c, wii) : NULL;
+}
+
+static Group book_or_twin(City *c, const char *book, const char *group)
+{
+    LoadedBook *lb = load_book(c, book), *twin;
+    Group g = { NULL, 0 };
+    if (lb)
+        g = book_group(&lb->book, group);
+    if (!g.at && (twin = wii_twin(c, book)) != NULL)
+        g = book_group(&twin->book, group);
+    return g;
+}
+
 static Group resolve(void *ctx, const char *book, const char *group)
 {
-    LoadedBook *lb = load_book((City *)ctx, book);
-    Group none = { NULL, 0 };
-    return lb ? book_group(&lb->book, group) : none;
+    return book_or_twin((City *)ctx, book, group);
 }
 
 static Group template_of(City *c, const char *name)
@@ -124,6 +146,12 @@ static Group template_of(City *c, const char *name)
             if (g.at)
                 return g;
         }
+    }
+    for (int i = 0; i < c->ntemplate_books && c->vol->nwii; i++) {   /* then the Wii's copies, for what they add */
+        LoadedBook *twin = wii_twin(c, c->template_books[i]);
+        Group g = twin ? book_group(&twin->book, name) : none;
+        if (g.at)
+            return g;
     }
     return none;
 }
