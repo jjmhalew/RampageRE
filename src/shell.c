@@ -2105,6 +2105,10 @@ struct Shell {
     Book book;
     Group monster_data, city_data;
     int nmonsters;                                       /* MonsterData's Monster<n> groups (30; the Wii's 40) */
+    /* with a Wii folder its ShellData.bdg's MonsterData is the roster (docs/WII_PLAN.md decision 2); the PS2's kept
+     * for the keys the Wii's has not got (DisableFor4Player, decision 7) */
+    Bundle b_wii_data; Book wii_book; int have_wii_data;
+    Group ps2_monster_data;
     ShellProfile prof;
     ShellGame gs;                                        /* gCommon.getGameStatus() and the players / bots */
     ShellStart st;
@@ -2194,7 +2198,20 @@ static const char *monster_name(const Shell *s, int i)
 }
 static float monster_prop(const Shell *s, int i, const char *key, float def)
 {
-    return group_num(monster_group(s, i), key, def);
+    float v = group_num(monster_group(s, i), key, -12345.0f);
+    if (v != -12345.0f || !s->ps2_monster_data.at)
+        return v != -12345.0f ? v : def;
+    for (int k = 0; k < SHELL_MONSTERS; k++) {           /* the Wii's roster: the PS2's group of that name */
+        char name[24];
+        snprintf(name, sizeof name, "Monster%d", k);
+        Group g = sub_group(s->ps2_monster_data, name);
+        const char *n = group_str(g, "Name");
+        if (!n)
+            break;
+        if (!_stricmp(n, monster_name(s, i)))
+            return group_num(g, key, def);
+    }
+    return def;
 }
 /* CityData.City<i>.City ("LasVegas") */
 static const char *city_name(const Shell *s, int i)
@@ -5562,10 +5579,15 @@ Shell *shell_open(const Vol *vol, const ShellStart *st, const ShellProfile *p)
             s->gui.bundles[s->gui.nb++] = &s->b_wii[i];
     if (book_open(&s->book, &s->b_data) == 0) {          /* gShell.loadPropertyBook("ShellData") */
         s->monster_data = book_group(&s->book, "MonsterData");
-        while (s->nmonsters < SHELL_MONSTERS && monster_name(s, s->nmonsters)[0])
-            s->nmonsters++;
         s->city_data = book_group(&s->book, "CityData");
     }
+    if (vol->nwii && (s->have_wii_data = load_bundle(vol, "ShellData.bdg", &s->b_wii_data)) != 0 &&
+        book_open(&s->wii_book, &s->b_wii_data) == 0 && book_group(&s->wii_book, "MonsterData").at) {
+        s->ps2_monster_data = s->monster_data;
+        s->monster_data = book_group(&s->wii_book, "MonsterData");
+    }
+    while (s->nmonsters < SHELL_MONSTERS && monster_name(s, s->nmonsters)[0])
+        s->nmonsters++;
     if (p) s->prof = *p;
     else {
         s->prof.sound = 0.5f;                            /* a new profile's (0x33F630) [R] */
@@ -5652,6 +5674,7 @@ void shell_close(Shell *s)
     if (s->have_loading) bdp_free(&s->b_loading);
     for (int i = 0; i < 3; i++)
         if (s->have_wii[i]) bdp_free(&s->b_wii[i]);
+    if (s->have_wii_data) bdp_free(&s->b_wii_data);
     free(s->quads);
     free(s);
 }

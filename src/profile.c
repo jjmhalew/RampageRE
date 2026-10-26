@@ -494,6 +494,41 @@ int profile_unpack_file(ProfileBlock *b, const uint8_t *in, long size)
     return profile_unpack(b, in + hsize);
 }
 
+/* a status record into the file's roster (out) and back (in): the flags and the picks by name */
+static void status_out(const Profile *p, const ProfileStatus *s, ProfileStatus *o)
+{
+    *o = *s;
+    for (int k = 0; k < PROFILE_PS2_MONSTERS; k++) {
+        int m = profile_find_monster(p, PROFILE_MONSTER_NAMES[k]);
+        o->monster_flags[k] = m >= 0 ? s->monster_flags[m] : 0;
+    }
+    for (int k = PROFILE_PS2_MONSTERS; k < PROFILE_MONSTERS; k++)
+        o->monster_flags[k] = 0;
+    for (int i = 0; i < PROFILE_PLAYERS; i++)
+        if (s->monster[i] >= 0 && s->monster[i] < p->nmonsters) {
+            int k = PROFILE_PS2_MONSTERS;
+            while (--k >= 0 && !same(PROFILE_MONSTER_NAMES[k], p->monster_name[s->monster[i]]))
+                ;
+            o->monster[i] = k >= 0 ? k : i;
+        }
+}
+
+static void status_in(const Profile *p, const ProfileStatus *s, ProfileStatus *o)
+{
+    *o = *s;
+    memset(o->monster_flags, 0, sizeof o->monster_flags);
+    for (int k = 0; k < PROFILE_PS2_MONSTERS; k++) {
+        int m = profile_find_monster(p, PROFILE_MONSTER_NAMES[k]);
+        if (m >= 0)
+            o->monster_flags[m] = s->monster_flags[k];
+    }
+    for (int i = 0; i < PROFILE_PLAYERS; i++)
+        if (s->monster[i] >= 0 && s->monster[i] < PROFILE_PS2_MONSTERS) {
+            int m = profile_find_monster(p, PROFILE_MONSTER_NAMES[s->monster[i]]);
+            o->monster[i] = m >= 0 ? m : i;
+        }
+}
+
 int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
 {
     if (!force && !(profile_needs_save(p) && p->allow_save))
@@ -501,7 +536,9 @@ int profile_write(Profile *p, const char *path, int force, uint64_t now_ms)
     if (now_ms)
         p->block.save_time = now_ms;                 /* [R] 0x344434 */
     uint8_t buf[PROFILE_FILE_SIZE];
-    profile_pack_file(&p->block, buf);
+    ProfileBlock fb = p->block;
+    status_out(p, &p->block.status, &fb.status);
+    profile_pack_file(&fb, buf);
     errno = 0;
     FILE *f = path ? fopen(path, "wb") : NULL;
     if (!f)
@@ -530,6 +567,8 @@ int profile_read(Profile *p, const char *path)
         profile_restore(p);
         return f ? 0 : -1;
     }
+    ProfileStatus s = p->block.status;
+    status_in(p, &s, &p->block.status);
     profile_restore(p);                              /* [R] 0x33F120 with 1 */
     p->block.status.changed = 0;
     p->block.changed = 0;

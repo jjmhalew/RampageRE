@@ -287,6 +287,9 @@ typedef struct Viewer {
     float sfx_vol, music_vol, music_now;             /* the Options page's volumes / 0.75 (the profile's 0.75 = 1);
                                                       * the music now */
     int music_state;                                 /* a state whose music waits for its block to be built, 0 none */
+    /* the Wii folder's ShellData.bdg: its MonsterData the roster (40) of the profile, the shell and the reveals
+     * (docs/WII_PLAN.md decision 2); wii_roster.n 0 without it */
+    Bundle wii_shelldata; Book wii_shellbook; RevealRoster wii_roster;
     Reveal reveal; RevealRoster roster;              /* the cryotube's monster and the unlocks (reveal.c): the
                                                       * roster's flags stand for the profile's, from 0 */
     RevealLoc tubes[REVEAL_LOCS]; int ntubes;        /* the tubes of a block activated but not built yet */
@@ -1380,7 +1383,10 @@ static void build(Viewer *v)
             gh.rubble_point = game_rubble_point;
             gh.ctx = v;
             if (v->roster.n == 0) {                  /* ShellData's MonsterData: the 30, the profile's flags */
-                reveal_roster_load(&v->roster, city_book_group(v->city, "ShellData", "MonsterData"));
+                if (v->wii_roster.n)                 /* (the Wii's 40) */
+                    v->roster = v->wii_roster;
+                else
+                    reveal_roster_load(&v->roster, city_book_group(v->city, "ShellData", "MonsterData"));
                 rubble_seed(&v->rubble, 1);
             }
             int pm[MONSTERS];                        /* 0x3236F0: the city's monster, not one of the players' */
@@ -1507,7 +1513,7 @@ static int open_city(Viewer *v, int index, uint32_t block, int game_block)
     v->city = c;
     v->city_index = index;
     v->ny_generators = v->band_sound = 0;            /* the city's onLoadScript loads its scripts' bundle anew */
-    if (v->roster.n)                                 /* its names are the old city's book's: read from this one's */
+    if (v->roster.n && !v->wii_roster.n)             /* its names are the old city's book's: read from this one's */
         reveal_roster_load(&v->roster, city_book_group(c, "ShellData", "MonsterData"));
     v->nblocks = city_blocks(c, v->blocks, 64);
     const char *at = game_block >= 0 ? city_game_block(c, game_block) : NULL;
@@ -7152,6 +7158,14 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
 
 /* ---- the front end (shell.c): --shell starts there, and a game's Quit goes back */
 
+/* a new profile (profile_init) on the roster in use: the Wii's when its folder has one */
+static void prof_init(Viewer *v)
+{
+    profile_init(&v->prof);
+    if (v->wii_roster.n)
+        profile_set_roster(&v->prof, v->wii_roster.name, v->wii_roster.n, NULL, 0);
+}
+
 /* the profile as the shell reads it */
 static void shell_profile(Viewer *v, ShellProfile *sp)
 {
@@ -8562,6 +8576,14 @@ static int viewer_main(int argc, char **argv)
             printf("wii data: %s holds no Game folder (nor DATA/files/Game): not used\n", gfx.wii_data);
         if (vol_find(&v.vol, "Dallas.bdp"))
             ncities = NCITIES + 1;
+        uint32_t size = 0;
+        uint8_t *sd = n ? vol_read(&v.vol, "ShellData.bdg", &size) : NULL;
+        if (sd && bdp_load(&v.wii_shelldata, sd, size) == 0 && book_open(&v.wii_shellbook, &v.wii_shelldata) == 0)
+            reveal_roster_load(&v.wii_roster, book_group(&v.wii_shellbook, "MonsterData"));
+        else
+            free(sd);
+        if (v.wii_roster.n)
+            printf("wii data: the roster of %d monsters\n", v.wii_roster.n);
     }
     if (v.lang < 0)
         v.lang = console_language(gfx.language, v.region);   /* rampage.cfg's language= (settings.h) */
@@ -8637,7 +8659,7 @@ static int viewer_main(int argc, char **argv)
             free(data);
     }
     v.night = night;
-    profile_init(&v.prof);                           /* the profile: rampage_profile.bin (a --shot run: a new one,
+    prof_init(&v);                                   /* the profile: rampage_profile.bin (a --shot run: a new one,
                                                       * not written, unless --profile names one) */
     v.prof_write = !shot || v.prof_path;
     if (!v.prof_path)
@@ -8650,7 +8672,7 @@ static int viewer_main(int argc, char **argv)
         v.prof_on_card = 1;
         snprintf(v.card_name, sizeof v.card_name, "%s", v.prof.block.name);
         if (v.shell_mode && !gfx.profile_autoload)   /* the game's way: the shell's popup loads it */
-            profile_init(&v.prof);
+            prof_init(&v);
         else if (v.shell_mode) {                     /* [port extra, profile_autoload] as if picked from the list
                                                       * (SHELL_EVT_PROFILE_LOAD): loaded, saving, its checkpoint, and
                                                       * shown, so the main menu opens no list (close(1): 0x300) */
@@ -8676,7 +8698,7 @@ static int viewer_main(int argc, char **argv)
             ok = head[i] >= 32 && head[i] < 127;
         v.prof_on_card = 1;
         snprintf(v.card_name, sizeof v.card_name, "%s", ok ? (const char *)head + 0x30 : "Profile");
-        profile_init(&v.prof);
+        prof_init(&v);
     }
     profile_restore_checkpoint(&v.prof);              /* MainMenu's campaign start */
     for (const char *c = cheat; c && *c; c += c[6] == ',' ? 7 : 6) {   /* "986960,071767": several */
