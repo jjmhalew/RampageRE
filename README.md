@@ -29,6 +29,10 @@ real hardware. Still missing: the smaller gaps that the notes in `docs/` list un
 the port guesses). After v1: the two arcade games of Bonus Content (Midway Classics), separate emulator programs on
 the disc rather than part of the game ([docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md)).
 
+**Optional, the Wii version's extras** (a port extra, off unless you give it your own Wii disc's files; see "The Wii's
+monsters and Dallas" below): its ten more monsters, Dallas as an eighth city (the campaign's fourth) with its two-boss block, and
+the fifth upgrade, SuperJump.
+
 The recompiled game (`build.ps1`) is the reference the port is checked against. It runs the front end and the first
 campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly and without sound
 ([docs/NOTES.md](docs/NOTES.md)).
@@ -61,6 +65,7 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | The game in the native port: front end and shell, profiles, game flow, challenges, people, army, traffic, bosses, edibles, effects, sound and music, movies, HUD and Pause | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 | Linux, Switch and PS Vita (homebrew) and Android builds, controllers and rumble, touch pad, texture packs, graphics settings, CI | ✅ (not yet tried on real hardware) [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) |
 | The attract mode's demo games (a random city, block and monsters, played by the computer) | ✅ [docs/SHELL_NOTES.md](docs/SHELL_NOTES.md) |
+| The Wii version's extras from your own Wii disc: 40 monsters, Dallas, SuperJump and its fifth star, the Wii's unlocks | ✅ [docs/WII_PLAN.md](docs/WII_PLAN.md) |
 | The arcade games (Midway Classics: Digital Eclipse's emulators on the disc) | after v1 [docs/ARCADE_NOTES.md](docs/ARCADE_NOTES.md) |
 | Coverage of the game's code: every function of the ELF ported, read, replaced by the port's own, unused by the data, or open (0.8 % of the code: the monsters' clip effects and roar, the tail motion, a few smaller items) | [docs/COVERAGE.md](docs/COVERAGE.md) |
 
@@ -129,6 +134,27 @@ asks nor copies. It starts in the front end and plays on the on-screen pad (a st
 Cross / Square / Triangle / Circle, R2 and Start on the right) or on a controller; the back button is back or the
 Pause menu ([docs/NATIVE.md](docs/NATIVE.md) "Android").
 
+### The Wii's monsters and Dallas (optional)
+The Wii version adds to the PS2 game ten monsters (Boris and Ruby from the start; Plucky, Fifi and Cyril
+revealed in Dallas; Squirmy, Flea, Sarah, Brian and VERN for 1, 3, 6, 12 and 20 monsters with all five upgrades),
+Dallas as the fourth of eight cities with a block of two bosses, and a fifth upgrade, SuperJump (Cross pressed again
+while landing). The port plays them from **your own Wii disc**, next to the PS2 data, which it still needs:
+extract the disc with Dolphin (the game's *Properties*, *Filesystem*, right-click the disc: *Extract Entire Disc*). Only its
+`DATA/files/Game`, `Shell` and `Audio` folders are read (about 320 MB). Tried with the European Wii disc (RPGP5D).
+
+| Where | How |
+|---|---|
+| Windows, Linux | `wii_data=` in `rampage.cfg` set to the extracted disc (the folder with `DATA`, or its `DATA/files`), or `rampage.exe ... --wii DIR`, or `RAMPAGE_WII_DATA` |
+| Switch, PS Vita | a `wii` folder with `Game`, `Shell` and `Audio` in `/switch/rampagere/` or `ux0:data/rampagere/`, found on its own |
+| Android | the same `wii` folder in the app folder by USB cable, or the launcher's shortcut **Add the Wii's data** (a long press on the icon), which copies it from the folder you pick; after the first start's copy the app asks once |
+| `make_standalone.bat`, `make_android_bundle.bat` | drag the extracted disc's folder onto the .bat with the rest (or leave `wii_data=` in the `rampage.cfg` beside it): it goes into the exe or APK and is used from there |
+
+Without it the port is the PS2 game, byte for byte, and saves as it did. With it the shell, the profile and the
+unlocks follow the Wii's roster of 40 monsters and its city order; the save stays the PS2's (`rampage_profile.bin`),
+with what the PS2 file cannot hold in `rampage_profile.wii.bin` beside it. `wii_data=none` leaves a `wii` folder out.
+It has been played on Windows (and on the Android emulator); the Linux build, the Switch, the Vita and phones are not yet tried with it. As with the PS2 data, the bundles that hold it
+are for your own use only.
+
 ### Building the native port
 Windows 10 or 11; nothing needs to be installed first (the scripts are WoodyRE's, adapted).
 
@@ -140,8 +166,8 @@ Windows 10 or 11; nothing needs to be installed first (the scripts are WoodyRE's
 | `build_switch.sh` | `rampage.nro` for the Switch (devkitPro, or its Docker image) |
 | `build_vita.sh` | `rampage.vpk` for the PS Vita (VitaSDK, or its Docker image) |
 | `android\gradlew.bat -p android assembleRelease` | the Android APK (docs/NATIVE.md "Android") |
-| `make_standalone.bat` | `RampageRE-standalone.exe`: `RampageRE.exe` and **your** game data (`RAMPAGE.VOL`, the ELF and `SYSTEM.CNF` from your disc, 1.35 GB) in one exe, which unpacks itself to `%LOCALAPPDATA%\RampageRE` at its first start and runs from there. Drag your disc image or `RAMPAGE.VOL` onto the .bat (else the data `RampageRE.exe` finds is taken) |
-| `make_android_bundle.bat` | `RampageRE-bundle.apk`: the APK of a release (or of your own build) and **your** game data in one APK; the app reads the data from its own APK, so it neither asks for the disc nor copies anything. Drag the APK and your disc image (or `RAMPAGE.VOL`) onto the .bat, or put them next to it. It is signed with a key of your own (made once, kept in `%LOCALAPPDATA%\RampageRE\android-bundle.key`), so later bundles install as updates of it but not over a RampageRE from the Releases page: uninstall that first (its saves and copied files go with it) |
+| `make_standalone.bat` | `RampageRE-standalone.exe`: `RampageRE.exe` and **your** game data (`RAMPAGE.VOL`, the ELF and `SYSTEM.CNF` from your disc, 1.35 GB) in one exe, which unpacks itself to `%LOCALAPPDATA%\RampageRE` at its first start and runs from there. Drag your disc image or `RAMPAGE.VOL` onto the .bat (else the data `RampageRE.exe` finds is taken), and your extracted Wii disc's folder for the Wii's extras (about 320 MB more) |
+| `make_android_bundle.bat` | `RampageRE-bundle.apk`: the APK of a release (or of your own build) and **your** game data in one APK; the app reads the data from its own APK, so it neither asks for the disc nor copies anything. Drag the APK and your disc image (or `RAMPAGE.VOL`) onto the .bat, or put them next to it, and your extracted Wii disc's folder for the Wii's extras (about 320 MB more). It is signed with a key of your own (made once, kept in `%LOCALAPPDATA%\RampageRE\android-bundle.key`), so later bundles install as updates of it but not over a RampageRE from the Releases page: uninstall that first (its saves and copied files go with it) |
 
 The C compiler is [Zig](https://ziglang.org): one in `tools\zig`, on `PATH` or from `pip install ziglang` is used,
 otherwise `build.bat` downloads Zig 0.16.0 (about 95 MB) into `tools\zig` once and checks its SHA-256.
