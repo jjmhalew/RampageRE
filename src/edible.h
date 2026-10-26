@@ -201,7 +201,7 @@ typedef struct {
     float rage_time;                                 /* +0xA54: the rage's clock (25 s) */
     float speed, speed_time;                         /* +0xA8C: the clips' rate (1); +0xA90 its clock */
     uint32_t abilities;                              /* gCommon.getMonsterFlags(slot, monster): 1 charge punch, 2 more
-                                                      * spins, 4 roar, 8 jump smash */
+                                                      * spins, 4 roar, 8 jump smash, 16 the Wii's super jump */
     uint32_t cheats;                                 /* gCommon.getCheatFlags(): 8 every move */
 } EdiblePower;
 void edible_power_init(EdiblePower *p);              /* energy 0, no rage, speed 1 */

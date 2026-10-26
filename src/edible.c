@@ -783,7 +783,9 @@ static const struct { const char *ns, *func, *from, *to; } SUBST[] = {
     { "Venus", "checkForHazard", "Hazard_FireWithPopcorn", "Hazard_Venus_FireWithPopcorn" },
     { "Venus", "checkForHazard", "Hazard_Shock", "Hazard_Venus_Shock" },
     { "Venus", "checkForHazard", "Hazard_BrokenPipe", "Hazard_Venus_BrokenPipe" },
+    { "Cyril", "checkForHazard", "Hazard_Shock", "Hazard_Cyril_Shock" },          /* the Wii's Cyril.bsf */
     { "Crock", "doGrabPowerup", "Powerup_Cat", "Powerup_Crock_Cat" },
+    { "Fifi", "doGrabPowerup", "Powerup_Cat", "Powerup_Crock_Cat" },              /* the Wii's Fifi.bsf */
     { "George", "doGrabPowerup", "Powerup_Banana", "Powerup_George_Banana" },
     { "Icky", "doGrabPowerup", "Powerup_Cockroach", "Powerup_Icky_Cockroach" },
     { "Kingston", "doGrabPowerup", "Powerup_Poison", "Powerup_Kingston_Poison" },
@@ -964,6 +966,9 @@ int edible_power_answer(const EdiblePower *p, const char *call)
         return (p->abilities & 1) || all || p->rage;
     if (same_text(f, "hasJumpSmash"))
         return (p->abilities & 8) || all || p->rage;
+    if (same_text(f, "hasSuperJump"))                /* [R] the Wii's Monsters.bsf: its fifth upgrade, 16 (no PS2
+                                                      * profile has it, profile_moves keeps 0xF: WII_PLAN.md phase 5) */
+        return (p->abilities & 16) || all || p->rage;
     if (same_text(f, "canStartRage"))                /* [R] 0x2ABF00: full, and no monster raging */
         return p->energy >= 100 && !p->rage;
     if (same_text(f, "inRageMode"))

@@ -854,8 +854,14 @@ struct PersonLook { int who; char anim[96]; int inst; };
 Group city_book_group(City *c, const char *book, const char *name)
 {
     Group none = { NULL, 0 };
-    LoadedBook *lb = book && name ? load_book(c, book) : NULL;
-    return lb ? book_group(&lb->book, name) : none;
+    return book && name ? book_or_twin(c, book, name) : none;
+}
+
+Group city_book_group_wii(City *c, const char *book, const char *name)
+{
+    LoadedBook *twin = book && name ? wii_twin(c, book) : NULL;
+    Group g = twin ? book_group(&twin->book, name) : (Group){ NULL, 0 };
+    return g.at ? g : city_book_group(c, book, name);
 }
 
 int city_shape_box(City *c, const char *shape, float min[3], float max[3])

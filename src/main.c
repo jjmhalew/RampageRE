@@ -581,6 +581,22 @@ static int rage_fx_at(Mon *mo, float at[3]);
 static void mon_nick_fx(Mon *mo);
 static Group army_find(void *ctx, const char *book, const char *name);
 
+/* a group of the monster's property book (MONSTER_DATA's "George_prop.prb": the book George_prop); a Wii monster's
+ * from the Wii's copy first, the one its graph was made with (docs/WII_PLAN.md) */
+static Group mon_props(Mon *mo, const char *group)
+{
+    Viewer *v = mo->v;
+    char book[64];
+    snprintf(book, sizeof book, "%s", mo->have_graph && mo->graph.props ? mo->graph.props : "");
+    char *dot = strrchr(book, '.');
+    if (dot)
+        *dot = 0;
+    if (!book[0])
+        return (Group){ 0 };
+    const Bundle *b = mon_in(mo) ? v->scene.mon[mo->slot].bundle : NULL;
+    return b && b->wii ? city_book_group_wii(v->city, book, group) : city_book_group(v->city, book, group);
+}
+
 static void start_moves(Mon *mo)
 {
     Viewer *v = mo->v;
@@ -596,17 +612,12 @@ static void start_moves(Mon *mo)
         return;
     mo->have_graph = 1;
     {                                                /* the property book's footfalls (MonsterFx), DisableFootDrag */
-        char book[64];
-        snprintf(book, sizeof book, "%s", mo->graph.props ? mo->graph.props : "");
-        char *dot = strrchr(book, '.');
-        if (dot)
-            *dot = 0;
         foot_props_default(&mo->feet_fx);
-        Group g = book[0] ? city_book_group(v->city, book, "MonsterFx") : (Group){ 0 };
+        Group g = mon_props(mo, "MonsterFx");
         foot_props_read(&mo->feet_fx, g);
         const char *rage = g.at ? group_str(g, "RageFx") : NULL;   /* (0x2F5D80) */
         snprintf(mo->rage_fx_name, sizeof mo->rage_fx_name, "%s", rage ? rage : "");
-        g = book[0] ? city_book_group(v->city, book, "MiscData") : (Group){ 0 };
+        g = mon_props(mo, "MiscData");
         foot_init(&mo->feet, g.at && group_num(g, "DisableFootDrag", 0) != 0);
         if (mon_in(mo))                   /* Use3LinkFootIK, RTWSmoothFactor, the ankle (0x2E5640) */
             foot_ik_props(&mo->feet, g, &mon_in(mo)->tree);
@@ -616,7 +627,7 @@ static void start_moves(Mon *mo)
         for (int i = 0; i < mo->weapons.n; i++)      /* a burst on stops with the weapons it had */
             if (mo->weapons.w[i].firing && mo->weapons.w[i].fx >= 0 && v->fxw)
                 fx_stop(v->fxw, mo->weapons.w[i].fx);
-        g = book[0] ? city_book_group(v->city, book, "WeaponList") : (Group){ 0 };   /* its weapons (0x2D4C40) */
+        g = mon_props(mo, "WeaponList");             /* its weapons (0x2D4C40) */
         army_mon_weapons_read(&mo->weapons, g, army_find, v);
     }
     if (mo->have_ag)
@@ -704,13 +715,7 @@ static void play_reset(Viewer *v)
  * MiscData|IsFemale of its property book (MONSTER_DATA +0xAA4): Amanda, Jill, Lizzie, Natalie, Snapper, Venus */
 static int monster_female(Mon *mo)
 {
-    Viewer *v = mo->v;
-    char book[64];                                   /* "George_prop.prb": the book George_prop(.bdp) */
-    snprintf(book, sizeof book, "%s", mo->have_graph && mo->graph.props ? mo->graph.props : "");
-    char *dot = strrchr(book, '.');
-    if (dot)
-        *dot = 0;
-    Group g = book[0] ? city_book_group(v->city, book, "MiscData") : (Group){ 0 };
+    Group g = mon_props(mo, "MiscData");
     return g.at && group_num(g, "IsFemale", 0) != 0;
 }
 
@@ -2493,9 +2498,15 @@ static void clip_event(Mon *mo, const MoveEvent *e)
         return;
     }
     else if (!strcmp(n, "Marco::eatPerson")) { mon_add_hp(mo, 10); return; }   /* Marco.bsf: addHitPoints(10) [R] */
-    else if (!strcmp(n, "Monsters::fireWeapon")) {   /* Monsters.bsf: p0 == 0 "roar", else p1 == 1 "fart" [R] */
+    else if (!strcmp(n, "Cyril::crazyCyril")) {       /* the Wii's Cyril.bsf, on his face's Expression_Zap: */
+        edible_power_speed(&mo->power, 1.5f, 35);    /* setSpeedScale(1.5, 35) [R] */
+        return;
+    }
+    else if (!strcmp(n, "Monsters::fireWeapon") || !strcmp(n, "Brian::fireWeapon")) {
+        /* Monsters.bsf: p0 == 0 "roar", else p1 == 1 "fart"; the Wii's Brian.bsf the same with "brain" for "roar"
+         * (Rhett_prop's Weapon|Brain on the Wii: BrainWeapon, a Shockwave with Brain_Attack) [R] */
         if (e->p[0] == 0 || e->p[1] == 1)
-            army_mon_weapon_fire(&mo->weapons, e->p[0] == 0 ? "roar" : "fart");
+            army_mon_weapon_fire(&mo->weapons, e->p[0] != 0 ? "fart" : n[0] == 'B' ? "brain" : "roar");
         return;
     }
     else if (!strcmp(n, "Monsters::changeMountRail")) {

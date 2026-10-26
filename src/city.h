@@ -422,8 +422,11 @@ void scene_monster_hold_root(Scene *s, int k, const float t[3], const float q[4]
 /* the side it is drawn on (mirrored or not); a blend under way keeps the pose it had as it was drawn */
 void scene_monster_mirror(Scene *s, int k, int mirrored);
 int city_camera(City *c, Group *two_tilts);
-/* a group of a property book by the book's name ("Objects1_Props", "Weapons": <name>.bdp in the Vol) */
+/* a group of a property book by the book's name ("Objects1_Props", "Weapons": <name>.bdp in the Vol); one the book
+ * has not got from the Wii folder's copy (<name>.bdg), if any */
 Group city_book_group(City *c, const char *book, const char *name);
+/* the same, the Wii's copy first: a Wii monster's own property book (Rhett_prop's Weapon|Brain for Brian) */
+Group city_book_group_wii(City *c, const char *book, const char *name);
 /* a block's index in the city's BlockList as the game counts it (the first at or after WorldData BlockStart), -1 */
 int city_block_index(City *c, const char *name);
 /* the block a game with that start block (GameStatus +0x210, a BlockList index) begins with: the list's entry at
