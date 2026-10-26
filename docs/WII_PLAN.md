@@ -39,30 +39,31 @@ Wii's scripts add (Dallas's two bosses, the new monsters' calls, SuperJump) has 
    `profile.c:544`). A second file next to it, e.g. `rampage_profile.wii.bin`, keeps by name the 10 monsters'
    flags, Dallas's city flags and start block, the SuperJump bits (16) of all 40 and the players' picks when they
    are Wii monsters. Loading merges by name; saving splits. A profile used without the Wii data loses nothing.
-4. **Unlocks: the Wii's.** Plucky, Fifi and Cyril are revealed in Dallas (its `MonsterRevealDef`, which the port
-   already reads by name). The other seven (Boris, Brian, Ruby, Sarah, Squirmy, Flea, VERN) are revealed nowhere in
-   the books: the Wii's rule is in code, `MonsterReveal::setupExtraMonsters` (0x800837AC in the Wii's `Rampage.elf`,
-   0x534 bytes, symbols kept). Read it first (phase 0). If it cannot be read, they are available from the start.
-5. **Controls of the Wii monsters' moves: map the Wii's inputs onto the pad.** Their move graphs number the inputs
-   otherwise: 31..57 move up by 10 (George walks on v41, the PS2's `|L|` 31), the buttons follow the Wii remote's
-   ids (`rev_digital_button_order`, 0x8030D7C8: A 14, B 15, 1 16, 2 17, ...), and v30..v33 are probably the remote's
-   motion (punch down: `v33>2 v31>1.5 v32>1`) [G]. Plan: a table per Wii input, built by lining up the Wii and PS2
-   graphs of the same monster (George, Lizzie, Ralph, Boosy; the Wii's 181 states are the PS2's 176 and five new),
-   so every Wii condition becomes the PS2 condition it stands for; the motion inputs become the PS2 buttons the same
-   transitions use. How far the transitions match one to one is the first thing to check. The 30 PS2 monsters keep
-   their PS2 graphs.
+4. **Unlocks: the Wii's** (read in phase 0, [WII_NOTES.md](WII_NOTES.md)). Boris and Ruby from the start (the
+   Wii starts monsters 0..7, the PS2 0..5); Plucky, Fifi and Cyril revealed in Dallas (its `MonsterRevealDef`, which
+   the port already reads by name); Squirmy, Flea, Sarah, Brian and VERN when 1, 3, 6, 12 and 20 monsters have all
+   five upgrades (`n5StarUnlock`). That last rule counts SuperJump: it needs decision 6.
+5. **Controls of the Wii monsters' moves: map the Wii's inputs onto the pad** (read in phase 0,
+   [WII_NOTES.md](WII_NOTES.md)). The Wii inserted ten motion inputs at 30..39 (the remote's and the Nunchuk's
+   accelerometers), so its ids from 40 on are the PS2's + 10; its buttons are A 14 (the PS2's Square moves), B 15
+   (Cross), 2 17 (Circle), 12 (Triangle). Two gestures stand for button presses: a hard sideways swing for Circle,
+   a hard downward swing for Triangle. George's graphs line up: 937 of the 941 shared (state, target) pairs have as
+   many transitions. So at load a Wii graph's conditions are renumbered, A / B / 2 / 12 become Square / Cross /
+   Circle / Triangle, and the two swings become Circle and Triangle presses. The 30 PS2 monsters keep their PS2
+   graphs.
 6. **The fifth upgrade, SuperJump: later, Wii monsters first.** It needs a move bit (16), a fifth star, a fifth
    `Upgrade|` group per block and an answer for `Monsters::hasSuperJump` (Wii `Monsters.bsf:846`); the PS2
-   monsters' graphs have no `Jump_Super` state. Phase 5, optional.
+   monsters' graphs have no `Jump_Super` state. Phase 5. Without it the five-star unlocks of decision 4 cannot
+   happen (no monster reaches all five upgrades), so until then those five need a stand-in rule (open: four upgrades
+   counted instead of five, or available from the start).
 7. **Four players:** the Wii drops `DisableFor4Player` (its monster select has no such test). Keep the port's
    setting (`four_players=`) deciding as now; the Wii monsters have no such flag.
 
 ## Phases (one commit per step, each checked like the tools were)
 
-**Phase 0, reading the Wii's code (no port changes).** `MonsterReveal::setupExtraMonsters` (decision 4); the Wii's
-pad-to-input code (`RController::getState`, `_calcDirectionFlags`, `getAccelerometerVal`) for decision 5's table;
-which shell defaults differ (the new profile's starting monsters). The ELF is PowerPC with symbols; Ghidra reads it.
-Output: notes in `docs/`, marked [R] / [G].
+**Phase 0, reading the Wii's code (no port changes). Done:** [WII_NOTES.md](WII_NOTES.md) (the unlocks, the
+input ids and buttons, the Wii graph against the PS2's), `tools/wiidis.py` (the Wii ELF disassembled with its
+symbols).
 
 **Phase 1, reading Wii files in C.** Each its own commit, each checked against the tools' numbers:
 1. `wii_data=` in `rampage.cfg` (`settings.c` `set()`, `Settings`), the command line `--wii DIR`.
@@ -115,9 +116,9 @@ Check: the campaign through Dallas with `--autoplay`; Dallas's results; the PS2 
 folder goes).
 
 ## Risks and unknowns
-- The input table (decision 5) is the least certain part: if the Wii's transitions do not line up one to one with
-  the PS2's, the Wii monsters' controls need their own design.
-- The seven unlocks without a book entry (decision 4) depend on reading PowerPC code.
+- The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
+  check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].
+- The five-star unlocks need SuperJump (decision 6) or a stand-in rule.
 - Dallas's second boss bar and its two-boss finish are new C, not data.
 - Size: phase 1 is the biggest (the GX mesh reader and the byte swapping); phases 3 and 4 touch many files but are
   mostly widening arrays.
