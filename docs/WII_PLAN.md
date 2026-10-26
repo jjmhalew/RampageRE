@@ -217,6 +217,11 @@ launcher unpacks them into `%LOCALAPPDATA%\RampageRE\wii` and hands `RampageRE.e
 it, as it asks for the PS2 disc at the first: Yes, the folder dialog (checked for Game); No or Cancel, `wii_data=none`.
 The answer goes into `rampage.cfg`, so it is asked once, existing setups included; `wii_data=none` is now silent.
 
+**Dallas for a PS2 save** (afterwards): a PS2 profile loaded with the Wii's cities opens the city `updateProfile` would
+have opened at the last city destroyed, the first not both open and destroyed, when the PS2 file has not got it. So a
+PS2 game past London (or finished) finds Dallas open at block 1, as a Wii game would; one that has not destroyed
+London yet opens it the Wii's way, after London (`profile.c` `wii_next_city`, at `profile_read`).
+
 ## Risks and unknowns
 - The input table (decision 5): George's graphs line up (937 of 941); the Wii-only monsters have no PS2 graph to
   check against, so their translated graphs are checked by playing them. Id 12's Wii button is not known [G].

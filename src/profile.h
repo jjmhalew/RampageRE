@@ -233,7 +233,8 @@ void profile_side_path(const char *path, char *out, int size);
  * "RPWI", u32 version 1, u32 that CRC, u32 the count, then 32-byte records: char[16] a name, u32 the kind (1 a
  * monster's flags: a; 2 a pick: a the player; 3 a city: a its flags, b its start block; 4 the status's city: a its
  * start block, b its flags, c its score), u32 a, b, c. A profile used without the Wii folder leaves the side file as
- * it is.
+ * it is. Read on the Wii's cities, the city profile_update would open next (the first not both available and
+ * destroyed) is opened when the PS2's file has not got it: Dallas for a PS2 game past London (port extra).
  * loadProfile: reads the file; a missing one (-1) or a bad one (0: shorter than its sizes, not the magic, a CRC that
  * is not 0 and does not match [R 0x1A2D08, 0x1A19B0], a data size not 0x128 [R 0x34462C]; the version is not checked
  * [R 0x3445E0]) gives a

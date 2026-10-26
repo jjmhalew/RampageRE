@@ -82,6 +82,19 @@ static void wii_start(const Profile *p, ProfileStatus *s)
             s->monster_flags[i] |= PM_UNLOCKED;
 }
 
+/* a PS2 file on the Wii's cities (port extra, docs/WII_PLAN.md): the city profile_update opens after a city is
+ * destroyed, the first not both available and destroyed, gets PC_AVAILABLE when the PS2's file has not got it (Dallas
+ * after London): the PS2 never opened it, the Wii would have. Nothing when no city before it is destroyed */
+static void wii_next_city(Profile *p)
+{
+    uint32_t *f = p->block.city_flags;
+    int n = 0;
+    while (city_ok(p, n) && (f[n] & (PC_AVAILABLE | PC_ALL_BLOCKS)) == (PC_AVAILABLE | PC_ALL_BLOCKS))
+        n++;
+    if (n > 0 && city_ok(p, n) && ps2_city(p->city_name[n]) < 0 && !(f[n] & PC_AVAILABLE))
+        f[n] |= PC_AVAILABLE;
+}
+
 /* ---------------------------------------------------------------- the rosters */
 
 void profile_set_roster(Profile *p, const char *const *monsters, int nmonsters, const char *const *cities,
@@ -793,8 +806,10 @@ int profile_read(Profile *p, const char *path)
     ProfileBlock fb = p->block;
     status_in(p, &fb.status, &p->block.status);
     cities_in(p, &fb, &p->block);
-    if (roster_beyond_ps2(p))
+    if (roster_beyond_ps2(p)) {
         side_read(p, path, get32(buf + 0x0C));
+        wii_next_city(p);                            /* Dallas for a PS2 file past London */
+    }
     wii_start(p, &p->block.status);                  /* a PS2 profile on the Wii's roster: Boris and Ruby too */
     profile_restore(p);                              /* [R] 0x33F120 with 1 */
     p->block.status.changed = 0;
