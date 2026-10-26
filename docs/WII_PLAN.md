@@ -128,6 +128,22 @@ the PS2 game stays byte for byte the same with `--wii`. Found on the way:
 Check: a PS2 profile loaded and saved with and without `wii_data` stays byte for byte the same; a Wii monster
 unlocked, saved, quit, loaded; the monster select scrolls through 40.
 
+**Phase 3 done** (4a766b8 .. 2416753): with a Wii folder the shell, the profile and the reveals use the Wii's roster
+of 40 in its order. The monster select and the card sheet show all 40, the card sheet in 20 columns of pairs. The
+PS2's `rampage_profile.bin` stays its 0x178 bytes, its monsters mapped by name. What it has no room for goes to
+`rampage_profile.wii.bin`: the Wii's monsters' flags, every monster's SuperJump bit and the players' picks of Wii
+monsters. Boris and Ruby are open from the start, and the five-star rule unlocks Squirmy, Flea, Sarah, Brian and
+Vern. Without the folder nothing changes: pictures, logs and the profile file match byte for byte, apart from the
+save's time stamp and CRC. Decided or found on the way:
+- decision 6's stand-in: until SuperJump (phase 5), the five-star rule counts the PS2's four upgrades (0xF);
+- the Wii changed the cities' reveal lists, dropping some PS2 monsters and adding its own. A Wii monster playing
+  uses the Wii's list, and a PS2 monster keeps the PS2's (`reveal_world_data`);
+- the Wii's MonsterData has no `DisableFor4Player`, so the shell reads it from the PS2's group of the same name;
+- a picked Wii monster is saved in the PS2 file as that player's start pick, and the side file keeps the real pick
+  while the PS2 file is still the one it was written with (its CRC);
+- the shell's `--do` gets `until NAME`, because the boot's movies run on the clock.
+The cities stay the PS2's seven in the PS2's order until phase 4.
+
 **Phase 4, Dallas in the game.**
 1. Cities sized by the data: `CITIES` / `CAMPAIGN` / `NCITIES` (`main.c:61-71`), `PROFILE_CITIES`, `SHELL_CITIES`,
    `num_cities` (`main.c:1387`, `game.c:1099`), the city select (`shell.c:5177`, `5185`: the Wii's `< 4` and 8
