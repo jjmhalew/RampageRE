@@ -95,6 +95,36 @@ static void map_material(Map *m, const uint8_t *d)
         mark(m, region[kind], region[kind] + 16u, 4);
 }
 
+/* cloth (tools/anim.py Cloth, cloth.c, tree.c cloth_particles): 32-bit but each part's flag bytes (+0x50 .. +0x57)
+ * and the particles. A Wii particle is 72 bytes, the PS2's 64 with 8 bytes 0xEA after the normal: each is moved
+ * into the PS2's 64 where it starts (the readers find every array by its offset, so the room left at the end of a
+ * part's particles is never read) and swapped there: f32 position, normal, value, weights; u16 bones; u8 count,
+ * 0xEA; u16 held; u32 0xFFFFFFFF x 2 */
+static void map_cloth(Map *m, uint8_t *d)
+{
+    uint32_t nparts = be32_at(m, d, 0x34), parts = be32_at(m, d, 0x38);
+    mark(m, 0x1C, m->n, 4);
+    for (uint32_t k = 0; k < nparts && k < 4096 && parts + 0x8C * (k + 1) <= m->n; k++) {
+        uint32_t r = parts + 0x8C * k, count = be32_at(m, d, r + 0x84), at = be32_at(m, d, r + 0x88);
+        mark(m, r + 0x50, r + 0x58, 0);
+        if (count > 65536 || (uint64_t)at + 72ull * count > m->n)
+            continue;
+        mark(m, at, at + 72 * count, 0);                 /* swapped below, once moved */
+        for (uint32_t i = 0; i < count; i++) {
+            uint8_t *dst = d + at + 64 * i;
+            const uint8_t *src = d + at + 72 * i;
+            memmove(dst, src, 0x18);
+            memmove(dst + 0x18, src + 0x20, 0x28);
+            Map one = { (uint8_t[64]){ 0 }, 64 };
+            mark(&one, 0, 0x2C, 4);
+            mark(&one, 0x2C, 0x34, 2);
+            mark(&one, 0x36, 0x38, 2);
+            mark(&one, 0x38, 0x40, 4);
+            swap_marked(dst, &one);
+        }
+    }
+}
+
 /* texture (0x68 bytes on the Wii): u32 kind, u32 GX format, u16 width, height, mip levels, 0xFFFF; its pixels
  * (data2) stay as they are, tex.c reads them as GX tiles */
 static void map_texture(Map *m)
@@ -170,7 +200,7 @@ static void swap_entry(const Bundle *b, BdpEntry *e)
     size_t len = strlen(name);
     int monster = e->type == ET_RAW && len >= 12 && strcmp(name + len - 12, "MONSTER_DATA") == 0;
     if (!e->data || (e->type != ET_TREE && e->type != ET_ANIM && e->type != ET_MATERIAL && e->type != ET_TEXTURE &&
-                     !monster))
+                     e->type != ET_CLOTH && !monster))
         return;                                          /* raw files (scripts, fonts, .ifl) stay little endian */
     uint8_t *d = (uint8_t *)e->data;
     Map m = { calloc(e->size ? e->size : 1, 1), e->size };
@@ -180,6 +210,7 @@ static void swap_entry(const Bundle *b, BdpEntry *e)
     else if (e->type == ET_ANIM) map_clip(&m, d);
     else if (e->type == ET_MATERIAL) map_material(&m, d);
     else if (e->type == ET_TEXTURE) map_texture(&m);
+    else if (e->type == ET_CLOTH) map_cloth(&m, d);
     else map_monster(&m, d);
     swap_marked(d, &m);
     free(m.w);

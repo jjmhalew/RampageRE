@@ -389,6 +389,39 @@ static Mat4 cloth_offset(Group cb)                   /* ClothOffset: rows, then 
     return off;
 }
 
+/* a Wii flag's mesh (GX, mesh_read) as cloth mesh parts: the Wii keeps no vertex -> particle table where the PS2
+ * does (the part record's +0x3C is its display list there), but every vertex lies on its particle's bind place (all
+ * 964 of the eight cities' flags): its particle is the nearest. The count of parts, -1 if the mesh does not read */
+static int wii_cloth_parts(const Cloth *cl, const BdpEntry *me, ClothMeshPart **out)
+{
+    Mesh wm;
+    *out = NULL;
+    if (mesh_read(me, &wm) != 0)
+        return -1;
+    int np = (int)wm.nparts;
+    ClothMeshPart *cp = calloc((size_t)(np > 0 ? np : 1), sizeof *cp);
+    for (int k = 0; cp && k < np; k++) {
+        const MeshPart *p = &wm.parts[k];
+        cp[k].material = (uint16_t)p->material;
+        cp[k].nverts = (int)p->nverts;
+        cp[k].particle = malloc(sizeof *cp[k].particle * (p->nverts ? p->nverts : 1));
+        for (uint32_t v = 0; cp[k].particle && v < p->nverts; v++)
+            cp[k].particle[v] = cloth_nearest(cl, p->pos + 3 * v);
+        if (p->uv) {
+            cp[k].uv = malloc(sizeof(float) * 2 * p->nverts + 1);
+            if (cp[k].uv)
+                memcpy(cp[k].uv, p->uv, sizeof(float) * 2 * p->nverts);
+        }
+        cp[k].ntris = (int)p->ntris;
+        cp[k].tris = malloc(sizeof(uint32_t) * 3 * p->ntris + 4);
+        if (cp[k].tris)
+            memcpy(cp[k].tris, p->tris, sizeof(uint32_t) * 3 * p->ntris);
+    }
+    mesh_free(&wm);
+    *out = cp;
+    return cp ? np : -1;
+}
+
 /* a flag of the model at `place`, in the wind of cb's keys: its instance (its skin in *skin), -1 none */
 static int flag_new(City *c, Scene *s, const char *model, Group cb, Mat4 place, Skin **skin)
 {
@@ -407,11 +440,13 @@ static int flag_new(City *c, Scene *s, const char *model, Group cb, Mat4 place, 
         return -1;
     }
     Mesh m = { 0 };
-    int np = cloth_mesh_parts(me->data, me->size), nv = 0;
+    ClothMeshPart *cp = NULL;
+    int np = me->wii ? wii_cloth_parts(cl, me, &cp) : cloth_mesh_parts(me->data, me->size), nv = 0;
     m.parts = calloc((size_t)(np > 0 ? np : 1), sizeof *m.parts);
-    ClothMeshPart *cp = calloc((size_t)(np > 0 ? np : 1), sizeof *cp);
+    if (!cp)
+        cp = calloc((size_t)(np > 0 ? np : 1), sizeof *cp);
     for (int k = 0; k < np; k++) {
-        if (cloth_mesh_part(cl, k, me->data, me->size, me->data2, me->size2, &cp[k]) != 0)
+        if (me->wii ? !cp[k].nverts : cloth_mesh_part(cl, k, me->data, me->size, me->data2, me->size2, &cp[k]) != 0)
             continue;
         MeshPart *p = &m.parts[m.nparts++];
         p->material = cp[k].material;
@@ -3996,7 +4031,8 @@ int city_monster(City *c, Scene *s, const char *monster, int clip_index, float x
                 for (uint32_t pi = 0; pi < m.nparts; base += m.parts[pi].nverts, pi++) {
                     const MeshPart *p = &m.parts[pi];
                     ClothMeshPart cp;
-                    if (cloth_mesh_part(sk->cloth, (int)pi, e->data, e->size, e->data2, e->size2, &cp) == 0) {
+                    if (!e->wii &&                   /* the Wii's has none: its vertices are on their particles */
+                        cloth_mesh_part(sk->cloth, (int)pi, e->data, e->size, e->data2, e->size2, &cp) == 0) {
                         if ((uint32_t)cp.nverts == p->nverts)
                             for (uint32_t j = 0; j < p->nverts; j++)
                                 sk->particle[base + j] = cp.particle[j];
