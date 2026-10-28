@@ -87,7 +87,8 @@ int challenge_load(Challenge *c, Group block_def, Group upgrade_def, int play_ty
 const char *challenge_identifier(const Challenge *c);   /* getChallengeIdentifier: Name, "" none (0x2B4970) */
 const char *challenge_icon(const Challenge *c);         /* getChallengeIcon: Icon, "" none (0x2B47C0) */
 float challenge_icon_scale(const Challenge *c, int pause);   /* getChallengeIconScale(pause): PauseScale (pause != 0
-                                                              * and the key there), else Scale; 0 without [R] */
+                                                              * and the key there), else Scale; 0 without [R], 1 in a book of
+                                                              * the Wii's data (Dallas) [R Wii] */
 float challenge_icon_shift(const Challenge *c);         /* getChallengeIconShift: ShiftX; 0 without [R] */
 int challenge_required(const Challenge *c);             /* getChallengeItemRequired (0x3464F0): the goals' Required
                                                          * summed, -1 with no goal */

@@ -244,9 +244,11 @@ static int float_key(Group g, const char *key, float *out)   /* [R] the cases wa
     return 1;
 }
 
+/* the Wii's starts its answer at 1.0 (0x80008304: sda2 0x804DDFA0) where the PS2's PFloat is 0.0; seven of Dallas's
+ * nine ChallengeDefs have no Scale (every PS2 one with an Icon has it) [R Wii] */
 float challenge_icon_scale(const Challenge *c, int pause)
 {
-    float v = 0;
+    float v = c->def.at && c->def.book && c->def.book->b && c->def.book->b->wii ? 1.0f : 0.0f;
     if (pause && float_key(c->def, "PauseScale", &v))
         return v;
     float_key(c->def, "Scale", &v);
