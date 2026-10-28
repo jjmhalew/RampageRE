@@ -36,7 +36,7 @@ The scope is the bundle's (`Bundle.scope`, set where it is loaded):
 | `Common` | anything else |
 
 ## 3. Making a pack
-1. Dump: `rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George --dumptex` (or with `--shot` and `--do`
+1. Dump: `RampageRE-dev.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George --dumptex` (or with `--shot` and `--do`
    for an unattended run), then look through `mods/dump/`.
 2. Edit or upscale a PNG; keep its aspect ratio and its alpha where it is see-through.
 3. Put it anywhere under `mods/textures/`, named with the same 16 hex digits (renaming the front part is fine).

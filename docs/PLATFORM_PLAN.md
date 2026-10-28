@@ -184,7 +184,7 @@ no game data is involved: the programs hold only the port's code.
 
 **RampageRE**: `.github/workflows/build.yml` with `on: push: branches: [main]`, `pull_request`, `tags: ['v*']`.
 - `windows`: `build_viewer.bat` (Zig is fetched with SHA-256; cache `tools/zig`); artifact `RampageRE-<sha>.zip` with
-  `rampage.exe`, README.md, LICENSE.
+  `RampageRE-dev.exe`, README.md, LICENSE.
 - `linux`: `sh build_viewer.sh rampage` on ubuntu-22.04; artifact tar.gz.
 - Later phases add `switch` and `android` jobs.
 - **Do not check out submodules** (actions/checkout's default `submodules: false`; PS2Recomp and the recomp need the

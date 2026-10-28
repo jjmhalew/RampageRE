@@ -1,4 +1,4 @@
-# The native viewer (`src/`, `rampage.exe`)
+# The native port (`src/`, `RampageRE.exe`, `RampageRE-dev.exe`)
 
 The second half of the hybrid approach: next to the recompiled game, a hand-written C program that reads the game's
 data with what the format work found and draws it, the way WoodyRE reimplements its game. The first piece is a viewer
@@ -7,16 +7,16 @@ Python tools' readers and of `tools/city.py`.
 
 ## Building and running
 ```bat
-build.bat dev                                 :: rampage.exe, the developer build (a console); build_viewer.bat does the same
-rampage.exe                                   :: the data it finds (below; build\disc\RAMPAGE.VOL first), Chicago, block 1
-rampage.exe NewYork 6 --night                 :: the same, another block
-rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1   :: straight from the disc image
-rampage.exe build\disc\RAMPAGE.VOL NewYork 6 --night
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit (offscreen: no window)
-rampage.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -4, up 1" --cam 10 -10 8 30 5 --shot s.png
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 2 --monster George --monster2 Lizzie   :: two on the keys
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --players 4 --bots 2 --play kingcity            :: two players, two bots
+build.bat dev                                 :: RampageRE-dev.exe, the developer build (a console); build_viewer.bat does the same
+RampageRE-dev.exe                                   :: the data it finds (below; build\disc\RAMPAGE.VOL first), Chicago, block 1
+RampageRE-dev.exe NewYork 6 --night                 :: the same, another block
+RampageRE-dev.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1   :: straight from the disc image
+RampageRE-dev.exe build\disc\RAMPAGE.VOL NewYork 6 --night
+RampageRE-dev.exe build\disc\RAMPAGE.VOL Chicago 1 --monster George   :: play George by his own move graph, the game's camera follows
+RampageRE-dev.exe build\disc\RAMPAGE.VOL Chicago 1 --shot shot.png   :: one frame to a PNG, then quit (offscreen: no window)
+RampageRE-dev.exe build\disc\RAMPAGE.VOL NewYork 3 --monster George --do "at 25 -4, up 1" --cam 10 -10 8 30 5 --shot s.png
+RampageRE-dev.exe build\disc\RAMPAGE.VOL Chicago 1 --players 2 --monster George --monster2 Lizzie   :: two on the keys
+RampageRE-dev.exe build\disc\RAMPAGE.VOL Chicago 1 --players 4 --bots 2 --play kingcity            :: two players, two bots
 ```
 `build.bat` compiles C99 with Zig (`zig cc`), like WoodyRE's: a Zig in `tools\zig`, on `PATH` or from
 `pip install ziglang` is used, otherwise Zig 0.16.0 is downloaded once and checked against its SHA-256 ("Windows
@@ -30,7 +30,7 @@ or unpacked (src/iso.c; `Vol.base` is where the VOL starts in the image). Beside
 `RAMPAGE.ELF` (`build.ps1`'s split copy) or `SLES_538.00` (copied off the disc); either works. `build.ps1` is not
 needed for the viewer.
 
-Without a path (or with a city name first: `rampage.exe NewYork 6`) it looks, in this order, and takes the first:
+Without a path (or with a city name first: `RampageRE-dev.exe NewYork 6`) it looks, in this order, and takes the first:
 1. `RAMPAGE_VOL` (the environment variable: a `RAMPAGE.VOL` or an image, taken as it is)
 2. `build\disc\RAMPAGE.VOL` (what `build.ps1` extracts), `.\RAMPAGE.VOL`, `data\RAMPAGE.VOL`, `RAMPAGE.VOL` beside the
    program
@@ -52,7 +52,7 @@ beside it); the choice is checked (an image with a `RAMPAGE.VOL` in it, or a VOL
 written to `%LOCALAPPDATA%\RampageRE\disc.txt` (step 5) so the next start finds it. Cancel quits. Elsewhere, and in a
 `--shot` run, it says where it looked and exits with 1 (a `--shot` run prints that to stderr, as every message). An
 image without `RAMPAGE.VOL` is refused ("not Rampage - Total Destruction"). An APK of `make_android_bundle.bat` counts
-as a disc image on every system (`rampage.exe RampageRE-bundle.apk Chicago 1` works too): its stored entries
+as a disc image on every system (`RampageRE-dev.exe RampageRE-bundle.apk Chicago 1` works too): its stored entries
 `assets/RAMPAGE.VOL`, `assets/SLES_538.00` and `assets/SYSTEM.CNF` are read in place (src/iso.c `zip_find`).
 
 The supported releases are the European SLES-53800 version 1.00 and the USA SLUS-21323 version 1.01: their ELF
@@ -126,8 +126,8 @@ game's textures, `--dumptex` writes every texture drawn to `mods/dump/` under th
 
 ### Autoplay (the playthrough test)
 ```bat
-rampage.exe build\disc\RAMPAGE.VOL --shell --autoplay --shot out\end.png --mute          :: the campaign, front end to credits
-rampage.exe build\disc\RAMPAGE.VOL Chicago 1 --autoplay --ap-cities 1 --shot out\c.png --mute   :: one city
+RampageRE-dev.exe build\disc\RAMPAGE.VOL --shell --autoplay --shot out\end.png --mute          :: the campaign, front end to credits
+RampageRE-dev.exe build\disc\RAMPAGE.VOL Chicago 1 --autoplay --ap-cities 1 --shot out\c.png --mute   :: one city
 python tools\playthrough.py out                  :: the whole suite, in parallel, out\report.md (--suite ci: one city, 2 blocks)
 ```
 `--autoplay` (with `--shot`: offscreen, simulated time, 60 frames a second, about 30 times real time) plays the game
@@ -153,7 +153,7 @@ moves on, a shell screen standing for 5 minutes (15 with a movie); a monster's p
 moving for 90 s, outside the street, more than 4 under its ground or inside a standing building for 2 s, down at 0
 HP for 90 s; the live people or an object list past its bound; more than 3 GB, or 500 MB more after ten blocks),
 `CRASH` (the exception or signal, its place in the exe and the last second's state; on Windows then a
-`CRASH_FRAME` line per frame of the stack, by dbghelp and the `rampage.pdb` beside the exe; `RAMPAGE_AP_CRASH=1`
+`CRASH_FRAME` line per frame of the stack, by dbghelp and the `RampageRE-dev.pdb` beside the exe; `RAMPAGE_AP_CRASH=1`
 makes one 5 s in, to try it) and `SUMMARY`. A `BLOCK` line also counts the buildings the bots' 60 s guard felled
 (`guard_falls`: the bots stuck on a building). Screenshots go to `--ap-shots DIR`: one
 per problem (80 at most) and every fifth block's end. The exit code is 3 when it saw problems.
@@ -173,8 +173,8 @@ and every blow between them one of its attack records' damage (+0x2C); a failed 
 
 | | |
 |---|---|
-| `build.bat` | `RampageRE.exe`, the player build (`-DRAMPAGE_GUI -Wl,--subsystem,windows`, the icon and version of `res/rampagere.rc`): no console; started without arguments it opens the front end (`--shell`); stdout and stderr go to `rampage.log` in the current folder (a new one each start, started again past 32 MB; `RAMPAGE_CONSOLE=1` keeps the streams, a `--shot` run too), the window title stays plain (`RAMPAGE_DEBUGTITLE=1`: as rampage.exe's); a message box when it cannot start; started from a read-only folder (Program Files) or a temporary one (from inside a zip) without arguments it works in `%LOCALAPPDATA%\RampageRE` |
-| `build.bat dev` | `rampage.exe`, the developer build: a console, the same command line; what this document and the tests use (`build_viewer.bat` calls this) |
+| `build.bat` | `RampageRE.exe`, the player build (`-DRAMPAGE_GUI -Wl,--subsystem,windows`, the icon and version of `res/rampagere.rc`): no console; started without arguments it opens the front end (`--shell`); stdout and stderr go to `rampage.log` in the current folder (a new one each start, started again past 32 MB; `RAMPAGE_CONSOLE=1` keeps the streams, a `--shot` run too), the window title stays plain (`RAMPAGE_DEBUGTITLE=1`: as RampageRE-dev.exe's); a message box when it cannot start; started from a read-only folder (Program Files) or a temporary one (from inside a zip) without arguments it works in `%LOCALAPPDATA%\RampageRE` |
+| `build.bat dev` | `RampageRE-dev.exe`, the developer build: a console, the same command line; what this document and the tests use (`build_viewer.bat` calls this) |
 | `build.bat standalone [DATA] [WII]` | `RampageRE.exe`, then `RampageRE-standalone.exe` (`make_standalone.bat`, below) |
 | `build.bat apkbundle` | `build\apkbundle.exe`, the tool of `make_android_bundle.bat` ("Android") |
 | `build.bat tools` | only `build\bundle_stub.exe`, `build\pack.exe` and `build\apkbundle.exe` (the CI builds them) |
@@ -233,7 +233,7 @@ SDL_VIDEODRIVER=offscreen ./rampage build/disc/RAMPAGE.VOL Chicago 1 --mute --sh
 ```
 `SDL_VIDEODRIVER=offscreen` is SDL's EGL pbuffer driver: it needs no X or Wayland server (CI, WSL without WSLg).
 Linux's `rampage` is the player build there too: started alone or with only the data's path it opens the front end,
-as `RampageRE.exe` does; given a city (or any option) it is the viewer, as `rampage.exe`. On the Steam Deck add it to
+as `RampageRE.exe` does; given a city (or any option) it is the viewer, as `RampageRE-dev.exe`. On the Steam Deck add it to
 Steam as a non-Steam game (*Add a Non-Steam Game*, the disc image's path as its launch option), so that in Game Mode, or
 started from Steam in Desktop Mode, Steam Input hands its controls over as a pad.
 Pass the disc image (`./rampage ~/Rampage.iso Chicago 1`), or put it (or `RAMPAGE.VOL` with `SLES_538.00` or
@@ -515,7 +515,7 @@ picture is exactly the one without them (the same bytes in a `--shot`). `src/set
 | anisotropy | `aniso=1` | `--aniso N` | `RAMPAGE_ANISO` | F8 (cycles) | `GL_TEXTURE_MAX_ANISOTROPY` 1 (off), 2, 4, 8, 16 on the world's textures: streets and walls at a grazing angle stay sharp |
 | the profile at launch | `profile_autoload=1` | `--autoload`, `--noautoload` | `RAMPAGE_PROFILE_AUTOLOAD` | | not graphics, but read the same way: see "The profile at launch" below |
 | four players in the menu | `four_players=1` | `--four-players`, `--no-four-players` | `RAMPAGE_FOUR_PLAYERS` | | not graphics either: see "Four players in the menu" below |
-| the Wii's extra content | `wii_data=` | `--wii DIR` | `RAMPAGE_WII_DATA` | | not graphics either: your own extracted Wii disc (Dolphin's Extract Entire Disc: the folder with `DATA`, or its `DATA/files`), for its ten monsters and Dallas; empty (the default) leaves the PS2 game as it is, except on the Switch, the Vita and Android, where a `wii` folder in the home folder is used when there is one (see each below; `wii_data=none` leaves it out, unsaid). `RampageRE.exe` (the player build, never `rampage.exe` nor a `--shot` run) asks once when it is empty: a message (Yes / No), then the system's folder dialog, the folder checked for `Game` (in it, `DATA/files` or `files`); the answer, the folder or `none`, is written into `rampage.cfg` (`settings_put`: that line alone, the rest and its comment kept), so it asks no more; deleting the line asks again. Work in progress, docs/WII_PLAN.md |
+| the Wii's extra content | `wii_data=` | `--wii DIR` | `RAMPAGE_WII_DATA` | | not graphics either: your own extracted Wii disc (Dolphin's Extract Entire Disc: the folder with `DATA`, or its `DATA/files`), for its ten monsters and Dallas; empty (the default) leaves the PS2 game as it is, except on the Switch, the Vita and Android, where a `wii` folder in the home folder is used when there is one (see each below; `wii_data=none` leaves it out, unsaid). `RampageRE.exe` (the player build, never `RampageRE-dev.exe` nor a `--shot` run) asks once when it is empty: a message (Yes / No), then the system's folder dialog, the folder checked for `Game` (in it, `DATA/files` or `files`); the answer, the folder or `none`, is written into `rampage.cfg` (`settings_put`: that line alone, the rest and its comment kept), so it asks no more; deleting the line asks again. Work in progress, docs/WII_PLAN.md |
 | language | `language=english` | `--language NAME` | `RAMPAGE_LANGUAGE` | | not graphics either: the console's language (`english`, `french`, `german`, `italian`, `spanish`; `japanese`, `dutch`, `portuguese` as the game takes them, English), which the PS2 game reads at start-up (sceScfGetLanguage, 0x10D300) for its texts and movies (the intro and Victory have French, German, Italian and Spanish cuts); `--lang N` picks a .loc column itself |
 | mips | `mips=0` | `--mips`, `--nomips` | `RAMPAGE_MIPS` | F9 | a 2×2 box mip chain (alpha-weighted, so cut-outs keep their colour) with trilinear filtering on the world's textures: no shimmer in the distance; anisotropy needs it to do much |
 

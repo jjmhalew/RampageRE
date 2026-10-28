@@ -59,7 +59,7 @@ campaign level, Las Vegas, with errors in the 3D picture (black ground), slowly 
 | People and traffic in the blocks (379 people, 375 vehicles; lanes from the game's traffic code) | ✅ |
 | Lighting: the game's lights, fog, drifting clouds; every block also at night | ✅ |
 | Effects (297, rebuilt byte for byte), string tables (13, 9 languages), GUI layouts (XML) | ✅ [docs/FORMAT_EDF.md](docs/FORMAT_EDF.md) |
-| Native viewer in C (`rampage.exe`): every city block from `RAMPAGE.VOL`, lit, day and night, traffic, animated people and props, any monster with its clips | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
+| Native viewer in C (`RampageRE-dev.exe`): every city block from `RAMPAGE.VOL`, lit, day and night, traffic, animated people and props, any monster with its clips | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
 | The game's play camera (TwoTilts) transcribed; walk a monster about with it following | ✅ [docs/CAMERA.md](docs/CAMERA.md) |
 | Monster move graphs (`MONSTER_DATA`): all 30 parsed, the pad variables and the game's runner decoded; clip events (script calls, movement modes), jump physics and the landing slots, the state nodes (playback rate, flags), the game's steering, air control and clip blending; the native viewer plays every monster by its own graph, jumps included, its punches damage the buildings' cells by the game's rules until floors collapse and buildings fall to rubble, and it climbs them | ✅ [docs/FORMAT_MONSTER.md](docs/FORMAT_MONSTER.md) |
 | The game in the native port: front end and shell, profiles, game flow, challenges, people, army, traffic, bosses, edibles, effects, sound and music, movies, HUD and Pause | ✅ [docs/NATIVE.md](docs/NATIVE.md) |
@@ -90,7 +90,7 @@ PS2Recomp submodule's `src/runner` folder, which are not committed.
 
 ### Prebuilt
 The native port ([docs/NATIVE.md](docs/NATIVE.md)) is built by GitHub Actions on every push and pull request:
-`RampageRE.exe` and `rampage.exe` for Windows (`build.bat`) and `rampage` for Linux (`build.sh`, needs SDL2). Each run
+`RampageRE.exe` and `RampageRE-dev.exe` for Windows (`build.bat`) and `rampage` for Linux (`build.sh`, needs SDL2). Each run
 of the [build workflow](https://github.com/jjmhalew/RampageRE/actions/workflows/build.yml) keeps them as artifacts, and
 each version tag publishes them on the [releases](https://github.com/jjmhalew/RampageRE/releases) page. They hold
 only the port's own code (the programs, README.md, LICENSE and two docs), **no game data**.
@@ -100,9 +100,9 @@ first start: *More info*, then *Run anyway*). At the first start it asks for you
 the `RAMPAGE.VOL` of a copy of the disc, in a file dialog; it reads it where it is (nothing is copied) and remembers it
 in `%LOCALAPPDATA%\RampageRE\disc.txt`. It starts in the front end; `rampage.cfg`, the profile, `rampage.log` and
 `mods\` are written beside the exe (or in `%LOCALAPPDATA%\RampageRE` when that folder is read-only or temporary).
-`rampage.exe` is the same program with a console, for the command line of [docs/NATIVE.md](docs/NATIVE.md):
-`rampage.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1`, or the `RAMPAGE.VOL` from
-it (`rampage.exe D:\RAMPAGE.VOL Chicago 1`). Without a path both look for the data beside themselves, in the current
+`RampageRE-dev.exe` is the same program with a console, for the command line of [docs/NATIVE.md](docs/NATIVE.md):
+`RampageRE-dev.exe "D:\Rampage - Total Destruction (Europe) (En,Fr,De,Es,It).iso" Chicago 1`, or the `RAMPAGE.VOL` from
+it (`RampageRE-dev.exe D:\RAMPAGE.VOL Chicago 1`). Without a path both look for the data beside themselves, in the current
 folder and in `%LOCALAPPDATA%\RampageRE` first (`~/.local/share/RampageRE` on Linux; the whole list is in
 [docs/NATIVE.md](docs/NATIVE.md) "Game data"). They do not need `build.ps1`. The recompiled game (`build.ps1`) is not
 built there, as it needs the disc.
@@ -144,7 +144,7 @@ extract the disc with Dolphin (the game's *Properties*, *Filesystem*, right-clic
 
 | Where | How |
 |---|---|
-| Windows | `RampageRE.exe` asks once, at a start when nothing names it: *Yes* opens a folder dialog for the extracted disc (the folder with `DATA`, or its `DATA/files`), *No* asks no more; the answer is kept in `rampage.cfg` as `wii_data=` (delete that line to be asked again). Or `rampage.exe ... --wii DIR`, or `RAMPAGE_WII_DATA` |
+| Windows | `RampageRE.exe` asks once, at a start when nothing names it: *Yes* opens a folder dialog for the extracted disc (the folder with `DATA`, or its `DATA/files`), *No* asks no more; the answer is kept in `rampage.cfg` as `wii_data=` (delete that line to be asked again). Or `RampageRE-dev.exe ... --wii DIR`, or `RAMPAGE_WII_DATA` |
 | Linux | `wii_data=` in `rampage.cfg` set to the extracted disc, or `--wii DIR`, or `RAMPAGE_WII_DATA` |
 | Switch, PS Vita | a `wii` folder with `Game`, `Shell` and `Audio` in `/switch/rampagere/` or `ux0:data/rampagere/`, found on its own |
 | Android | the same `wii` folder in the app folder by USB cable, or the launcher's shortcut **Add the Wii's data** (a long press on the icon), which copies it from the folder you pick; after the first start's copy the app asks once |
@@ -162,7 +162,7 @@ Windows 10 or 11; nothing needs to be installed first (the scripts are WoodyRE's
 | Script | Builds |
 |---|---|
 | `build.bat` | `RampageRE.exe`, the player build: no console, the icon and version of `res/rampagere.rc`, starts in the front end, asks for the disc image at the first start, logs to `rampage.log`, says in a message box when it cannot start |
-| `build.bat dev` | `rampage.exe`, the developer build: the same program with a console that prints what each block holds (the one docs/NATIVE.md and the tests use; `build_viewer.bat`, the old name, builds it) |
+| `build.bat dev` | `RampageRE-dev.exe`, the developer build: the same program with a console that prints what each block holds (the one docs/NATIVE.md and the tests use; `build_viewer.bat`, the old name, builds it) |
 | `build.sh` | `./rampage` for Linux and the Steam Deck (SDL2; `GLES=1` for OpenGL ES; `build_viewer.sh` is the old name) |
 | `build_switch.sh` | `rampage.nro` for the Switch (devkitPro, or its Docker image) |
 | `build_vita.sh` | `rampage.vpk` for the PS Vita (VitaSDK, or its Docker image) |
@@ -182,7 +182,7 @@ Never share or upload them.**
 | Path | |
 |---|---|
 | `build.ps1` | the whole pipeline: disc → split ELF → C++ → `ps2EntryRunner.exe` |
-| `build.bat`, `src/` | the native port `RampageRE.exe` / `rampage.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
+| `build.bat`, `src/` | the native port `RampageRE.exe` / `RampageRE-dev.exe` (C99, Zig, OpenGL; see docs/NATIVE.md) |
 | `build.sh`, `build_switch.sh`, `build_vita.sh` | the same port for Linux (SDL2), the Switch (homebrew `rampage.nro`) and the PS Vita (homebrew `rampage.vpk`) |
 | `android/` | the same port as an Android app (Gradle, SDL2's activity, the on-screen pad of `src/touch.c`) |
 | `make_standalone.bat`, `make_android_bundle.bat`, `tools/native/` | your own one-file builds with your game data inside: the standalone launcher (`bundle.c`) and its packer (`pack.c`), the APK bundler and signer (`apkbundle.c`) |

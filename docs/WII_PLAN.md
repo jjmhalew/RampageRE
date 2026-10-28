@@ -78,10 +78,10 @@ symbols).
    weights (the skinning already loops over 4, `city.c:3328`).
 6. Cloth: 72-byte particles (`tree.c:65`, `cloth.c:256`), the held flag a u16.
 7. Property books, string tables (the kind bytes; `prb.c`, `loc_find` in hud.c and shell.c).
-Check: `rampage.exe Dallas 4` draws the block; `--monster Boris` walks in a PS2 city (with George's controls until
+Check: `RampageRE-dev.exe Dallas 4` draws the block; `--monster Boris` walks in a PS2 city (with George's controls until
 phase 2); `--shot` images of each of the 10 against the viewer's glTF.
 
-**Phase 1 done** (92fe225 .. adff860): `rampage.exe build\disc\RAMPAGE.VOL Dallas 4 --wii DIR` draws Dallas's blocks
+**Phase 1 done** (92fe225 .. adff860): `RampageRE-dev.exe build\disc\RAMPAGE.VOL Dallas 4 --wii DIR` draws Dallas's blocks
 (the viewer's eighth city, key 8) and `--monster Boris` (any of the ten) plays a Wii monster in any city; the computer
 drives Boris through three Dallas blocks (`--autoplay`). Every reader was checked against the tools on every Wii file
 (textures, meshes, cloth, books, string tables, MONSTER_DATA by George's PS2 and Wii records), and the PS2 game

@@ -1,6 +1,6 @@
-"""The automated playthrough suite: rampage.exe --autoplay over the whole game, the problems it finds.
+"""The automated playthrough suite: RampageRE-dev.exe --autoplay over the whole game, the problems it finds.
 
-Each run is one rampage.exe --autoplay process (offscreen, simulated time; docs/NATIVE.md "Autoplay"): the campaign from
+Each run is one RampageRE-dev.exe --autoplay process (offscreen, simulated time; docs/NATIVE.md "Autoplay"): the campaign from
 the front end to the credits, each city on its own, the other play modes, two and four players, the attract mode's
 demos, with several seeds; and every monster on its own, its HP and its blows checked against its MONSTER_DATA. The
 runs go in parallel; everything is written to the folder given (OUT): per run its log
@@ -8,7 +8,7 @@ runs go in parallel; everything is written to the folder given (OUT): per run it
 (<name>_shots/) and its profile; then report.md and report.json, a table per run and every problem.
 
 Usage:
-  python tools/playthrough.py OUT [--vol RAMPAGE.VOL] [--exe rampage.exe] [--suite full|cities|modes|ci] [--jobs N]
+  python tools/playthrough.py OUT [--vol RAMPAGE.VOL] [--exe RampageRE-dev.exe] [--suite full|cities|modes|ci] [--jobs N]
                                   [--seeds 1,2] [--only NAME,...] [--timeout SECONDS]
   python tools/playthrough.py OUT --suite ci      one city, two blocks: exit 1 on a crash, a hang or a problem
   python tools/playthrough.py OUT --suite monsters   each of the 30 monsters, four of it in Chicago for three blocks
@@ -229,7 +229,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('out', help='the folder everything is written to')
     ap.add_argument('--vol', default=os.environ.get('RAMPAGE_VOL', os.path.join(ROOT, 'build', 'disc', 'RAMPAGE.VOL')))
-    ap.add_argument('--exe', default=os.path.join(ROOT, 'rampage.exe' if os.name == 'nt' else 'rampage'))
+    ap.add_argument('--exe', default=os.path.join(ROOT, 'RampageRE-dev.exe' if os.name == 'nt' else 'rampage'))
     ap.add_argument('--suite', default='full', choices=['full', 'campaign', 'cities', 'modes', 'ci',
                                                                 'monsters'])
     ap.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) // 2))

@@ -1,5 +1,5 @@
 # Builds the native port on every push to main, every pull request and every tag v*: RampageRE.exe (the player build)
-# and rampage.exe (the developer build with a console) with build.bat (Windows, Zig), and the helpers of tools/native
+# and RampageRE-dev.exe (the developer build with a console) with build.bat (Windows, Zig), and the helpers of tools/native
 # (build.bat tools: the standalone launcher, its packer, apkbundle), rampage with build.sh (Linux, SDL2), the APK with
 # android/ (Gradle), rampage.nro with build_switch.sh (Switch homebrew, devkitPro) and rampage.vpk with build_vita.sh
 # (PS Vita homebrew, VitaSDK). No game data is involved: the
@@ -7,7 +7,7 @@
 # out and build.ps1 never runs (the standalone and the APK bundle, which hold the user's own data, are made by the user
 # with make_standalone.bat / make_android_bundle.bat, never here). Each package is listed file by file and checked for
 # disc files before it is uploaded. A pushed tag v* (which must match the version in res/rampagere.rc) also publishes a
-# GitHub release with RampageRE-windows-<tag>.zip (RampageRE.exe, rampage.exe, README.md, LICENSE, docs/NATIVE.md,
+# GitHub release with RampageRE-windows-<tag>.zip (RampageRE.exe, RampageRE-dev.exe, README.md, LICENSE, docs/NATIVE.md,
 # docs/TEXTURES.md), RampageRE-linux-x86_64-<tag>.tar.gz (rampage and the same files), RampageRE-android-<tag>.zip
 # (RampageRE-<tag>.apk, README.md, LICENSE, docs/NATIVE.md) and RampageRE-switch-<tag>.zip (switch/rampagere/ with
 # rampage.nro, README.md, LICENSE: unpacked onto the SD card as it is) and RampageRE-vita-<tag>.zip (rampage.vpk,
@@ -44,7 +44,7 @@ jobs:
       - name: Check the exes
         shell: pwsh
         run: |
-          foreach ($n in 'RampageRE.exe', 'rampage.exe', 'build/bundle_stub.exe', 'build/pack.exe', 'build/apkbundle.exe') {
+          foreach ($n in 'RampageRE.exe', 'RampageRE-dev.exe', 'build/bundle_stub.exe', 'build/pack.exe', 'build/apkbundle.exe') {
             $f = Get-Item $n; "$n`: $($f.Length) bytes, $($f.VersionInfo.ProductName) $($f.VersionInfo.FileVersion)" }
           $v = (Get-Item RampageRE.exe).VersionInfo
           # a release tag must match res/rampagere.rc (the exe's version): v1.2.3 (or v1.2.3-rc1, a pre-release) = "1.2.3"
@@ -57,7 +57,7 @@ jobs:
         shell: bash
         timeout-minutes: 3
         run: |
-          for exe in rampage.exe RampageRE.exe; do
+          for exe in RampageRE-dev.exe RampageRE.exe; do
             rc=0
             timeout 60 ./$exe no-such-dir/RAMPAGE.VOL --shot smoke.png --mute > smoke.out 2> smoke.err || rc=$?
             echo "$exe: exit code $rc"; echo "stdout:"; cat smoke.out; echo "stderr:"; cat smoke.err
@@ -98,7 +98,7 @@ jobs:
           $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { $env:GITHUB_SHA.Substring(0, 7) }
           $name = "RampageRE-windows-$ver"
           # file by file, never a folder or a glob: nothing else can end up in the zip
-          foreach ($f in 'RampageRE.exe', 'rampage.exe', 'README.md', 'LICENSE', 'docs/NATIVE.md', 'docs/TEXTURES.md') {
+          foreach ($f in 'RampageRE.exe', 'RampageRE-dev.exe', 'README.md', 'LICENSE', 'docs/NATIVE.md', 'docs/TEXTURES.md') {
             $dir = "pkg/$name/" + (Split-Path $f)
             New-Item -ItemType Directory -Force $dir | Out-Null
             Copy-Item $f $dir
@@ -117,7 +117,7 @@ jobs:
           $bad = @($names | Where-Object { $_ -match '(?i)\.(vol|elf|iso|bin|cue)$|(^|/)SLES_|(^|/)build/' })
           if ($bad.Count) { "::error::game data in the package: $($bad -join ', ')"; exit 1 }
           $root = [IO.Path]::GetFileNameWithoutExtension($env:PKG)
-          $want = 'RampageRE.exe', 'rampage.exe', 'README.md', 'LICENSE', 'docs/NATIVE.md', 'docs/TEXTURES.md' | ForEach-Object { "$root/$_" }
+          $want = 'RampageRE.exe', 'RampageRE-dev.exe', 'README.md', 'LICENSE', 'docs/NATIVE.md', 'docs/TEXTURES.md' | ForEach-Object { "$root/$_" }
           $extra = @($names | Where-Object { -not $_.EndsWith('/') -and $_ -notin $want })
           $missing = @($want | Where-Object { $_ -notin $names })
           if ($extra.Count -or $missing.Count) { "::error::unexpected: $($extra -join ', ') missing: $($missing -join ', ')"; exit 1 }
@@ -401,7 +401,7 @@ jobs:
         run: |
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           new=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed -e 's/[[:space:]]*$//')
-          start="Windows: unzip and start RampageRE.exe; at the first start it asks for your own disc image (.iso) of the European (SLES-53800) or USA (SLUS-21323) PS2 disc, or its RAMPAGE.VOL, reads it where it is and remembers it (rampage.exe is the same with a console and the command line of docs/NATIVE.md, e.g. rampage.exe D:\\RAMPAGE.VOL Chicago 1). Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/your.iso (or RAMPAGE.VOL; needs SDL2), which opens the front end; on the Steam Deck add rampage to Steam as a non-Steam game with that path as its launch option, so the Deck's controls work as a pad. Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. PS Vita (homebrew, experimental): install the .vpk from the -vita.zip with VitaShell and put your disc image into ux0:data/rampagere/; it needs ur0:data/libshacccg.suprx (ShaRKBR33D). Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
+          start="Windows: unzip and start RampageRE.exe; at the first start it asks for your own disc image (.iso) of the European (SLES-53800) or USA (SLUS-21323) PS2 disc, or its RAMPAGE.VOL, reads it where it is and remembers it (RampageRE-dev.exe is the same with a console and the command line of docs/NATIVE.md, e.g. RampageRE-dev.exe D:\\RAMPAGE.VOL Chicago 1). Linux / Steam Deck: unpack the .tar.gz and start ./rampage /path/to/your.iso (or RAMPAGE.VOL; needs SDL2), which opens the front end; on the Steam Deck add rampage to Steam as a non-Steam game with that path as its launch option, so the Deck's controls work as a pad. Android (7.0 and up, arm64 or x86_64): install the .apk from the -android.zip; at the first start it asks for your disc image (.iso) and copies RAMPAGE.VOL and the ELF out of it once (1.35 GB). Switch (homebrew, experimental): unpack the -switch.zip onto the SD card and put your disc image into /switch/rampagere/. PS Vita (homebrew, experimental): install the .vpk from the -vita.zip with VitaShell and put your disc image into ux0:data/rampagere/; it needs ur0:data/libshacccg.suprx (ShaRKBR33D). Keys, controls and options: docs/NATIVE.md. The game files are not included - see README.md."
           if [ -n "$new" ]; then printf '%s\n\n%s\n' "$new" "$start" > notes.md; else printf '%s\n' "$start" > notes.md; fi
           ls -l dist
           pre=; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease;; esac   # v1.2.3-rc1: a pre-release

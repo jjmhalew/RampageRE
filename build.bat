@@ -2,7 +2,7 @@
 rem build.bat - builds RampageRE, the native port (src\), on Windows 10/11 with Zig; nothing to install first. After WoodyRE's.
 rem   build.bat                     RampageRE.exe, the player build: no console, starts in the front end, asks for your
 rem                                 disc image at the first start, logs to rampage.log
-rem   build.bat dev                 rampage.exe, the developer build: a console that prints what each block holds (the
+rem   build.bat dev                 RampageRE-dev.exe, the developer build: a console that prints what each block holds (the
 rem                                 build the tests and docs\NATIVE.md use; build_viewer.bat builds this one)
 rem   build.bat standalone [DATA] [WII]  RampageRE-standalone.exe: RampageRE.exe + YOUR game data in one exe, for your
 rem                                 own use only (make_standalone.bat); DATA = your disc image or RAMPAGE.VOL, else the
@@ -42,9 +42,9 @@ if /i "%~1"=="tools" (
     exit /b 0
 )
 if /i "%~1"=="dev" (
-    echo Building rampage.exe ^(developer build^)...
-    %ZIG% cc -std=c99 -O2 -Wall %CPU% -o rampage.exe %SRC% res\rampagere.rc %LIBS% || goto :fail
-    echo Done: rampage.exe
+    echo Building RampageRE-dev.exe ^(developer build^)...
+    %ZIG% cc -std=c99 -O2 -Wall %CPU% -o RampageRE-dev.exe %SRC% res\rampagere.rc %LIBS% || goto :fail
+    echo Done: RampageRE-dev.exe
     exit /b 0
 )
 

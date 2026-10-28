@@ -3,9 +3,9 @@ with RAMPAGE_CAPTURE (main.c), which appends every other 1/60 s step's picture (
 mixed sound (48 kHz) to raw files, muxed into an H.264/AAC MP4. Not the game's: footage (a Reddit post, a README).
 Usage: python tools/clip.py NAME START SECONDS [--size WxH] [--keep] -- ARGS...
   START = simulated seconds since the run's start (as the autoplay log's t=), SECONDS = the clip's length.
-  ARGS = rampage.exe's own (the city, block, --monster, --players, --play, --night ...); --autoplay, --shot, --mute
+  ARGS = RampageRE-dev.exe's own (the city, block, --monster, --players, --play, --night ...); --autoplay, --shot, --mute
   off, the profile and the window size are added. Writes build/clips/NAME.mp4 (the raw files in build/clips/NAME/, removed
-  unless --keep). Needs rampage.exe (build.bat dev), build/disc/RAMPAGE.VOL and imageio-ffmpeg (pip install imageio-ffmpeg).
+  unless --keep). Needs RampageRE-dev.exe (build.bat dev), build/disc/RAMPAGE.VOL and imageio-ffmpeg (pip install imageio-ffmpeg).
 Examples:
   python tools/clip.py chicago 30 20 -- Chicago 1 --monster George --ap-seed 1
   python tools/clip.py fourp 25 20 -- Chicago 1 --players 4 --bots 4 --ap-seed 2
@@ -21,7 +21,7 @@ def record(d, start, secs, size, args):
     prof = os.path.join(d, "clip.prof")
     if os.path.exists(prof): os.remove(prof)
     env = dict(os.environ, RAMPAGE_CAPTURE=f"{start} {secs} {d}")
-    cmd = [os.path.join(root, "rampage.exe"), os.path.join(root, "build", "disc", "RAMPAGE.VOL"), *args, "--autoplay",
+    cmd = [os.path.join(root, "RampageRE-dev.exe"), os.path.join(root, "build", "disc", "RAMPAGE.VOL"), *args, "--autoplay",
            "--ap-minutes", str(start / 60 + secs / 60 + 1), "--ap-log", os.path.join(d, "ap.log"), "--profile", prof,
            "--window", size, "--shot", os.path.join(d, "end.png")]
     out = subprocess.run(cmd, cwd=d, env=env, capture_output=True, text=True, errors="replace").stdout
