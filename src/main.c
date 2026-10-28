@@ -8642,9 +8642,10 @@ static int viewer_main(int argc, char **argv)
     if (wii_pick)                                    /* the Wii's data through the file picker, copied into wii */
         android_wii_setup();
 #endif
-#if defined __SWITCH__ || defined __vita__ || defined __ANDROID__
+#if defined __SWITCH__ || defined __vita__ || defined __ANDROID__ || defined __linux__
     if (!gfx.wii_data[0] && plat_exists("wii"))      /* the home folder's wii, found as the game's data there is
-                                                      * (docs/NATIVE.md); wii_data= another path (none) leaves it */
+                                                      * (docs/NATIVE.md; Linux: the current folder's, beside its
+                                                      * rampage.cfg); wii_data= another path (none) leaves it */
         snprintf(gfx.wii_data, sizeof gfx.wii_data, "wii");
 #endif
 #if defined RAMPAGE_GUI && defined _WIN32
