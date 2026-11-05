@@ -9128,12 +9128,14 @@ static int viewer_main(int argc, char **argv)
             w.quit = 1;
         }
         game_next_block(&v);                         /* the game moved on to the next block */
-        if (w.pressed[VK_NEXT] && v.nblocks) { v.block = (v.block + 1) % v.nblocks; build(&v); }
-        if (w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }
-        if (w.pressed['N']) { v.night = !v.night; build(&v); }
-        if (w.pressed['F']) v.fog = !v.fog;
-        if (w.pressed['H']) v.show_hits = !v.show_hits;
-        if (w.pressed['M']) {                        /* player 1's monster: the next one */
+        int vk = !v.shell_mode;                      /* the viewer's keys: none in a game from the front end (1 .. 7,
+                                                      * N, M, G there left the game's city, block or monster, issue #7) */
+        if (vk && w.pressed[VK_NEXT] && v.nblocks) { v.block = (v.block + 1) % v.nblocks; build(&v); }
+        if (vk && w.pressed[VK_PRIOR] && v.nblocks) { v.block = (v.block + v.nblocks - 1) % v.nblocks; build(&v); }
+        if (vk && w.pressed['N']) { v.night = !v.night; build(&v); }
+        if (vk && w.pressed['F']) v.fog = !v.fog;
+        if (vk && w.pressed['H']) v.show_hits = !v.show_hits;
+        if (vk && w.pressed['M']) {                  /* player 1's monster: the next one */
             v.mon[0].monster = v.mon[0].monster + 1 < (int)v.nmonsters ? v.mon[0].monster + 1 : -1;
             for (int k = 1; k < v.nmon; k++)         /* (the others keep theirs; with none, none at all) */
                 if (v.mon[k].monster < 0)
@@ -9141,7 +9143,7 @@ static int viewer_main(int argc, char **argv)
             v.clip = -1;
             build(&v);
         }
-        if (w.pressed['G'] && have_monster(&v)) {
+        if (vk && w.pressed['G'] && have_monster(&v)) {
             v.play = !v.play;
             cam_init(&v.cam, &v.cam_settings);
             dircam_init(&v.cd, &v.cam);
@@ -9150,11 +9152,11 @@ static int viewer_main(int argc, char **argv)
                 if (v.mon[k].have_graph)
                     play_state(&v.mon[k]);
         }
-        if (have_monster(&v) && !v.play && (w.pressed['K'] || w.pressed['L'])) {
+        if (vk && have_monster(&v) && !v.play && (w.pressed['K'] || w.pressed['L'])) {
             v.clip = w.pressed['L'] ? v.clip + 1 : (v.clip > 0 ? v.clip - 1 : 0);
             build(&v);
         }
-        for (int i = 0; i < ncities; i++)
+        for (int i = 0; vk && i < ncities; i++)
             if (w.pressed['1' + i] && i != v.city_index)
                 open_city(&v, i, 0, -1);
         if (w.wheel) speed *= powf(1.25f, (float)w.wheel);
