@@ -112,6 +112,12 @@ disc image or `RAMPAGE.VOL`; needs SDL2, which SteamOS has). It starts in the fr
 `rampage` to Steam as a non-Steam game with the disc image's path as its launch option, so Steam hands its controls over
 as a pad.
 
+**Keyboard** (Windows and Linux; a controller plays too, player 1 on the first): in a game W A S D move, the arrows
+turn the head, Space jumps (Cross), **J punches** (Square), **K kicks** (Triangle), **L grabs** (Circle), R roars (R2),
+P, Enter or Esc pause. In the menus the arrows choose, Enter or Space accept, Backspace or Esc goes back, C / V / R are Square,
+Triangle and R2, F2 the cheat entry. Player 2 plays on the numeric keypad (Num Lock on): 8 4 2 6 move, 0 jumps, 7
+punches, 9 kicks, 1 grabs, 3 roars. F5 .. F9 change the graphics settings, F11 or Alt+Enter fullscreen, F12 a screenshot.
+
 **Nintendo Switch** (homebrew, experimental, not yet tried on a Switch): unpack `RampageRE-switch-<tag>.zip` onto the
 SD card (or build `rampage.nro` with `./build_switch.sh`, devkitPro or its Docker image), put your disc image (or
 `RAMPAGE.VOL` with `RAMPAGE.ELF`) into `/switch/rampagere/` beside it and start it from the Homebrew Menu, preferably
