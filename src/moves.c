@@ -201,6 +201,7 @@ int moves_read(const Bundle *b, MoveGraph *g)
                 g->attach[k].m[j] = rdf(a + 4 * j);
             g->attach[k].name = name_at(b, (int32_t)rd32(a + 0x30));
             g->attach[k].bone = (int)(rd32(a + 0x34) & 0xFFFF);
+            g->attach[k].mirror = (int16_t)(rd32(a + 0x34) >> 16);
         }
     }
     int32_t fxsel = (int32_t)rd32(d + 0x9C8);         /* 0x2F3950: +0xA80[+0x9C8], none when < 0 */

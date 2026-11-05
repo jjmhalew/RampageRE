@@ -32,7 +32,7 @@ Offsets from the start of the entry. The tables follow each other from 0xAA8 in 
 | 0xA58 / 0xA5C | start lists | 29 × 12 at 0xF760 | u32 ?, offset of a state, u32 flags (8: keep a time) |
 | 0xA94 / 0xA98 | slot columns | 6 × 0x128 at 0xF8BC | 74 slots each overriding the defaults (−1 = keep), see "Slots" |
 | 0xA78 / 0xA7C / 0xA80 | effect slot nodes | 2 at 0xFFAC, pointers at 0x1022C | each {u32 count, offset} then 0x34 bytes a node: f32[12] matrix (rows, then the place), i16 bone, i16 the slot of the other side. +0x9C8 picks the set (0x2F3950; −1 none): 1 in all 30, its 11 nodes (Cal, Eyegore, Jill, Natalie, Venus 12); set 0 is one node. The clip events of type 12 put their effects on them ("Effect slots") |
-| 0xA84 / 0xA88 | attachment nodes | 15 × 0x38 at 0x10234 | f32[12] matrix, name (`fxNode_Belch`, `Helper L Hand`, `Tracking_Node`, ...), bone \| index << 16 |
+| 0xA84 / 0xA88 | attachment nodes | 15 × 0x38 at 0x10234 | f32[12] matrix, name (`fxNode_Belch`, `Helper L Hand`, `Tracking_Node`, ...), bone \| index << 16: the index is the other side's node (`Helper R Hand` ↔ `Helper L Hand`, the rest their own), which the node getter 0x2E4FF0 takes instead while the monster plays mirrored (0x2E51D4), on the mirrored pose; so a held object stays in the hand that grabbed it (main.c `attach_world`) |
 | 0xA8C / 0xA90 | effect names | 12 at 0x1057C | `Monster_Belch.edf`, `Debris_mega_punch.edf`, ... |
 | 0xA54 | the move graph | header 0x34 bytes at 0x105AC | +0x2C state count, +0x30 offset of the first state |
 | | states | 176 from 0x105E0 | see below |

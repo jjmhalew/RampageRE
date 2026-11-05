@@ -5431,8 +5431,10 @@ static int ends_with_i(const char *s, const char *tail)
     return a >= b && _stricmp(s + a - b, tail) == 0;
 }
 
-/* an attachment node of MONSTER_DATA (+0xA84) in the world as drawn: its bone's place x its matrix (rows, then the
- * place); mirrored, the other side's node on the other side's bone, reflected; 0 = ok */
+/* an attachment node of MONSTER_DATA (+0xA84) in the world as drawn (0x2E4FF0 for a node past the bones): its
+ * bone's place x its matrix (rows, then the place); mirrored, the node of the other side (+0x36, 0x2E51D4) on its
+ * bone as the game's mirrored pose has it (the other side's node reflected, scene_monster_node), so a mirrored clip's
+ * grab holds in the hand that grabs, as 0x2DACA0 does for the effects' nodes (mon_fx_frame); 0 = ok */
 static int attach_world(Mon *mo, const char *name, Mat4 *out)
 {
     if (!mo->have_graph || !mon_in(mo))
@@ -5442,27 +5444,19 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
     for (int i = 0; i < mo->graph.nattach && !a; i++)
         if (mo->graph.attach[i].name && ends_with_i(mo->graph.attach[i].name, name))
             a = &mo->graph.attach[i];
-    if (!a || a->bone < 0 || (uint32_t)a->bone >= in->tree.n)
+    if (a && mo->mirror && a->mirror >= 0 && a->mirror < mo->graph.nattach)
+        a = &mo->graph.attach[a->mirror];
+    Mat4 w;
+    if (!a || a->bone < 0 || (uint32_t)a->bone >= in->tree.n ||
+        scene_monster_node(&mo->v->scene, mo->slot, in->tree.nodes[a->bone].name, &w) != 0)
         return -1;
-    if (mo->mirror) {                                 /* the partner bone's own attachment */
-        int mb = in->tree.nodes[a->bone].mirror;
-        for (int i = 0; i < mo->graph.nattach; i++)
-            if (mo->graph.attach[i].bone == mb && mb != a->bone)
-                a = &mo->graph.attach[i];
-    }
     Mat4 t = mat_identity();
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < 3; j++)
             t.m[4 * i + j] = a->m[3 * i + j];
     for (int j = 0; j < 3; j++)
         t.m[12 + j] = a->m[9 + j];
-    Mat4 m = mat_mul(in->node[a->bone], t);
-    if (mo->mirror)
-        for (int c = 0; c < 4; c++) {                /* S m S */
-            m.m[4 * c] = -m.m[4 * c];
-            m.m[c] = -m.m[c];
-        }
-    *out = mat_mul(in->base, m);
+    *out = mat_mul(w, t);
     return 0;
 }
 

@@ -96,9 +96,10 @@ typedef struct {
      * (+0x28, as a state's: the face's event player runs them, 0x2F4500 on monster +0x7DE8) */
     struct MoveNode { const char *name, *clip; float rate, blend; const MoveEvent *events; int nevents; } *nodes;
     int nnodes;
-    /* the attachment nodes (+0xA84 / +0xA88, 0x38 bytes): a matrix (rows, then the place) on a bone: Helper R Hand
-     * (what the monster holds things by), fxNode_*, Tracking_Node ... */
-    struct MoveAttach { const char *name; int bone; float m[12]; } *attach; int nattach;
+    /* the attachment nodes (+0xA84 / +0xA88, 0x38 bytes): a matrix (rows, then the place) on a bone (+0x34): Helper R
+     * Hand (what the monster holds things by), fxNode_*, Tracking_Node ...; and the node of the other side (+0x36),
+     * taken instead while the monster plays mirrored (0x2E51D4: George's Helper R Hand 12 <-> Helper L Hand 11) */
+    struct MoveAttach { const char *name; int bone, mirror; float m[12]; } *attach; int nattach;
     /* the effect slots' nodes (0x2DACA0: the record +0xA80[+0x9C8] (0x2F3950; item 1 of 2 in all 30), {u32 count,
      * offset}, 0x34 bytes each): a matrix (rows, then the place) on a bone (+0x30), and the slot of the other side
      * (+0x32), taken instead while the monster plays mirrored (George's 11: 0 the mouth, 3 / 4 the hands, ...) */
