@@ -347,7 +347,9 @@ playing a `George_Head_*` clip at the rate 1 / its duration with a blend of 0.2.
 the animation player (0x2FFF10) on its own 0 .. 1 clock and replaces the body clip, rotation and place, on the bones
 of a mask built at spawn (0x2EA458): the subtree under `Bip01 Head` (George: 8 .. 27, the eyes, lips, cheeks, brows
 and jaw), the head itself only with the head layer; for `Eyegore`, `Cal`, `Venus`, `Natilie` and `Jill`'s skeletons
-the subtree three nodes above the head, and their brows and eyes by name. At spawn `Monsters::PostInit` starts
+the subtree two nodes above the head (the head's parent's parent, 0x2EA484 .. 0x2EA4A4: Cal's `Bip01 Spine`; three
+would be the pelvis, whose subtree holds every tentacle, which the face clips key still), and their brows and eyes by
+name. At spawn `Monsters::PostInit` starts
 `DefaultFacialAnim` (`Expression_Idle`, looping, no head layer); a face clip that ends plays again while it loops or
 has plays left (0x2E95D0), else the next queued one (`queueFacialAnim`), else the default again. So the face bones
 never show the body clips' own: the shared `SKELETON_1_*` clips turn George's eyes 112 … 176° from his bind pose,

@@ -4212,7 +4212,7 @@ int scene_monster_face(Scene *s, int k, const char *clip, int head)
     in->face = c;
     in->has_face = 1;
     in->face_t = 0;
-    /* the mask (0x2EA458): the subtree of Bip01 Head; for five skeletons the subtree three nodes above it and their
+    /* the mask (0x2EA458): the subtree of Bip01 Head; for five skeletons the subtree two nodes above it and their
      * brows and eyes by name; setFacialAnim's head layer adds or takes out the head itself */
     if (!in->face_mask)
         in->face_mask = calloc(in->tree.n ? in->tree.n : 1, 1);
@@ -4233,7 +4233,7 @@ int scene_monster_face(Scene *s, int k, const char *clip, int head)
                 wide |= ends_with(bdp_name(mb, mb->entries[i].name), WIDE[k]);
     if (wide) {
         int top = hd;
-        for (int k = 0; k < 3 && in->tree.nodes[top].parent >= 0; k++)
+        for (int k = 0; k < 2 && in->tree.nodes[top].parent >= 0; k++)   /* (0x2EA484 .. 0x2EA4A4: two parents) */
             top = in->tree.nodes[top].parent;
         mark_subtree(&in->tree, top, in->face_mask);
         static const char *const NAMED[] = { "Bip01 L Brow", "Bip01 R Brow", "Bip01 L Eye", "Bip01 R Eye" };
