@@ -1561,6 +1561,7 @@ static int open_city(Viewer *v, int index, uint32_t block, int game_block)
 /* the viewer's answers to the graph's script checks (Monsters.bsf: there are no buildings, people or power-ups to
  * test against here, so only the monster's own abilities say yes) */
 static int attach_world(Mon *mo, const char *name, Mat4 *out);
+static int lift_world(Mon *mo, Mat4 *out);
 static int window_person(Mon *mo, const float *xyz);
 static int window_soldier(Mon *mo, const float *xyz);
 
@@ -2206,9 +2207,16 @@ static void grab_nearest(Mon *mo)
     Viewer *v = mo->v;
     Mat4 h;
     /* the hold (0x2DA4A0 -> 0x2DA310) takes nothing while the hand holds a valid object, of whatever kind [R] */
-    if (held_anything(mo) || !v->scene.folk || attach_world(mo, "Helper R Hand", &h) != 0)
+    if (held_anything(mo) || !v->scene.folk)
         return;
-    float hand[3] = { h.m[12], h.m[13], h.m[14] }, root[3] = { mo->mx, mo->my, mo->mz };
+    /* the hand: the script's node by name (0x2AB8E8: vtable +0x48, 0x2E54A0: a bone of the skeleton, else an
+     * attachment node); a monster without one (Nick and Dick have no Helper R Hand) gets -1, and the search is
+     * from its body centre, the feet + MONSTER_DATA +0x1A0 / +0x1A4 (0x2D9A44 -> 0x2DA820, + its place) [R] */
+    float hand[3], root[3] = { mo->mx, mo->my, mo->mz };
+    if (attach_world(mo, "Helper R Hand", &h) == 0) {
+        hand[0] = h.m[12]; hand[1] = h.m[13]; hand[2] = h.m[14];
+    } else
+        mon_body_centre(mo, hand);
     Mat4 n0;                                     /* in front of node 0 (Bip01) as posed, by the node getter that
                                                   * gives the hand (vtable +0x4C(0): 0x2D9AF8 .. 0x2D9B30) [R] */
     const Instance *rin = mon_in(mo);
@@ -4576,7 +4584,7 @@ static void vehicle_step(Viewer *v, float dt, const ArmyMonster *m, int nm, cons
     for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand (before what follows it) */
         Mon *mo = &v->mon[k];
         Mat4 h;
-        if (mo->held_vehicle >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+        if (mo->held_vehicle >= 0 && lift_world(mo, &h) == 0)
             vehicle_hold(v->veh, mo->held_vehicle, h.m, mo->mirror, dt);
     }
     for (int k = 0; k < v->nvfx; k++) {              /* the effects that follow their vehicle, while it is there */
@@ -4708,7 +4716,7 @@ static void rail_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
     for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand (before what follows it) */
         Mon *mo = &v->mon[k];
         Mat4 h;
-        if (mo->held_rail >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+        if (mo->held_rail >= 0 && lift_world(mo, &h) == 0)
             rail_hold(v->rail, mo->held_rail, h.m, mo->mirror, dt);
     }
     for (int k = 0; k < v->nrfx; k++) {              /* the effects that follow their object, while it is there */
@@ -4847,7 +4855,7 @@ static void parade_step(Viewer *v, float dt, const ArmyMonster *m, int nm)
     for (int k = 0; k < v->nmon; k++) {              /* one in a monster's hand (before what follows it) */
         Mon *mo = &v->mon[k];
         Mat4 h;
-        if (mo->held_parade >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+        if (mo->held_parade >= 0 && lift_world(mo, &h) == 0)
             parade_hold(v->parade, mo->held_parade, h.m, mo->mirror, dt);
     }
     for (int k = 0; k < v->npfx; k++) {              /* the effects that follow their object, while it is there */
@@ -5005,7 +5013,7 @@ static void street_step(Viewer *v, float dt)
                                                       * what follows it) */
         Mon *mo = &v->mon[k];
         Mat4 h;
-        if (mo->held_sobj >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+        if (mo->held_sobj >= 0 && lift_world(mo, &h) == 0)
             streetobj_hold(v->sobj, mo->held_sobj, h.m, mo->mirror, dt);
     }
     for (int i = 0, n = streetobj_count(v->sobj); i < n; i++) {   /* drawn where they are now */
@@ -5323,7 +5331,7 @@ static void army_step(Viewer *v, float dt)
     for (int k = 0; k < v->nmon; k++) {              /* a unit in a monster's hand (before what follows it) */
         Mon *mo = &v->mon[k];
         Mat4 h;
-        if (mo->held_unit >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+        if (mo->held_unit >= 0 && lift_world(mo, &h) == 0)
             army_hold(v->army, mo->held_unit, h.m, mo->mirror, dt);
     }
     for (int k = 0; k < v->nfxa; k++) {              /* the effects that follow their unit or shot */
@@ -5458,6 +5466,18 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
         t.m[12 + j] = a->m[9 + j];
     *out = mat_mul(w, t);
     return 0;
+}
+
+/* where a held object hangs (0x2DAD50, the HeldObjectMover's 0x310ED0 / 0x3109E0): the node at monster +0x100, which
+ * the setup (0x2E98C0 .. 0x2EAB10) resolves from its book's MiscData|LiftNodeName, else -1; and -1 is the skeleton's
+ * Lift_Node (animation player +0x72CC, monster +0x7DB4) as posed, keyed by every monster's grab, hold and throw
+ * clips [R]. [G] The port keeps Helper R Hand where the graph has one (Nick and Dick have none: theirs is Lift_Node,
+ * as the game's) */
+static int lift_world(Mon *mo, Mat4 *out)
+{
+    if (attach_world(mo, "Helper R Hand", out) == 0)
+        return 0;
+    return scene_monster_node(&mo->v->scene, mo->slot, "Lift_Node", out);
 }
 
 /* a node of the monster by name in the world as drawn: an attachment node of MONSTER_DATA's (fxNode_Fart,
@@ -6377,7 +6397,7 @@ static void play_step(Viewer *v, float dt, float aspect)
             Mat4 h;
             if (mo->held >= 0 && people_get(v->scene.folk, mo->held)->phase != PP_HELD)
                 mo->held = -1;
-            if (mo->held >= 0 && attach_world(mo, "Helper R Hand", &h) == 0)
+            if (mo->held >= 0 && lift_world(mo, &h) == 0)
                 people_hold(v->scene.folk, mo->held, h.m, mo->mirror, dt);
         }
         PeopleEvent ev[32];
