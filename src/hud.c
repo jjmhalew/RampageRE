@@ -2060,14 +2060,15 @@ static Rage *rage_load(Hud *h)
 }
 
 /* PointsBanner.createAndStartText / ...Text2 (0x2B1640 / 0x2B14E0) [R]: the screen loads one more Rage interface
- * (appended to its list, 0x233500), then gGuiMgr's function lookup (0x231220) calls Rage::setPointsBannerData in the
- * first interface on the screen whose program has it: the oldest Rage still up. So while another banner shows, the
- * data go to that one (its text, set up on its first frame, stays; its hold and name change) and the new one keeps
- * the RAMPAGE defaults */
+ * (appended to its list, 0x233500), then gGuiMgr's function lookup (0x231220) calls Rage::setPointsBannerData. The
+ * lookup asks gGuiMgr +0x23C's program first, and the load left the new Rage's there: its <sc> tag (0x22C010) sets
+ * the script (0x238A90) and puts the interface's program in +0x23C (0x22C0C4), not put back. So the data go to the
+ * banner just loaded, also while others show (the screen's list, oldest first, only for a program without the
+ * function; up to v1.2.3 the port took that list's first, and an upgrade taken while a challenge's banner was up
+ * showed RAMPAGE, issue #6) */
 static Rage *rage_load_data(Hud *h)
 {
-    Rage *r = rage_load(h);
-    return r ? h->rages[0] : NULL;
+    return rage_load(h);
 }
 
 /* Rage::setPointsBannerData / setPointsBannerData2, and this.setName("Removeable"): gWorld.hideChallengeCompletionUI
