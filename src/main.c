@@ -186,6 +186,7 @@ typedef struct Mon {
     float fart_in[4];                                /* installObjectTimer("Monsters::timedDoFart", 2): due in, 0 none */
     float thrown_t;                                  /* +0xA94: 1 s from a throw (0x2DA28C), the camera's */
     char rage_fx_name[32]; int rage_fx, rage_on;     /* its book's MonsterFx RageFx (+0x164) and the one on (+0x168) */
+    char lift_node[32];                              /* its book's MiscData|LiftNodeName (+0x100), "" none: Lift_Node */
     int nick, nick_fx[3];                            /* Nick's fire and eyes (+0x174 .. +0x17C): 0 not Nick, 1 to
                                                       * start, 2 on, 3 shut down (becomeHuman, till the respawn) */
     float face_ev;                                   /* the face's event player's time (+0x7DE8 +0x8), a share */
@@ -620,6 +621,8 @@ static void start_moves(Mon *mo)
         const char *rage = g.at ? group_str(g, "RageFx") : NULL;   /* (0x2F5D80) */
         snprintf(mo->rage_fx_name, sizeof mo->rage_fx_name, "%s", rage ? rage : "");
         g = mon_props(mo, "MiscData");
+        const char *lift = g.at ? group_str(g, "LiftNodeName") : NULL;   /* (0x2E98C0 .. 0x2EAB10) */
+        snprintf(mo->lift_node, sizeof mo->lift_node, "%s", lift ? lift : "");
         foot_init(&mo->feet, g.at && group_num(g, "DisableFootDrag", 0) != 0);
         if (mon_in(mo))                   /* Use3LinkFootIK, RTWSmoothFactor, the ankle (0x2E5640) */
             foot_ik_props(&mo->feet, g, &mon_in(mo)->tree);
@@ -1562,6 +1565,7 @@ static int open_city(Viewer *v, int index, uint32_t block, int game_block)
  * test against here, so only the monster's own abilities say yes) */
 static int attach_world(Mon *mo, const char *name, Mat4 *out);
 static int lift_world(Mon *mo, Mat4 *out);
+static int mon_node_world(Mon *mo, const char *name, Mat4 *out);
 static int window_person(Mon *mo, const float *xyz);
 static int window_soldier(Mon *mo, const float *xyz);
 
@@ -5468,16 +5472,26 @@ static int attach_world(Mon *mo, const char *name, Mat4 *out)
     return 0;
 }
 
-/* where a held object hangs (0x2DAD50, the HeldObjectMover's 0x310ED0 / 0x3109E0): the node at monster +0x100, which
- * the setup (0x2E98C0 .. 0x2EAB10) resolves from its book's MiscData|LiftNodeName, else -1; and -1 is the skeleton's
- * Lift_Node (animation player +0x72CC, monster +0x7DB4) as posed, keyed by every monster's grab, hold and throw
- * clips [R]. [G] The port keeps Helper R Hand where the graph has one (Nick and Dick have none: theirs is Lift_Node,
- * as the game's) */
+/* where a held object hangs (0x2DAD50, for the HeldObjectMover's grab 0x310ED0 and each frame 0x3109E0) [R]: the
+ * node at monster +0x100, which the setup sets to -1 (0x2E9914) and resolves only from its book's
+ * MiscData|LiftNodeName (0x2EAAB8 .. 0x2EAB10, by name through vtable +0x48; the node getter vtable +0x4C): only Cal's
+ * and Jill's books have one ("Helper R Hand"); for the rest (-1) the skeleton's own Lift_Node bone (+0x7DB4), which
+ * the grab, hold, throw and eat clips key apart from the hand: George's hold hangs a person from the fist and stands
+ * a car up in it, the Lizzie skeleton's eats toss the person off the hand and into the mouth. Its place x the scale
+ * (+0xA78 while +0xA74), its axes the bone's, 1 long (the port's base matrix is scaled). [G] A skeleton without a
+ * Lift_Node falls back to Helper R Hand; 0 = ok */
 static int lift_world(Mon *mo, Mat4 *out)
 {
-    if (attach_world(mo, "Helper R Hand", out) == 0)
-        return 0;
-    return scene_monster_node(&mo->v->scene, mo->slot, "Lift_Node", out);
+    int r = mo->lift_node[0] ? mon_node_world(mo, mo->lift_node, out) :
+                               scene_monster_node(&mo->v->scene, mo->slot, "Lift_Node", out);
+    if (r != 0 && (r = attach_world(mo, "Helper R Hand", out)) != 0)
+        return r;
+    for (int a = 0; a < 3; a++) {
+        float *c = &out->m[4 * a], l = sqrtf(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+        for (int k = 0; l > 1e-6f && k < 3; k++)
+            c[k] /= l;
+    }
+    return 0;
 }
 
 /* a node of the monster by name in the world as drawn: an attachment node of MONSTER_DATA's (fxNode_Fart,
