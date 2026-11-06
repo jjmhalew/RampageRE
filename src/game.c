@@ -159,10 +159,10 @@ static float clock_left(const Game *g)               /* 0x347DC0 [R] */
     return left < 0 ? 0 : left;
 }
 
-/* 0x347D70: the clock is out when it is armed or running and the world's clock is the bonus time (+0x3C) or more past
- * the start (+0x34), stopped or not; not the time left: an unarmed block's clock is out at its 0:00, a boss block's
- * (TimeLimit 600, bonus time 480) with 2:00 still shown [R] */
-int game_time_up(const Game *g) { return g && (g->enabled || g->running) && !((float)g->now - g->start < g->max_time); }
+/* 0x347D70: the clock is out when it is not armed (+0x44: a TimeLimit, the boss blocks' 600, a Timed Run; armed it
+ * returns 0 at once, 0x347D74 -> 0x347D88), it runs (+0x45) and the world's clock is the bonus time (+0x3C) or more
+ * past the start (+0x34); not the time left: a campaign block without a TimeLimit is out at its 0:00 [R] */
+int game_time_up(const Game *g) { return g && !g->enabled && g->running && !((float)g->now - g->start < g->max_time); }
 
 static void clock_start(Game *g)                     /* 0x347EA0 [R] */
 {
