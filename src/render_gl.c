@@ -1019,7 +1019,11 @@ static void draw_part(Renderer *r, const SceneMesh *sm, const Skin *skin, uint32
     if (blend || see_through) {                          /* over what is behind, by its alpha */
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glAlphaFunc(GL_GREATER, blend == 2 || see_through ? 0.0f : 0.01f);
+        /* a monster skin in state 2 cuts its see-through texels at half [G: the skinned path's own TEST (0x1AB270 ->
+         * 0x259E50 -> 0x261FA0) not traced; kept at alpha > 0, the fur fringes of Rojo, Gilman, Boosy and Leon
+         * (palette alpha 4/128 inside, 17 .. 115 at the edge) wrote their depth midway through the mesh and hid the
+         * legs drawn after them: the street showed through Rojo's loincloth and hocks, issue #6] */
+        glAlphaFunc(GL_GREATER, blend == 2 && skin ? 0.5f : blend == 2 || see_through ? 0.0f : 0.01f);
         if (blend != 2 && !see_through)                  /* a facade sheet and the glass keep writing their depth [R
                                                           * GS states 2 and 7: ALPHA 0x44, TEST 0x5000D (alpha > 0),
                                                           * Z written] */
