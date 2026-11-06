@@ -1523,8 +1523,10 @@ static void line_mover(StreetObj *o, const float to[3], float speed)
     o->lm_resp2 = r >= 0 ? r * r : -1;
 }
 /* the LineMover's step (0x315E10), straight at its speed [R: the place stays on the segment]; onMoverCallback: 2 at
- * its end; while it simply moves, 4 with any monster nearer than MonsterResponseDist (3D, 0x316D60 .. 0x316E04);
- * 0 none */
+ * its end, and every frame after it [R: t is clamped to 1 at 0x315F70 and passes 1 again the next frame, 0x315F80
+ * answers 2 each time] until the script gives it another mover (the forklift's state 4 without DoMove4_5 waits for
+ * the next one; the kite's script deletes it at the first, so it is answered once); while it simply moves, 4 with
+ * any monster nearer than MonsterResponseDist (3D, 0x316D60 .. 0x316E04); 0 none */
 static int line_step(StreetObjs *s, StreetObj *o)
 {
     float d[3], l = 0, p[3];
@@ -1536,7 +1538,8 @@ static int line_step(StreetObjs *s, StreetObj *o)
     float step = o->lm_speed * TIMESTEP;
     if (l <= step) {
         set_point(o, o->lm_to);
-        o->lm_on = 0;
+        if (o->kind != SK_FORK)
+            o->lm_on = 0;
         return 2;
     }
     for (int k = 0; k < 3; k++)
@@ -1869,7 +1872,8 @@ static void kite_fly(StreetObj *o)
 /* ForkLift.bsf [R] (ForkLift1 in NY02, ForkLiftHK1 in HK01): a forklift driving its round of the yard on LineMovers,
  * turning between them at pi a second (startRotation: from curRotZ, which the first turn has not set: it snaps):
  * from (Loc1X, Loc1Y) (23.7, 4) facing back to y -3 at 6, along x to Loc3X (-33) at 8, to y Loc4Y (4) at 6, with
- * DoMove4_5 (1) out to x -24.5 and back at 5 (without, it stops there), to y -3 at 6, along x to Loc1X at 8, to y
+ * DoMove4_5 (1) out to x -24.5 and back at 5 (without, as ForkLiftHK1's 0: the finished line's next answer 2 goes
+ * on), to y -3 at 6, along x to Loc1X at 8, to y
  * Loc1Y and back to y -3 at 6, and round again. Pickupable; held (onPickup) it stops for good, DamageShape; a monster's
  * blows take its HitPoints (1): HitEffect1 on it, and at the last (not held) DamageShape, HitEffect2 on it (with none:
  * the score, 2) and it flies off 25 a second away from the monster; thrown, landing or hit by a thrown object, or
@@ -1919,7 +1923,7 @@ static void fork_next(StreetObj *o)
         o->state = 4;
     } else if (o->state == 4) {
         if (!onum(o, "DoMove4_5", 1)) {
-            o->state = 6;                            /* (no leg: it stops here) */
+            o->state = 6;                            /* no leg: the line's next answer 2 (next frame) turns it [R] */
             return;
         }
         if (!turned) { fork_turn(o, -PI / 2); o->flags |= 1; return; }
