@@ -778,7 +778,8 @@ static void track_drop(Track *t)
 }
 
 /* [R] 0x273CF0: the objects in order of their distance (in x, y) from the listener; the nearest 16 are seen to:
- * started when in range, killed when out of it (and dropped unless kept), dropped when their sound has ended */
+ * started when in range, killed when out of it (and dropped unless kept), dropped when their sound has ended; the
+ * others are as out of range */
 static void objects_tick(float dt)
 {
     int order[MAX_TRACKS], n = 0;
@@ -799,6 +800,20 @@ static void objects_tick(float dt)
             j--;
         }
         order[j] = i;
+    }
+    for (int k = NEAREST; k < n; k++) {   /* [R 0x274048 .. 0x2741C0] past the nearest 16: as out of range, its sound
+                                          * killed (started again from its beginning once among the 16: the Singer's
+                                          * song, whose 0D raises its volume on every pass, is heard again), dropped
+                                          * unless kept; a drop ends the walk (0x274188 clears the dropped one's next) */
+        Track *t = &S.track[order[k]];
+        if (t->inst >= 0) {
+            inst_kill(t->inst);
+            t->inst = -1;
+        }
+        if (!t->keep) {
+            track_drop(t);
+            break;
+        }
     }
     for (int k = 0; k < n && k < NEAREST; k++) {
         Track *t = &S.track[order[k]];
