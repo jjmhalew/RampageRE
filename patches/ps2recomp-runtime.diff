@@ -2109,13 +2109,14 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..178b8a8 100644
+index 8590f14..1d1074a 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
-@@ -1,6 +1,11 @@
+@@ -1,6 +1,12 @@
  #include "runtime/ps2_pad.h"
  #include "ps2_host_backend.h"
 +#include <cmath>
++#include <cstdio>
 +#include <cstdlib>
  #include <cstring>
 +#include <string>
@@ -2124,7 +2125,160 @@ index 8590f14..178b8a8 100644
  
  namespace
  {
-@@ -119,6 +124,81 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -23,9 +29,138 @@ namespace
+     constexpr uint16_t PAD_L1 = 0x0400u;
+     constexpr uint16_t PAD_R2 = 0x0200u;
+     constexpr uint16_t PAD_L2 = 0x0100u;
++
++    // RAMPAGE-DEBUG: side-by-side traces of the game's move runner against the native port (tools/movelog.py).
++    struct RampagePlayPress
++    {
++        uint32_t at, frames;
++        uint16_t mask;
++    };
++
++    std::vector<RampagePlayPress> rampage_play_parse(const char *env)
++    {
++        static const std::pair<const char *, uint16_t> names[] = {
++            {"up", PAD_UP}, {"down", PAD_DOWN}, {"left", PAD_LEFT}, {"right", PAD_RIGHT},
++            {"cross", PAD_CROSS}, {"circle", PAD_CIRCLE}, {"square", PAD_SQUARE}, {"triangle", PAD_TRIANGLE},
++            {"start", PAD_START}, {"select", PAD_SELECT}, {"l1", PAD_L1}, {"r1", PAD_R1}, {"l2", PAD_L2}, {"r2", PAD_R2}};
++        std::vector<RampagePlayPress> out;
++        std::string spec(env ? env : "");
++        size_t pos = 0;
++        while (pos < spec.size())
++        {
++            size_t end = spec.find(';', pos);
++            if (end == std::string::npos)
++                end = spec.size();
++            const std::string item = spec.substr(pos, end - pos);
++            pos = end + 1;
++            const size_t colon = item.find(':');
++            if (colon == std::string::npos)
++                continue;
++            RampagePlayPress press{static_cast<uint32_t>(std::strtoul(item.c_str(), nullptr, 10)), 1, 0};
++            std::string buttons = item.substr(colon + 1);
++            const size_t slash = buttons.find('/');
++            if (slash != std::string::npos)
++            {
++                press.frames = static_cast<uint32_t>(std::strtoul(buttons.c_str() + slash + 1, nullptr, 10));
++                buttons.resize(slash);
++            }
++            size_t b = 0;
++            while (b < buttons.size())
++            {
++                size_t plus = buttons.find('+', b);
++                if (plus == std::string::npos)
++                    plus = buttons.size();
++                const std::string name = buttons.substr(b, plus - b);
++                for (const auto &[n, mask] : names)
++                    if (name == n)
++                        press.mask |= mask;
++                b = plus + 1;
++            }
++            out.push_back(press);
++        }
++        return out;
++    }
++
++    uint32_t rd32(const uint8_t *rdram, uint32_t addr)
++    {
++        uint32_t v;
++        std::memcpy(&v, rdram + (addr & 0x1FFFFFFu), 4);
++        return v;
++    }
++
++    float rdf(const uint8_t *rdram, uint32_t addr)
++    {
++        const uint32_t u = rd32(rdram, addr);
++        float f;
++        std::memcpy(&f, &u, 4);
++        return f;
++    }
++}
++
++// RAMPAGE-DEBUG: player 1's move-runner frames since the game began (0 before the first), PS2X_PLAY's clock.
++uint32_t g_rampageFrame = 0;
++
++// RAMPAGE-DEBUG: called on entry to the move runner 0x2EBFE0 (runner in $a0) by the line tools/movelog.py puts in
++// its generated function. For player 1's monster (+0x18 the monster, its +0xFC the player) it counts the frame and,
++// with PS2X_MOVELOG=file, writes what the runner starts the frame with: the state (index +0x0 of the state +0x0),
++// the time (+0x10), the transition picked (+0x1E), the switch wait (+0x1D), the world's dt (gp -0x6CFC, +4) and the
++// monster's speed (+0xA8C), the pad variables it reads (0x4D3330 + player x 0x3C4 + 0x18, 16 bytes each, the value
++// at +0x14: the booleans 4 .. 21 as a mask, the left stick 0 / 1), HP (+0xA4C), energy (+0xA50), the movement mode
++// (+0xAD8), mirrored (+0x7DA1), its place (+0x2C .. +0x34), the x, y of its matrix's first two rows (+0x8, +0xC,
++// +0x14, +0x18), its velocity (+0xBD30), the players and bots (Common 0x4D7E28 / 0x4D7E2C), its AI flag (+0x108) and
++// the x, y of the camera's right and forward axes it reads the stick in (+0xA18, +0xA24). PS2X_PLAY_END=n ends the
++// run after frame n.
++void rampage_movelog(const uint8_t *rdram, uint32_t runner, uint32_t gp)
++{
++    const uint32_t monster = rd32(rdram, runner + 0x18);
++    if (!monster || rd32(rdram, monster + 0xFC) != 0)
++        return;
++    const uint32_t frame = ++g_rampageFrame;
++    static FILE *log = []() -> FILE * {
++        const char *path = std::getenv("PS2X_MOVELOG");
++        return path ? std::fopen(path, "w") : nullptr;
++    }();
++    static const uint32_t end = []() -> uint32_t {
++        const char *e = std::getenv("PS2X_PLAY_END");
++        return e ? static_cast<uint32_t>(std::strtoul(e, nullptr, 10)) : 0u;
++    }();
++    if (log)
++    {
++        const uint32_t state = rd32(rdram, runner);
++        const uint32_t table = 0x4D3330u + 0x18u;
++        uint32_t buttons = 0;
++        for (uint32_t k = 4; k <= 21; k++)
++            if (rd32(rdram, table + 16u * k + 0x14u) & 0xFFu)
++                buttons |= 1u << k;
++        const uint32_t world = rd32(rdram, gp - 0x6CFCu);
++        std::fprintf(log,
++                     "F %u dt %.6f sp %.4f st %d t %.6f pick %d wait %u btn %x lx %.3f ly %.3f hp %.3f en %.3f mode %u "
++                     "mir %u pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %u nb %u ai %u "
++                     "frm %.3f %.3f %.3f %.3f\n",
++                     frame, world ? rdf(rdram, world + 4) : 0.0f, rdf(rdram, monster + 0xA8C),
++                     state ? static_cast<int>(rd32(rdram, state)) : -1, rdf(rdram, runner + 0x10),
++                     static_cast<int16_t>(rd32(rdram, runner + 0x1C) >> 16), (rd32(rdram, runner + 0x1C) >> 8) & 0xFFu,
++                     buttons, rdf(rdram, table + 0x14u), rdf(rdram, table + 16u + 0x14u), rdf(rdram, monster + 0xA4C),
++                     rdf(rdram, monster + 0xA50), rd32(rdram, monster + 0xAD8), rd32(rdram, monster + 0x7DA0) >> 8 & 0xFFu,
++                     rdf(rdram, monster + 0x2C), rdf(rdram, monster + 0x30), rdf(rdram, monster + 0x34),
++                     rdf(rdram, monster + 0x8), rdf(rdram, monster + 0xC), rdf(rdram, monster + 0x14),
++                     rdf(rdram, monster + 0x18), rdf(rdram, monster + 0xBD30), rdf(rdram, monster + 0xBD34),
++                     rdf(rdram, monster + 0xBD38), rd32(rdram, 0x4D7E28u), rd32(rdram, 0x4D7E2Cu),
++                     rd32(rdram, monster + 0x108) & 0xFFu, rdf(rdram, monster + 0xA18), rdf(rdram, monster + 0xA1C),
++                     rdf(rdram, monster + 0xA24), rdf(rdram, monster + 0xA28));
++        std::fflush(log);
++    }
++    if (end && frame >= end)
++    {
++        if (log)
++            std::fclose(log);
++        std::exit(0);
++    }
+ }
+ 
+-bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
++extern uint32_t g_rampageFrame;   // RAMPAGE-DEBUG: below
++
++bool PSPadBackend::readState(int port, int /*slot*/, uint8_t *data, size_t size)
+ {
+     if (!data || size < 32)
+         return false;
+@@ -37,6 +172,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+     data[3] = 0xFF;
+     data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
+ 
++    // RAMPAGE-DEBUG: PS2X_ONE_PAD=1 gives the input to the first pad only, so a scripted game has one player (every
++    // pad reads the same keys otherwise, and the second joins on the same Start)
++    static const bool s_onePad = std::getenv("PS2X_ONE_PAD") != nullptr;
++    if (s_onePad && port != 0)
++        return true;
++
+     uint16_t btns = 0xFFFFu;
+     constexpr int kGamepad = 0;
+     const bool useGamepad = IsGamepadAvailable(kGamepad);
+@@ -119,6 +260,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
              clearBit(PAD_SELECT);
      }
  
@@ -2191,6 +2345,13 @@ index 8590f14..178b8a8 100644
 +            if (now >= press.at && now < press.at + press.duration)
 +                clearBit(press.mask);
 +    }
++
++    // RAMPAGE-DEBUG: PS2X_PLAY="300:right/40;400:circle/90" holds the buttons from that game frame (player 1's
++    // move-runner frames, rampage_movelog) for that many frames (1 without /n). For side-by-side traces.
++    static const std::vector<RampagePlayPress> s_play = rampage_play_parse(std::getenv("PS2X_PLAY"));
++    for (const RampagePlayPress &press : s_play)
++        if (g_rampageFrame >= press.at && g_rampageFrame < press.at + press.frames)
++            clearBit(press.mask);
 +
 +    // PS2X_AUTOPRESS=1 holds Start and then Cross for a second every six seconds.
 +    static const bool s_autoPress = std::getenv("PS2X_AUTOPRESS") != nullptr;

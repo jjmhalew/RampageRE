@@ -336,6 +336,9 @@ typedef struct Viewer {
      * simulated time ap_t; the autopilot's next press, the mode, players, bots and city (-1 the campaign's next) it
      * goes for, the demos it waits for (no presses in the menus) */
     Autoplay *ap; double ap_t; float ap_wait;
+    FILE *movelog; int movelog_frame;                /* --movelog: player 1's move runner, a line a frame */
+    int replay_frame; float replay_rows[2][3];       /* replay_log: the camera axes the game's monster read the stick
+                                                        in (+0xA18, +0xA24), for player 1 in place of the port's */
     int ap_type, ap_players, ap_bots, ap_city, ap_demos;
     int bot_guard_falls;                             /* buildings the bots' 60 s guard felled (for the watchdog) */
     int play_values[8];                              /* gWorld.getPlayValue / setPlayValue (0x4D201C): the run's, never
@@ -5951,6 +5954,20 @@ static void mon_step(Mon *mo, float dt)
             in->v[k] = held[k] || pressed[k];
             if (pressed[k]) in->fresh[k] = 0.2f;
         }
+        if (v->movelog && mo == &v->mon[0] && dt > 0) {   /* --movelog: the game's line (tools/movelog.py), as the
+                                                      * runner starts its frame */
+            uint32_t btn = 0;
+            for (int k = MV_UP; k <= MV_L3; k++)
+                btn |= (in->v[k] != 0) << k;
+            float h = mo->heading / 57.2957795f;     /* rot: the matrix's first two rows, x and y (right, forward) */
+            fprintf(v->movelog, "F %d dt %.6f sp %.4f st %d t %.6f pick %d wait 0 btn %x lx %.3f ly %.3f hp %.3f en %.3f "
+                    "mode %d mir %d pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %d nb %d ai %d "
+                    "frm %.3f %.3f %.3f %.3f\n", ++v->movelog_frame, dt, mo->power.speed, mo->run.state, mo->run.time,
+                    mo->run.chosen, btn, lx, ly, mo->hp, mo->energy, mo->mode, mo->mirror, mo->mx, mo->my, mo->mz,
+                    cosf(h), sinf(h), -sinf(h), cosf(h), mo->vel[0], mo->vel[1], mo->vel[2], v->nmon, v->num_bots,
+                    mo->is_ai, mo->frame[0][0], mo->frame[0][1], mo->frame[1][0], mo->frame[1][1]);
+            fflush(v->movelog);
+        }
         moves_derive(in);
         {                                            /* the stick in the monster's frame (0x2C0AD0 -> 0x2C03E0) */
             float w[3], h = mo->heading / 57.2957795f, c = cosf(h), s = sinf(h);
@@ -5960,7 +5977,9 @@ static void mon_step(Mon *mo, float dt)
         const MoveState *st = &mo->graph.states[mo->run.state];
         /* the camera frame the stick is read in: every frame (0x2E0738), or, in a NODE_HOLD_FRAME state, only when the
          * stick moves (0x2E8190), so a climb keeps its direction while the camera swings */
-        if (!(st->flags & NODE_HOLD_FRAME) || lx != mo->stick[0] || ly != mo->stick[1])
+        if (v->replay_frame && mo == &v->mon[0])     /* a replay: the game's own (replay_log) */
+            memcpy(mo->frame, v->replay_rows, sizeof mo->frame);
+        else if (!(st->flags & NODE_HOLD_FRAME) || lx != mo->stick[0] || ly != mo->stick[1])
             memcpy(mo->frame, v->view.rows, sizeof mo->frame);
         mo->stick[0] = lx;
         mo->stick[1] = ly;
@@ -6919,6 +6938,61 @@ static void game_next_block(Viewer *v)
  * play that player's monster (the others' keys idle meanwhile, the computer's monsters go on). Once the game goes back
  * to the shell the words stop: the ones left are returned (NULL none), for the shell */
 static void attract_press(Viewer *v);
+
+/* --do "replay FILE": the recompiled game's move log (tools/movelog.py, PS2X_MOVELOG) played back: each line's pad
+ * variables (the buttons 4 .. 21 as held, a press where one was not held the line before; the left stick) drive the
+ * monster for one frame of the line's dt, as the game's runner read them; with --movelog the port writes the same
+ * lines to compare */
+static void replay_log(Viewer *v, Mon *mo, const char *path, float aspect)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "replay: cannot read %s\n", path);
+        return;
+    }
+    char line[1024];
+    uint32_t prev = 0;
+    int warned = 0;
+    while (fgets(line, sizeof line, f) && !v->exit_game) {
+        unsigned frame;
+        float dt;
+        const char *b = strstr(line, " btn "), *x = strstr(line, " lx "), *y = strstr(line, " ly ");
+        if (sscanf(line, "F %u dt %f", &frame, &dt) != 2 || !b || !x || !y)
+            continue;
+        uint32_t btn = (uint32_t)strtoul(b + 5, NULL, 16);
+        for (int j = 0; j < v->nmon; j++)            /* the keys' pads idle, this monster's from the line */
+            if (v->mon[j].drive != DRIVE_COMPUTER)
+                memset(&v->mon[j].pad, 0, sizeof v->mon[j].pad);
+        for (int k = MV_UP; k <= MV_L3; k++) {
+            mo->pad.held[k] = (uint8_t)(btn >> k & 1);
+            mo->pad.pressed[k] = (uint8_t)((btn >> k & 1) && !(prev >> k & 1));
+        }
+        mo->pad.lx = strtof(x + 4, NULL);
+        mo->pad.ly = strtof(y + 4, NULL);
+        prev = btn;
+        const char *fr = strstr(line, " frm "), *np = strstr(line, " np ");
+        float a[4];
+        if (fr && sscanf(fr + 5, "%f %f %f %f", &a[0], &a[1], &a[2], &a[3]) == 4) {
+            /* the stick's frame as the game's monster had it: the comparison leaves the camera out */
+            float rows[2][3] = { { a[0], a[1], 0 }, { a[2], a[3], 0 } };
+            memcpy(v->replay_rows, rows, sizeof rows);
+            v->replay_frame = 1;
+        }
+        if (np && atoi(np + 4) != v->nmon && !warned) {
+            fprintf(stderr, "replay: the game had %d players, here %d (--players)\n", atoi(np + 4), v->nmon);
+            warned = 1;
+        }
+        play_step(v, dt, aspect);
+        if (pose_monsters(v, 0)) {                   /* posed each frame, as the main loop does */
+            scene_update(&v->scene, 0);
+            hit_spheres_all(v);
+        }
+        game_next_block(v);
+    }
+    v->replay_frame = 0;
+    fclose(f);
+}
+
 static const char *play_script(Viewer *v, const char *script, float aspect)
 {
     Mon *mo = &v->mon[0];                            /* the monster the words play */
@@ -6950,6 +7024,16 @@ static const char *play_script(Viewer *v, const char *script, float aspect)
                 mo = &v->mon[k];
             else
                 printf("no player %d\n", k + 1);
+            continue;
+        }
+        if (_stricmp(word, "replay") == 0) {         /* replay FILE: the game's own move log, frame by frame */
+            char path[512];
+            int k = 0;
+            while (*p == ' ') p++;
+            while (*p && *p != ',' && k < (int)sizeof path - 1) path[k++] = *p++;
+            while (k > 0 && path[k - 1] == ' ') k--;
+            path[k] = 0;
+            replay_log(v, mo, path, aspect);
             continue;
         }
         if (_stricmp(word, "mirror") == 0) {         /* the next clip mirrored, as an event of type 8 would */
@@ -8622,6 +8706,10 @@ static int viewer_main(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--autoplay") == 0) autoplay = 1;   /* the playthrough test (docs/NATIVE.md) */
         else if (strcmp(argv[i], "--ap-log") == 0 && i + 1 < argc) ap_log = argv[++i];
+        else if (strcmp(argv[i], "--movelog") == 0 && i + 1 < argc) {   /* tools/movelog.py */
+            v.movelog = fopen(argv[++i], "w");
+            if (!v.movelog) fprintf(stderr, "cannot write %s\n", argv[i]);
+        }
         else if (strcmp(argv[i], "--ap-shots") == 0 && i + 1 < argc) ap_shots = argv[++i];
         else if (strcmp(argv[i], "--ap-minutes") == 0 && i + 1 < argc) ap_lim.minutes = atof(argv[++i]);
         else if (strcmp(argv[i], "--ap-blocks") == 0 && i + 1 < argc) ap_lim.blocks = atoi(argv[++i]);
@@ -9218,7 +9306,8 @@ static int viewer_main(int argc, char **argv)
         if (playing) {
             float aspect = w.width ? (float)w.height / w.width : 0.75f;
             if (shot && !settled) {                     /* a shot: the camera settles, then the script */
-                if (!v.ap)                           /* (--autoplay: its words first, then it plays on) */
+                if (!v.ap && !(script && !_strnicmp(script, "replay", 6)))   /* (--autoplay: its words first, then
+                                                      * it plays on; a replay from the game's first frame) */
                     play_script(&v, "wait 2", aspect);
                 if (script)
                     script = play_script(&v, script, aspect);

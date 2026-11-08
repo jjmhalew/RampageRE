@@ -6,8 +6,12 @@ The runtime writes a status line and build\disc\shot_NNN.png every 600 frames (P
   .\test.ps1 -Seconds 120
   .\test.ps1 -PadInput "12:cross;20.5:down/0.3"   scripted pad input (seconds after start; see ps2_pad.cpp)
   .\test.ps1 -ToGameplay             create a profile and start the campaign (Las Vegas) with George
+  .\test.ps1 -ToGameplay -Play "60:up/30;120:circle/50" -PlayEnd 300 -MoveLog build\movelog_game.txt
+                                     then, one player, the pad by game frame and the move runner's log
+                                     (tools/movelog.py; the run ends after frame PlayEnd)
 #>
-param([int]$Seconds = 45, [string]$PadInput = "", [switch]$ToGameplay)
+param([int]$Seconds = 45, [string]$PadInput = "", [switch]$ToGameplay, [string]$Play = "", [int]$PlayEnd = 0,
+      [string]$MoveLog = "")
 $root = $PSScriptRoot
 $exe = Join-Path $root "build\cmake\ps2xRuntime\Release\ps2EntryRunner.exe"
 if (-not (Test-Path $exe)) { throw "Build first: .\build.ps1" }
@@ -32,6 +36,14 @@ $out = Join-Path $root "build\test.out"
 $err = Join-Path $root "build\test.err"
 $env:PS2X_AUTOPRESS = "1"
 $env:PS2X_INPUT = $PadInput   # empty = autopress Start/Cross
+if ($MoveLog -or $Play) {
+    # one player, the frame-keyed pad and the log (ps2_pad.cpp); a game frame takes about 0.4 s here
+    $env:PS2X_ONE_PAD = "1"
+    $env:PS2X_PLAY = $Play
+    $env:PS2X_PLAY_END = "$PlayEnd"
+    $env:PS2X_MOVELOG = if ($MoveLog) { [IO.Path]::GetFullPath((Join-Path $root $MoveLog)) } else { "" }
+    if ($PlayEnd -gt 0 -and $Seconds -lt 240 + $PlayEnd / 2) { $Seconds = [int](240 + $PlayEnd / 2) }
+}
 $p = Start-Process -FilePath $exe -ArgumentList "RAMPAGE.ELF" -WorkingDirectory (Join-Path $root "build\disc") `
     -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
 if ($p.WaitForExit($Seconds * 1000)) { "exited with code $($p.ExitCode)" } else { $p | Stop-Process -Force; "still running after $Seconds s (stopped)" }
