@@ -442,6 +442,13 @@ A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next on
    bytes) holds the new node (+0x0), its blend time (+0x4), the start time (+0x8), the sticks × 255 (+0x1C..+0x28)
    and flags (+0x2C: the transition's blend mode << 4, 0x1 keep the phase); the monster's command (0x2E6580) plays it.
 
+A frame, in order [R by the recompiled game's trace, tools/movelog.py]: the animation's update fires the clip's
+events up to where the frame's step takes it (0x2FFF10 → 0x2E95D0 → 0x2F45D0 → 0x2E7840), then the monster's update
+moves it by its velocity and gravity, tests the landing and the mount (0x2DE530 and on), then the controller
+(0x2C0AD0) runs the runner and only then takes in a posted state (+0x110, 0x2C0DC4 .. 0x2C0E1C → 0x2EBF50). So
+`Jump_Start_1`'s 16 up at 0.136 is moved by and pulled down in the frame whose step crosses it, and a landing
+(0x2DC450 posts slot 56 through setReaction) leaves the air state running that frame, the landing starting after it.
+
 ## Blending
 0x2FFA00 starts a clip in the monster's animation player: with blend mode 0, or 1 while nothing plays yet, it cuts;
 otherwise the two pose buffers swap (+0x29C0 / +0x29C4), so the pose the monster had stays as it was, and the blend

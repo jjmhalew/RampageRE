@@ -5954,20 +5954,6 @@ static void mon_step(Mon *mo, float dt)
             in->v[k] = held[k] || pressed[k];
             if (pressed[k]) in->fresh[k] = 0.2f;
         }
-        if (v->movelog && mo == &v->mon[0] && dt > 0) {   /* --movelog: the game's line (tools/movelog.py), as the
-                                                      * runner starts its frame */
-            uint32_t btn = 0;
-            for (int k = MV_UP; k <= MV_L3; k++)
-                btn |= (in->v[k] != 0) << k;
-            float h = mo->heading / 57.2957795f;     /* rot: the matrix's first two rows, x and y (right, forward) */
-            fprintf(v->movelog, "F %d dt %.6f sp %.4f st %d t %.6f pick %d wait 0 btn %x lx %.3f ly %.3f hp %.3f en %.3f "
-                    "mode %d mir %d pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %d nb %d ai %d "
-                    "frm %.3f %.3f %.3f %.3f\n", ++v->movelog_frame, dt, mo->power.speed, mo->run.state, mo->run.time,
-                    mo->run.chosen, btn, lx, ly, mo->hp, mo->energy, mo->mode, mo->mirror, mo->mx, mo->my, mo->mz,
-                    cosf(h), sinf(h), -sinf(h), cosf(h), mo->vel[0], mo->vel[1], mo->vel[2], v->nmon, v->num_bots,
-                    mo->is_ai, mo->frame[0][0], mo->frame[0][1], mo->frame[1][0], mo->frame[1][1]);
-            fflush(v->movelog);
-        }
         moves_derive(in);
         {                                            /* the stick in the monster's frame (0x2C0AD0 -> 0x2C03E0) */
             float w[3], h = mo->heading / 57.2957795f, c = cosf(h), s = sinf(h);
@@ -5986,14 +5972,20 @@ static void mon_step(Mon *mo, float dt)
         float t0 = mo->run.time, length = st->length;
         float cdt = dt * mo->power.speed;             /* the clips run at the speed scale x their rate (0x2EBFE0:
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
-        int ev = -1, was_mode = mo->mode;            /* the mode 0x2E2770 switches on (the landing sets 4) */
-        /* a posted state (the start record +0x110: playReaction, resetMonsterState, the respawn's drop): the
-         * controller takes it in right after the runner, the same frame (0x2C0DC4 .. 0x2C0E1C -> 0x2EBF50), so the
+        int ev = -1;
+        mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
+        mo->under_tested = 0;                        /* 0x2DE5A4: and the building under it */
+        /* the clip's events up to where this frame takes it come first: the animation's update (0x2FFF10 -> 0x2E95D0
+         * -> 0x2F45D0 -> 0x2E7840) runs before the monster's update and the controller's runner (0x2C0AD0) [R by the
+         * game's trace, tools/movelog.py: Ground_Grab_Down's doGrabObject at 0.339 s answers pickupSuccess in the frame
+         * whose step crosses it; Jump_Start_1's 16 up at 0.136 is moved and pulled down by gravity in that frame] */
+        clip_events(mo, st, t0, t0 + cdt < length ? t0 + cdt : length);
+        int was_mode = mo->mode;                     /* the mode 0x2E2770 switches on (the landing sets 4) */
+        /* a posted state (the start record +0x110: playReaction, resetMonsterState, the respawn's drop, an event's):
+         * the controller takes it in right after the runner, the same frame (0x2C0DC4 .. 0x2C0E1C -> 0x2EBF50), so the
          * state playing runs this frame first, and a goal of the AI that posts one in its update wins [R] */
         int posted = mo->force_to > 0 && mo->force_to <= mo->graph.n ? mo->force_to - 1 : -1;
         mo->force_to = 0;
-        mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
-        mo->under_tested = 0;                        /* 0x2DE5A4: and the building under it */
         if (mo->mode == MODE_AIRBORNE) {             /* the air (0x2DEBD8, mode 1 of 0x2DEBB0's switch) */
             float pos[3] = { mo->mx, mo->my, mo->mz };  /* 0x2DEBD8: drag, the move, gravity */
             monster_air_velocity(mo->vel, pos, dt, mo->no_gravity);
@@ -6040,10 +6032,11 @@ static void mon_step(Mon *mo, float dt)
                 /* landed (0x2DC450): slot 56 in the current column, taken as setReaction does (not defeated, not
                  * shrunk below 0.3, 0x2DC5E0 .. 0x2DC610) and let go (0x2DA570, 0x2DC628) */
                 int to = mo->defeated || mo->scale < 0.3f ? -1 : moves_slot(&mo->graph, SLOT_LAND, mo->column);
-                if (to >= 0) {
+                if (to >= 0) {                       /* posted (+0x110): the state in the air runs this frame yet,
+                                                      * the controller starts the landing after it [R by the game's
+                                                      * trace, tools/movelog.py] */
                     let_go(mo, 0);
-                    moves_force(&mo->run, to);
-                    ev = 0;
+                    posted = to;
                 }
                 mo->mode = MODE_PRONE;
                 memset(mo->vel, 0, sizeof mo->vel);
@@ -6151,13 +6144,20 @@ static void mon_step(Mon *mo, float dt)
             const Instance *ik = mon_in(&v->mon[k]);
             nai += v->mon[k].is_ai && !(ik && ik->hidden);
         }
-        /* the clip's events up to where this frame takes it come before the runner picks (the animation's update,
-         * 0x2FFF10 -> 0x2E95D0 -> 0x2F45D0 -> 0x2E7840, before the controller's 0x2C0AD0 [R by the game's trace,
-         * tools/movelog.py: Ground_Grab_Down's doGrabObject at 0.339 s answers pickupSuccess in the frame whose step
-         * crosses it]); a state forced already this frame (ev 0) plays none of the old clip's */
-        int events_done = ev != 0;
-        if (events_done)
-            clip_events(mo, st, t0, t0 + cdt < length ? t0 + cdt : length);
+        if (v->movelog && mo == &v->mon[0] && dt > 0) {   /* --movelog: the game's line (tools/movelog.py), as the
+                                                      * runner starts its frame, after the events and the update */
+            uint32_t btn = 0;
+            for (int k = MV_UP; k <= MV_L3; k++)
+                btn |= (in->v[k] != 0) << k;
+            float h = mo->heading / 57.2957795f;     /* rot: the matrix's first two rows, x and y (right, forward) */
+            fprintf(v->movelog, "F %d dt %.6f sp %.4f st %d t %.6f pick %d wait 0 btn %x lx %.3f ly %.3f hp %.3f en %.3f "
+                    "mode %d mir %d pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %d nb %d ai %d "
+                    "frm %.3f %.3f %.3f %.3f\n", ++v->movelog_frame, dt, mo->power.speed, mo->run.state, mo->run.time,
+                    mo->run.chosen, btn, lx, ly, mo->hp, mo->energy, mo->mode, mo->mirror, mo->mx, mo->my, mo->mz,
+                    cosf(h), sinf(h), -sinf(h), cosf(h), mo->vel[0], mo->vel[1], mo->vel[2], v->nmon, v->num_bots,
+                    mo->is_ai, mo->frame[0][0], mo->frame[0][1], mo->frame[1][0], mo->frame[1][1]);
+            fflush(v->movelog);
+        }
         int switched = ev == 0 || (mo->is_ai && mo->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */
                                    dir_ai_step(&mo->ai, &mo->ag, &mo->run, root, cdt, dt, nai, answer, mo) :
                                    moves_step(&mo->run, in, cdt, answer, mo));
@@ -6186,8 +6186,6 @@ static void mon_step(Mon *mo, float dt)
             if (st->flags & NODE_ROOT_TURN)
                 mo->heading += m * root_turn(mo, clip_at(mo, st, t0), clip_at(mo, st, t1));
         }
-        if (!events_done)
-            clip_events(mo, st, t0, t1);              /* the old clip's events up to now */
         if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
             float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
             float h = mo->heading;
