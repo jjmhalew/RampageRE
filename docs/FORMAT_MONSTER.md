@@ -119,7 +119,10 @@ front-left, right, left, back, back-right, back-left. None below a stick size of
 them `M.front`, `M.front8`, ...; mirrored, the condition reader swaps 33 / 34, 41 / 42, 43 / 44 and 46 / 47.
 
 Ids 4 … 21 and 48 … 57 are booleans, the rest floats. The stick sizes (30, 31) always count as new and 32 … 47 while
-they are set (0x2C17C0), so `|L|>0.7(new)` means only "pushed past 0.7". When the monster is mirrored (+0x7DA1 of the monster) the
+they are set (0x2C17C0), so `|L|>0.7(new)` means only "pushed past 0.7". An eighth (48 … 55) is new while the stick
+points there and either axis moved lately: its count of frames since a stick event that was not 0 (0x2C14B8 zeroes
+it) at most 2 (0x2C1950 .. 0x2C1A0C). So `Front_Climb_Up`'s and `Front_Idle_Up`'s `L.left == 1` (new) into
+`Front_Transition_Mirror` (priority 8) turns a climbing monster when the stick goes to the side. When the monster is mirrored (+0x7DA1 of the monster) the
 left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). Variable 57 reads 0 and is never new
 (0x2C1838), and the picker does not compare 56 and 57 at all: a condition on `false` never holds and one on `true`
 always does, held or new, whatever its test and value (0x2EC598 .. 0x2EC5C4, 0x2EC7C8 ..). So every `false`

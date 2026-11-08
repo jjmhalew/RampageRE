@@ -427,6 +427,12 @@ void moves_derive(MoveInput *in)
         int k = (int)floorf(a / (3.14159265f / 4));
         v[OCTANT[(k % 8 + 8) % 8]] = 1;
     }
+    /* [R 0x2C1950 .. 0x2C1A0C] an eighth is new while either axis moved lately (its count of frames since a stick
+     * event that was not 0 at most 2, 0x2C14B8) and the stick points there: Front_Climb_Up's and Front_Idle_Up's
+     * L.left == 1 (new) into Front_Transition_Mirror, Jump_Mount_Side_L_Impact's L.right == 1 (new) */
+    float moved = fmaxf(in->fresh[MV_LX], in->fresh[MV_LY]);
+    for (int k = MV_L_UP; k <= MV_L_DOWNRIGHT; k++)
+        in->fresh[k] = v[k] > 0 ? moved : 0;
     v[MV_TRUE] = 1;
     v[MV_FALSE] = 0;
     in->fresh[MV_TRUE] = 1;
