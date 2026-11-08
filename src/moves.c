@@ -451,6 +451,10 @@ static int holds(const MoveCond *c, const MoveInput *in)
             if (var == SWAP[k][0]) { var = SWAP[k][1]; break; }
             else if (var == SWAP[k][1]) { var = SWAP[k][0]; break; }
     }
+    union { uint32_t u; float f; } u = { c->value };
+    if (!(c->flags & 1) && var < MV_R_SIZE && c->op == 4 &&   /* [R 0x2EC630 .. 0x2EC734] a "new" == 0 of a button */
+        (is_bool(var) ? (c->value & 0xFF) == 0 : u.f == 0))   /* or an axis: let go lately (0x2C1A60, its count of */
+        return in->gone[var] > 0;                    /* frames since <= 2), the front's Circle == 0 into the release */
     if (!(c->flags & 1) && in->fresh[var] <= 0)      /* a "new" condition: the input must have just come */
         return 0;
     float a = in->v[var], b;
@@ -458,7 +462,6 @@ static int holds(const MoveCond *c, const MoveInput *in)
         a = a != 0;
         b = (c->value & 0xFF) != 0;
     } else {
-        union { uint32_t u; float f; } u = { c->value };
         b = u.f;
     }
     switch (c->op) {
@@ -571,8 +574,10 @@ int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
             }
         }
     }
-    for (int k = 0; k < MV_COUNT; k++)               /* inputs age; a switch uses them up */
+    for (int k = 0; k < MV_COUNT; k++) {             /* inputs age; a switch uses them up */
         in->fresh[k] = switched ? 0 : in->fresh[k] - dt;
+        in->gone[k] = switched ? 0 : in->gone[k] - dt;
+    }
     return switched;
 }
 

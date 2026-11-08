@@ -5947,6 +5947,7 @@ static void mon_step(Mon *mo, float dt)
         in->v[MV_LX] = lx;
         in->v[MV_LY] = ly;
         for (int k = MV_UP; k <= MV_L3; k++) {
+            if (in->v[k] && !held[k] && !pressed[k]) in->gone[k] = 0.2f;   /* let go (the release, 0x2C1A60) */
             in->v[k] = held[k] || pressed[k];
             if (pressed[k]) in->fresh[k] = 0.2f;
         }

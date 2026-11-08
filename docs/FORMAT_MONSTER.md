@@ -124,7 +124,11 @@ left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the secto
 (0x2C1838), and the picker does not compare 56 and 57 at all: a condition on `false` never holds and one on `true`
 always does, held or new, whatever its test and value (0x2EC598 .. 0x2EC5C4, 0x2EC7C8 ..). So every `false`
 transition is switched off, the held `false == 0` too (each monster has one: `Side_L_Charge_Punch` →
-`Side_L_Punch_Flurry` from 0.75 s at priority 3, which a plain `==` would take before the charge is done). The
+`Side_L_Punch_Flurry` from 0.75 s at priority 3, which a plain `==` would take before the charge is done). A new
+`== 0` of a button or an axis (ids below 30) means "let go": it holds while that input's count of frames since it
+was released (+0x20 of its entry) is at most gp −0x7218 (2) (0x2EC630 .. 0x2EC734 → 0x2C1A60); each monster has one,
+`Front_Charge_Punch`'s `Circle == 0` (new) into `Front_Charge_Release`, so letting go ends the charge (`moves.c`
+keeps a release 0.2 s, as a press, `MoveInput.gone`). The
 game's own events (landing, hits) come in through the slots instead ("Slots"), and nothing found fires
 `Ground_TurnAround` for a pad-controlled monster: it turns with the stick ("Steering").
 
