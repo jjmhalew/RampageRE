@@ -440,6 +440,10 @@ static int holds(const MoveCond *c, const MoveInput *in)
     if (c->var >= MV_COUNT)
         return 0;
     uint32_t var = c->var;
+    if (var == MV_FALSE)                             /* [R 0x2EC598 .. 0x2EC5C4, 0x2EC7C8 ..] false never holds and */
+        return 0;                                    /* true always does, held or new, whatever the test: so each */
+    if (var == MV_TRUE)                              /* monster's held false == 0 into its Side_L_Punch_Flurry */
+        return 1;                                    /* (from 0.75 s, priority 3) is switched off too */
     if ((c->flags & 2) && in->mirrored) {            /* mirrored: the other side (0x2C1638, 0x2C1688) */
         static const uint8_t SWAP[][2] = { { 50, 53 }, { 51, 54 }, { 52, 55 }, { 33, 34 }, { 41, 42 }, { 43, 44 },
                                            { 46, 47 } };

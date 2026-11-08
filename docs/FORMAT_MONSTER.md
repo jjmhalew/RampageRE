@@ -121,7 +121,10 @@ them `M.front`, `M.front8`, ...; mirrored, the condition reader swaps 33 / 34, 4
 Ids 4 … 21 and 48 … 57 are booleans, the rest floats. The stick sizes (30, 31) always count as new and 32 … 47 while
 they are set (0x2C17C0), so `|L|>0.7(new)` means only "pushed past 0.7". When the monster is mirrored (+0x7DA1 of the monster) the
 left / right pairs swap (50 ↔ 53, 51 ↔ 54, 52 ↔ 55, and pairs of the sectors). Variable 57 reads 0 and is never new
-(0x2C1838), so a `false == 0` (new) or `false > 0` condition never holds: those transitions are switched off. The
+(0x2C1838), and the picker does not compare 56 and 57 at all: a condition on `false` never holds and one on `true`
+always does, held or new, whatever its test and value (0x2EC598 .. 0x2EC5C4, 0x2EC7C8 ..). So every `false`
+transition is switched off, the held `false == 0` too (each monster has one: `Side_L_Charge_Punch` →
+`Side_L_Punch_Flurry` from 0.75 s at priority 3, which a plain `==` would take before the charge is done). The
 game's own events (landing, hits) come in through the slots instead ("Slots"), and nothing found fires
 `Ground_TurnAround` for a pad-controlled monster: it turns with the stick ("Steering").
 
