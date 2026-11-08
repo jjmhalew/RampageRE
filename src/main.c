@@ -5968,10 +5968,10 @@ static void mon_step(Mon *mo, float dt)
         float cdt = dt * mo->power.speed;             /* the clips run at the speed scale x their rate (0x2EBFE0:
                                                       * setSpeedScale, the rage's 1.33, the speed power-up) */
         int ev = -1, was_mode = mo->mode;            /* the mode 0x2E2770 switches on (the landing sets 4) */
-        if (mo->force_to > 0 && mo->force_to <= mo->graph.n) {   /* a played reaction (force_state) */
-            moves_force(&mo->run, mo->force_to - 1);
-            ev = 0;
-        }
+        /* a posted state (the start record +0x110: playReaction, resetMonsterState, the respawn's drop): the
+         * controller takes it in right after the runner, the same frame (0x2C0DC4 .. 0x2C0E1C -> 0x2EBF50), so the
+         * state playing runs this frame first, and a goal of the AI that posts one in its update wins [R] */
+        int posted = mo->force_to > 0 && mo->force_to <= mo->graph.n ? mo->force_to - 1 : -1;
         mo->force_to = 0;
         mo->water_tested = 0;                        /* 0x2DE5BC: the water is asked anew each frame */
         mo->under_tested = 0;                        /* 0x2DE5A4: and the building under it */
@@ -6034,7 +6034,7 @@ static void mon_step(Mon *mo, float dt)
              * gravity and no ground follow, mounted or not (a knock-off's clip holds it where it is till its own
              * mode event, after unmountBuilding); only below a ground at or under the street it is lifted, 0.4 x
              * ground + 0.6 x z a world step (0x2E06E0 .. 0x2E0730) */
-            if (ev != 0)
+            if (ev != 0 && posted < 0)
                 memset(mo->vel, 0, sizeof mo->vel);
             float g = ground_at(mo);
             if (mo->mz < g && g <= 0)
@@ -6141,6 +6141,13 @@ static void mon_step(Mon *mo, float dt)
             else if (v->game)
                 game_move_done(v->game, mo->slot);
         float t1 = switched ? (ev == 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : mo->run.time;
+        if (posted >= 0 && ev != 0 && !(mo->is_ai && mo->ai.forced)) {   /* the posted state, after the runner */
+            moves_force(&mo->run, posted);
+            if (!switched)
+                t1 = t0 + cdt < length ? t0 + cdt : length;   /* (the clip played on to here first) */
+            switched = 1;
+            ev = 0;                                  /* a forced start: no transition (below) */
+        }
         float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
         if (root_at(mo, clip_at(mo, st, t0), a, q) == 0 && root_at(mo, clip_at(mo, st, t1), b, q) == 0) {
             float c = cosf(mo->heading / 57.2957795f), s = sinf(mo->heading / 57.2957795f);

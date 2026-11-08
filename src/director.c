@@ -1274,16 +1274,10 @@ int dir_ai_step(DirAI *ai, DirGraph *ag, MoveRunner *r, const float pos[3], floa
                 MoveCall call, void *ctx)
 {
     ai->done = 0;
+    ai->forced = 0;
     ai->stick[0] = ai->stick[1] = 0;                 /* +0x0 and +0xC cleared each frame [R 0x2EE430] */
     if (!r->g || r->state < 0 || r->state >= r->g->n)
         return 0;
-    if (ai->force >= 0 && ai->force < r->g->n) {     /* last frame's forced state: the controller takes the start list
-                                                      * (0x2C0AD0 -> 0x2EBF50), no transition [R] */
-        moves_force(r, ai->force);
-        ai->force = -1;
-        clip_started(ai, r);
-        return 1;
-    }
     ai->force = -1;
     const MoveGraph *g = r->g;
     const MoveState *s = &g->states[r->state];
@@ -1344,6 +1338,14 @@ int dir_ai_step(DirAI *ai, DirGraph *ag, MoveRunner *r, const float pos[3], floa
                 if (r->chosen == i) r->chosen = -1;
             }
         }
+    }
+    /* a state the goal forced (0x2D9710: the start record +0x110): the controller takes it in right after the runner,
+     * the same frame (0x2C0DC4 .. 0x2C0E1C -> 0x2EBF50), over whatever the runner switched to [R] */
+    if (ai->force >= 0 && ai->force < g->n) {
+        moves_force(r, ai->force);
+        ai->force = -1;
+        ai->forced = 1;
+        switched = 1;
     }
     if (switched)
         clip_started(ai, r);

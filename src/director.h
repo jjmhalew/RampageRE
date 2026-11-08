@@ -127,7 +127,8 @@ typedef struct {
     DirGoal q[DIR_GOALS];    /* the queue (+0x20 / +0x24), q[0] the current one */
     int n;
     int current;             /* q[0] is the current goal (+0x1C): a new goal drops it */
-    int force;               /* a state forced (0x2D9710: the start list at +0x110), taken next frame; -1 none */
+    int force;               /* a state forced (0x2D9710: the start list at +0x110), taken in at the step's end; -1 */
+    int forced;              /* the last step took one in (it wins over a state posted before the step) */
     float stick[2];          /* out: the stick (+0xC) in world x, y, length 1 while walking, else 0 */
     int done;                /* out: goals with notify that ended this frame (Levels::moveComplete) */
     DirBot bot;              /* the DestroyBuildings goal's own (one per monster) */
