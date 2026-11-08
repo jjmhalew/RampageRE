@@ -1,4 +1,4 @@
-"""Side-by-side traces of the monsters' move runner: the recompiled game against the native port.
+r"""Side-by-side traces of the monsters' move runner: the recompiled game against the native port.
 
 The game's side: `rampage_movelog` (patches/ps2recomp-runtime.diff, ps2_pad.cpp) is called on entry to the move
 runner 0x2EBFE0 and writes one line per frame of player 1's monster (PS2X_MOVELOG=file): the state it starts the
@@ -13,12 +13,11 @@ build\disc\RAMPAGE.VOL LasVegas 1 --monster George --players NP --bots NB --do "
 --movelog build\movelog_port.txt --shot s.png` with the log's np / nb, then `diff`. The replay hands the port the
 game's stick frame (+0xA18, +0xA24) too.
 
-What the recompiled game gets wrong itself (so not the port's): it steers the monster wrong (stick left walked it
-on the way it faced, the next walk turned it to the stick before; 0x2E8410 is the port's formula, the turn 0x2E8190
-is suspect), so a walk ends elsewhere; and -ToGameplay's menu presses go by the clock, so a run may start with a bot
-partner (np 2 nb 1). The diff skips the game's 2-frame switch wait (a pick without 0x1000), which the port leaves
-out on purpose (FORMAT_MONSTER.md "At run time"). Found with it so far: the forced states' frame, the clip events
-before the runner (main.c).
+-ToGameplay's menu presses go by the clock, so a run may start with a bot partner (np 2 nb 1). The diff skips the
+game's 2-frame switch wait (a pick without 0x1000), which the port leaves out on purpose (FORMAT_MONSTER.md "At run
+time"). Found with it so far: the forced states' frame, the clip events before the runner (main.c), and the
+recompiler's RSQRT.S (fs / sqrt(ft), not 1 / sqrt(fs)), which had left the game's monster unable to turn towards the
+stick (its stick direction was never normalised: an angle of 0, or 180 degrees behind it).
 
 Usage: python tools/movelog.py hook             put the call into the generated sub_002EBFE0 (then build.ps1 -Quick)
        python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick or time differ
