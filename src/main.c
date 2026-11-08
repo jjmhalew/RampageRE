@@ -6132,6 +6132,13 @@ static void mon_step(Mon *mo, float dt)
             const Instance *ik = mon_in(&v->mon[k]);
             nai += v->mon[k].is_ai && !(ik && ik->hidden);
         }
+        /* the clip's events up to where this frame takes it come before the runner picks (the animation's update,
+         * 0x2FFF10 -> 0x2E95D0 -> 0x2F45D0 -> 0x2E7840, before the controller's 0x2C0AD0 [R by the game's trace,
+         * tools/movelog.py: Ground_Grab_Down's doGrabObject at 0.339 s answers pickupSuccess in the frame whose step
+         * crosses it]); a state forced already this frame (ev 0) plays none of the old clip's */
+        int events_done = ev != 0;
+        if (events_done)
+            clip_events(mo, st, t0, t0 + cdt < length ? t0 + cdt : length);
         int switched = ev == 0 || (mo->is_ai && mo->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */
                                    dir_ai_step(&mo->ai, &mo->ag, &mo->run, root, cdt, dt, nai, answer, mo) :
                                    moves_step(&mo->run, in, cdt, answer, mo));
@@ -6160,7 +6167,8 @@ static void mon_step(Mon *mo, float dt)
             if (st->flags & NODE_ROOT_TURN)
                 mo->heading += m * root_turn(mo, clip_at(mo, st, t0), clip_at(mo, st, t1));
         }
-        clip_events(mo, st, t0, t1);                  /* the old clip's events up to now */
+        if (!events_done)
+            clip_events(mo, st, t0, t1);              /* the old clip's events up to now */
         if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
             float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
             float h = mo->heading;
