@@ -550,7 +550,11 @@ static void release(Vehicles *v, int s, float share)
         total += ts->t[i].freq * (float)((ts->t[i].max_count < 5 ? ts->t[i].max_count : 5) - ts->t[i].alive);
     if (ts->nt == 0 || total <= 0)
         return;
-    float pick = total * frand(v), sum = 0;
+    /* [R 0x332E68 .. 0x332EC0] the type's draw is the lagged Fibonacci (0x106950, gWorld +0x82C), unsigned, times
+     * 2^-32; the lane's coin below is the Park-Miller. Drawn from the Park-Miller, every release took one of its
+     * numbers from the people and the scripts, and the traffic went its own way from the first car [R by the
+     * recompiled game's PS2X_RNGLOG, tools/movelog.py] */
+    float pick = total * ((float)wrand_lf() * (1.0f / 4294967296.0f)), sum = 0;
     int j = 0;
     for (; j < ts->nt; j++) {
         float w = ts->t[j].freq * (float)((ts->t[j].max_count < 5 ? ts->t[j].max_count : 5) - ts->t[j].alive);
