@@ -25,7 +25,14 @@ largest float, not infinity), which had put the game's monster at NaN on a roof'
 The game logged here is the PAL one: 25 world steps a second (dt 0.04), where the port plays at 30; a replay takes
 the log's rate for the monster's per-step shares (main.c step_hz).
 
-Usage: python tools/movelog.py hook             put the call into the generated sub_002EBFE0 (then build.ps1 -Quick)
+The random numbers: the game's log has an R line a frame (the world's Park-Miller state, the lagged Fibonacci's i, j
+and the sum of its table, GameStatus' two seeds), as does the port's; a replay starts from those seeds. Who draws:
+PS2X_RNGLOG=file (the game: frame, P or L, the caller's address) against RAMPAGE_RNGLOG=file (the port: frame, P or
+L, its callers by name, Windows). Found with them: the traffic's type drawn from the wrong generator, the Park-Miller
+seeded after the block was made.
+
+Usage: python tools/movelog.py hook             put the calls into the generated sub_002EBFE0, sub_00106BD0 and
+                                                 sub_00106950 (then build.ps1 -Quick)
        python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, time, mode,
                                                  mirroring, HP or energy differ
 """
@@ -37,34 +44,43 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNNER = os.path.join(ROOT, 'PS2Recomp', 'ps2xRuntime', 'src', 'runner')
 UNITY = os.path.join(ROOT, 'build', 'cmake', 'ps2xRuntime', 'CMakeFiles', 'ps2EntryRunner.dir', 'Unity')
 OBJECTS = os.path.join(ROOT, 'build', 'cmake', 'ps2xRuntime', 'ps2EntryRunner.dir', 'Release')
-NAME = 'sub_002EBFE0_0x2ebfe0'
 MARK = '// RAMPAGE-MOVELOG'
-DECL = ('void rampage_movelog(const uint8_t *rdram, uint32_t runner, uint32_t gp); ' + MARK + '\n')
-CALL = '    rampage_movelog(rdram, GPR_U32(ctx, 4), GPR_U32(ctx, 28)); ' + MARK + '\n'
+# the move runner's entry (the move log) and the world's two random generators (PS2X_RNGLOG: who draws, P / L)
+HOOKS = [
+    ('sub_002EBFE0_0x2ebfe0', 0x2ebfe0, 'void rampage_movelog(const uint8_t *rdram, uint32_t runner, uint32_t gp);',
+     'rampage_movelog(rdram, GPR_U32(ctx, 4), GPR_U32(ctx, 28));'),
+    ('sub_00106BD0_0x106bd0', 0x106bd0,
+     'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp);',
+     "rampage_rnglog(rdram, 'P', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28));"),
+    ('sub_00106950_0x106950', 0x106950,
+     'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp);',
+     "rampage_rnglog(rdram, 'L', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28));"),
+]
 
 
 def hook():
-    path = os.path.join(RUNNER, NAME + '.cpp')
-    with open(path, encoding='utf-8') as f:
-        lines = f.readlines()
-    if any(MARK in line for line in lines):
-        print(f'{NAME}.cpp already hooked')
-        return
-    head = next(i for i, line in enumerate(lines) if line.startswith('void ' + NAME + '('))
-    lines.insert(head, DECL)
-    # after the resume switch (a return into the middle jumps from it), so only a fresh call logs
-    first = next(i for i in range(head, len(lines)) if lines[i].strip() == 'ctx->pc = 0x2ebfe0u;')
-    lines.insert(first, CALL)
-    with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.writelines(lines)
-    print(f'hooked {NAME}.cpp')
-    for bundle in glob.glob(os.path.join(UNITY, '*.cxx')):
-        with open(bundle) as f:
-            if NAME + '.cpp' in f.read():
-                obj = os.path.join(OBJECTS, os.path.basename(bundle)[:-4] + '.obj')
-                if os.path.exists(obj):
-                    os.remove(obj)
-                print(f'dropped {os.path.basename(obj)}')
+    for name, addr, decl, call in HOOKS:
+        path = os.path.join(RUNNER, name + '.cpp')
+        with open(path, encoding='utf-8') as f:
+            lines = f.readlines()
+        if any(MARK in line for line in lines):
+            print(f'{name}.cpp already hooked')
+            continue
+        head = next(i for i, line in enumerate(lines) if line.startswith('void ' + name + '('))
+        lines.insert(head, decl + ' ' + MARK + '\n')
+        # after the resume switch (a return into the middle jumps from it), so only a fresh call logs
+        first = next(i for i in range(head, len(lines)) if lines[i].strip() == f'ctx->pc = {addr:#x}u;')
+        lines.insert(first, '    ' + call + ' ' + MARK + '\n')
+        with open(path, 'w', encoding='utf-8', newline='\n') as f:
+            f.writelines(lines)
+        print(f'hooked {name}.cpp')
+        for bundle in glob.glob(os.path.join(UNITY, '*.cxx')):
+            with open(bundle) as f:
+                if name + '.cpp' in f.read():
+                    obj = os.path.join(OBJECTS, os.path.basename(bundle)[:-4] + '.obj')
+                    if os.path.exists(obj):
+                        os.remove(obj)
+                    print(f'dropped {os.path.basename(obj)}')
 
 
 def read(path):

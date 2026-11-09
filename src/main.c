@@ -6208,6 +6208,10 @@ static void mon_step(Mon *mo, float dt)
             for (int k = MV_UP; k <= MV_L3; k++)
                 btn |= (in->v[k] != 0) << k;
             float h = mo->heading / 57.2957795f;     /* rot: the matrix's first two rows, x and y (right, forward) */
+            uint32_t li, lj, ls;                     /* the world's random states, as the game's log has them */
+            wrand_lf_peek(&li, &lj, &ls);
+            fprintf(v->movelog, "R %d pm %08x lf %u %u %08x\n", v->movelog_frame + 1, *wrand_pm_state(), li, lj, ls);
+            wrand_log_frame(v->movelog_frame + 1);
             fprintf(v->movelog, "F %d dt %.6f sp %.4f st %d t %.6f pick %d wait 0 btn %x lx %.3f ly %.3f hp %.3f en %.3f "
                     "mode %d mir %d pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %d nb %d ai %d "
                     "frm %.3f %.3f %.3f %.3f\n", ++v->movelog_frame, dt, mo->power.speed, mo->run.state, mo->run.time,
@@ -9024,6 +9028,24 @@ static int viewer_main(int argc, char **argv)
                     v.prof.current.seed[k] = wrand_pm_next(&s) >> 8 & 0xFFFF;
                 while (!v.prof.current.seed[k]);
         }
+    }
+    if (script && !_strnicmp(script, "replay ", 7)) {   /* --do "replay FILE": the game's seeds from its log's R line
+                                                      * (GameStatus 0x4D7B90 / 0x4D7B94), so the world draws as its did */
+        char path[512];
+        size_t n = strcspn(script + 7, ";");
+        snprintf(path, sizeof path, "%.*s", (int)n, script + 7);
+        FILE *f = fopen(path, "r");
+        char line[256];
+        unsigned s0, s1;
+        const char *at;
+        while (f && fgets(line, sizeof line, f))
+            if (line[0] == 'R' && (at = strstr(line, " seed ")) && sscanf(at + 6, "%x %x", &s0, &s1) == 2) {
+                v.prof.current.seed[0] = s0;
+                v.prof.current.seed[1] = s1;
+                break;
+            }
+        if (f)
+            fclose(f);
     }
     {                                                /* --players N (1 .. 4, --bots B of them the computer's) */
         static const char *const OTHERS[] = { "George", "Lizzie", "Ralph", "Boosy" };   /* the ones not named */

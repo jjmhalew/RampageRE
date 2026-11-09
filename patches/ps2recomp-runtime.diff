@@ -2182,7 +2182,7 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..1d1074a 100644
+index 8590f14..31b060d 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
 @@ -1,6 +1,12 @@
@@ -2198,7 +2198,7 @@ index 8590f14..1d1074a 100644
  
  namespace
  {
-@@ -23,9 +29,138 @@ namespace
+@@ -23,9 +29,163 @@ namespace
      constexpr uint16_t PAD_L1 = 0x0400u;
      constexpr uint16_t PAD_R2 = 0x0200u;
      constexpr uint16_t PAD_L2 = 0x0100u;
@@ -2268,8 +2268,9 @@ index 8590f14..1d1074a 100644
 +        std::memcpy(&f, &u, 4);
 +        return f;
 +    }
-+}
-+
+ }
+ 
+-bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
 +// RAMPAGE-DEBUG: player 1's move-runner frames since the game began (0 before the first), PS2X_PLAY's clock.
 +uint32_t g_rampageFrame = 0;
 +
@@ -2306,6 +2307,14 @@ index 8590f14..1d1074a 100644
 +            if (rd32(rdram, table + 16u * k + 0x14u) & 0xFFu)
 +                buttons |= 1u << k;
 +        const uint32_t world = rd32(rdram, gp - 0x6CFCu);
++        // the world's two random states: Park-Miller (+0x828) and the lagged Fibonacci (+0x82C: i, j, t[17])
++        uint32_t lf_sum = 0;
++        for (uint32_t k = 0; world && k < 17; k++)
++            lf_sum += rd32(rdram, world + 0x834u + 4u * k);
++        // and GameStatus' two seeds they start from at the world's reset (0x4D7B90, 0x4D7B94: 0x2B74D0, 0x2B65B4)
++        std::fprintf(log, "R %u pm %08x lf %u %u %08x seed %x %x\n", frame, world ? rd32(rdram, world + 0x828u) : 0u,
++                     world ? rd32(rdram, world + 0x82Cu) : 0u, world ? rd32(rdram, world + 0x830u) : 0u, lf_sum,
++                     rd32(rdram, 0x4D7B90u), rd32(rdram, 0x4D7B94u));
 +        std::fprintf(log,
 +                     "F %u dt %.6f sp %.4f st %d t %.6f pick %d wait %u btn %x lx %.3f ly %.3f hp %.3f en %.3f mode %u "
 +                     "mir %u pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %u nb %u ai %u "
@@ -2329,16 +2338,32 @@ index 8590f14..1d1074a 100644
 +            std::fclose(log);
 +        std::exit(0);
 +    }
- }
- 
--bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
++}
++
++// RAMPAGE-DEBUG: who draws the world's random numbers (PS2X_RNGLOG=file): one line per call of the Park-Miller
++// (0x106BD0, P) or the lagged Fibonacci (0x106950, L) on the world's states, with the move log's frame and the
++// caller's address (tools/movelog.py hook puts the calls in; a script's frand comes from its dispatcher, 0x279FC4)
++void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp)
++{
++    static FILE *log = []() -> FILE * {
++        const char *path = std::getenv("PS2X_RNGLOG");
++        return path ? std::fopen(path, "w") : nullptr;
++    }();
++    if (!log)
++        return;
++    const uint32_t world = rd32(rdram, gp - 0x6CFCu);
++    if ((kind == 'P' && a0 != world + 0x828u) || (kind == 'L' && a0 != world + 0x82Cu))
++        return;
++    std::fprintf(log, "%u %c %06x\n", g_rampageFrame, kind, ra);
++}
++
 +extern uint32_t g_rampageFrame;   // RAMPAGE-DEBUG: below
 +
 +bool PSPadBackend::readState(int port, int /*slot*/, uint8_t *data, size_t size)
  {
      if (!data || size < 32)
          return false;
-@@ -37,6 +172,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -37,6 +197,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
      data[3] = 0xFF;
      data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
  
@@ -2351,7 +2376,7 @@ index 8590f14..1d1074a 100644
      uint16_t btns = 0xFFFFu;
      constexpr int kGamepad = 0;
      const bool useGamepad = IsGamepadAvailable(kGamepad);
-@@ -119,6 +260,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -119,6 +285,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
              clearBit(PAD_SELECT);
      }
  
