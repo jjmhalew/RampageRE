@@ -1069,6 +1069,11 @@ static void build(Viewer *v)
         v->traffic_exit = 5.0f + wrand_frand() * 5.0f;
         v->hidden_x = -100.0f + wrand_frand() * 100.0f;
         (void)wrand_frand();
+        /* [R 0x2B74FC .. 0x2B751C] then RWorld's reset seeds the Park-Miller from GameStatus seed[0], and the block
+         * is made after it (0x2B6580): the block's people, edibles and traffic draw from the fresh state. Seeded at
+         * the game's making, after the block, the port's world was dealt from the state before [R by the recompiled
+         * game's PS2X_RNGLOG, tools/movelog.py] */
+        wrand_seed_pm(v->prof.current.seed[0] ? v->prof.current.seed[0] : 0x2545F491u);
         v->traffic_acc = 0;
         memset(&v->hidden, 0, sizeof v->hidden);
     }

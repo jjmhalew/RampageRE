@@ -1097,7 +1097,8 @@ Game *game_new(const GameHost *host, const GameConfig *cfg)
         g->cfg.num_bots = 0;
     if (g->cfg.num_cities <= 0)
         g->cfg.num_cities = 7;
-    wrand_seed_pm(g->cfg.seed ? g->cfg.seed : 0x2545F491u);   /* RWorld's reset: GameStatus seed[0] */
+    /* (RWorld's reset seeds the Park-Miller from GameStatus seed[0] before the block is made: the host does, main.c
+     * build, with the world) */
     g->start_block = g->cfg.start_block;
     g->king_block = g->king_city = g->king_world = g->first_place = g->second_place = -1;
     g->results_screen = -1;
