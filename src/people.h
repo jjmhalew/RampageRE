@@ -53,7 +53,8 @@ typedef struct {
                                                       * the clip's); the clip time is anim_time / anim_len x clip */
     int anim_loop;                                   /* AnimRepeat */
     int anim_done;                                   /* a play that does not repeat has ended (onAnimComplete sent) */
-    int anim_end;                                    /* it got to its end in the last advance: told the next frame */
+    int anim_skip;                                   /* started at a random offset: not advanced the next time */
+    int fresh;                                       /* made in play this frame: its first update is the next frame's */
     float world[16];                                 /* column-major; always kept: pos and heading, or the hand / the flight */
     int building, storey, column;                    /* a window occupant's cell (-1 none) */
     int slot_empty;                                  /* its slot has no occupant any more (people_window_emptied) */

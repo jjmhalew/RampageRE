@@ -22,6 +22,7 @@ enum { OF_DYING = 0x800, OF_PUSH_OUT = 0x4000, OF_EFF_NODES = 0x8000, OF_PICKUP 
 struct People {
     Person *v;
     int n, cap;
+    int playing;                                     /* people_update has run: the block is in play */
     PeopleClipSeconds clip_seconds;
     void *ctx;
     float droppable_rate;
@@ -322,13 +323,15 @@ static void start_anim(People *p, Person *q, const char *name, int random_offset
     }
     q->anim_len = len;
     q->anim_time = 0;
+    q->anim_skip = 0;
     if (random_offset) {
         float r = frand(p);                          /* 0x2A9258: frand x 2^-31 of the world's Park-Miller */
-        if (r > 0.001f && len > 0)
+        if (r > 0.001f && len > 0) {
             q->anim_time = r - len * (float)(int)(r / len);
+            q->anim_skip = 1;                        /* (setTime: no advance the next time) */
+        }
     }
     q->anim_done = 0;
-    q->anim_end = 0;
 }
 
 /* ---------------------------------------------------------------- the LineMover (0x315E10) */
@@ -1163,6 +1166,7 @@ static Person *new_person(People *p, Group tmpl, const float pos[3], float headi
     Person *q = &p->v[p->n++];
     memset(q, 0, sizeof *q);
     q->tmpl = tmpl;
+    q->fresh = p->playing;
     q->name = tmpl.at ? group_name(tmpl) : "";
     q->kind = script_kind(tmpl.at ? group_str(tmpl, "Script|ScriptName") : NULL);
     memcpy(q->pos, pos, sizeof q->pos);
@@ -1863,6 +1867,7 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
 {
     p->m = m;
     p->nm = nm;
+    p->playing = 1;
     people_spawn_chain(p);                           /* the ones eaten since the last frame (people_remove) */
     for (int i = 0; i < p->ntimers; i++)
         if ((p->timer[i].left -= dt) <= 0) {
@@ -1877,25 +1882,31 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
         Person *q = &p->v[i];
         if (q->phase == PP_GONE)
             continue;
-        int r = 1;
-        /* the anim: a play that does not repeat ends in onAnimComplete. [R by PS2X_RNGLOG] The actor is told of the
-         * end the frame after its clip got there (0x30CE98, before the pulse), and then the clip is advanced, the one
-         * its handler started too: the Mime's next turn and its draw at 32, 51, 57 where told at once they came at 31,
-         * 50, 56 */
-        if (!q->anim_loop && !q->anim_done && q->anim_end) {
-            q->anim_done = 1;                        /* a handler's startAnim clears it */
-            r = on_anim_done(p, q);
+        if (q->fresh) {                              /* [R by PS2X_RNGLOG] one made in play (a window's occupant
+                                                      * out, a chain's next) is first updated the frame after: the
+                                                      * windows' clips ended a frame later than told here */
+            q->fresh = 0;
+            continue;
         }
-        if (r != DELETE_ME && q->phase != PP_GONE) {
-            if (q->anim_loop) {
-                if (q->anim_len > 0) {
-                    q->anim_time = fmodf(q->anim_time + (q->anim_reverse ? -dt : dt), q->anim_len);
-                    if (q->anim_time < 0)
-                        q->anim_time += q->anim_len;
-                }
-            } else if (!q->anim_done && !q->anim_end && (q->anim_time += dt) >= q->anim_len) {
+        int r = 1;
+        /* the anim (0x30CE40: the clip's advance by the step, at its end onAnimComplete, 0x27DBA0 event 0xC, the
+         * same frame): a play that does not repeat ends in onAnimComplete. A clip started at a random offset (the
+         * game's setTime, 0x30C920, for an offset above 0.001) is not advanced the first time [R by PS2X_RNGLOG: the
+         * Mime's turns at 32, 51, 57 and a Tourist's Idle at 96, where advanced they came a frame off] */
+        if (q->anim_skip)
+            q->anim_skip = 0;
+        else if (q->anim_loop) {
+            if (q->anim_len > 0) {
+                q->anim_time = fmodf(q->anim_time + (q->anim_reverse ? -dt : dt), q->anim_len);
+                if (q->anim_time < 0)
+                    q->anim_time += q->anim_len;
+            }
+        } else if (!q->anim_done) {
+            q->anim_time += dt;
+            if (q->anim_time >= q->anim_len) {
                 q->anim_time = q->anim_len;
-                q->anim_end = 1;
+                q->anim_done = 1;                    /* a handler's startAnim clears it */
+                r = on_anim_done(p, q);
             }
         }
         /* [R 0x30CEA0] the pulse's clock (+0xFC) runs only with a delay (+0xF8) of 0.01 or more; at the delay it is
