@@ -368,7 +368,7 @@ index 94a6fa1..787d362 100644
      X(sceDeci2ExLock)                         \
      X(sceDeci2ExRecv)                         \
 diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
-index 0f19c9f..0937cd3 100644
+index 0f19c9f..49c6090 100644
 --- a/ps2xRuntime/include/ps2_runtime_macros.h
 +++ b/ps2xRuntime/include/ps2_runtime_macros.h
 @@ -597,19 +597,101 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
@@ -483,6 +483,26 @@ index 0f19c9f..0937cd3 100644
  #define FPU_ABS_S(a) fabsf((float)(a))
  #define FPU_MOV_S(a) ((float)(a))
  #define FPU_NEG_S(a) (-(float)(a))
+@@ -623,7 +705,18 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+ #define FPU_FLOOR_W_S(a) ((int32_t)floorf((float)(a)))
+ #define FPU_CVT_S_W(a) ((float)(int32_t)(a))
+ #define FPU_CVT_S_L(a) ((float)(int64_t)(a))
+-#define FPU_CVT_W_S(a) ((int32_t)nearbyintf((float)(a)))
++// RAMPAGE: the EE's CVT.W.S truncates (its FPU knows only rounding to zero), and one past the int's range is held at
++// 0x7FFFFFFF or 0x80000000 (by its sign). Rounded to the nearest, 0.5 + 20 x 0.35 made 8 window occupants of a
++// building's 20 cells where the game has 7, and one random number more
++static inline int32_t ps2_fpu_cvt_w(float x)
++{
++    uint32_t u;
++    std::memcpy(&u, &x, sizeof u);
++    if ((u & 0x7F800000u) <= 0x4E800000u)
++        return (int32_t)x;
++    return (u & 0x80000000u) ? (int32_t)0x80000000u : 0x7FFFFFFF;
++}
++#define FPU_CVT_W_S(a) ps2_fpu_cvt_w((float)(a))
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))
 diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
 index ea86a9c..0ae770a 100644
 --- a/ps2xRuntime/include/runtime/ps2_memory.h
