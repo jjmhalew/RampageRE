@@ -27,9 +27,13 @@ the log's rate for the monster's per-step shares (main.c step_hz).
 
 The random numbers: the game's log has an R line a frame (the world's Park-Miller state, the lagged Fibonacci's i, j
 and the sum of its table, GameStatus' two seeds), as does the port's; a replay starts from those seeds. Who draws:
-PS2X_RNGLOG=file (the game: frame, P or L, the caller's address) against RAMPAGE_RNGLOG=file (the port: frame, P or
-L, its callers by name, Windows). Found with them: the traffic's type drawn from the wrong generator, the Park-Miller
-seeded after the block was made.
+PS2X_RNGLOG=file (the game: frame, P or L, the caller's address, then the return addresses on its stack: a script's
+draw (0x279FC4) is under its VM's frames 0x18xxxx .. 0x1Dxxxx, the native caller that ran the script further up)
+against RAMPAGE_RNGLOG=file (the port: frame, P or L, its callers by name, the first with its line, Windows). Found
+with them: the traffic's type drawn from the wrong generator, the Park-Miller seeded after the block was made, the
+block made in another order (the buildings' objects, the edibles, the attack objects, the actors, the AI, the
+traffic, the crowds, then the objects' onInit), a building's actor (VegasCowboySign) the game never makes, a clip's
+end told the frame after, and in the recompiler CVT.W.S to the nearest (the EE truncates).
 
 Usage: python tools/movelog.py hook             put the calls into the generated sub_002EBFE0, sub_00106BD0 and
                                                  sub_00106950 (then build.ps1 -Quick)
@@ -50,11 +54,11 @@ HOOKS = [
     ('sub_002EBFE0_0x2ebfe0', 0x2ebfe0, 'void rampage_movelog(const uint8_t *rdram, uint32_t runner, uint32_t gp);',
      'rampage_movelog(rdram, GPR_U32(ctx, 4), GPR_U32(ctx, 28));'),
     ('sub_00106BD0_0x106bd0', 0x106bd0,
-     'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp);',
-     "rampage_rnglog(rdram, 'P', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28));"),
+     'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp, uint32_t sp);',
+     "rampage_rnglog(rdram, 'P', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28), GPR_U32(ctx, 29));"),
     ('sub_00106950_0x106950', 0x106950,
-     'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp);',
-     "rampage_rnglog(rdram, 'L', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28));"),
+     'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp, uint32_t sp);',
+     "rampage_rnglog(rdram, 'L', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28), GPR_U32(ctx, 29));"),
 ]
 
 

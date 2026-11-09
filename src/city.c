@@ -3685,6 +3685,9 @@ void city_actors(City *c, Scene *s)
             continue;
         float xyz[3];
         location(a, xyz);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("actor %s (%s) at %.1f %.1f %.1f\n", group_str(a, "Name"), group_str(t, "Script|ScriptName"), xyz[0],
+                   xyz[1], xyz[2]);
         people_set_instance(s->folk, people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0)), a);   /* (its chain) */
         s->people++;
     }

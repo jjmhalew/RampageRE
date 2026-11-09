@@ -2202,7 +2202,7 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..31b060d 100644
+index 8590f14..d911764 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
 @@ -1,6 +1,12 @@
@@ -2218,7 +2218,7 @@ index 8590f14..31b060d 100644
  
  namespace
  {
-@@ -23,9 +29,163 @@ namespace
+@@ -23,9 +29,177 @@ namespace
      constexpr uint16_t PAD_L1 = 0x0400u;
      constexpr uint16_t PAD_R2 = 0x0200u;
      constexpr uint16_t PAD_L2 = 0x0100u;
@@ -2288,9 +2288,8 @@ index 8590f14..31b060d 100644
 +        std::memcpy(&f, &u, 4);
 +        return f;
 +    }
- }
- 
--bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
++}
++
 +// RAMPAGE-DEBUG: player 1's move-runner frames since the game began (0 before the first), PS2X_PLAY's clock.
 +uint32_t g_rampageFrame = 0;
 +
@@ -2358,12 +2357,15 @@ index 8590f14..31b060d 100644
 +            std::fclose(log);
 +        std::exit(0);
 +    }
-+}
-+
+ }
+ 
+-bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
 +// RAMPAGE-DEBUG: who draws the world's random numbers (PS2X_RNGLOG=file): one line per call of the Park-Miller
 +// (0x106BD0, P) or the lagged Fibonacci (0x106950, L) on the world's states, with the move log's frame and the
 +// caller's address (tools/movelog.py hook puts the calls in; a script's frand comes from its dispatcher, 0x279FC4)
-+void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp)
++// the frame, P or L, the caller (ra) and, after it, the return addresses found on the caller's stack (words whose
++// instruction 8 back is a jal or jalr: saved ra's, the callers further up, with now and then a stale one; up to 32)
++void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp, uint32_t sp)
 +{
 +    static FILE *log = []() -> FILE * {
 +        const char *path = std::getenv("PS2X_RNGLOG");
@@ -2374,7 +2376,19 @@ index 8590f14..31b060d 100644
 +    const uint32_t world = rd32(rdram, gp - 0x6CFCu);
 +    if ((kind == 'P' && a0 != world + 0x828u) || (kind == 'L' && a0 != world + 0x82Cu))
 +        return;
-+    std::fprintf(log, "%u %c %06x\n", g_rampageFrame, kind, ra);
++    std::fprintf(log, "%u %c %06x", g_rampageFrame, kind, ra);
++    int found = 0;
++    for (uint32_t at = sp; at < sp + 0x3000u && found < 32; at += 4) {   // (deep: a script's draw is under its VM's frames)
++        const uint32_t w = rd32(rdram, at);
++        if (w < 0x100008u || w >= 0x500000u || (w & 3) || w == ra)
++            continue;
++        const uint32_t op = rd32(rdram, w - 8);
++        if ((op >> 26) == 3 || (op & 0xFC1F07FFu) == 0x00000009u) {
++            std::fprintf(log, " %06x", w);
++            found++;
++        }
++    }
++    std::fputc('\n', log);
 +}
 +
 +extern uint32_t g_rampageFrame;   // RAMPAGE-DEBUG: below
@@ -2383,7 +2397,7 @@ index 8590f14..31b060d 100644
  {
      if (!data || size < 32)
          return false;
-@@ -37,6 +197,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -37,6 +211,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
      data[3] = 0xFF;
      data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
  
@@ -2396,7 +2410,7 @@ index 8590f14..31b060d 100644
      uint16_t btns = 0xFFFFu;
      constexpr int kGamepad = 0;
      const bool useGamepad = IsGamepadAvailable(kGamepad);
-@@ -119,6 +285,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -119,6 +299,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
              clearBit(PAD_SELECT);
      }
  

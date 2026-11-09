@@ -2,8 +2,8 @@
 #include "wrand.h"
 
 /* RAMPAGE_RNGLOG=file: who draws (tools/movelog.py, against the recompiled game's PS2X_RNGLOG): one line per draw,
- * the move log's frame, P (Park-Miller) or L (lagged Fibonacci), and the first callers outside this file (Windows,
- * through dbghelp and the build's .pdb) */
+ * the move log's frame, P (Park-Miller) or L (lagged Fibonacci), and the first callers outside this file, the first
+ * with its line (Windows, through dbghelp and the build's .pdb) */
 #ifdef _WIN32
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +22,8 @@ typedef struct {
     CHAR Name[128];
 } RngSym;                                            /* dbghelp's SYMBOL_INFO with room for the name */
 static BOOL (WINAPI *rng_sym_from_addr)(HANDLE, DWORD64, DWORD64 *, void *);
+typedef struct { DWORD SizeOfStruct; PVOID Key; DWORD LineNumber; PCHAR FileName; DWORD64 Address; } RngLine;
+static BOOL (WINAPI *rng_line_from_addr)(HANDLE, DWORD64, PDWORD, RngLine *);   /* SymGetLineFromAddr64 */
 
 void wrand_log_frame(int frame) { rng_frame = frame; }
 
@@ -34,6 +36,7 @@ static void rng_note(char kind)
         HMODULE dh = path ? LoadLibraryA("dbghelp.dll") : NULL;
         BOOL (WINAPI *sym_init)(HANDLE, PCSTR, BOOL) = dh ? (void *)GetProcAddress(dh, "SymInitialize") : NULL;
         rng_sym_from_addr = dh ? (void *)GetProcAddress(dh, "SymFromAddr") : NULL;
+        rng_line_from_addr = dh ? (void *)GetProcAddress(dh, "SymGetLineFromAddr64") : NULL;
         if (sym_init && rng_sym_from_addr && sym_init(GetCurrentProcess(), NULL, TRUE))
             rng_log = fopen(path, "w");
     }
@@ -54,6 +57,11 @@ static void rng_note(char kind)
         if (!strncmp(sym.Name, "wrand_", 6) || !strcmp(sym.Name, "rng_note"))
             continue;
         fprintf(rng_log, " %s", sym.Name);
+        RngLine line = { sizeof line };
+        DWORD disp = 0;                              /* the first caller's line: an inlined draw's place */
+        if (!shown && rng_line_from_addr &&
+            rng_line_from_addr(GetCurrentProcess(), (DWORD64)(uintptr_t)st[k], &disp, &line))
+            fprintf(rng_log, ":%lu", (unsigned long)line.LineNumber);
         shown++;
     }
     fputc('\n', rng_log);
