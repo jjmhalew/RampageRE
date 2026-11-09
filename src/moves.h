@@ -148,7 +148,16 @@ typedef struct {
     int floor_any, floor_act;                        /* the AI's pick floors (the pad's +0x8, +0xC: pickByAction) */
     uint8_t *in_window, *sw_window;                  /* per transition of the state */
     int from, via;                                   /* after a switch: the old state, the transition (-1: clip end) */
+    /* the switch wait (0x2EBFE0, +0x1D / +0x14): a transition without 0x1000 starts its clip at once, but the runner
+     * itself stays in the old state, its time held, MOVES_SWITCH_WAIT frames more. state and time above are the clip
+     * that plays; held, held_time, held_chosen and the held windows the runner's own (its +0x0, +0x10, +0x1E);
+     * held_via the transition whose clip was asked for (+0xC) */
+    int wait;                                        /* frames of the wait left, 0 none */
+    int held, held_chosen, held_via;
+    float held_time;
+    uint8_t *held_in, *held_sw;
 } MoveRunner;
+#define MOVES_SWITCH_WAIT 2                          /* gp -0x7218 (0x44C958) [R] */
 void moves_start(MoveRunner *r, const MoveGraph *g, int state);
 /* one frame: dt seconds (times the monster's speed); 1 when it switched state (r->from, r->via say how) */
 int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx);
@@ -160,7 +169,17 @@ void moves_stop(MoveRunner *r);
 int moves_events_between(const MoveState *s, float from, float to, const MoveEvent **first);
 /* the state slot k starts in a column (the monster's +0xBAB4, -1 = default), -1 if none */
 int moves_slot(const MoveGraph *g, int slot, int column);
-void moves_force(MoveRunner *r, int state);           /* the state now, from its start (0x2EBF50) */
+void moves_force(MoveRunner *r, int state);           /* the state now, from its start (0x2EBF50); no wait */
+/* take transition k of the state (its switch window open): its clip starts (the phase kept with flag 1), and without
+ * flag 0x1000 the runner waits (MoveRunner.wait); r->from, r->via set */
+void moves_take(MoveRunner *r, int k);
+/* during a wait: the runner's own view (its held state, time, pick and windows) swapped in, or back */
+void moves_swap_held(MoveRunner *r);
+void moves_wait_frame(MoveRunner *r);                /* a frame of the wait gone (the AI's runner) */
+/* the runner's own state, time and pick, as the game logs them (the held ones while it waits) */
+static inline int moves_own_state(const MoveRunner *r) { return r->wait > 0 ? r->held : r->state; }
+static inline float moves_own_time(const MoveRunner *r) { return r->wait > 0 ? r->held_time : r->time; }
+static inline int moves_own_pick(const MoveRunner *r) { return r->wait > 0 ? r->held_chosen : r->chosen; }
 enum { SLOT_LAND = 56, SLOT_LAND_BACK = 57 };         /* 0x2DC450: on its feet / the ground's normal against its up */
 
 /* how a transition brings the next clip in (its +0x0, the low nibble of the clip request's flags >> 4): BLEND_CUT

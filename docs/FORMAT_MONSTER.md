@@ -441,7 +441,11 @@ A runner per monster (`src/moves.c` is its port): +0 the state, +0x4 the next on
    (0x2EBFEC skips the advance while +0x1D is on), and it enters the target when the count reaches the global at
    gp −0x7218 (0x44C958, 2) + 1, its time then the start plus (count − 1) × dt × the speed (0x2ECE70, 0x2ECF08), where
    the clip begun at the pick has got to; a pick of the same transition meanwhile (+0xC) changes nothing. So what is
-   seen starts at the pick either way; `moves.c` enters at once. With no pick, a state whose time passed its length
+   seen starts at the pick either way. While it waits the pad's pick (0x2EC3D0) still runs on the old state, and another
+   transition it takes starts its own clip (into its target at once with 0x1000, else the wait goes on); the AI's
+   picks (0x2F2630, 0x2F2970) do nothing, and its goals read the old state. `moves.c` keeps the state that plays and
+   the runner's own apart (MoveRunner.wait, held) [R by the game's trace, tools/movelog.py: every recorded wait frame
+   matches]. With no pick, a state whose time passed its length
    takes its "clip ended" transition. A pick whose switch window has passed is dropped; windows that passed are
    cleared.
 4. 0x2ECBE0 starts the next clip: at 0, or with flag 0x1 at the same fraction of its length (capped at its end);

@@ -498,6 +498,29 @@ static void enter(MoveRunner *r, int state, float time)
     r->sw_window = calloc(s->ntrans ? s->ntrans : 1, 1);
 }
 
+static void drop_hold(MoveRunner *r)
+{
+    free(r->held_in);
+    free(r->held_sw);
+    r->held_in = r->held_sw = NULL;
+    r->wait = 0;
+}
+
+void moves_wait_frame(MoveRunner *r)
+{
+    if (r->wait > 0 && --r->wait == 0)               /* the count at 3: it enters the state its clip plays */
+        drop_hold(r);
+}
+
+void moves_swap_held(MoveRunner *r)
+{
+    int st = r->state; r->state = r->held; r->held = st;
+    float t = r->time; r->time = r->held_time; r->held_time = t;
+    int c = r->chosen; r->chosen = r->held_chosen; r->held_chosen = c;
+    uint8_t *w = r->in_window; r->in_window = r->held_in; r->held_in = w;
+    w = r->sw_window; r->sw_window = r->held_sw; r->held_sw = w;
+}
+
 void moves_start(MoveRunner *r, const MoveGraph *g, int state)
 {
     memset(r, 0, sizeof *r);
@@ -508,6 +531,7 @@ void moves_start(MoveRunner *r, const MoveGraph *g, int state)
 
 void moves_stop(MoveRunner *r)
 {
+    drop_hold(r);
     free(r->in_window);
     free(r->sw_window);
     memset(r, 0, sizeof *r);
@@ -529,18 +553,36 @@ static float start_time(const MoveRunner *r, const MoveTrans *t)
     return f < to->length ? f : to->length;
 }
 
-int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
+/* [R 0x2EC1A0 .. 0x2EC23C, 0x2ECBE0, 0x2ECE70 .. 0x2ECF54] the transition taken: its clip's request goes out at once,
+ * with 0x1000 or without; with it the runner enters the target too (+0x1C), without it the runner waits (+0x1D on,
+ * the count +0x14 from 1, its time held: 0x2EBFEC skips the advance) and enters the target once the count reaches
+ * the global at gp -0x7218 (2) + 1, its time then the start plus (count - 1) x the step, where the clip begun at the
+ * pick has got to. Its windows are not cleared while it waits (the cleanup at 0x2EC2B0 is skipped) */
+void moves_take(MoveRunner *r, int k)
+{
+    const MoveTrans *t = &r->g->states[r->state].trans[k];
+    float start = start_time(r, t);
+    r->from = r->state;
+    r->via = k;
+    drop_hold(r);
+    if (!(t->flags & 0x1000)) {
+        r->wait = MOVES_SWITCH_WAIT;
+        r->held = r->state;
+        r->held_time = r->time;
+        r->held_chosen = r->chosen;
+        r->held_via = k;
+        r->held_in = r->in_window;                   /* (kept: enter frees the new state's) */
+        r->held_sw = r->sw_window;
+        r->in_window = r->sw_window = NULL;
+    }
+    enter(r, t->target, start);
+}
+
+/* 0x2EC3D0: of the transitions in their input window and allowed for a pad (0x10; 0x2FF750 returns 0), the last one
+ * of the highest priority whose conditions and check hold; it stays picked until its switch window */
+static void pad_pick(MoveRunner *r, const MoveInput *in, MoveCall call, void *ctx)
 {
     const MoveState *s = &r->g->states[r->state];
-    float prev = r->time;
-    r->time += dt;
-    for (int i = 0; i < s->ntrans; i++) {
-        const MoveTrans *t = &s->trans[i];
-        if (in_window(t->in0, t->in1, prev, r->time)) r->in_window[i] = 1;
-        if (in_window(t->sw0, t->sw1, prev, r->time)) r->sw_window[i] = 1;
-    }
-    /* 0x2EC3D0: of the transitions in their input window and allowed for a pad (0x10; 0x2FF750 returns 0), the
-     * last one of the highest priority whose conditions and check hold; it stays picked until its switch window */
     for (int i = 0; i < s->ntrans; i++) {
         const MoveTrans *t = &s->trans[i];
         if (!r->in_window[i] || !(t->flags & 0x10) || t->target < 0)
@@ -555,13 +597,64 @@ int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
         if (ok)
             r->chosen = i;
     }
+}
+
+static void age_inputs(MoveInput *in, float dt, int switched)
+{
+    float age = in->age > 0 ? in->age : dt;
+    for (int k = 0; k < MV_COUNT; k++) {             /* inputs age a frame (0x2C11C0 ..); a switch uses them up */
+        in->fresh[k] = switched ? 0 : in->fresh[k] - age;
+        in->gone[k] = switched ? 0 : in->gone[k] - age;
+    }
+}
+
+int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
+{
+    if (r->wait > 0) {
+        /* the switch wait: the clip plays on; the runner, in the old state with its time held, picks among its
+         * transitions as ever (0x2EC3D0 does not test +0x1D): the one asked for again changes nothing (+0xC), another
+         * whose switch window is open is taken, its clip asked for, the wait going on (or ended, with 0x1000) */
+        float clip = r->time + dt;
+        moves_swap_held(r);
+        const MoveState *s = &r->g->states[r->state];
+        for (int i = 0; i < s->ntrans; i++) {        /* (prev: the time less the step, 0x2EC044) */
+            const MoveTrans *t = &s->trans[i];
+            if (in_window(t->in0, t->in1, r->time - dt, r->time)) r->in_window[i] = 1;
+            if (in_window(t->sw0, t->sw1, r->time - dt, r->time)) r->sw_window[i] = 1;
+        }
+        pad_pick(r, in, call, ctx);
+        int k = r->chosen, take = k >= 0 && r->sw_window[k] && k != r->held_via;
+        float start = take ? start_time(r, &s->trans[k]) : 0;
+        int from = r->state;
+        moves_swap_held(r);
+        if (take) {
+            const MoveTrans *t = &s->trans[k];
+            if (t->flags & 0x1000)
+                drop_hold(r);
+            else
+                r->held_via = k;
+            r->from = from;
+            r->via = k;
+            enter(r, t->target, start);
+        } else {
+            r->time = clip;
+        }
+        moves_wait_frame(r);
+        age_inputs(in, dt, take);
+        return take;
+    }
+    const MoveState *s = &r->g->states[r->state];
+    float prev = r->time;
+    r->time += dt;
+    for (int i = 0; i < s->ntrans; i++) {
+        const MoveTrans *t = &s->trans[i];
+        if (in_window(t->in0, t->in1, prev, r->time)) r->in_window[i] = 1;
+        if (in_window(t->sw0, t->sw1, prev, r->time)) r->sw_window[i] = 1;
+    }
+    pad_pick(r, in, call, ctx);
     int switched = 0;
     if (r->chosen >= 0 && r->sw_window[r->chosen]) {
-        const MoveTrans *t = &s->trans[r->chosen];
-        float start = start_time(r, t);
-        r->from = r->state;
-        r->via = r->chosen;
-        enter(r, t->target, start);
+        moves_take(r, r->chosen);
         switched = 1;
     } else if (r->time > s->length) {                /* the clip ended: its follow-up, or around again */
         r->from = r->state;
@@ -584,11 +677,7 @@ int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
             }
         }
     }
-    float age = in->age > 0 ? in->age : dt;
-    for (int k = 0; k < MV_COUNT; k++) {             /* inputs age a frame (0x2C11C0 ..); a switch uses them up */
-        in->fresh[k] = switched ? 0 : in->fresh[k] - age;
-        in->gone[k] = switched ? 0 : in->gone[k] - age;
-    }
+    age_inputs(in, dt, switched);
     return switched;
 }
 
@@ -600,6 +689,7 @@ int moves_event(MoveRunner *r, const char *to)
         if (t->target < 0 || t->ncond != 1 || t->cond[0].var != MV_FALSE || t->cond[0].op != 4 ||
             !r->g->states[t->target].name || _stricmp(r->g->states[t->target].name, to) != 0)
             continue;
+        drop_hold(r);
         r->from = r->state;
         r->via = i;
         enter(r, t->target, 0);
@@ -628,6 +718,7 @@ int moves_slot(const MoveGraph *g, int slot, int column)
 
 void moves_force(MoveRunner *r, int state)
 {
+    drop_hold(r);                                    /* 0x2EBF50: +0x1D, +0x1C and the count cleared */
     r->from = r->state;
     r->via = -1;
     enter(r, state, 0);

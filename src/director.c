@@ -275,6 +275,8 @@ static int node_action(const DirGraph *ag, int state)   /* the state's node's ac
  * None: the state's own transition for the action, in its window (0x2F28B8) */
 static void pick_by_action(MoveRunner *r, const DirGraph *ag, int action, int again, MoveCall call, void *ctx)
 {
+    if (r->wait > 0)                                 /* [R 0x2F2680] none while the runner waits (+0x1D) */
+        return;
     const MoveGraph *g = r->g;
     const MoveState *s = &g->states[r->state];
     int want = action != DA_KEEP;
@@ -317,6 +319,8 @@ static void ai_pick(MoveRunner *r, const DirGraph *ag, int action, int to_state,
         pick_by_action(r, ag, action, 0, call, ctx);
         return;
     }
+    if (r->wait > 0)                                 /* [R 0x2F29B4] none while the runner waits (+0x1D) */
+        return;
     const MoveGraph *g = r->g;
     const MoveState *s = &g->states[r->state];
     int want = to_state >= 0 ? r->state != to_state : action != DA_KEEP;   /* 0x2F2A84: not where it is already */
@@ -1280,6 +1284,14 @@ int dir_ai_step(DirAI *ai, DirGraph *ag, MoveRunner *r, const float pos[3], floa
         return 0;
     ai->force = -1;
     const MoveGraph *g = r->g;
+    /* the switch wait (moves.h): the clip plays on; the goals see the runner's own state, its time held, and pick
+     * nothing (0x2F2630, 0x2F2970 test +0x1D) */
+    int held = r->wait > 0;
+    float clip = r->time + dt;
+    if (held) {
+        moves_swap_held(r);
+        r->time -= dt;
+    }
     const MoveState *s = &g->states[r->state];
     float prev = r->time;
     r->time += dt;                                   /* 0x2EBFE0: the windows */
@@ -1307,18 +1319,12 @@ int dir_ai_step(DirAI *ai, DirGraph *ag, MoveRunner *r, const float pos[3], floa
         ai_pick(r, ag, DA_IDLE, -1, call, ctx);      /* 0x2F2630(pad, 11) */
     /* the switch, as moves_step: the pick when its switch window is open, else the clip's end */
     int switched = 0;
-    if (r->chosen >= 0 && r->sw_window[r->chosen]) {
-        const MoveTrans *t = &s->trans[r->chosen];
-        const MoveState *to = &g->states[t->target];
-        float start = 0;                             /* 0x2ECBE0: flag 1 keeps the phase */
-        if ((t->flags & 1) && s->length > 0) {
-            start = to->length * (r->time / s->length);
-            if (start > to->length) start = to->length;
-        }
-        int via = r->chosen;
-        moves_force(r, t->target);
-        r->via = via;
-        r->time = start;
+    if (held) {
+        moves_swap_held(r);
+        r->time = clip;
+        moves_wait_frame(r);
+    } else if (r->chosen >= 0 && r->sw_window[r->chosen]) {
+        moves_take(r, r->chosen);                    /* (0x2ECBE0: flag 1 keeps the phase; no 0x1000: the wait) */
         switched = 1;
     } else if (r->time > s->length) {
         if (s->next == r->state) {

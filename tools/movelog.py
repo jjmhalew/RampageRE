@@ -18,8 +18,8 @@ game's stick frame (+0xA18, +0xA24) too.
 (player, their own count n, player 1's frame; state, time, pick, HP, mode, place, heading, AI flag), which the diff
 pairs by player and n.
 
-The diff skips the game's 2-frame switch wait (a pick without 0x1000), which the port leaves out on purpose
-(FORMAT_MONSTER.md "At run time"). Found with it so far: the forced states' frame, the clip events before the runner
+The game's 2-frame switch wait (a pick without 0x1000: the runner holds the old state while the new clip plays,
+FORMAT_MONSTER.md "At run time") is in both logs (wait 1) and compared as any frame. Found with it so far: the forced states' frame, the clip events before the runner
 (main.c), how long a press stays new (3 frames, MV_NEW_FOR) and that it is the press's value that counts (a tap let
 go still does), the root's step after the turn and the face's hold before the runner; and in the recompiler RSQRT.S
 (fs / sqrt(ft), not 1 / sqrt(fs)), which had left the game's monster unable to turn towards the stick (its stick
@@ -42,8 +42,8 @@ end told the frame after, and in the recompiler CVT.W.S to the nearest (the EE t
 
 Usage: python tools/movelog.py hook             put the calls into the generated sub_002EBFE0, sub_00106BD0 and
                                                  sub_00106950 (then build.ps1 -Quick)
-       python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, time, mode,
-                                                 mirroring, HP or energy differ; then the other monsters' (a bot's)
+       python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, the wait, time,
+                                                 mode, mirroring, HP or energy differ; then the other monsters' (a bot's)
                                                  B lines, paired by player and count
 """
 import glob
@@ -117,21 +117,12 @@ def diff(game, port, show=20):
         why = []
         if x['F'] == '1':                                # the game's first line is the runner before the level's reset
             continue
-        if x['wait'] != '0':
-            # the game's switch wait (no 0x1000: the runner holds the old state 2 frames, its clip already started;
-            # FORMAT_MONSTER.md "At run time"): the port, which enters at once, is in the state the wait ends in
-            j = i
-            while j < len(a) and a[j]['wait'] != '0':
-                j += 1
-            if j < len(a) and y['st'] == a[j]['st']:
-                continue
         if x['st'] != y['st']:
             why.append(f"state {x['st']} / {y['st']}")
-        # the frame the game's wait ends it has just entered (no pick yet); the port, in that state since the wait
-        # began, may have picked already
-        after_wait = i > 0 and a[i - 1]['wait'] != '0'
-        if x['pick'] != y['pick'] and x['wait'] == '0' and not after_wait:
+        if x['pick'] != y['pick']:
             why.append(f"pick {x['pick']} / {y['pick']}")
+        if x['wait'] != y['wait']:
+            why.append(f"wait {x['wait']} / {y['wait']}")
         if abs(float(x['t']) - float(y['t'])) > 0.002:
             why.append(f"time {x['t']} / {y['t']}")
         for key in ('mode', 'mir'):
@@ -146,7 +137,7 @@ def diff(game, port, show=20):
             if shown >= show:
                 break
     if not shown:
-        print('no difference in state, pick, time, mode, mirroring, HP or energy')
+        print('no difference in state, pick, wait, time, mode, mirroring, HP or energy')
 
 
 def read_bots(path):
@@ -175,16 +166,12 @@ def diff_bots(game, port, show=10):
             continue
         x, y = a[key], b[key]
         why = []
-        if x['wait'] != '0':                         # the game's switch wait, as in diff(): the port is in the state
-            n = key[1]                               # the wait ends in
-            while (key[0], n) in a and a[(key[0], n)]['wait'] != '0':
-                n += 1
-            if (key[0], n) in a and y['st'] == a[(key[0], n)]['st']:
-                continue
         if x['st'] != y['st']:
             why.append(f"state {x['st']} / {y['st']}")
-        if x['pick'] != y['pick'] and x['wait'] == '0':
+        if x['pick'] != y['pick']:
             why.append(f"pick {x['pick']} / {y['pick']}")
+        if x['wait'] != y['wait']:
+            why.append(f"wait {x['wait']} / {y['wait']}")
         if abs(float(x['t']) - float(y['t'])) > 0.002:
             why.append(f"time {x['t']} / {y['t']}")
         if x['mode'] != y['mode']:
@@ -201,7 +188,7 @@ def diff_bots(game, port, show=10):
             if shown >= show:
                 break
     if not shown:
-        print('the other monsters: no difference in state, pick, time, mode, HP or place')
+        print('the other monsters: no difference in state, pick, wait, time, mode, HP or place')
 
 
 def main():
