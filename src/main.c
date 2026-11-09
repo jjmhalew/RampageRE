@@ -5882,7 +5882,15 @@ static void bot_collapse(void *ctx, int bi)          /* collapseBuilding, scored
     }
 }
 
-/* what the AI monsters' DestroyBuildings goals see this frame: the buildings, the monsters, each one itself */
+/* what the AI monsters' DestroyBuildings goals see: the buildings, the monsters, each one itself. Made again right
+ * before each AI monster's runner (mon_step): the goal's update reads the world as it is then, its own place after
+ * its update this frame and the monsters before it after theirs [R by the game's trace, tools/movelog.py: a bot's
+ * walk round a front's corner (0x2EE150) let go the frame its own y passed the corner's line; seen from the frame's
+ * start the port's held on a frame longer, turned 12 degrees less and punched the building 4 frames later] */
+static DirBuilding bot_db[64];
+static DirMonster bot_dm[MONSTERS];
+static DirBotView bot_bv[MONSTERS];
+
 static void bot_views(Viewer *v, DirBuilding *db, DirMonster *dm, DirBotView *bv)
 {
     int nb = 0;
@@ -6267,6 +6275,8 @@ static void mon_step(Mon *mo, float dt)
                     mo->mz, cosf(h), sinf(h), -sinf(h), cosf(h), mo->is_ai);
             fflush(v->movelog);
         }
+        if (ev != 0 && mo->is_ai && mo->have_ag)     /* the goals see the world as it is now */
+            bot_views(v, bot_db, bot_dm, bot_bv);
         int switched = ev == 0 || (mo->is_ai && mo->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */
                                    dir_ai_step(&mo->ai, &mo->ag, &mo->run, root, cdt, dt, nai, answer, mo) :
                                    moves_step(&mo->run, in, cdt, answer, mo));
@@ -6493,10 +6503,7 @@ static void play_step(Viewer *v, float dt, float aspect)
     scene_cloth_step(&v->scene, dt);                 /* the cloths' time, simulated at the next posing */
     fx_budget(v->fxw, v->nmon + (v->extra >= 0));    /* the effects budget, by the monsters in the world (0x2B72B0) */
     v->mid_x = players_mid_x(v);                     /* 0x336360, once a frame (0x2B6CE0) */
-    static DirBuilding db[64];
-    static DirMonster dm[MONSTERS];
-    static DirBotView bv[MONSTERS];
-    bot_views(v, db, dm, bv);
+    bot_views(v, bot_db, bot_dm, bot_bv);
     if (v->extra >= 0) {                             /* the revealed monster's 0.25 s timer, its calls */
         reveal_walk_update(&v->rwalk, dt, v->mon[v->extra].mx, v->view.pos[0]);
         reveal_events(v);
