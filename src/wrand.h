@@ -2,11 +2,17 @@
  *   gWorld +0x828: Park-Miller (0x106BD0: s = 16807 s mod 2^31 - 1, 2^31 - 1 becomes 0), seeded from GameStatus
  *     seed[0]: gWorld.frand() (s / 2^31, 0x279F98), gWorld.rand() ((s >> 8) & 0xFFFF, 0x279F58), findPointInRubble;
  *   gWorld +0x82C: the lagged Fibonacci 0x106950 (seeded by 0x1069C0 from seed[1]): the bots' rand01, the edibles'
- *     rand(), the smashes. [R] */
+ *     rand(), the smashes. [R]
+ * And the world's step, gWorld.getTimeStep(), which the systems' scripts count in. */
 #ifndef WRAND_H
 #define WRAND_H
 
 #include <stdint.h>
+
+/* gWorld.getTimeStep() [R 0x2B7800]: 1/30, the world's step on a 60 Hz screen, as the port plays; 1/25 on a 50 Hz
+ * one, as the recompiled PAL game runs, so --do "replay" takes its log's (tools/movelog.py) */
+float world_step(void);
+void world_set_step(float step);
 
 uint32_t *wrand_pm_state(void);                      /* +0x828 itself (findPointInRubble draws on it) */
 void wrand_seed_pm(uint32_t seed);

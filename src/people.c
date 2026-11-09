@@ -9,7 +9,7 @@
 
 #define PI 3.14159265f
 #define DEG (180.0f / PI)
-#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
+#define TIMESTEP world_step()                        /* gWorld.getTimeStep(), 1/30 (wrand.h) [R 0x2B7800] */
 #define DELETE_ME (4 | 8 | 16)                       /* [R] what a script handler returns to have its actor deleted */
 #define MAX_EVENTS 256
 #define MAX_TIMERS 32

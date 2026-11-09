@@ -1,4 +1,4 @@
-/* wrand.c - the world's two random states (gWorld +0x828, +0x82C), see wrand.h */
+/* wrand.c - the world's two random states (gWorld +0x828, +0x82C) and its step, see wrand.h */
 #include "wrand.h"
 
 /* RAMPAGE_RNGLOG=file: who draws (tools/movelog.py, against the recompiled game's PS2X_RNGLOG): one line per draw,
@@ -71,6 +71,11 @@ static void rng_note(char kind)
 void wrand_log_frame(int frame) { (void)frame; }
 #define rng_note(kind) ((void)0)
 #endif
+
+static float step = 1.0f / 30.0f;
+
+float world_step(void) { return step; }
+void world_set_step(float s) { step = s; }
 
 static uint32_t pm = 0x2545F491u;
 

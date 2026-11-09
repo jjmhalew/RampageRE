@@ -8,7 +8,7 @@
 #include "wrand.h"
 
 #define PI 3.14159265f
-#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): its step, 1/30 [R 0x2B7800] */
+#define TIMESTEP world_step()                        /* gWorld.getTimeStep(), 1/30 (wrand.h) [R 0x2B7800] */
 #define MAX_OBJS 128
 #define MAX_EVENTS 512
 #define SLOTS 3                                      /* the current block and the two behind it */

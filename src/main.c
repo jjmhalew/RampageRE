@@ -87,12 +87,12 @@ typedef struct {
 enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2, DRIVE_PAD = 3 };
 
 #define MONSTERS 4                                   /* the game's players and bots together (Common 0x4D7E28) */
-#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): the world's step [R 0x2B7800]; the monster's
+#define TIMESTEP world_step()                        /* gWorld.getTimeStep(): the world's step [R 0x2B7800]; the monster's
                                                       * update runs once a step, here once a drawn frame */
 /* the monster's update a second, which its per-step shares (the ground follow's 0.7, the face's 0.4, the foot lock's,
  * the hands' 0.3, the foot records') go by: 30, the world's rate on a 60 Hz screen (0x285A20, 0x2B7800); 25 on a
  * 50 Hz one, as the recompiled PAL game runs, so --do "replay" takes the rate of the log it plays (FLOW_NOTES.md) */
-static float step_hz = 30;
+#define step_hz (1 / world_step())
 
 #define MON_FX_SLOTS 32
 #define MON_FX_NAMED 8
@@ -7061,7 +7061,7 @@ static void replay_log(Viewer *v, Mon *mo, const char *path, float aspect)
             warned = 1;
         }
         if (dt > 0)                                  /* the log's world rate (25 for the PAL game) */
-            step_hz = 1 / dt;
+            world_set_step(dt);
         play_step(v, dt, aspect);
         if (pose_monsters(v, 0)) {                   /* posed each frame, as the main loop does */
             scene_update(&v->scene, 0);
@@ -9071,11 +9071,19 @@ static int viewer_main(int argc, char **argv)
         char line[256];
         unsigned s0, s1;
         const char *at;
-        while (f && fgets(line, sizeof line, f))
-            if (line[0] == 'R' && (at = strstr(line, " seed ")) && sscanf(at + 6, "%x %x", &s0, &s1) == 2) {
+        int seeded = 0, stepped = 0;
+        float dt;
+        while (f && fgets(line, sizeof line, f) && !(seeded && stepped))
+            if (!seeded && line[0] == 'R' && (at = strstr(line, " seed ")) && sscanf(at + 6, "%x %x", &s0, &s1) == 2) {
                 v.prof.current.seed[0] = s0;
                 v.prof.current.seed[1] = s1;
-                break;
+                seeded = 1;
+            } else if (!stepped && line[0] == 'F' && (at = strstr(line, " dt ")) && sscanf(at + 4, "%f", &dt) == 1 &&
+                       dt > 0) {
+                world_set_step(dt);                  /* and its world's step from the start: the block is made with it */
+                if (v.fxw)
+                    fx_set_step(v.fxw, TIMESTEP);
+                stepped = 1;
             }
         if (f)
             fclose(f);

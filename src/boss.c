@@ -18,7 +18,7 @@
 #define MAX_SP 24                                    /* a SplineMover's points */
 #define MAX_LP 40                                    /* a LineMover's points */
 #define MAX_FX_DIE 32                                /* (the burning Scumhawk's fires: 2 + 3 x 2 + 2 every 3 s) */
-#define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): the world's step [R 0x2B7800] */
+#define TIMESTEP world_step()                        /* gWorld.getTimeStep(), 1/30 (wrand.h) [R 0x2B7800] */
 #define ROOF(storeys) ((float)(storeys) * 3.0f + 3.0f * 0.5f + 6.0f)   /* the scripts' height of a building */
 
 /* object flags (+0x4C), names from the table at 0x3F5F70 [R]; 8 and 0x8000000 have no name there */
