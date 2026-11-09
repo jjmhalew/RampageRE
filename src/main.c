@@ -6320,7 +6320,10 @@ static void mon_step(Mon *mo, float dt)
                 reveal_walk_arrived(&v->rwalk, &v->reveal);
             else if (v->game)
                 game_move_done(v->game, mo->slot);
-        float t1 = switched ? (ev == 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : mo->run.time;
+        /* the old clip's step this frame: none on a transition taken (its clip's request goes out at once, 0x2ECBE0, and
+         * the new clip's start drops the step) [R by the game's trace, tools/movelog.py: a bot's walk into its punch
+         * stood still that frame, where the port went on 0.1 along the front]; up to its end when it ran out */
+        float t1 = switched ? (ev == 0 || mo->run.via >= 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : mo->run.time;
         if (posted >= 0 && ev != 0 && !(mo->is_ai && mo->ai.forced)) {   /* the posted state, after the runner */
             moves_force(&mo->run, posted);
             if (!switched)
