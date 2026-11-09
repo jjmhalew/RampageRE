@@ -116,10 +116,19 @@ const MoveNode *moves_node(const MoveGraph *g, const char *name);   /* NULL = no
 /* 0x2DACA0: effect slot k's node (the other side's while mirrored), NULL = none */
 const struct MoveFxNode *moves_fx_node(const MoveGraph *g, int slot, int mirrored);
 
+/* how long a press, a release or a stick move counts as new: the game's count of frames since it (+0x1C, +0x20 of
+ * the variable's entry, zeroed by the event 0x2C14B8, raised once a frame after the runner at the end of 0x2C0AD0)
+ * at most gp-0x7218 (2) (0x2C1A18, 0x2C1A60, 0x2C1950): the frame it comes and the next two, 0.12 s at the game's 25
+ * frames a second. 0.1 so that steps of 0.04 give exactly those three [R by the recompiled game's trace,
+ * tools/movelog.py: Circle pressed 4 frames before Ground_Kick's window opened did not grab] */
+#define MV_NEW_FOR 0.1f
+
 typedef struct {
     float v[MV_COUNT];                               /* held values (booleans 0 / 1) */
     float fresh[MV_COUNT];                           /* > 0: pressed lately (seconds left), for "new" conditions */
     float gone[MV_COUNT];                            /* > 0: let go lately (seconds left), for a "new" == 0 (0x2C1A60) */
+    float age;                                       /* the frame's time the two age by (the game counts frames, so
+                                                        not the clip's, which the speed boost scales); 0: the step's */
     int mirrored;                                    /* the monster plays mirrored: conditions with flag 2 swap left
                                                         and right (0x2C15F8) */
 } MoveInput;

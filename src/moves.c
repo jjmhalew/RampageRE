@@ -580,9 +580,10 @@ int moves_step(MoveRunner *r, MoveInput *in, float dt, MoveCall call, void *ctx)
             }
         }
     }
-    for (int k = 0; k < MV_COUNT; k++) {             /* inputs age; a switch uses them up */
-        in->fresh[k] = switched ? 0 : in->fresh[k] - dt;
-        in->gone[k] = switched ? 0 : in->gone[k] - dt;
+    float age = in->age > 0 ? in->age : dt;
+    for (int k = 0; k < MV_COUNT; k++) {             /* inputs age a frame (0x2C11C0 ..); a switch uses them up */
+        in->fresh[k] = switched ? 0 : in->fresh[k] - age;
+        in->gone[k] = switched ? 0 : in->gone[k] - age;
     }
     return switched;
 }

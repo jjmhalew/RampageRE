@@ -5945,15 +5945,16 @@ static void mon_step(Mon *mo, float dt)
     if (mo->have_graph) {
         MoveInput *in = &mo->input;
         face_step(mo, dt);
-        if (in->v[MV_LX] != lx) in->fresh[MV_LX] = 0.2f;
-        if (in->v[MV_LY] != ly) in->fresh[MV_LY] = 0.2f;
+        if (in->v[MV_LX] != lx) in->fresh[MV_LX] = MV_NEW_FOR;
+        if (in->v[MV_LY] != ly) in->fresh[MV_LY] = MV_NEW_FOR;
         in->v[MV_LX] = lx;
         in->v[MV_LY] = ly;
         for (int k = MV_UP; k <= MV_L3; k++) {
-            if (in->v[k] && !held[k] && !pressed[k]) in->gone[k] = 0.2f;   /* let go (the release, 0x2C1A60) */
+            if (in->v[k] && !held[k] && !pressed[k]) in->gone[k] = MV_NEW_FOR;   /* let go (the release, 0x2C1A60) */
             in->v[k] = held[k] || pressed[k];
-            if (pressed[k]) in->fresh[k] = 0.2f;
+            if (pressed[k]) in->fresh[k] = MV_NEW_FOR;
         }
+        in->age = dt;
         moves_derive(in);
         {                                            /* the stick in the monster's frame (0x2C0AD0 -> 0x2C03E0) */
             float w[3], h = mo->heading / 57.2957795f, c = cosf(h), s = sinf(h);

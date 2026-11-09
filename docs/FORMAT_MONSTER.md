@@ -94,8 +94,12 @@ Flags (+0x2C), as the command and the monster update (0x2DE530 ...) test them:
 ## Conditions
 A condition is `variable OP value`, OP 0 `>`, 1 `>=`, 2 `<`, 3 `<=`, 4 `==` (the function tables at 0x3F5950 for
 floats and 0x3F5970 for booleans; the variable is the left operand). Flags bit 0: test the value as it is; clear:
-the input must be new, latched this frame (0x2C1A60, 0x2C17C0), so a button press counts once. `tools/monster.py`
-prints them as `Square==1(new) L.up==1`.
+the input must be new, so a button press counts once: its entry's count of frames since it was pressed (+0x1C,
+zeroed by the press 0x2C14B8, raised once a frame after the runner at the end of 0x2C0AD0, all set past the limit
+when the state switches) at most gp −0x7218 (2) (0x2C1A18): the frame it comes and the next two, 0.12 s at the
+game's 25 frames a second. A press made earlier than that before a transition's input window opens is lost (port:
+`MV_NEW_FOR`) [R by the recompiled game's trace, tools/movelog.py: Circle pressed 4 frames before `Ground_Kick`'s
+window did not grab]. `tools/monster.py` prints them as `Square==1(new) L.up==1`.
 
 The variables are a table per player (0x4D3330 + player × 0x3C4, +0x18; 16 bytes each from +0x14), filled each
 frame by 0x2C0AD0 from the pad record (gp−0x6FA8 + player × 0x5C) that the pad code (0x1A5220, after scePadRead)
