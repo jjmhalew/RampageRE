@@ -99,7 +99,10 @@ zeroed by the press 0x2C14B8, raised once a frame after the runner at the end of
 when the state switches) at most gp −0x7218 (2) (0x2C1A18): the frame it comes and the next two, 0.12 s at the
 game's 25 frames a second. A press made earlier than that before a transition's input window opens is lost (port:
 `MV_NEW_FOR`) [R by the recompiled game's trace, tools/movelog.py: Circle pressed 4 frames before `Ground_Kick`'s
-window did not grab]. `tools/monster.py` prints them as `Square==1(new) L.up==1`.
+window did not grab]. What a new test compares is the value the input was pressed or moved to (+0x18, kept by the
+event 0x2C14B8 from a non-zero value; a zero one is a release: +0x20), not its value now (+0x14): a tap let go before
+the window opens still counts its 3 frames [R by the trace: Square tapped 2 frames before `Ground_Punch`'s 0.54 took
+`Ground_Punch_2`]. `tools/monster.py` prints them as `Square==1(new) L.up==1`.
 
 The variables are a table per player (0x4D3330 + player × 0x3C4, +0x18; 16 bytes each from +0x14), filled each
 frame by 0x2C0AD0 from the pad record (gp−0x6FA8 + player × 0x5C) that the pad code (0x1A5220, after scePadRead)

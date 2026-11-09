@@ -5967,14 +5967,29 @@ static void mon_step(Mon *mo, float dt)
     if (mo->have_graph) {
         MoveInput *in = &mo->input;
         face_step(mo, dt);
-        if (in->v[MV_LX] != lx) in->fresh[MV_LX] = MV_NEW_FOR;
-        if (in->v[MV_LY] != ly) in->fresh[MV_LY] = MV_NEW_FOR;
-        in->v[MV_LX] = lx;
-        in->v[MV_LY] = ly;
+        /* [R 0x2C14B8] an input's event: its value now (+0x14); a non-zero one is a press or a move (its value kept,
+         * +0x18, its count of frames since zeroed, +0x1C), a zero one a release (+0x20 zeroed): a stick let go to the
+         * middle is not a move */
+        const float axis[2] = { lx, ly };
+        for (int k = 0; k < 2; k++) {
+            int id = k ? MV_LY : MV_LX;
+            if (in->v[id] == axis[k])
+                continue;
+            if (axis[k] != 0) {
+                in->fresh[id] = MV_NEW_FOR;
+                in->latched[id] = axis[k];
+            } else {
+                in->gone[id] = MV_NEW_FOR;
+            }
+            in->v[id] = axis[k];
+        }
         for (int k = MV_UP; k <= MV_L3; k++) {
             if (in->v[k] && !held[k] && !pressed[k]) in->gone[k] = MV_NEW_FOR;   /* let go (the release, 0x2C1A60) */
             in->v[k] = held[k] || pressed[k];
-            if (pressed[k]) in->fresh[k] = MV_NEW_FOR;
+            if (pressed[k]) {
+                in->fresh[k] = MV_NEW_FOR;
+                in->latched[k] = 1;
+            }
         }
         in->age = dt;
         moves_derive(in);

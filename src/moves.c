@@ -463,7 +463,11 @@ static int holds(const MoveCond *c, const MoveInput *in)
         return in->gone[var] > 0;                    /* frames since <= 2), the front's Circle == 0 into the release */
     if (!(c->flags & 1) && in->fresh[var] <= 0)      /* a "new" condition: the input must have just come */
         return 0;
-    float a = in->v[var], b;
+    /* [R 0x2C1A18 .. 0x2C1A48] a new test of a button or an axis reads the value it was pressed or moved to (+0x18,
+     * kept by 0x2C14B8 from a non-zero event), not what it is now: a tap let go before the window opened still
+     * counts its 3 frames [R by the recompiled game's trace, tools/movelog.py: Square tapped 2 frames before
+     * Ground_Punch's 0.54 took Ground_Punch_2]. The derived ones (30 ..) are read as they are (0x2C17C0's table) */
+    float a = !(c->flags & 1) && var < MV_R_SIZE ? in->latched[var] : in->v[var], b;
     if (is_bool(var)) {
         a = a != 0;
         b = (c->value & 0xFF) != 0;
