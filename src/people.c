@@ -328,6 +328,7 @@ static void start_anim(People *p, Person *q, const char *name, int random_offset
             q->anim_time = r - len * (float)(int)(r / len);
     }
     q->anim_done = 0;
+    q->anim_end = 0;
 }
 
 /* ---------------------------------------------------------------- the LineMover (0x315E10) */
@@ -1877,19 +1878,24 @@ void people_update(People *p, float dt, const PeopleMonster *m, int nm)
         if (q->phase == PP_GONE)
             continue;
         int r = 1;
-        /* the anim: a play that does not repeat ends in onAnimComplete */
-        if (q->anim_loop) {
-            if (q->anim_len > 0) {
-                q->anim_time = fmodf(q->anim_time + (q->anim_reverse ? -dt : dt), q->anim_len);
-                if (q->anim_time < 0)
-                    q->anim_time += q->anim_len;
-            }
-        } else if (!q->anim_done) {
-            q->anim_time += dt;
-            if (q->anim_time >= q->anim_len) {
+        /* the anim: a play that does not repeat ends in onAnimComplete. [R by PS2X_RNGLOG] The actor is told of the
+         * end the frame after its clip got there (0x30CE98, before the pulse), and then the clip is advanced, the one
+         * its handler started too: the Mime's next turn and its draw at 32, 51, 57 where told at once they came at 31,
+         * 50, 56 */
+        if (!q->anim_loop && !q->anim_done && q->anim_end) {
+            q->anim_done = 1;                        /* a handler's startAnim clears it */
+            r = on_anim_done(p, q);
+        }
+        if (r != DELETE_ME && q->phase != PP_GONE) {
+            if (q->anim_loop) {
+                if (q->anim_len > 0) {
+                    q->anim_time = fmodf(q->anim_time + (q->anim_reverse ? -dt : dt), q->anim_len);
+                    if (q->anim_time < 0)
+                        q->anim_time += q->anim_len;
+                }
+            } else if (!q->anim_done && !q->anim_end && (q->anim_time += dt) >= q->anim_len) {
                 q->anim_time = q->anim_len;
-                q->anim_done = 1;                    /* a handler's startAnim clears it */
-                r = on_anim_done(p, q);
+                q->anim_end = 1;
             }
         }
         /* [R 0x30CEA0] the pulse's clock (+0xFC) runs only with a delay (+0xF8) of 0.01 or more; at the delay it is
