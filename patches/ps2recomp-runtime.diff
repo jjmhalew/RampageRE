@@ -309,10 +309,30 @@ index a4286ba..a48786d 100644
          bool m_sifInitialized = false;
      };
 diff --git a/ps2xRecomp/src/lib/fpu_translator.cpp b/ps2xRecomp/src/lib/fpu_translator.cpp
-index 944cee7..a936c34 100644
+index 944cee7..a3b7360 100644
 --- a/ps2xRecomp/src/lib/fpu_translator.cpp
 +++ b/ps2xRecomp/src/lib/fpu_translator.cpp
-@@ -76,7 +76,9 @@ namespace ps2recomp
+@@ -53,12 +53,14 @@ namespace ps2recomp
+             case COP1_S_MUL:
+                 return fmt::format("ctx->f[{}] = FPU_MUL_S(ctx->f[{}], ctx->f[{}]);", fd, fs, ft);
+             case COP1_S_DIV:
+-                return fmt::format("if (ctx->f[{}] == 0.0f) {{ ctx->fcr31 |= 0x100000; /* DZ flag */ "
+-                                   "ctx->f[{}] = copysignf(INFINITY, ctx->f[{}] * 0.0f); }} "
+-                                   "else ctx->f[{}] = ctx->f[{}] / ctx->f[{}];",
+-                                   ft, fd, fs, fd, fs, ft);
++                // RAMPAGE: the EE has no infinity: x / 0 is the largest float with the sign of fs xor ft (FPU_DIV_S)
++                return fmt::format("if (ctx->f[{}] == 0.0f) ctx->fcr31 |= 0x100000; /* DZ flag */ "
++                                   "ctx->f[{}] = FPU_DIV_S(ctx->f[{}], ctx->f[{}]);",
++                                   ft, fd, fs, ft);
+             case COP1_S_SQRT:
+-                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, fs);
++                // RAMPAGE: SQRT.S fd, ft reads the ft field (fs is 0 in its encoding, 0x46010084 = sqrt.s $f2, $f1);
++                // reading fs took the root of $f0
++                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, ft);
+             case COP1_S_ABS:
+                 return fmt::format("ctx->f[{}] = FPU_ABS_S(ctx->f[{}]);", fd, fs);
+             case COP1_S_MOV:
+@@ -76,7 +78,9 @@ namespace ps2recomp
              case COP1_S_CVT_W:
                  return fmt::format("{{ int32_t tmp = FPU_CVT_W_S(ctx->f[{}]); std::memcpy(&ctx->f[{}], &tmp, sizeof(tmp)); }}", fs, fd);
              case COP1_S_RSQRT:
@@ -348,10 +368,10 @@ index 94a6fa1..787d362 100644
      X(sceDeci2ExLock)                         \
      X(sceDeci2ExRecv)                         \
 diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
-index 0f19c9f..ca948e1 100644
+index 0f19c9f..0937cd3 100644
 --- a/ps2xRuntime/include/ps2_runtime_macros.h
 +++ b/ps2xRuntime/include/ps2_runtime_macros.h
-@@ -597,11 +597,68 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+@@ -597,19 +597,101 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
      return _mm_set1_epi64x(static_cast<long long>(value));
  }
  
@@ -425,10 +445,29 @@ index 0f19c9f..ca948e1 100644
  
  // FPU (COP1) operations
  #define FPU_SET_ACC(ctx, res) (ctx->f_acc = res)
-@@ -610,6 +667,18 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
- #define FPU_MUL_S(a, b) ((float)(a) * (float)(b))
- #define FPU_DIV_S(a, b) ((float)(a) / (float)(b))
- #define FPU_SQRT_S(a) sqrtf((float)(a))
+-#define FPU_ADD_S(a, b) ((float)(a) + (float)(b))
+-#define FPU_SUB_S(a, b) ((float)(a) - (float)(b))
+-#define FPU_MUL_S(a, b) ((float)(a) * (float)(b))
+-#define FPU_DIV_S(a, b) ((float)(a) / (float)(b))
+-#define FPU_SQRT_S(a) sqrtf((float)(a))
++// RAMPAGE: the EE's FPU has no infinity or NaN: a result past the largest float is held there (its sign kept), x / 0 is
++// the largest float with the sign of x xor the divisor's, and the root is of |x|. With IEEE's infinity a wall's
++// normalise divided by 0 and the inf - inf after it left the recompiled game's monster at NaN on a roof's edge
++static inline float ps2_fpu_clamp(float x)
++{
++    return fabsf(x) <= 3.40282347e+38f ? x : std::signbit(x) ? -3.40282347e+38f : 3.40282347e+38f;
++}
++static inline float ps2_fpu_div(float s, float t)
++{
++    if (t == 0.0f)
++        return std::signbit(s) != std::signbit(t) ? -3.40282347e+38f : 3.40282347e+38f;
++    return ps2_fpu_clamp(s / t);
++}
++#define FPU_ADD_S(a, b) ps2_fpu_clamp((float)(a) + (float)(b))
++#define FPU_SUB_S(a, b) ps2_fpu_clamp((float)(a) - (float)(b))
++#define FPU_MUL_S(a, b) ps2_fpu_clamp((float)(a) * (float)(b))
++#define FPU_DIV_S(a, b) ps2_fpu_div((float)(a), (float)(b))
++#define FPU_SQRT_S(a) sqrtf(fabsf((float)(a)))
 +// RAMPAGE: RSQRT.S fd, fs, ft = fs / sqrt(ft) as the EE does it: the root of |ft|, no infinity or NaN (a zero root
 +// gives the largest float with the sign of fs xor ft, and a quotient past it is held there)
 +static inline float ps2_fpu_rsqrt(float s, float t)
