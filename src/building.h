@@ -90,7 +90,6 @@ typedef struct {
     float shake_time, shake_length, shake_amp;       /* the shaker (+0x8AC): time left, ShakeLength, MasterAmp */
     float shake_t, shake_total;
     float shake[4][3];                               /* (period, phase, amp) */
-    uint32_t seed;                                   /* Park-Miller (0x106BD0) */
     int no_autocollapse;                             /* disableAutoCollapse(1): its HP running out does not fell it */
     int dirty;                                       /* a cell or a storey changed: redraw */
     BuildingWindow window[BUILDING_WINDOWS]; int nwindows;   /* its open (and opening, closing) windows */

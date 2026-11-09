@@ -2673,7 +2673,6 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->hitter = -1;                             /* +0x190: no attacker yet */
         sb->b.row = (int)group_num(inst, "Row", 0);
         sb->b.hp = sb->b.hp_max = (int)group_num(t, "BuildingHP", (float)sb->b.hp_max);
-        sb->b.seed = *count;
         sb->mesh = mesh;
         sb->node = node;
         sb->ground = ground_inst;

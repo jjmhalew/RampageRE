@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include "building.h"
+#include "wrand.h"
 
 #define CELL_W 5.0f
 #define GROUND_H 6.0f
@@ -34,7 +35,6 @@ void building_init(Building *b, const float min[3], const float max[3], int widt
     b->shake_amp = 0.05f;
     static const float SHAKE[4][3] = { { 0.05f, 1, 3 }, { 0.25f, 2, 0.25f }, { 0.33f, 3, 0.25f }, { 0.61f, 4, 0.25f } };
     memcpy(b->shake, SHAKE, sizeof b->shake);
-    b->seed = 1;
     b->ground_due = 1;                               /* 0x2D2820 */
 }
 
@@ -47,10 +47,13 @@ int building_cell_index(const Building *b, int face, int column)
     return i < BUILDING_CELLS ? i : -1;
 }
 
-static uint32_t rnd(Building *b)                     /* Park-Miller, seed x 16807 mod 2^31 - 1 (0x106BD0) */
+/* the world's Park-Miller (gWorld +0x828, 0x4D1FC8: every building draws on it, 0x2BBD80 .. 0x2CF198), shared with
+ * every other system's draws [R by PS2X_RNGLOG, tools/movelog.py]. A Park-Miller of each building's own, as here
+ * before, left the world's stream behind the game's at the first hit */
+static uint32_t rnd(Building *b)
 {
-    b->seed = (uint32_t)((uint64_t)b->seed * 16807 % 2147483647u);
-    return b->seed;
+    (void)b;
+    return wrand_pm();
 }
 
 static float rnd01(Building *b) { return (float)rnd(b) / 2147483648.0f; }
@@ -172,6 +175,18 @@ void building_set_level(Building *b, int face, int row, int col, int level)
     if (old == level)
         return;
     v->level = (uint8_t)level;
+    if (level != 0) {
+        /* [R 0x2CEC40 .. 0x2CEC78 -> 0x2CF0D0] the vertex's own vector is set again from its table (0x430EE0) and
+         * moved by a random point within 0.05 x level / 3 of it: a point in the ball, by rejection (x, y, z each
+         * r / 2^31 - 0.5 until x^2 + y^2 + z^2 <= 1/4), three draws a try. Not used here, but its draws are the
+         * world's, before the dent's own */
+        float x, y, z;
+        do {
+            x = rnd01(b) - 0.5f;
+            y = rnd01(b) - 0.5f;
+            z = rnd01(b) - 0.5f;
+        } while (z * z + y * y + x * x > 0.25f);
+    }
     if (level == 0) {
         v->along = v->up = 0;
     } else if (level > old) {
