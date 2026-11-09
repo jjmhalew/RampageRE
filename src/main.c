@@ -110,6 +110,8 @@ typedef struct Mon {
     float frame[2][3], stick[2];                     /* the camera's right and forward axes the stick is read in
                                                         (+0xA18, +0xA24) and the stick they were taken for (+0xA3C) */
     float air[3];                                    /* the stick's own velocity (+0xA68), NODE_AIR_* */
+    float travel[4];                                 /* the root's travel the runner's step left for the next update:
+                                                        x, y in the monster's own frame, z, and its turn (mon_step) */
     uint32_t armed;                                  /* body parts an attack event armed (bits) */
     int mirror, mirror_queued;                       /* the clip plays mirrored (+0xAA0); for the next clip (+0xAA1) */
     Mount mount;                                     /* on a building's face (climb.c) */
@@ -657,6 +659,7 @@ static void start_moves(Mon *mo)
     mo->hand_thick = mo->monster >= 0 && !_stricmp(v->monsters[mo->monster], "Lizzie") ? 0.5f : 0.75f;
     memset(&mo->input, 0, sizeof mo->input);
     memset(mo->vel, 0, sizeof mo->vel);
+    memset(mo->travel, 0, sizeof mo->travel);
     mo->mirror = mo->mirror_queued = 0;
     memset(&mo->mount, 0, sizeof mo->mount);
     memset(mo->hand, 0, sizeof mo->hand);
@@ -1007,6 +1010,7 @@ static void reveal_events(Viewer *v)
             mo->heading = e->v[0] * 57.2957795f;
             mo->mode = MODE_GROUND;
             memset(mo->vel, 0, sizeof mo->vel);
+            memset(mo->travel, 0, sizeof mo->travel);
             mo->shown = 1;
             if (mon_in(mo))
                 mon_in(mo)->hidden = 0;
@@ -2459,6 +2463,7 @@ static void clip_event(Mon *mo, const MoveEvent *e)
             in.cam_half_fov = v->view.fov / 2;
             game_start_respawn(v->game, mo->slot, &in, &out);
             mo->mx = out.pos[0]; mo->my = out.pos[1]; mo->mz = out.pos[2];
+            memset(mo->travel, 0, sizeof mo->travel);
             mo->heading = out.facing * 57.2957795f;
             mo->human = 0;
             if (out.fall) {                          /* in the air, Jump_Butt_Slam_fall */
@@ -3576,6 +3581,7 @@ static void reset_monster_state(Mon *mo)
     mo->scale = mo->scale_to = 1;
     mo->scale_left = 0;
     memset(mo->vel, 0, sizeof mo->vel);
+    memset(mo->travel, 0, sizeof mo->travel);
     mo->power.speed = 1;                             /* 0x2DCBAC .. 0x2DCBB0: the speed scale 1, no time left (the
                                                       * rage, if on, goes on) [R] */
     mo->power.speed_time = 0;
@@ -3980,6 +3986,7 @@ static void game_step(Viewer *v, float dt)
                     mo->mx += e->pos[0]; mo->my += e->pos[1] + v->block_shift; mo->mz += e->pos[2];
                 } else if (e->a >= 1 || e->type == GE_PLACE) {
                     mo->mx = e->pos[0]; mo->my = e->pos[1] + v->block_shift; mo->mz = e->pos[2];
+                    memset(mo->travel, 0, sizeof mo->travel);
                     if (e->a >= 1) {                 /* setFacingZ, setVel(0, 0, 0) */
                         mo->heading = e->f * 57.2957795f;
                         memset(mo->vel, 0, sizeof mo->vel);
@@ -5924,6 +5931,21 @@ static int cam_follows(const Mon *mo)
     return !in->hidden;
 }
 
+/* the root's travel and turn the runner's last step left (Mon.travel): taken in the monster's update, after the stick's
+ * turn and before the runner, so the step goes along the heading turned this frame [R by the game's trace,
+ * tools/movelog.py: a walk's 0.703 a frame goes along the heading logged that frame, and its first step comes the
+ * frame after the clip's first advance; taken right after the runner, the port's went along the heading before the
+ * turn, ending a walk 1.1 off a front's edge, which it then did not mount] */
+static void mon_travel(Mon *mo)
+{
+    float c = cosf(mo->heading / 57.2957795f), s = sinf(mo->heading / 57.2957795f);
+    mo->mx += c * mo->travel[0] - s * mo->travel[1];
+    mo->my += s * mo->travel[0] + c * mo->travel[1];
+    mo->mz += mo->travel[2];
+    mo->heading += mo->travel[3];
+    memset(mo->travel, 0, sizeof mo->travel);
+}
+
 /* one frame of a monster's own play, from its pad (Mon.pad). The graph picks the state; the clip's root carries the
  * monster (its travel added to where it stands, its turn when a NODE_BAKE_ROOT state ends), the stick turns it
  * (NODE_STEER) or drives it (NODE_AIR_*) in the camera's frame, the clip's events set its movement mode and velocity,
@@ -6138,6 +6160,7 @@ static void mon_step(Mon *mo, float dt)
         if (mo->dropping && mo->mode != MODE_AIRBORNE)   /* 0x2E19F8 .. 0x2E1A14: dropping in only while in the air */
             mo->dropping = 0;
         float before[3] = { mo->mx, mo->my, mo->mz };
+        mon_travel(mo);
         float root[3] = { mo->mx, mo->my, mo->mz };
         int nai = 0;                                 /* the AI monsters in play, who share the graph search's
                                                       * states a frame (0x2F30C0: +0x108 set, +0x109 clear) */
@@ -6175,18 +6198,16 @@ static void mon_step(Mon *mo, float dt)
             switched = 1;
             ev = 0;                                  /* a forced start: no transition (below) */
         }
-        float a[3], b[3], q[4];                      /* the root's travel and turn this frame the state hands the monster */
+        float a[3], b[3], q[4];                      /* the root's travel and turn the runner's step hands the monster */
         if (root_at(mo, clip_at(mo, st, t0), a, q) == 0 && root_at(mo, clip_at(mo, st, t1), b, q) == 0) {
-            float c = cosf(mo->heading / 57.2957795f), s = sinf(mo->heading / 57.2957795f);
-            float dx = st->flags & NODE_ROOT_X ? b[0] - a[0] : 0, dy = st->flags & NODE_ROOT_Y ? b[1] - a[1] : 0;
             float m = mo->mirror ? -1.0f : 1.0f;      /* mirrored: across the monster's x */
-            mo->mx += c * m * dx - s * dy;
-            mo->my += s * m * dx + c * dy;
-            if (st->flags & NODE_ROOT_Z)
-                mo->mz += b[2] - a[2];
-            if (st->flags & NODE_ROOT_TURN)
-                mo->heading += m * root_turn(mo, clip_at(mo, st, t0), clip_at(mo, st, t1));
+            mo->travel[0] += st->flags & NODE_ROOT_X ? m * (b[0] - a[0]) : 0;
+            mo->travel[1] += st->flags & NODE_ROOT_Y ? b[1] - a[1] : 0;
+            mo->travel[2] += st->flags & NODE_ROOT_Z ? b[2] - a[2] : 0;
+            mo->travel[3] += st->flags & NODE_ROOT_TURN ? m * root_turn(mo, clip_at(mo, st, t0), clip_at(mo, st, t1)) : 0;
         }
+        if (switched && (st->flags & NODE_BAKE_ROOT))   /* the bake below puts the old root's end where the monster is */
+            mon_travel(mo);
         if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
             float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
             float h = mo->heading;

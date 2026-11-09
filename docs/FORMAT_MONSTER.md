@@ -452,6 +452,10 @@ moves it by its velocity and gravity, tests the landing and the mount (0x2DE530 
 (0x2C0AD0) runs the runner and only then takes in a posted state (+0x110, 0x2C0DC4 .. 0x2C0E1C → 0x2EBF50). So
 `Jump_Start_1`'s 16 up at 0.136 is moved by and pulled down in the frame whose step crosses it, and a landing
 (0x2DC450 posts slot 56 through setReaction) leaves the air state running that frame, the landing starting after it.
+The root's travel is a frame behind and turned with it: the step the runner's clip made last frame moves the monster
+in its update, after the stick's turn (+0xA14, 0x2E0260), so it goes along the heading of the frame it is taken in
+(a walk's 0.703 a frame along the heading logged that frame; a new walk's first step the frame after its clip first
+advances). `mon_travel` takes it there; a baking clip's last step is taken before the bake.
 
 ## Blending
 0x2FFA00 starts a clip in the monster's animation player: with blend mode 0, or 1 while nothing plays yet, it cuts;
