@@ -6240,6 +6240,41 @@ static void mon_step(Mon *mo, float dt)
             mo->mz += (pos[2] - mo->mz) * k;
             mo->heading += (fmodf(h - mo->heading + 540, 360) - 180) * k;
         }
+        /* in the update (0x2E03A8), before the runner, as the travel: the foot lock (0x2E0EFC), the camera's reach
+         * (0x2E10A4), the monsters pushed apart (0x2E11A4) and the box test (0x2E11B0) [R by the game's trace,
+         * tools/movelog.py: a monster walking or punched into a front is logged as the runner starts, already held
+         * 3 off it; the AI's goals read that place] */
+        if (mon_in(mo) && mo->feet.anchor >= 0) {   /* the foot lock (0x33BF10): the root eases onto
+                                                      * the planted foot as the clip has it at its time 0 */
+            const Instance *in = mon_in(mo);
+            float feet[2][3], place[3] = { mo->mx, mo->my, mo->mz };
+            if (ik_clip_node(in, 0, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, 0, "Bip01 R Foot", feet[1]) == 0 &&
+                foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading,
+                          dt * step_hz)) {
+                mo->mx = place[0];
+                mo->my = place[1];
+                if (mo->is_ai)                       /* 0x2E0F54: the goal's +0x38 */
+                    dir_ai_cooldown(&mo->ai);
+            }
+        }
+        if (!mo->reveal) {                           /* (the revealed one walks off to x 100 [R]) */
+            if (mo->mx < -75) mo->mx = -75;
+            if (mo->mx > 75) mo->mx = 75;
+        }
+        if (!mo->is_ai && !mo->mount.mounted) {   /* the camera's reach (0x336290): a player off a face stays
+                                                      * at most 70 up and 30 along x from the players' middle */
+            if (mo->mz > 70) {
+                mo->mz = 70;
+                if (mo->vel[2] > 0) mo->vel[2] = 0;
+                if (mo->air[2] > 0) mo->air[2] = 0;
+            }
+            if (fabsf(mo->mx - v->mid_x) > 30) {
+                mo->mx = v->mid_x + (mo->mx > v->mid_x ? 30 : -30);
+                mo->vel[0] = mo->air[0] = 0;
+            }
+        }
+        push_apart(mo, dt);
+        push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
         float root[3] = { mo->mx, mo->my, mo->mz };
         int nai = 0;                                 /* the AI monsters in play, who share the graph search's
                                                       * states a frame (0x2F30C0: +0x108 set, +0x109 clear) */
@@ -6371,37 +6406,6 @@ static void mon_step(Mon *mo, float dt)
                 memset(mo->vel, 0, sizeof mo->vel);
                 set_reaction(mo, 67);
                 mo->defeated = 1;
-            }
-        }
-        if (mon_in(mo) && mo->feet.anchor >= 0) {   /* the foot lock (0x33BF10): the root eases onto
-                                                      * the planted foot as the clip has it at its time 0 */
-            const Instance *in = mon_in(mo);
-            float feet[2][3], place[3] = { mo->mx, mo->my, mo->mz };
-            if (ik_clip_node(in, 0, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, 0, "Bip01 R Foot", feet[1]) == 0 &&
-                foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading,
-                          dt * step_hz)) {
-                mo->mx = place[0];
-                mo->my = place[1];
-                if (mo->is_ai)                       /* 0x2E0F54: the goal's +0x38 */
-                    dir_ai_cooldown(&mo->ai);
-            }
-        }
-        if (!mo->reveal) {                           /* (the revealed one walks off to x 100 [R]) */
-            if (mo->mx < -75) mo->mx = -75;
-            if (mo->mx > 75) mo->mx = 75;
-        }
-        push_apart(mo, dt);
-        push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
-        if (!mo->is_ai && !mo->mount.mounted) {   /* the camera's reach (0x336290): a player off a face stays
-                                                      * at most 70 up and 30 along x from the players' middle */
-            if (mo->mz > 70) {
-                mo->mz = 70;
-                if (mo->vel[2] > 0) mo->vel[2] = 0;
-                if (mo->air[2] > 0) mo->air[2] = 0;
-            }
-            if (fabsf(mo->mx - v->mid_x) > 30) {
-                mo->mx = v->mid_x + (mo->mx > v->mid_x ? 30 : -30);
-                mo->vel[0] = mo->air[0] = 0;
             }
         }
         if (mo->turn_left > 0) {                     /* a hit's turn (hit_turn) over what else turned it */
