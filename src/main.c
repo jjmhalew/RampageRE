@@ -1295,6 +1295,8 @@ static void build(Viewer *v)
     v->scene.traffic = v->veh;
     if (v->have_scene)                               /* Traffic's crowds, once a world */
         city_crowds(v->city, &v->scene);
+    if (v->sobj)                                     /* the street objects' onInit, the block begun */
+        streetobj_init(v->sobj);
     parade_free(v->parade);                          /* the block's balloons, bikers and food carts */
     v->parade = NULL;
     for (int k = 0; k < v->nmon; k++)

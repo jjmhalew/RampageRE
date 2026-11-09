@@ -2195,6 +2195,10 @@ void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb)
                    o->world[12], o->world[13], o->world[14], o->box_min[0], o->box_min[1], o->box_min[2],
                    o->box_max[0], o->box_max[1], o->box_max[2], (unsigned)o->oflags, o->building);
     }
+}
+
+void streetobj_init(StreetObjs *s)
+{
     for (int i = 0; i < s->n; i++)                   /* onInit, the block begun */
         if (s->o[i].kind == SK_BILLBOARD)
             billboard_init(s, &s->o[i]);

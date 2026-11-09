@@ -206,6 +206,9 @@ int streetobj_add_attachment(StreetObjs *s, int parent, Group tmpl, const float 
 /* the block's start (0x2B6580 -> 0x309E20): each object without a building is attached to the building whose
  * footprint holds it (inclusive, the last such one: 0x2A3D20 with no direction) */
 void streetobj_start(StreetObjs *s, const StreetBuilding *b, int nb);
+/* their onInit (the billboards' pigeons, the fountains', the kites'): the block begun, after its people, AI, traffic
+ * and Traffic's crowds are made (their draws on the world's random numbers after those) */
+void streetobj_init(StreetObjs *s);
 
 /* the next dt seconds: their pulses (at 1/60 s), onBuildingDestruction from the buildings, the falls */
 void streetobj_update(StreetObjs *s, float dt, const StreetMonster *m, int nm, const StreetBuilding *b, int nb);
