@@ -390,7 +390,9 @@ the bottle in its hand (`Attachment2`, node 2, 0.25 out) turn every frame (Proce
 
 ## AnimatedSign.bsf [R]
 VegasCowboySign (Las Vegas block 1, on the Gold Rush building's roof): an `ActorInstance|` of its building, the only
-actor any building places; city.c places it with the building's objects. Its own clip (Sign_Cowboy's arm, the
+actor any building lists. The game does not make it: no Construct of it draws on the world's random numbers in
+the block's making, and the recompiled game's Gold Rush has no cowboy (PS2X_RNGLOG, tools/movelog.py); city.c
+leaves it out too. The script is ported all the same (SK_ANIMSIGN). Its own clip (Sign_Cowboy's arm, the
 `Sign` ActorAnimShape with no Anim) loops.
 - **Construct**: flags 0, a fallRot onPulse never reads (one `gWorld.frand()`).
 - **TakeDamage** (a monster's blow: it is `IsObstacle+OnlyHitWithEffNodes`), **TakeImpact** (a thrown object) or

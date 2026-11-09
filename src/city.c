@@ -2798,14 +2798,9 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
     s->placing_building = !scenery && *count > had ? (int)(*count - 1) : -1;
     for (uint32_t i = 0; i < no; i++)
         place_object(c, s, record_group(where, obj[i]), node);
-    no = group_values(inst, "ActorInstance|", &where, obj, MAX_REC);   /* its actors: the one there is, Las Vegas'
-                                                                         * VegasCowboySign (AnimatedSign.bsf) */
-    for (uint32_t i = 0; i < no; i++) {
-        Group ai = record_group(where, obj[i]), at = template_of(c, group_str(ai, "Name"));
-        const char *sc = at.at ? group_str(at, "Script|ScriptName") : NULL;
-        if (sc && !_stricmp(sc, "AnimatedSign.bsf"))
-            place_object(c, s, ai, node);
-    }
+    /* its ActorInstance| (the one there is: Las Vegas block 1's VegasCowboySign, AnimatedSign.bsf, on the Gold Rush
+     * building) the game does not make: no Construct draws its gWorld.frand() in the block's making and the
+     * recompiled game's Gold Rush has no cowboy [R by PS2X_RNGLOG, tools/movelog.py, and its screenshots] */
     s->placing_building = -1;
     if (*count > had) {                              /* its pieces, to move */
         SceneBuilding *sb = &(*list)[*count - 1];

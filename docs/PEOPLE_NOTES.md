@@ -306,7 +306,8 @@ crowds, a streaker), `Biker` 74 (parade.c), `StationaryPerson` 73, `Military_Win
 - **AnimatedSign.bsf** (`VegasCowboySign`, an `ActorInstance|` of a Las Vegas `BuildingInstance|`, not a person): a
   looping `Sign` that falls (z − 10 a second, turning (π/10, 3π/20) a second, `GroundEffect` at z ≤ −0.25, then
   deleted) when a monster hits it (`HitEffect`, addStats), something thrown meets it or its building comes down
-  (`DetachEffect`). Ported in streetobj.c (SK_ANIMSIGN, docs/STREETOBJ_NOTES.md).
+  (`DetachEffect`). Ported in streetobj.c (SK_ANIMSIGN, docs/STREETOBJ_NOTES.md), though the game never makes it
+  (a building's actors are not made).
 - **ActorSwarm.bsf** (`ChildSwarm`, the school's recess; people.c `people_add_swarm`) [R ActorSwarm.scr]: made by
   SchoolBuilding.bsf at the school's place. Its `onInit` plays `BellSound` (`Alarm_Bell`) and sets a 2 s pulse. The
   first pulse shows its `Message` ("RECESS", a PointsBanner text in `MessageColor`, (0, 200, 0), scale 0.5), plays
