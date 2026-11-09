@@ -312,9 +312,15 @@ City *city_open(const Vol *vol, const char *name);   /* NULL if the city's bundl
 void city_close(City *c);
 uint32_t city_blocks(City *c, const char **names, uint32_t max);   /* the block list, without repeats */
 int city_build(City *c, const char *block, int night, Scene *s);    /* 0 = ok */
-/* the world starts (its scripts' onInit): the next city_build with occupants makes Traffic's two crowds and their
- * Crowd_Panic; a city_build without this before it (the game's next block) makes none */
+/* the world starts (its scripts' onInit): the next city_crowds after a city_build with occupants makes Traffic's two
+ * crowds and their Crowd_Panic; one without this before it (the game's next block) makes none */
 void city_new_world(City *c);
+/* the block's people (its ActorInstance| list, not SpawnedItem): after its edibles and street objects, before its AI
+ * (0x2B6580's order, the draws on the world's random numbers) */
+void city_actors(City *c, Scene *s);
+/* Traffic's onActivateBlock: its crowds, once a world; after the block's edibles, objects, AI and traffic are made
+ * (0x2B6580's order: the people draw on the world's random numbers after them) */
+void city_crowds(City *c, Scene *s);
 /* the block left behind, after city_build of the next (0x303BB0, 0x303C90): its GroundShape at (0, -41, 0) and the
  * RubbleShape of each of its buildings with -50 <= LeftEdgeXPos < 50 where the building stood, as models only */
 void city_build_left(City *c, const char *block, Scene *s);

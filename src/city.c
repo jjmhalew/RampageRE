@@ -3674,6 +3674,46 @@ static void update(Scene *s, double t, int all)
 
 void scene_update(Scene *s, double t) { update(s, t, 0); }
 
+void city_actors(City *c, Scene *s)
+{
+    Record r[MAX_REC];
+    uint32_t n = s->folk ? group_all(s->block, "ActorInstance|", r, MAX_REC) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        Group a = record_group(s->block, r[i]), t = template_of(c, group_str(a, "Name"));
+        if (!a.at || group_num(a, "SpawnedItem", 0) != 0)
+            continue;
+        if (!t.at) {
+            s->missing++;
+            continue;
+        }
+        if (parade_script_ours(group_str(t, "Script|ScriptName")))   /* a biker: parade.c's (main) */
+            continue;
+        float xyz[3];
+        location(a, xyz);
+        people_set_instance(s->folk, people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0)), a);   /* (its chain) */
+        s->people++;
+    }
+    if (s->folk)
+        people_set_block(s->folk, s->block);         /* the SpawnedItem ones come by the chains (people.h) */
+}
+
+/* [R] Traffic::onActivateBlock: the crowds come once a world (bCreateCrowd, set by its onInit), on the first block
+ * with runners whose CreateCrowd (1 unless set; 0 in HK01, HK02, SF10) is not 0; with them the 3D sound Crowd_Panic
+ * at the block's origin (SoundEffect.start(name, 1): it goes when it has played, sound.c) */
+void city_crowds(City *c, Scene *s)
+{
+    if (!s->folk || !c->create_crowd || !c->nrunners || group_num(s->block, "CreateCrowd", 1) == 0)
+        return;
+    static const float CROWD[2][3] = { { -14, 0.5f, 0 }, { 8, -3, 0 } };
+    static const float ORIGIN[3] = { 0, 0, 0 };
+    c->create_crowd = 0;
+    for (int k = 0; k < 2 && c->nrunners; k++)
+        s->people += people_crowd(s->folk, c->runners, c->nrunners, CROWD[k]);
+    int se = sound_effect_start("Crowd_Panic", 1);
+    if (se >= 0)                                     /* (sfx.isValid()) */
+        sound_effect_set_point(se, ORIGIN);
+}
+
 int city_build(City *c, const char *block_name, int night, Scene *s)
 {
     memset(s, 0, sizeof *s);
@@ -3733,7 +3773,8 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
     s->placing_attack = 0;
     s->placing_block = 0;
     /* the people (people.c): the block's ActorInstance| entries (SpawnedItem = 1: comes after an earlier one is
-     * gone), Traffic's two crowds of the block's occupants' runners, the window occupants later */
+     * gone; city_actors) and Traffic's two crowds of the block's occupants' runners (city_crowds), made by the caller
+     * in the game's order; the window occupants later */
     s->owner = c;
     s->folk = people_new(people_clip_seconds, c);
     people_set_templates(s->folk, people_template, c);
@@ -3768,23 +3809,6 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         if (water_read(record_group(block, r[i]), &wd) == 0 && (s->water[s->nwater] = water_new(&wd, at, 0)) != NULL)
             s->nwater++;
     }
-    n = group_all(block, "ActorInstance|", r, MAX_REC);
-    for (uint32_t i = 0; i < n; i++) {
-        Group a = record_group(block, r[i]), t = template_of(c, group_str(a, "Name"));
-        if (!a.at || group_num(a, "SpawnedItem", 0) != 0)
-            continue;
-        if (!t.at) {
-            s->missing++;
-            continue;
-        }
-        if (parade_script_ours(group_str(t, "Script|ScriptName")))   /* a biker: parade.c's (main) */
-            continue;
-        float xyz[3];
-        location(a, xyz);
-        people_set_instance(s->folk, people_add(s->folk, t, xyz, group_num(a, "ZRotation", 0)), a);   /* (its chain) */
-        s->people++;
-    }
-    people_set_block(s->folk, block);                /* the SpawnedItem ones come by the chains (people.h) */
     Group occ = group_sub(block, "Occupants");
     s->music = group_str(block, "Music");
     s->block = block;
@@ -3821,19 +3845,6 @@ int city_build(City *c, const char *block_name, int night, Scene *s)
         Group rt = template_of(c, rn);
         if (fill && rt.at && c->nrunners < 16)
             c->runners[c->nrunners++] = rt;
-    }
-    /* [R] Traffic::onActivateBlock: the crowds come once a world (bCreateCrowd, set by its onInit), on the first block
-     * with runners whose CreateCrowd (1 unless set; 0 in HK01, HK02, SF10) is not 0; with them the 3D sound
-     * Crowd_Panic at the block's origin (SoundEffect.start(name, 1): it goes when it has played, sound.c) */
-    if (c->create_crowd && c->nrunners && group_num(block, "CreateCrowd", 1) != 0) {
-        static const float CROWD[2][3] = { { -14, 0.5f, 0 }, { 8, -3, 0 } };
-        static const float ORIGIN[3] = { 0, 0, 0 };
-        c->create_crowd = 0;
-        for (int k = 0; k < 2 && c->nrunners; k++)
-            s->people += people_crowd(s->folk, c->runners, c->nrunners, CROWD[k]);
-        int se = sound_effect_start("Crowd_Panic", 1);
-        if (se >= 0)                                 /* (sfx.isValid()) */
-            sound_effect_set_point(se, ORIGIN);
     }
     traffic(s, block, 0);
     /* the next two blocks behind it (0x302AF0): slot 1 at y + 41, slot 2 at y + 82 (hard-coded), their ground, every

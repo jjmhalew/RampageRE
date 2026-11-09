@@ -1132,6 +1132,106 @@ static void build(Viewer *v)
         music_stop(0);
         music_play(v->scene.music);
     }
+    /* [R 0x2B6580] the block made in the game's order, as its draws on the world's random numbers go: the edibles
+     * behind the windows (each building's cells and slots), the street objects, the block's people, its AI, the
+     * traffic and then Traffic's crowds (onActivateBlock) [R by the recompiled game's PS2X_RNGLOG, tools/movelog.py] */
+    edible_free(v->edibles);                         /* the edibles behind the block's windows */
+    v->edibles = NULL;
+    v->nefx = 0;
+    if (v->have_scene) {
+        static EdibleHost eh;
+        eh.find = army_find;
+        eh.cell_state = edible_cell_state;
+        eh.cell_place = edible_cell_where;
+        eh.cell_follow = edible_cell_follow;
+        eh.ctx = v;
+        v->edibles = edible_new(&eh);
+        if (v->edibles) {
+            edible_load_block(v->edibles, v->scene.block);
+            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {   /* 0x3196F0: a building's window slots, then
+                                                      * its edibles, the draws in that order */
+                const SceneBuilding *sb = &v->scene.buildings[i];
+                int before = edible_slots(v->edibles), own = 0;
+                scene_occupant_slots(&v->scene, (int)i);
+                edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
+                for (int k = before; k < edible_slots(v->edibles); k++) {   /* its edibles' new slots: those in a
+                                                      * cell of no occupant's slot are slots of their own; the first
+                                                      * occupant's slot of its cell takes its kind (+0xE, 0x319EAC) */
+                    const EdibleSlot *es = edible_slot(v->edibles, k);
+                    int shared = 0;
+                    for (int j = 0; j < v->scene.nslots && !shared; j++) {
+                        struct WindowSlot *ws = &v->scene.slots[j];
+                        shared = ws->building == (int)i && ws->column == es->column &&
+                                 building_live_of(&sb->b, ws->storey) == es->storey;
+                        if (shared)
+                            ws->edible = es->kind;
+                    }
+                    own += !shared;
+                }
+                scene_occupant_pad(&v->scene, own);
+            }
+            scene_occupant_sort(&v->scene);          /* 0x31A540: then the list sorted (0x31AE20) */
+            v->scene.slots_made = 1;
+            if (getenv("RAMPAGE_TRACE")) {
+                int nm = 0;
+                for (int k = 0; k < v->scene.nslots; k++)
+                    nm += v->scene.slots[k].military;
+                printf("window slots: %d civilian, %d military; the list %d long, the soldiers' turn its first %d, "
+                       "the civilians' the %d after\n", v->scene.nslots - nm, nm, v->scene.norder, v->scene.order_mil,
+                       v->scene.order_civ);
+            }
+            add_tubes(v);                            /* a reveal's tubes, for the block now built */
+            if (getenv("RAMPAGE_TRACE"))
+                printf("edibles: %d kinds, %d slots\n", edible_kinds(v->edibles), edible_slots(v->edibles));
+        }
+    }
+    v->scene.edibles = v->edibles;
+    for (int k = 0; k < v->nweather_fx; k++)         /* the last block's weather: in the game its FollowEffect goes
+                                                      * with its object at the block's end (0x2B66C0) and the next
+                                                      * block's Weather starts at once (0x302AF0) [R]; here the old
+                                                      * one runs on until the new block is built */
+        if (v->fxw)
+            fx_stop(v->fxw, v->weather_fx[k]);
+    v->nweather_fx = 0;
+    v->weather_due = v->have_scene;
+    streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
+    v->sobj = NULL;
+    v->nsofx = 0;
+    for (int k = 0; k < v->nmon; k++)
+        v->mon[k].held_sobj = -1;
+    if (v->have_scene) {
+        static StreetHost sh;
+        sh.shape_box = army_shape_box;
+        sh.shape_sphere = model_sphere;
+        sh.find = rubble_tmpl;                       /* a template by name: the geysers the fountains leave */
+        sh.ctx = v;
+        v->sobj = streetobj_new(&sh);
+        for (int k = 0; k < SCENE_STREET_MAX; k++)   /* one a script makes has no scene entry */
+            v->street_of[k] = -1;
+        static StreetBuilding sbs[64];
+        int nb = 0;
+        for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
+            memcpy(sbs[nb].min, v->scene.buildings[i].b.min, sizeof sbs[nb].min);
+            memcpy(sbs[nb].max, v->scene.buildings[i].b.max, sizeof sbs[nb].max);
+            sbs[nb].falling = v->scene.buildings[i].b.collapse >= 0;
+        }
+        for (int k = 0; k < v->scene.nstreet; k++) {
+            const struct SceneStreetObj *so = &v->scene.street[k];
+            v->sobj_of[k] = !v->sobj ? -1 : so->parent >= 0 ?   /* a billboard's attachment, after it */
+                            streetobj_add_attachment(v->sobj, v->sobj_of[so->parent], so->t, so->world) :
+                            streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack);
+            if (v->sobj_of[k] >= 0)
+                v->street_of[v->sobj_of[k]] = k;
+            if (v->sobj_of[k] >= 0 && so->nnode)     /* the crane's nodes */
+                streetobj_nodes(v->sobj, v->sobj_of[k], (const float (*)[3])so->node, so->nnode);
+        }
+        if (v->sobj)
+            streetobj_start(v->sobj, sbs, nb);
+        if (getenv("RAMPAGE_TRACE"))
+            printf("street objects: %d\n", v->sobj ? streetobj_count(v->sobj) : 0);
+    }
+    if (v->have_scene)                               /* the block's people (ActorInstance|) */
+        city_actors(v->city, &v->scene);
     if (v->army) {
         army_free(v->army);
         v->army = NULL;
@@ -1193,50 +1293,8 @@ static void build(Viewer *v)
         }
     }
     v->scene.traffic = v->veh;
-    for (int k = 0; k < v->nweather_fx; k++)         /* the last block's weather: in the game its FollowEffect goes
-                                                      * with its object at the block's end (0x2B66C0) and the next
-                                                      * block's Weather starts at once (0x302AF0) [R]; here the old
-                                                      * one runs on until the new block is built */
-        if (v->fxw)
-            fx_stop(v->fxw, v->weather_fx[k]);
-    v->nweather_fx = 0;
-    v->weather_due = v->have_scene;
-    streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
-    v->sobj = NULL;
-    v->nsofx = 0;
-    for (int k = 0; k < v->nmon; k++)
-        v->mon[k].held_sobj = -1;
-    if (v->have_scene) {
-        static StreetHost sh;
-        sh.shape_box = army_shape_box;
-        sh.shape_sphere = model_sphere;
-        sh.find = rubble_tmpl;                       /* a template by name: the geysers the fountains leave */
-        sh.ctx = v;
-        v->sobj = streetobj_new(&sh);
-        for (int k = 0; k < SCENE_STREET_MAX; k++)   /* one a script makes has no scene entry */
-            v->street_of[k] = -1;
-        static StreetBuilding sbs[64];
-        int nb = 0;
-        for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
-            memcpy(sbs[nb].min, v->scene.buildings[i].b.min, sizeof sbs[nb].min);
-            memcpy(sbs[nb].max, v->scene.buildings[i].b.max, sizeof sbs[nb].max);
-            sbs[nb].falling = v->scene.buildings[i].b.collapse >= 0;
-        }
-        for (int k = 0; k < v->scene.nstreet; k++) {
-            const struct SceneStreetObj *so = &v->scene.street[k];
-            v->sobj_of[k] = !v->sobj ? -1 : so->parent >= 0 ?   /* a billboard's attachment, after it */
-                            streetobj_add_attachment(v->sobj, v->sobj_of[so->parent], so->t, so->world) :
-                            streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack);
-            if (v->sobj_of[k] >= 0)
-                v->street_of[v->sobj_of[k]] = k;
-            if (v->sobj_of[k] >= 0 && so->nnode)     /* the crane's nodes */
-                streetobj_nodes(v->sobj, v->sobj_of[k], (const float (*)[3])so->node, so->nnode);
-        }
-        if (v->sobj)
-            streetobj_start(v->sobj, sbs, nb);
-        if (getenv("RAMPAGE_TRACE"))
-            printf("street objects: %d\n", v->sobj ? streetobj_count(v->sobj) : 0);
-    }
+    if (v->have_scene)                               /* Traffic's crowds, once a world */
+        city_crowds(v->city, &v->scene);
     parade_free(v->parade);                          /* the block's balloons, bikers and food carts */
     v->parade = NULL;
     for (int k = 0; k < v->nmon; k++)
@@ -1312,56 +1370,6 @@ static void build(Viewer *v)
         }
     }
     v->scene.rail = v->rail;
-    edible_free(v->edibles);                         /* the edibles behind the block's windows */
-    v->edibles = NULL;
-    v->nefx = 0;
-    if (v->have_scene) {
-        static EdibleHost eh;
-        eh.find = army_find;
-        eh.cell_state = edible_cell_state;
-        eh.cell_place = edible_cell_where;
-        eh.cell_follow = edible_cell_follow;
-        eh.ctx = v;
-        v->edibles = edible_new(&eh);
-        if (v->edibles) {
-            edible_load_block(v->edibles, v->scene.block);
-            for (uint32_t i = 0; i < v->scene.nbuildings; i++) {   /* 0x3196F0: a building's window slots, then
-                                                      * its edibles, the draws in that order */
-                const SceneBuilding *sb = &v->scene.buildings[i];
-                int before = edible_slots(v->edibles), own = 0;
-                scene_occupant_slots(&v->scene, (int)i);
-                edible_add_building(v->edibles, (int)i, sb->inst, sb->props, sb->b.width, sb->b.n);
-                for (int k = before; k < edible_slots(v->edibles); k++) {   /* its edibles' new slots: those in a
-                                                      * cell of no occupant's slot are slots of their own; the first
-                                                      * occupant's slot of its cell takes its kind (+0xE, 0x319EAC) */
-                    const EdibleSlot *es = edible_slot(v->edibles, k);
-                    int shared = 0;
-                    for (int j = 0; j < v->scene.nslots && !shared; j++) {
-                        struct WindowSlot *ws = &v->scene.slots[j];
-                        shared = ws->building == (int)i && ws->column == es->column &&
-                                 building_live_of(&sb->b, ws->storey) == es->storey;
-                        if (shared)
-                            ws->edible = es->kind;
-                    }
-                    own += !shared;
-                }
-                scene_occupant_pad(&v->scene, own);
-            }
-            scene_occupant_sort(&v->scene);          /* 0x31A540: then the list sorted (0x31AE20) */            v->scene.slots_made = 1;
-            if (getenv("RAMPAGE_TRACE")) {
-                int nm = 0;
-                for (int k = 0; k < v->scene.nslots; k++)
-                    nm += v->scene.slots[k].military;
-                printf("window slots: %d civilian, %d military; the list %d long, the soldiers' turn its first %d, "
-                       "the civilians' the %d after\n", v->scene.nslots - nm, nm, v->scene.norder, v->scene.order_mil,
-                       v->scene.order_civ);
-            }
-            add_tubes(v);                            /* a reveal's tubes, for the block now built */
-            if (getenv("RAMPAGE_TRACE"))
-                printf("edibles: %d kinds, %d slots\n", edible_kinds(v->edibles), edible_slots(v->edibles));
-        }
-    }
-    v->scene.edibles = v->edibles;
     {                                                /* the buildings' shadows on the lot, cast at the block's start */
         static float boxes[SHADOW_MAX_BUILDINGS][6];
         int nb = 0;
