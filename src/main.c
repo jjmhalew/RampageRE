@@ -343,6 +343,7 @@ typedef struct Viewer {
      * goes for, the demos it waits for (no presses in the menus) */
     Autoplay *ap; double ap_t; float ap_wait;
     FILE *movelog; int movelog_frame;                /* --movelog: player 1's move runner, a line a frame */
+    int movelog_n[MONSTERS];                         /* the other monsters' B lines so far, by slot */
     int replay_frame; float replay_rows[2][3];       /* replay_log: the camera axes the game's monster read the stick
                                                         in (+0xA18, +0xA24), for player 1 in place of the port's */
     int ap_type, ap_players, ap_bots, ap_city, ap_demos;
@@ -6254,6 +6255,16 @@ static void mon_step(Mon *mo, float dt)
                     mo->run.chosen, btn, lx, ly, mo->hp, mo->energy, mo->mode, mo->mirror, mo->mx, mo->my, mo->mz,
                     cosf(h), sinf(h), -sinf(h), cosf(h), mo->vel[0], mo->vel[1], mo->vel[2], v->nmon, v->num_bots,
                     mo->is_ai, mo->frame[0][0], mo->frame[0][1], mo->frame[1][0], mo->frame[1][1]);
+            fflush(v->movelog);
+        }
+        if (v->movelog && mo != &v->mon[0] && mo - v->mon < v->nmon && dt > 0) {   /* the others (a bot): B lines,
+                                                      * paired with the game's by slot and count */
+            int k = (int)(mo - v->mon);
+            float h = mo->heading / 57.2957795f;
+            fprintf(v->movelog, "B %d p %d n %d st %d t %.6f pick %d wait 0 hp %.3f en %.3f mode %d mir %d "
+                    "pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f ai %d\n", v->movelog_frame, k, ++v->movelog_n[k],
+                    mo->run.state, mo->run.time, mo->run.chosen, mo->hp, mo->energy, mo->mode, mo->mirror, mo->mx, mo->my,
+                    mo->mz, cosf(h), sinf(h), -sinf(h), cosf(h), mo->is_ai);
             fflush(v->movelog);
         }
         int switched = ev == 0 || (mo->is_ai && mo->have_ag ?   /* the AI picks the transitions (0x2E1AA0) */

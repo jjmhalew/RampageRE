@@ -27,7 +27,7 @@ static BOOL (WINAPI *rng_line_from_addr)(HANDLE, DWORD64, PDWORD, RngLine *);   
 
 void wrand_log_frame(int frame) { rng_frame = frame; }
 
-static void rng_note(char kind)
+static void rng_note(char kind, uint32_t a, uint32_t b)   /* a, b: the state drawn from (P's; L's i and j) */
 {
     static int init;
     if (!init) {
@@ -64,12 +64,16 @@ static void rng_note(char kind)
             fprintf(rng_log, ":%lu", (unsigned long)line.LineNumber);
         shown++;
     }
+    if (kind == 'P')                                 /* and the state it draws from, as the game's log has it */
+        fprintf(rng_log, " s=%08x", a);
+    else
+        fprintf(rng_log, " s=%u,%u", a, b);
     fputc('\n', rng_log);
     fflush(rng_log);
 }
 #else
 void wrand_log_frame(int frame) { (void)frame; }
-#define rng_note(kind) ((void)0)
+#define rng_note(kind, a, b) ((void)0)
 #endif
 
 static float step = 1.0f / 30.0f;
@@ -85,7 +89,7 @@ void wrand_seed_pm(uint32_t seed) { pm = seed; }
 uint32_t wrand_pm_next(uint32_t *s)
 {
     if (s == &pm)
-        rng_note('P');
+        rng_note('P', *s, 0);
     uint64_t x = (uint64_t)*s * 16807u;
     x = (x & 0x7FFFFFFFu) + (x >> 31);
     x = (x & 0x7FFFFFFFu) + (x >> 31);
@@ -129,7 +133,7 @@ void wrand_lf_peek(uint32_t *i, uint32_t *j, uint32_t *sum)
 
 uint32_t wrand_lf(void)
 {
-    rng_note('L');
+    rng_note('L', lf.i, lf.j);
     uint32_t v = lf.t[lf.i] + lf.t[lf.j];
     lf.i = lf.i == 16 ? 0 : lf.i + 1;
     lf.t[lf.j] = v;

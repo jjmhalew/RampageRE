@@ -13,17 +13,22 @@ build\disc\RAMPAGE.VOL LasVegas 1 --monster George --players NP --bots NB --do "
 --movelog build\movelog_port.txt --shot s.png` with the log's np / nb, then `diff`. The replay hands the port the
 game's stick frame (+0xA18, +0xA24) too.
 
--ToGameplay's menu presses go by the clock, so a run may start with a bot partner (np 2 nb 1). The diff skips the
-game's 2-frame switch wait (a pick without 0x1000), which the port leaves out on purpose (FORMAT_MONSTER.md "At run
-time"). Found with it so far: the forced states' frame, the clip events before the runner (main.c), how long a
-press stays new (3 frames, MV_NEW_FOR) and that it is the press's value that counts (a tap let go still does), the
-root's step after the turn and the face's hold before the runner; and in the recompiler RSQRT.S (fs / sqrt(ft), not
-1 / sqrt(fs)), which had left the game's monster unable to turn towards the stick (its stick direction was never
-normalised: an angle of 0, or 180 degrees behind it), and SQRT.S (the root of ft, not fs) with DIV.S by 0 (the
-largest float, not infinity), which had put the game's monster at NaN on a roof's edge.
+-ToGameplay's menu presses go by the clock, so a run may start with a bot partner (np 2 nb 1): replay it with
+--players 2 --bots 1, or the world's random numbers part at the bot's first draw. The other monsters have B lines
+(player, their own count n, player 1's frame; state, time, pick, HP, mode, place, heading, AI flag), which the diff
+pairs by player and n.
+
+The diff skips the game's 2-frame switch wait (a pick without 0x1000), which the port leaves out on purpose
+(FORMAT_MONSTER.md "At run time"). Found with it so far: the forced states' frame, the clip events before the runner
+(main.c), how long a press stays new (3 frames, MV_NEW_FOR) and that it is the press's value that counts (a tap let
+go still does), the root's step after the turn and the face's hold before the runner; and in the recompiler RSQRT.S
+(fs / sqrt(ft), not 1 / sqrt(fs)), which had left the game's monster unable to turn towards the stick (its stick
+direction was never normalised: an angle of 0, or 180 degrees behind it), and SQRT.S (the root of ft, not fs) with
+DIV.S by 0 (the largest float, not infinity), which had put the game's monster at NaN on a roof's edge.
 
 The game logged here is the PAL one: 25 world steps a second (dt 0.04), where the port plays at 30; a replay takes
-the log's rate for the monster's per-step shares (main.c step_hz).
+the log's step for the whole world (wrand.h world_step: the monster's per-step shares, the traffic's, people's and
+objects' scripts) before the block is made.
 
 The random numbers: the game's log has an R line a frame (the world's Park-Miller state, the lagged Fibonacci's i, j
 and the sum of its table, GameStatus' two seeds), as does the port's; a replay starts from those seeds. Who draws:
@@ -38,7 +43,8 @@ end told the frame after, and in the recompiler CVT.W.S to the nearest (the EE t
 Usage: python tools/movelog.py hook             put the calls into the generated sub_002EBFE0, sub_00106BD0 and
                                                  sub_00106950 (then build.ps1 -Quick)
        python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, time, mode,
-                                                 mirroring, HP or energy differ
+                                                 mirroring, HP or energy differ; then the other monsters' (a bot's)
+                                                 B lines, paired by player and count
 """
 import glob
 import os
@@ -143,11 +149,67 @@ def diff(game, port, show=20):
         print('no difference in state, pick, time, mode, mirroring, HP or energy')
 
 
+def read_bots(path):
+    """The other monsters' B lines: {(player, n): fields}."""
+    out = {}
+    with open(path) as f:
+        for line in f:
+            w = line.split()
+            if not w or w[0] != 'B':
+                continue
+            d = {w[i]: w[i + 1] for i in range(2, len(w) - 1, 2)}
+            d['F'] = w[1]
+            d['pos'] = [float(x) for x in w[w.index('pos') + 1:w.index('pos') + 4]]
+            out[(int(d['p']), int(d['n']))] = d
+    return out
+
+
+def diff_bots(game, port, show=10):
+    a, b = read_bots(game), read_bots(port)
+    if not a and not b:
+        return
+    print(f'{len(a)} game lines of the other monsters, {len(b)} port lines')
+    shown = 0
+    for key in sorted(a):
+        if key not in b or key[1] == 1:              # (the first: the runner before the level's reset)
+            continue
+        x, y = a[key], b[key]
+        why = []
+        if x['wait'] != '0':                         # the game's switch wait, as in diff(): the port is in the state
+            n = key[1]                               # the wait ends in
+            while (key[0], n) in a and a[(key[0], n)]['wait'] != '0':
+                n += 1
+            if (key[0], n) in a and y['st'] == a[(key[0], n)]['st']:
+                continue
+        if x['st'] != y['st']:
+            why.append(f"state {x['st']} / {y['st']}")
+        if x['pick'] != y['pick'] and x['wait'] == '0':
+            why.append(f"pick {x['pick']} / {y['pick']}")
+        if abs(float(x['t']) - float(y['t'])) > 0.002:
+            why.append(f"time {x['t']} / {y['t']}")
+        if x['mode'] != y['mode']:
+            why.append(f"mode {x['mode']} / {y['mode']}")
+        if abs(float(x['hp']) - float(y['hp'])) > 0.01:
+            why.append(f"hp {x['hp']} / {y['hp']}")
+        far = max(abs(p - q) for p, q in zip(x['pos'], y['pos']))
+        if far > 0.05:
+            why.append('pos ' + ' '.join(f'{p:.3f}' for p in x['pos']) + ' / ' +
+                       ' '.join(f'{q:.3f}' for q in y['pos']))
+        if why:
+            print(f"player {key[0]} line {key[1]} (frame {x['F']} / {y['F']}): " + ', '.join(why))
+            shown += 1
+            if shown >= show:
+                break
+    if not shown:
+        print('the other monsters: no difference in state, pick, time, mode, HP or place')
+
+
 def main():
     if len(sys.argv) == 2 and sys.argv[1] == 'hook':
         hook()
     elif len(sys.argv) == 4 and sys.argv[1] == 'diff':
         diff(sys.argv[2], sys.argv[3])
+        diff_bots(sys.argv[2], sys.argv[3])
     else:
         sys.exit(__doc__)
 

@@ -2202,7 +2202,7 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..d911764 100644
+index 8590f14..ed3a0b6 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
 @@ -1,6 +1,12 @@
@@ -2218,7 +2218,7 @@ index 8590f14..d911764 100644
  
  namespace
  {
-@@ -23,9 +29,177 @@ namespace
+@@ -23,9 +29,207 @@ namespace
      constexpr uint16_t PAD_L1 = 0x0400u;
      constexpr uint16_t PAD_R2 = 0x0200u;
      constexpr uint16_t PAD_L2 = 0x0100u;
@@ -2288,8 +2288,9 @@ index 8590f14..d911764 100644
 +        std::memcpy(&f, &u, 4);
 +        return f;
 +    }
-+}
-+
+ }
+ 
+-bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
 +// RAMPAGE-DEBUG: player 1's move-runner frames since the game began (0 before the first), PS2X_PLAY's clock.
 +uint32_t g_rampageFrame = 0;
 +
@@ -2305,14 +2306,39 @@ index 8590f14..d911764 100644
 +// run after frame n.
 +void rampage_movelog(const uint8_t *rdram, uint32_t runner, uint32_t gp)
 +{
-+    const uint32_t monster = rd32(rdram, runner + 0x18);
-+    if (!monster || rd32(rdram, monster + 0xFC) != 0)
-+        return;
-+    const uint32_t frame = ++g_rampageFrame;
 +    static FILE *log = []() -> FILE * {
 +        const char *path = std::getenv("PS2X_MOVELOG");
 +        return path ? std::fopen(path, "w") : nullptr;
 +    }();
++    const uint32_t monster = rd32(rdram, runner + 0x18);
++    if (!monster)
++        return;
++    const uint32_t player = rd32(rdram, monster + 0xFC);
++    if (player != 0)
++    {
++        // the other monsters (a bot partner, player 2): a B line each time their runner starts, with the player, its
++        // own count of them (n: the diff pairs them by that, whatever order the monsters run in) and player 1's
++        // frame; what the runner starts with, as F's, and the AI flag (+0x108)
++        static uint32_t count[8];
++        if (log && player < 8)
++        {
++            const uint32_t state = rd32(rdram, runner);
++            std::fprintf(log,
++                         "B %u p %u n %u st %d t %.6f pick %d wait %u hp %.3f en %.3f mode %u mir %u pos %.4f %.4f %.4f "
++                         "rot %.4f %.4f %.4f %.4f ai %u\n",
++                         g_rampageFrame, player, ++count[player], state ? static_cast<int>(rd32(rdram, state)) : -1,
++                         rdf(rdram, runner + 0x10), static_cast<int16_t>(rd32(rdram, runner + 0x1C) >> 16),
++                         (rd32(rdram, runner + 0x1C) >> 8) & 0xFFu, rdf(rdram, monster + 0xA4C),
++                         rdf(rdram, monster + 0xA50), rd32(rdram, monster + 0xAD8),
++                         rd32(rdram, monster + 0x7DA0) >> 8 & 0xFFu, rdf(rdram, monster + 0x2C),
++                         rdf(rdram, monster + 0x30), rdf(rdram, monster + 0x34), rdf(rdram, monster + 0x8),
++                         rdf(rdram, monster + 0xC), rdf(rdram, monster + 0x14), rdf(rdram, monster + 0x18),
++                         rd32(rdram, monster + 0x108) & 0xFFu);
++            std::fflush(log);
++        }
++        return;
++    }
++    const uint32_t frame = ++g_rampageFrame;
 +    static const uint32_t end = []() -> uint32_t {
 +        const char *e = std::getenv("PS2X_PLAY_END");
 +        return e ? static_cast<uint32_t>(std::strtoul(e, nullptr, 10)) : 0u;
@@ -2357,9 +2383,8 @@ index 8590f14..d911764 100644
 +            std::fclose(log);
 +        std::exit(0);
 +    }
- }
- 
--bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
++}
++
 +// RAMPAGE-DEBUG: who draws the world's random numbers (PS2X_RNGLOG=file): one line per call of the Park-Miller
 +// (0x106BD0, P) or the lagged Fibonacci (0x106950, L) on the world's states, with the move log's frame and the
 +// caller's address (tools/movelog.py hook puts the calls in; a script's frand comes from its dispatcher, 0x279FC4)
@@ -2388,6 +2413,11 @@ index 8590f14..d911764 100644
 +            found++;
 +        }
 +    }
++    // and the state it draws from (Park-Miller: the state; the lagged Fibonacci: its i and j), as s=
++    if (kind == 'P')
++        std::fprintf(log, " s=%08x", rd32(rdram, a0));
++    else
++        std::fprintf(log, " s=%u,%u", rd32(rdram, a0), rd32(rdram, a0 + 4));
 +    std::fputc('\n', log);
 +}
 +
@@ -2397,7 +2427,7 @@ index 8590f14..d911764 100644
  {
      if (!data || size < 32)
          return false;
-@@ -37,6 +211,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -37,6 +241,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
      data[3] = 0xFF;
      data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
  
@@ -2410,7 +2440,7 @@ index 8590f14..d911764 100644
      uint16_t btns = 0xFFFFu;
      constexpr int kGamepad = 0;
      const bool useGamepad = IsGamepadAvailable(kGamepad);
-@@ -119,6 +299,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -119,6 +329,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
              clearBit(PAD_SELECT);
      }
  
