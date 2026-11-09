@@ -16,8 +16,14 @@ game's stick frame (+0xA18, +0xA24) too.
 -ToGameplay's menu presses go by the clock, so a run may start with a bot partner (np 2 nb 1). The diff skips the
 game's 2-frame switch wait (a pick without 0x1000), which the port leaves out on purpose (FORMAT_MONSTER.md "At run
 time"). Found with it so far: the forced states' frame, the clip events before the runner (main.c), how long a
-press stays new (3 frames, MV_NEW_FOR) and that it is the press's value that counts (a tap let go still does), and the recompiler's RSQRT.S (fs / sqrt(ft), not 1 / sqrt(fs)), which had left the game's monster unable to turn towards the
-stick (its stick direction was never normalised: an angle of 0, or 180 degrees behind it).
+press stays new (3 frames, MV_NEW_FOR) and that it is the press's value that counts (a tap let go still does), the
+root's step after the turn and the face's hold before the runner; and in the recompiler RSQRT.S (fs / sqrt(ft), not
+1 / sqrt(fs)), which had left the game's monster unable to turn towards the stick (its stick direction was never
+normalised: an angle of 0, or 180 degrees behind it), and SQRT.S (the root of ft, not fs) with DIV.S by 0 (the
+largest float, not infinity), which had put the game's monster at NaN on a roof's edge.
+
+The game logged here is the PAL one: 25 world steps a second (dt 0.04), where the port plays at 30; a replay takes
+the log's rate for the monster's per-step shares (main.c step_hz).
 
 Usage: python tools/movelog.py hook             put the call into the generated sub_002EBFE0 (then build.ps1 -Quick)
        python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, time, mode,

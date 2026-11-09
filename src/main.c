@@ -89,6 +89,10 @@ enum { DRIVE_KEYS1 = 0, DRIVE_KEYS2 = 1, DRIVE_COMPUTER = 2, DRIVE_PAD = 3 };
 #define MONSTERS 4                                   /* the game's players and bots together (Common 0x4D7E28) */
 #define TIMESTEP (1.0f / 30.0f)                      /* gWorld.getTimeStep(): the world's step [R 0x2B7800]; the monster's
                                                       * update runs once a step, here once a drawn frame */
+/* the monster's update a second, which its per-step shares (the ground follow's 0.7, the face's 0.4, the foot lock's,
+ * the hands' 0.3, the foot records') go by: 30, the world's rate on a 60 Hz screen (0x285A20, 0x2B7800); 25 on a
+ * 50 Hz one, as the recompiled PAL game runs, so --do "replay" takes the rate of the log it plays (FLOW_NOTES.md) */
+static float step_hz = 30;
 
 #define MON_FX_SLOTS 32
 #define MON_FX_NAMED 8
@@ -3421,7 +3425,7 @@ static void feet_update(void *ctx, IkFeet *f)
     }
     m.blend_left = in->blend_left;
     m.blend_time = in->blend_time;
-    m.steps = mo->feet_dt / TIMESTEP;                /* the frames since its last update, in world steps */
+    m.steps = mo->feet_dt * step_hz;                /* the frames since its last update, in world steps */
     mo->feet_dt = 0;
     foot_update(&mo->feet, &m, f->w, f->pos);
 }
@@ -6088,7 +6092,7 @@ static void mon_step(Mon *mo, float dt)
                 memset(mo->vel, 0, sizeof mo->vel);
             float g = ground_at(mo);
             if (mo->mz < g && g <= 0)
-                mo->mz = g + (mo->mz - g) * powf(0.6f, dt * 30);
+                mo->mz = g + (mo->mz - g) * powf(0.6f, dt * step_hz);
         } else {                                     /* 0x2DF6F0 (modes 0, 2 and 4 of the switch, 0x431290 [R]:
                                                       * taking off it is on the ground till a velocity event sets
                                                       * mode 1): a knock slides it, friction stops it */
@@ -6099,7 +6103,7 @@ static void mon_step(Mon *mo, float dt)
              * street, it is eased down so in the state it is in; nothing in those modes makes it fall (+0xAD8 is
              * written only by the clips' mode events, 0x2E7DE4, their velocity ones, 0x2DB130, the clip's start,
              * 0x2E8028, and the landing, 0x2DC5DC). On a roof's free edge the box test holds it (0x2A49C0) */
-            mo->mz = monster_ground_follow(mo->mz, ground_at(mo), mo->no_gravity, dt);
+            mo->mz = monster_ground_follow(mo->mz, ground_at(mo), mo->no_gravity, dt * step_hz);
         }
         if ((was_mode == MODE_GROUND || was_mode == MODE_BUILDING) && (st->flags & 0x810D2)) {
             /* wading (0x2E2870, the case of modes 0 and 5 in 0x2E2770: 0x2E28A0 .. 0x2E2974): in a state that
@@ -6185,7 +6189,7 @@ static void mon_step(Mon *mo, float dt)
             /* [R 0x2E0D44 .. 0x2E0EE4] the monster goes 0.4 of the way there each frame of its update (a world step):
              * its place by a lerp, its turn by a slerp (0x167DE0), so a new place (getting on, over the top, off the
              * roof) is eased into; here 0.6^(dt / step) of the way is left */
-            float k = 1 - powf(0.6f, dt / TIMESTEP);
+            float k = 1 - powf(0.6f, dt * step_hz);
             mo->mx += (pos[0] - mo->mx) * k;
             mo->my += (pos[1] - mo->my) * k;
             mo->mz += (pos[2] - mo->mz) * k;
@@ -6314,7 +6318,7 @@ static void mon_step(Mon *mo, float dt)
             float feet[2][3], place[3] = { mo->mx, mo->my, mo->mz };
             if (ik_clip_node(in, 0, "Bip01 L Foot", feet[0]) == 0 && ik_clip_node(in, 0, "Bip01 R Foot", feet[1]) == 0 &&
                 foot_lock(&mo->feet, mo->graph.states[mo->run.state].flags, (const float (*)[3])feet, place, mo->heading,
-                          dt / TIMESTEP)) {
+                          dt * step_hz)) {
                 mo->mx = place[0];
                 mo->my = place[1];
                 if (mo->is_ai)                       /* 0x2E0F54: the goal's +0x38 */
@@ -6756,7 +6760,7 @@ static void hands_step(Mon *mo, float dt)
             anim[1] = w.m[13];
             anim[2] = w.m[14];
         }
-        hand_update(hd, h, &mo->mount, &v->scene, mo->hand_thick, anim, dt);
+        hand_update(hd, h, &mo->mount, &v->scene, mo->hand_thick, anim, dt, dt * step_hz);
         float wt = hand_weight(hd);
         if (getenv("RAMPAGE_HANDS") && (wt > 0 || hd->target > 0))
             printf("  hand %d: w %.2f%s%s, clip's at %.2f %.2f %.2f, held at %.2f %.2f %.2f\n", h, wt,
@@ -7019,6 +7023,8 @@ static void replay_log(Viewer *v, Mon *mo, const char *path, float aspect)
             fprintf(stderr, "replay: the game had %d players, here %d (--players)\n", atoi(np + 4), v->nmon);
             warned = 1;
         }
+        if (dt > 0)                                  /* the log's world rate (25 for the PAL game) */
+            step_hz = 1 / dt;
         play_step(v, dt, aspect);
         if (pose_monsters(v, 0)) {                   /* posed each frame, as the main loop does */
             scene_update(&v->scene, 0);

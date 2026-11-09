@@ -493,7 +493,8 @@ void climb_hand_snap(const Mount *m, const Scene *s, int hand, float thick, floa
     pos[2] = fmaxf(lo + 1.5f, fminf(pos[2], hi - 1.5f));
 }
 
-void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, float thick, const float anim[3], float dt)
+void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, float thick, const float anim[3], float dt,
+                 float steps)
 {
     int follow = 0;
     if (h->remaining > 0) {
@@ -516,7 +517,7 @@ void hand_update(Hand *h, int hand, const Mount *m, const Scene *s, float thick,
         climb_hand_snap(m, s, hand, thick, h->tp);
     if (h->valid) {                                  /* 0.3 (gp - 0x7130) of the last place stays, a frame of the
                                                       * monster's update: a world step, 1/30 s [R 0x2B7800] */
-        float keep = powf(0.3f, dt * 30);
+        float keep = powf(0.3f, steps);
         for (int k = 0; k < 3; k++)
             h->sp[k] = h->tp[k] + (h->sp[k] - h->tp[k]) * keep;
         ik_slerp(h->tq, h->sq, keep, h->sq);
