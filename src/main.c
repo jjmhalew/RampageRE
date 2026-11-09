@@ -1083,7 +1083,10 @@ static void build(Viewer *v)
         city_new_world(v->city);
         /* [R Traffic.scr onInit] the world's init (0x2852E0 -> WorldScript +0x28: slot 0) before any block is made:
          * fNextExitTime = 5 + 5 frand, the HiddenVehicle's x = -100 + 100 frand, and its Construct's frand
-         * (Vehicle.bsf's pulse, 1 s for a hidden one), from the world's stream */
+         * (Vehicle.bsf's pulse, 1 s for a hidden one), from the world's stream. [R 0x28530C .. 0x285328] the init
+         * sets that stream to 0xBABEFACE first, so these three are the same in every world [R by PS2X_RNGLOG's
+         * states; drawn from whatever the last world left, the exit timer ran out at another time] */
+        wrand_seed_pm(0xBABEFACEu);
         v->traffic_exit = 5.0f + wrand_frand() * 5.0f;
         v->hidden_x = -100.0f + wrand_frand() * 100.0f;
         (void)wrand_frand();
