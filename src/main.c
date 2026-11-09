@@ -6176,6 +6176,21 @@ static void mon_step(Mon *mo, float dt)
             mo->dropping = 0;
         float before[3] = { mo->mx, mo->my, mo->mz };
         mon_travel(mo);
+        if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
+            /* after the root's step, in the update, so the runner reads the place held [R by the game's trace,
+             * tools/movelog.py: climbing past the top - 11.5, the runner's canMantle saw the height held] */
+            float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
+            float h = mo->heading;
+            climb_place(&mo->mount, &v->scene, st->flags, delta, dt, pos, &h);
+            /* [R 0x2E0D44 .. 0x2E0EE4] the monster goes 0.4 of the way there each frame of its update (a world step):
+             * its place by a lerp, its turn by a slerp (0x167DE0), so a new place (getting on, over the top, off the
+             * roof) is eased into; here 0.6^(dt / step) of the way is left */
+            float k = 1 - powf(0.6f, dt / TIMESTEP);
+            mo->mx += (pos[0] - mo->mx) * k;
+            mo->my += (pos[1] - mo->my) * k;
+            mo->mz += (pos[2] - mo->mz) * k;
+            mo->heading += (fmodf(h - mo->heading + 540, 360) - 180) * k;
+        }
         float root[3] = { mo->mx, mo->my, mo->mz };
         int nai = 0;                                 /* the AI monsters in play, who share the graph search's
                                                       * states a frame (0x2F30C0: +0x108 set, +0x109 clear) */
@@ -6223,19 +6238,6 @@ static void mon_step(Mon *mo, float dt)
         }
         if (switched && (st->flags & NODE_BAKE_ROOT))   /* the bake below puts the old root's end where the monster is */
             mon_travel(mo);
-        if (mo->mode == MODE_BUILDING && mo->mount.at.building >= 0) {   /* held on the face (0x2D5870) */
-            float pos[3] = { mo->mx, mo->my, mo->mz }, delta[3] = { mo->mx - before[0], mo->my - before[1], mo->mz - before[2] };
-            float h = mo->heading;
-            climb_place(&mo->mount, &v->scene, st->flags, delta, dt, pos, &h);
-            /* [R 0x2E0D44 .. 0x2E0EE4] the monster goes 0.4 of the way there each frame of its update (a world step):
-             * its place by a lerp, its turn by a slerp (0x167DE0), so a new place (getting on, over the top, off the
-             * roof) is eased into; here 0.6^(dt / step) of the way is left */
-            float k = 1 - powf(0.6f, dt / TIMESTEP);
-            mo->mx += (pos[0] - mo->mx) * k;
-            mo->my += (pos[1] - mo->my) * k;
-            mo->mz += (pos[2] - mo->mz) * k;
-            mo->heading += (fmodf(h - mo->heading + 540, 360) - 180) * k;
-        }
         if (switched) {
             /* a clip that bakes: its root, as drawn where it ended (the axes it handed over were held at its start, a
              * turn it handed over taken out), in the monster's frame as seen (mirrored if it was) */
