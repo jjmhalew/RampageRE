@@ -20,7 +20,8 @@ press stays new (3 frames, MV_NEW_FOR), and the recompiler's RSQRT.S (fs / sqrt(
 stick (its stick direction was never normalised: an angle of 0, or 180 degrees behind it).
 
 Usage: python tools/movelog.py hook             put the call into the generated sub_002EBFE0 (then build.ps1 -Quick)
-       python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick or time differ
+       python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, time, mode,
+                                                 mirroring, HP or energy differ
 """
 import glob
 import os
@@ -82,6 +83,8 @@ def diff(game, port, show=20):
     for i in range(n):
         x, y = a[i], b[i]
         why = []
+        if x['F'] == '1':                                # the game's first line is the runner before the level's reset
+            continue
         if x['wait'] != '0':
             # the game's switch wait (no 0x1000: the runner holds the old state 2 frames, its clip already started;
             # FORMAT_MONSTER.md "At run time"): the port, which enters at once, is in the state the wait ends in
@@ -92,17 +95,26 @@ def diff(game, port, show=20):
                 continue
         if x['st'] != y['st']:
             why.append(f"state {x['st']} / {y['st']}")
-        if x['pick'] != y['pick'] and x['wait'] == '0':
+        # the frame the game's wait ends it has just entered (no pick yet); the port, in that state since the wait
+        # began, may have picked already
+        after_wait = i > 0 and a[i - 1]['wait'] != '0'
+        if x['pick'] != y['pick'] and x['wait'] == '0' and not after_wait:
             why.append(f"pick {x['pick']} / {y['pick']}")
         if abs(float(x['t']) - float(y['t'])) > 0.002:
             why.append(f"time {x['t']} / {y['t']}")
+        for key in ('mode', 'mir'):
+            if x.get(key) != y.get(key):
+                why.append(f"{key} {x.get(key)} / {y.get(key)}")
+        for key in ('hp', 'en'):
+            if key in x and key in y and abs(float(x[key]) - float(y[key])) > 0.01:
+                why.append(f"{key} {x[key]} / {y[key]}")
         if why:
             print(f"frame {x['F']}: " + ', '.join(why) + f"   (btn {x['btn']} lx {x['lx']} ly {x['ly']})")
             shown += 1
             if shown >= show:
                 break
     if not shown:
-        print('no difference in state, pick or time')
+        print('no difference in state, pick, time, mode, mirroring, HP or energy')
 
 
 def main():
