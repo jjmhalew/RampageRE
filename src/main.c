@@ -1049,6 +1049,24 @@ static void reveal_events(Viewer *v)
 
 static void block_left(Viewer *v);
 
+/* a building's own object (its ObjectInstance|, not an attachment or an AttackObjectInstance|) */
+static int building_obj(const struct SceneStreetObj *so)
+{
+    return so->building >= 0 && so->parent < 0 && !so->attack;
+}
+/* the street object of scene entry k (an attachment after its billboard) */
+static void add_street_obj(Viewer *v, int k)
+{
+    const struct SceneStreetObj *so = &v->scene.street[k];
+    v->sobj_of[k] = !v->sobj ? -1 : so->parent >= 0 ?   /* a billboard's attachment, after it */
+                    streetobj_add_attachment(v->sobj, v->sobj_of[so->parent], so->t, so->world) :
+                    streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack);
+    if (v->sobj_of[k] >= 0)
+        v->street_of[v->sobj_of[k]] = k;
+    if (v->sobj_of[k] >= 0 && so->nnode)             /* the crane's nodes */
+        streetobj_nodes(v->sobj, v->sobj_of[k], (const float (*)[3])so->node, so->nnode);
+}
+
 static void build(Viewer *v)
 {
     if (v->have_scene)
@@ -1133,8 +1151,28 @@ static void build(Viewer *v)
         music_play(v->scene.music);
     }
     /* [R 0x2B6580] the block made in the game's order, as its draws on the world's random numbers go: the edibles
-     * behind the windows (each building's cells and slots), the street objects, the block's people, its AI, the
-     * traffic and then Traffic's crowds (onActivateBlock) [R by the recompiled game's PS2X_RNGLOG, tools/movelog.py] */
+     * behind the windows (each building's cells and slots), the block's street objects, its people, its AI, the
+     * traffic and then Traffic's crowds (onActivateBlock), the buildings' own objects before them all [R by the recompiled game's PS2X_RNGLOG, tools/movelog.py] */
+    streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
+    v->sobj = NULL;
+    v->nsofx = 0;
+    for (int k = 0; k < v->nmon; k++)
+        v->mon[k].held_sobj = -1;
+    if (v->have_scene) {
+        static StreetHost sh;
+        sh.shape_box = army_shape_box;
+        sh.shape_sphere = model_sphere;
+        sh.find = rubble_tmpl;                       /* a template by name: the geysers the fountains leave */
+        sh.ctx = v;
+        v->sobj = streetobj_new(&sh);
+        for (int k = 0; k < SCENE_STREET_MAX; k++)   /* one a script makes has no scene entry */
+            v->street_of[k] = -1;
+        /* [R 0x302DDC -> 0x3043C8] the buildings' own objects (their signs) are made with the buildings, before the
+         * edibles: their Constructs' draws come first [R by PS2X_RNGLOG] */
+        for (int k = 0; k < v->scene.nstreet; k++)
+            if (building_obj(&v->scene.street[k]))
+                add_street_obj(v, k);
+    }
     edible_free(v->edibles);                         /* the edibles behind the block's windows */
     v->edibles = NULL;
     v->nefx = 0;
@@ -1194,20 +1232,7 @@ static void build(Viewer *v)
             fx_stop(v->fxw, v->weather_fx[k]);
     v->nweather_fx = 0;
     v->weather_due = v->have_scene;
-    streetobj_free(v->sobj);                         /* the block's StreetObject.bsf and RoofItem.bsf objects */
-    v->sobj = NULL;
-    v->nsofx = 0;
-    for (int k = 0; k < v->nmon; k++)
-        v->mon[k].held_sobj = -1;
     if (v->have_scene) {
-        static StreetHost sh;
-        sh.shape_box = army_shape_box;
-        sh.shape_sphere = model_sphere;
-        sh.find = rubble_tmpl;                       /* a template by name: the geysers the fountains leave */
-        sh.ctx = v;
-        v->sobj = streetobj_new(&sh);
-        for (int k = 0; k < SCENE_STREET_MAX; k++)   /* one a script makes has no scene entry */
-            v->street_of[k] = -1;
         static StreetBuilding sbs[64];
         int nb = 0;
         for (uint32_t i = 0; i < v->scene.nbuildings && nb < 64; i++, nb++) {
@@ -1215,16 +1240,9 @@ static void build(Viewer *v)
             memcpy(sbs[nb].max, v->scene.buildings[i].b.max, sizeof sbs[nb].max);
             sbs[nb].falling = v->scene.buildings[i].b.collapse >= 0;
         }
-        for (int k = 0; k < v->scene.nstreet; k++) {
-            const struct SceneStreetObj *so = &v->scene.street[k];
-            v->sobj_of[k] = !v->sobj ? -1 : so->parent >= 0 ?   /* a billboard's attachment, after it */
-                            streetobj_add_attachment(v->sobj, v->sobj_of[so->parent], so->t, so->world) :
-                            streetobj_add(v->sobj, so->t, so->inst, so->world, so->building, so->attack);
-            if (v->sobj_of[k] >= 0)
-                v->street_of[v->sobj_of[k]] = k;
-            if (v->sobj_of[k] >= 0 && so->nnode)     /* the crane's nodes */
-                streetobj_nodes(v->sobj, v->sobj_of[k], (const float (*)[3])so->node, so->nnode);
-        }
+        for (int k = 0; k < v->scene.nstreet; k++)  /* the rest: the block's own, after the edibles */
+            if (!building_obj(&v->scene.street[k]))
+                add_street_obj(v, k);
         if (v->sobj)
             streetobj_start(v->sobj, sbs, nb);
         if (getenv("RAMPAGE_TRACE"))
