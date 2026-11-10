@@ -257,11 +257,10 @@ static void search_step(DirGraph *ag, const MoveGraph *g, int state, float step,
         search_write(ag, g, call, ctx);
 }
 
-/* The AI's pick (0x2F2630 by action, 0x2F2970 by state): of the current state's transitions in their input window and
- * of at least the priority already picked, the first that needs nothing is taken at once; otherwise the last of the
- * highest priority leading where it wants (a state of that action code, or that state), unless the pick already leads
- * there; with none, the state's own transition for that action (no window asked). It then waits for its switch window
- * (0x2EBF40 sets the runner's pick, +0x1E) [R] */
+/* The AI's pick (0x2F2630 by action, 0x2F2970 by state): of the current state's transitions in their input window, the
+ * last that needs nothing at the floors or above, or after it the last leading where it wants (a state of that action
+ * code, or that state); by action with none, the state's own transition for that action. It then waits for its
+ * switch window (0x2EBF40 sets the runner's pick, +0x1E) [R] */
 static int node_action(const DirGraph *ag, int state)   /* the state's node's action (+0x3C) */
 {
     return ag->action && state >= 0 && state < ag->n ? ag->action[state] : -1;
@@ -269,10 +268,12 @@ static int node_action(const DirGraph *ag, int state)   /* the state's node's ac
 /* pickByAction 0x2F2630 (pad, action, again, again) [R]: the floors (pad +0x8 for a transition that needs nothing,
  * +0xC for one of the action) start again (-1) only with no pick pending, so they hold while one waits for its
  * switch window; with again 0 no pick by the action while the state or the pending pick already has it (0x2F26B0 ..
- * 0x2F26EC). Each transition in its input window at the floor or above: one that needs nothing raises +0x8 and is
- * the pick, the scan going on (0x2F2784), so a later one may take its place; one leading to a state of the action
- * at +0x8 or above, usable, its target allowed and not where the pending pick leads raises +0xC and is the pick.
- * None: the state's own transition for the action, in its window (0x2F28B8) */
+ * 0x2F26EC). Each transition in its input window: one that needs nothing, at the higher floor or above (0x2F2728),
+ * raises +0x8 and is the pick, the scan going on (0x2F2784), so a later one may take its place; any other leading to
+ * a state of the action at +0x8 or above (its priority not held to +0xC: 0x2F27AC), usable, its target allowed and
+ * not where the pending pick leads raises +0xC and is the pick, so the last of them is [R by the game's trace,
+ * tools/movelog.py: a bot's punch with Ground_Punch_2 (priority 6) and Ground_Punch again (5) both open took the
+ * second]. None: the state's own transition for the action, in its window (0x2F28B8) */
 static void pick_by_action(MoveRunner *r, const DirGraph *ag, int action, int again, MoveCall call, void *ctx)
 {
     if (r->wait > 0)                                 /* [R 0x2F2680] none while the runner waits (+0x1D) */
@@ -290,9 +291,9 @@ static void pick_by_action(MoveRunner *r, const DirGraph *ag, int action, int ag
     int thr = r->floor_any > r->floor_act ? r->floor_any : r->floor_act, pick = -1;
     for (int i = 0; i < s->ntrans; i++) {
         const MoveTrans *t = &s->trans[i];
-        if (t->priority < thr || t->target < 0 || t->target >= g->n)
+        if (t->target < 0 || t->target >= g->n)
             continue;
-        if (r->in_window[i] && usable(t, call, ctx) == 0) {
+        if (t->priority >= thr && r->in_window[i] && usable(t, call, ctx) == 0) {
             r->floor_any = thr = t->priority;
             pick = i;
             continue;
@@ -313,9 +314,14 @@ static void pick_by_action(MoveRunner *r, const DirGraph *ag, int action, int ag
         r->chosen = pick;
 }
 
+/* by action (to_state -1: pickByAction (pad, action, 0, 0)) or pickByState 0x2F2970 (pad, the state's node) [R]: the
+ * floors as pickByAction's; each transition in its input window: one that needs nothing at the higher floor or above
+ * raises +0x8 and is the pick, the scan going on; any other leading to that state (none while the runner is in it,
+ * 0x2F2A84), at +0x8 or above, usable and its target allowed raises +0xC and is the pick. No fallback, nor a test of
+ * where the pending pick leads */
 static void ai_pick(MoveRunner *r, const DirGraph *ag, int action, int to_state, MoveCall call, void *ctx)
 {
-    if (to_state < 0) {                              /* by action: pickByAction (pad, action, 0, 0) */
+    if (to_state < 0) {
         pick_by_action(r, ag, action, 0, call, ctx);
         return;
     }
@@ -323,30 +329,23 @@ static void ai_pick(MoveRunner *r, const DirGraph *ag, int action, int to_state,
         return;
     const MoveGraph *g = r->g;
     const MoveState *s = &g->states[r->state];
-    int want = to_state >= 0 ? r->state != to_state : action != DA_KEEP;   /* 0x2F2A84: not where it is already */
-    int thr = r->chosen >= 0 ? s->trans[r->chosen].priority : -1, pick = -1;
+    if (r->chosen < 0 || r->chosen >= s->ntrans)     /* (0x2EBF00: no pick pending) */
+        r->floor_any = r->floor_act = -1;
+    int thr = r->floor_any > r->floor_act ? r->floor_any : r->floor_act, pick = -1;
     for (int i = 0; i < s->ntrans; i++) {
         const MoveTrans *t = &s->trans[i];
-        if (t->priority < thr || t->target < 0 || t->target >= g->n)
+        if (t->target < 0 || t->target >= g->n)
             continue;
-        if (r->in_window[i] && usable(t, call, ctx) == 0) {   /* one that needs nothing: at once */
+        if (t->priority >= thr && r->in_window[i] && usable(t, call, ctx) == 0) {
+            r->floor_any = thr = t->priority;
             pick = i;
-            break;
+            continue;
         }
-        if (!want || !r->in_window[i])
+        if (r->state == to_state || t->target != to_state || t->priority < r->floor_any || !r->in_window[i] ||
+            usable(t, call, ctx) == 2 || !target_ok(g, t))
             continue;
-        int match = to_state >= 0 ? t->target == to_state : ag->action && ag->action[t->target] == action;
-        if (!match || !target_ok(g, t) || usable(t, call, ctx) == 2)
-            continue;
-        if (r->chosen >= 0 && s->trans[r->chosen].target == t->target)
-            continue;                                /* the pick already leads there */
+        r->floor_act = thr = t->priority;
         pick = i;
-        thr = t->priority;
-    }
-    if (pick < 0 && want && to_state < 0 && action >= 0 && action < 16 && ag->fallback) {
-        int f = ag->fallback[r->state][action];
-        if (f >= 0 && f < s->ntrans && target_ok(g, &s->trans[f]) && usable(&s->trans[f], call, ctx) != 2)
-            pick = f;
     }
     if (pick >= 0)
         r->chosen = pick;
