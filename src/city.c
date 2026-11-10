@@ -3584,7 +3584,7 @@ static Instance *mon_inst(const Scene *s, int k)
     return k >= 0 && k < s->nmon && s->mon[k].inst >= 0 ? &s->instances[s->mon[k].inst] : NULL;
 }
 
-int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world)
+int scene_monster_node_by(const Scene *s, int k, const char *name, const Mat4 *base, Mat4 *world)
 {
     const Instance *in = mon_inst(s, k);
     if (!in)
@@ -3594,10 +3594,16 @@ int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world)
             int m = in->mirrored ? in->tree.nodes[i].mirror : (int)i;
             if (m < 0 || (uint32_t)m >= in->tree.n)
                 m = (int)i;
-            *world = mat_mul(in->base, in->mirrored ? reflect_node(in->node[m], reflect_axis(in, m)) : in->node[m]);
+            *world = mat_mul(base ? *base : in->base,
+                             in->mirrored ? reflect_node(in->node[m], reflect_axis(in, m)) : in->node[m]);
             return 0;
         }
     return -1;
+}
+
+int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world)
+{
+    return scene_monster_node_by(s, k, name, NULL, world);
 }
 
 int scene_monster_hand(const Scene *s, int k, int hand, Mat4 *world)

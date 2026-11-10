@@ -2231,9 +2231,18 @@ static void foot_pose(Mon *mo, FootPose *m)
     m->place[0] = mo->mx; m->place[1] = mo->my; m->place[2] = mo->mz;
     float h = mo->heading / 57.2957795f;
     m->fwd[0] = -sinf(h); m->fwd[1] = cosf(h);
+    /* [R 0x2E5C40] the node as posed through the monster's matrix as it is now, x the dynamic scale: not the one it
+     * was last drawn with, which this frame's step has left behind [R by the game's trace, tools/movelog.py: a punch's
+     * last step of 0.057, into its idle's cancelFootStep, left the port's planted foot short by as much, and the
+     * foot lock eased the idle that far back] */
+    Mat4 base = mat_trs_z(mo->mx, mo->my, mo->mz, mo->heading);
+    if (mo->scale != 1)
+        for (int k = 0; k < 11; k++)
+            if ((k & 3) != 3)
+                base.m[k] *= mo->scale;
     for (int f = 0; f < 2; f++) {
         Mat4 w;
-        if (scene_monster_node(&v->scene, mo->slot, foot_bone(f, mo->mirror), &w) == 0) {
+        if (scene_monster_node_by(&v->scene, mo->slot, foot_bone(f, mo->mirror), &base, &w) == 0) {
             m->foot[f][0] = w.m[12]; m->foot[f][1] = w.m[13]; m->foot[f][2] = w.m[14];
         } else
             memcpy(m->foot[f], m->place, sizeof m->place);

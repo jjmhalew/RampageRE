@@ -382,6 +382,8 @@ void scene_fx_started(Scene *s, FxWorld *w, const struct SceneFx *f, int id);
 void scene_fx_follow(Scene *s, FxWorld *w);          /* the spawners' update: their effects on their storeys */
 /* a node of the monster's skeleton by name, in the world as drawn (mirrored: the other side's, reflected); 0 = ok */
 int scene_monster_node(const Scene *s, int k, const char *name, Mat4 *world);
+/* the same through another matrix than the one it was drawn with (base: its place, turn and scale), NULL as drawn */
+int scene_monster_node_by(const Scene *s, int k, const char *name, const Mat4 *base, Mat4 *world);
 /* the window occupants (0x318650): every SpawnRate seconds (0.75) one comes to a random free slot of a building in
  * view; the slots are the block's windows, a FillRate share of them, each with an occupant picked by Frequency */
 /* building bi's window slots (0x3196F0's first half): the host makes them building by building just before the
