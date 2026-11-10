@@ -178,7 +178,7 @@ typedef struct Mon {
     int under, under_tested;                         /* 0x2D6150's answer this frame (+0xC6F8), asked (+0xC6FC) */
     float steer_turn;                                /* +0xA14: the turn the state command worked out (steer), taken
                                                       * in the next frame's update */
-    struct { int st, ev, posted; float t0, length, cdt; } mh;   /* mon_step's update half, for its runner half */
+    struct { int valid, st, ev; float t0, length, cdt; } mh;   /* mon_step's update, for the next runner */
     int landed; float landed_z;                      /* it landed this frame from the air at landed_z: the box test
                                                       * (0x2E2C50, in its update) came before the landing (0x2E2770,
                                                       * the world's pass after, 0x2B6D20) and saw it in the air */
@@ -347,6 +347,7 @@ typedef struct Viewer {
     Autoplay *ap; double ap_t; float ap_wait;
     FILE *movelog; int movelog_frame;                /* --movelog: player 1's move runner, a line a frame */
     int movelog_n[MONSTERS];                         /* the other monsters' B lines so far, by slot */
+    float mon_was[MONSTERS][3]; int mon_was_ok;      /* the monsters' places at the last frame's end (the people's) */
     int replay_frame; float replay_rows[2][3];       /* replay_log: the camera axes the game's monster read the stick
                                                         in (+0xA18, +0xA24), for player 1 in place of the port's */
     int ap_type, ap_players, ap_bots, ap_city, ap_demos;
@@ -1075,6 +1076,7 @@ static void build(Viewer *v)
 {
     if (v->have_scene)
         scene_free(&v->scene);
+    v->mon_was_ok = 0;                               /* (a new block: no last frame's places) */
     if (!v->game_built && v->fxw)                    /* a new world (a city, a game): the last one's effects gone
                                                       * with it (its fountains' sprays, its fires went on where they
                                                       * stood, in the new city's street) */
@@ -6022,13 +6024,51 @@ static void mon_travel(Mon *mo)
     memset(mo->travel, 0, sizeof mo->travel);
 }
 
+/* the controller's reading of the pad (0x2C0AD0 .. 0x2C1A60), before its runner: the inputs' events, the derived
+ * variables and the stick in the monster's frame */
+static void mon_input(Mon *mo, MoveInput *in, float lx, float ly, const uint8_t *pressed, const uint8_t *held,
+                      float dt)
+{
+    /* [R 0x2C14B8] an input's event: its value now (+0x14); a non-zero one is a press or a move (its value kept,
+     * +0x18, its count of frames since zeroed, +0x1C), a zero one a release (+0x20 zeroed): a stick let go to the
+     * middle is not a move */
+    const float axis[2] = { lx, ly };
+    for (int k = 0; k < 2; k++) {
+        int id = k ? MV_LY : MV_LX;
+        if (in->v[id] == axis[k])
+            continue;
+        if (axis[k] != 0) {
+            in->fresh[id] = MV_NEW_FOR;
+            in->latched[id] = axis[k];
+        } else {
+            in->gone[id] = MV_NEW_FOR;
+        }
+        in->v[id] = axis[k];
+    }
+    for (int k = MV_UP; k <= MV_L3; k++) {
+        if (in->v[k] && !held[k] && !pressed[k]) in->gone[k] = MV_NEW_FOR;   /* let go (the release, 0x2C1A60) */
+        in->v[k] = held[k] || pressed[k];
+        if (pressed[k]) {
+            in->fresh[k] = MV_NEW_FOR;
+            in->latched[k] = 1;
+        }
+    }
+    in->age = dt;
+    moves_derive(in);
+    {                                            /* the stick in the monster's frame (0x2C0AD0 -> 0x2C03E0) */
+        float w[3], h = mo->heading / 57.2957795f, c = cosf(h), s = sinf(h);
+        stick_world(mo, lx, ly, w);
+        moves_sectors(in, c * w[0] + s * w[1], -s * w[0] + c * w[1]);
+    }
+}
+
 /* one frame of a monster's own play, from its pad (Mon.pad). The graph picks the state; the clip's root carries the
  * monster (its travel added to where it stands, its turn when a NODE_BAKE_ROOT state ends), the stick turns it
  * (NODE_STEER) or drives it (NODE_AIR_*) in the camera's frame, the clip's events set its movement mode and velocity,
  * and in the air it falls by MOVES_GRAVITY until it meets the ground, which fires the landing slot. Then its place,
- * head, scale, hands and feet for the posing. In two halves (play_step): 0 the monster's update (the clip's events,
- * the move, the box test), 1 its controller's runner and what follows it; every monster's update comes before any
- * runner, the fight between them in between */
+ * head, scale, hands and feet for the posing. In two halves (play_step): 1 the controller (the pad's input and the
+ * runner, and the state command after it), 0 the monster's update (the clip's events, the move, the box test) and its
+ * posing; every monster's controller comes first in a frame, then every monster's update and the world's objects */
 static void mon_step(Mon *mo, float dt, int half)
 {
     Viewer *v = mo->v;
@@ -6041,52 +6081,29 @@ static void mon_step(Mon *mo, float dt, int half)
         pressed = held = none;
     }
     if (half) {
-        if (mo->have_graph)
-            goto runner;
-        goto drawn;
+        if (!mo->have_graph)
+            return;
+        if (!mo->mh.valid) {                         /* (no update yet: the level's first frame) */
+            mo->mh.valid = 1;
+            mo->mh.st = mo->run.state;
+            mo->mh.ev = -1;
+            mo->mh.t0 = mo->run.time;
+            mo->mh.length = mo->graph.states[mo->run.state].length;
+            mo->mh.cdt = dt * mo->power.speed;
+        }
+        goto runner;
     }
     if (mo->thrown_t > 0)                            /* 0x2E1E88 .. 0x2E1EAC */
         mo->thrown_t = mo->thrown_t > dt ? mo->thrown_t - dt : 0;
     if (mo->have_graph) {
         MoveInput *in = &mo->input;
         face_step(mo, dt);
-        /* [R 0x2C14B8] an input's event: its value now (+0x14); a non-zero one is a press or a move (its value kept,
-         * +0x18, its count of frames since zeroed, +0x1C), a zero one a release (+0x20 zeroed): a stick let go to the
-         * middle is not a move */
-        const float axis[2] = { lx, ly };
-        for (int k = 0; k < 2; k++) {
-            int id = k ? MV_LY : MV_LX;
-            if (in->v[id] == axis[k])
-                continue;
-            if (axis[k] != 0) {
-                in->fresh[id] = MV_NEW_FOR;
-                in->latched[id] = axis[k];
-            } else {
-                in->gone[id] = MV_NEW_FOR;
-            }
-            in->v[id] = axis[k];
-        }
-        for (int k = MV_UP; k <= MV_L3; k++) {
-            if (in->v[k] && !held[k] && !pressed[k]) in->gone[k] = MV_NEW_FOR;   /* let go (the release, 0x2C1A60) */
-            in->v[k] = held[k] || pressed[k];
-            if (pressed[k]) {
-                in->fresh[k] = MV_NEW_FOR;
-                in->latched[k] = 1;
-            }
-        }
-        in->age = dt;
-        moves_derive(in);
-        {                                            /* the stick in the monster's frame (0x2C0AD0 -> 0x2C03E0) */
-            float w[3], h = mo->heading / 57.2957795f, c = cosf(h), s = sinf(h);
-            stick_world(mo, lx, ly, w);
-            moves_sectors(in, c * w[0] + s * w[1], -s * w[0] + c * w[1]);
-        }
         const MoveState *st = &mo->graph.states[mo->run.state];
         /* the camera frame the stick is read in: every frame (0x2E0738), or, in a NODE_HOLD_FRAME state, only when the
-         * stick moves (0x2E8190), so a climb keeps its direction while the camera swings */
-        if (v->replay_frame && mo == &v->mon[0])     /* a replay: the game's own (replay_log) */
-            memcpy(mo->frame, v->replay_rows, sizeof mo->frame);
-        else if (!(st->flags & NODE_HOLD_FRAME) || lx != mo->stick[0] || ly != mo->stick[1])
+         * stick moves (0x2E8190), so a climb keeps its direction while the camera swings (a replay: the game's own,
+         * at the runner) */
+        if (!(v->replay_frame && mo == &v->mon[0]) &&
+            (!(st->flags & NODE_HOLD_FRAME) || lx != mo->stick[0] || ly != mo->stick[1]))
             memcpy(mo->frame, v->view.rows, sizeof mo->frame);
         mo->stick[0] = lx;
         mo->stick[1] = ly;
@@ -6102,11 +6119,10 @@ static void mon_step(Mon *mo, float dt, int half)
          * whose step crosses it; Jump_Start_1's 16 up at 0.136 is moved and pulled down by gravity in that frame] */
         clip_events(mo, st, t0, t0 + cdt < length ? t0 + cdt : length);
         int was_mode = mo->mode;                     /* the mode 0x2E2770 switches on (the landing sets 4) */
-        /* a posted state (the start record +0x110: playReaction, resetMonsterState, the respawn's drop, an event's):
-         * the controller takes it in right after the runner, the same frame (0x2C0DC4 .. 0x2C0E1C -> 0x2EBF50), so the
-         * state playing runs this frame first, and a goal of the AI that posts one in its update wins [R] */
+        /* a posted state (the start record +0x110: playReaction, resetMonsterState, the respawn's drop, an event's, the
+         * landing's): one slot, the last write winning, which the controller takes in right after its next runner
+         * (0x2C0DC4 .. 0x2C0E1C -> 0x2EBF50); the update only asks whether one is there [R] */
         int posted = mo->force_to > 0 && mo->force_to <= mo->graph.n ? mo->force_to - 1 : -1;
-        mo->force_to = 0;
         if (mo->mode == MODE_AIRBORNE) {             /* the air (0x2DEBD8, mode 1 of 0x2DEBB0's switch) */
             float pos[3] = { mo->mx, mo->my, mo->mz };  /* 0x2DEBD8: drag, the move, gravity */
             monster_air_velocity(mo->vel, pos, dt, mo->no_gravity);
@@ -6158,6 +6174,7 @@ static void mon_step(Mon *mo, float dt, int half)
                                                       * trace, tools/movelog.py] */
                     let_go(mo, 0);
                     posted = to;
+                    mo->force_to = to + 1;
                 }
                 mo->mode = MODE_PRONE;
                 memset(mo->vel, 0, sizeof mo->vel);
@@ -6311,27 +6328,35 @@ static void mon_step(Mon *mo, float dt, int half)
         push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
         mo->mh.st = (int)(st - mo->graph.states);    /* the update's end: what the runner half goes on with */
         mo->mh.ev = ev;
-        mo->mh.posted = posted;
         mo->mh.t0 = t0;
         mo->mh.length = length;
         mo->mh.cdt = cdt;
-        return;
+        mo->mh.valid = 1;
+        goto drawn;
     runner:
         in = &mo->input;
         st = &mo->graph.states[mo->mh.st];
         ev = mo->mh.ev;
-        posted = mo->mh.posted;
         t0 = mo->mh.t0;
         length = mo->mh.length;
         cdt = mo->mh.cdt;
-        if (posted < 0 && ev != 0 && mo->pending_slot >= 0) {
-            /* a blow between the update and the runner (the fight): its start record (+0x110, setReaction) is taken
-             * after the runner, as a posted state (0x2C0DC4) [R by the game's trace, tools/movelog.py: a bot kicked
-             * in its walk logged its HP lost as its runner started, its reaction the frame after] */
-            posted = moves_slot(&mo->graph, mo->pending_slot, mo->column);
+        if (v->replay_frame && mo == &v->mon[0])     /* a replay: the stick's frame the game's runner had (replay_log) */
+            memcpy(mo->frame, v->replay_rows, sizeof mo->frame);
+        mon_input(mo, in, lx, ly, pressed, held, dt);
+        /* the start record (+0x110) as the frame left it: the level's script's reset, a goal's state, a landing; a blow
+         * of the fight after the update (setReaction) writes it last [R by the game's trace, tools/movelog.py: a bot
+         * kicked in its walk logged its HP lost as its runner started, its reaction the frame after; the intro's goal
+         * overwrites the level's reset] */
+        posted = mo->force_to > 0 && mo->force_to <= mo->graph.n ? mo->force_to - 1 : -1;
+        mo->force_to = 0;
+        if (ev != 0 && mo->pending_slot >= 0) {
+            int slot = moves_slot(&mo->graph, mo->pending_slot, mo->column);
             mo->pending_slot = -1;
-            if (posted >= 0 && mo->vel[2] > 0)
-                mo->mode = MODE_AIRBORNE;
+            if (slot >= 0) {
+                posted = slot;
+                if (mo->vel[2] > 0)
+                    mo->mode = MODE_AIRBORNE;
+            }
         }
         float root[3] = { mo->mx, mo->my, mo->mz };
         int nai = 0;                                 /* the AI monsters in play, who share the graph search's
@@ -6500,7 +6525,7 @@ static void mon_step(Mon *mo, float dt, int half)
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", mo->graph.states[mo->run.state].name,
                    mo->run.time, mo->mx, mo->my, mo->mz, mo->heading, mo->mode, mo->vel[2]);
     }
-    if (!half)
+    if (half)
         return;
 drawn:
     scene_monster_place(&v->scene, mo->slot, mo->mx, mo->my, mo->mz, mo->heading);
@@ -6588,22 +6613,28 @@ static void play_step(Viewer *v, float dt, float aspect)
         reveal_walk_update(&v->rwalk, dt, v->mon[v->extra].mx, v->view.pos[0]);
         reveal_events(v);
     }
-    /* every monster's update, then the fight between them (0x2E2770's pass: 0x2E35D0 for each attacker), then every
-     * controller's runner [R by the game's trace, tools/movelog.py: a bot's clip events draw their random numbers, and
-     * player 1's kick takes the bot's HP, before player 1's and the bot's runners log their frame] */
-    for (int k = 0; k < mon_world(v); k++)
-        mon_step(&v->mon[k], dt, 0);
-    if (v->nmon > 1)
-        monsters_fight(v);
-    for (int k = 0; k < mon_world(v); k++)
+    /* the game's world update (0x2B6A30) runs every monster's controller first (its vtable +0x60: the pad's input, the
+     * runner, the state command), then the tick (0x285030): the objects' pass (0x284E40: the monsters' updates, then
+     * the people, the vehicles, the rest), each monster's pass (0x2B6CE0 -> 0x2E2770: the fight, 0x2E35D0), and the
+     * world script's end of frame (0x284DA0: the traffic) [R by the game's trace, tools/movelog.py: between two of
+     * player 1's lines the bot's clip events draw their random numbers, then the people theirs; player 1's kick
+     * takes the bot's HP before the bot's runner logs its frame; the level's first frame runs the runners before
+     * the script that starts the intro] */
+    for (int k = 0; k < mon_world(v); k++)           /* the controllers */
         mon_step(&v->mon[k], dt, 1);
+    for (int k = 0; k < mon_world(v); k++)           /* the monsters' updates */
+        mon_step(&v->mon[k], dt, 0);
     if (v->extra >= 0)                               /* (it arrived: hidden) */
         reveal_events(v);
     if (v->scene.folk) {                             /* the people, the ones in their hands, what they make happen */
         PeopleMonster pm[MONSTERS];
         for (int k = 0; k < v->nmon; k++) {
             const Mon *mo = &v->mon[k];
-            pm[k] = (PeopleMonster){ { mo->mx, mo->my, mo->mz },
+            /* [R by the game's trace, tools/movelog.py: a person's onAnimComplete chose by the monsters' places as
+             * the last frame left them, not as this frame's updates (before it in the objects' pass) moved them] */
+            int was = v->mon_was_ok;
+            pm[k] = (PeopleMonster){ { was ? v->mon_was[k][0] : mo->mx, was ? v->mon_was[k][1] : mo->my,
+                                       was ? v->mon_was[k][2] : mo->mz },
                                      mo->have_graph ? mo->graph.states[mo->run.state].name : NULL };
         }
         {                                            /* the occupants' clock and reach (0x318650) */
@@ -6825,6 +6856,22 @@ static void play_step(Viewer *v, float dt, float aspect)
         break;
     default: break;
     }
+    if (v->nmon > 1)                                 /* each monster's pass: the fight */
+        monsters_fight(v);
+    for (int k = 0; k < v->nmon && k < MONSTERS; k++) {   /* the monsters' places the next frame's people go by */
+        v->mon_was[k][0] = v->mon[k].mx;
+        v->mon_was[k][1] = v->mon[k].my;
+        v->mon_was[k][2] = v->mon[k].mz;
+    }
+    v->mon_was_ok = 1;
+    /* [R Traffic.scr onEndFrame] the world's tick (WorldBase +0x28, 0x284DA0) ends in WorldScript +0x38 (0x284E20:
+     * slot 4), after its objects' update (+0x24): fNextExitTime less the step, and a new 5 + 5 frand when it is out,
+     * which nothing uses (createRunners is never called) but the world's stream */
+    for (v->traffic_acc += v->have_scene ? dt : 0; v->traffic_acc >= TIMESTEP; v->traffic_acc -= TIMESTEP) {
+        v->traffic_exit -= TIMESTEP;
+        if (v->traffic_exit < 0)
+            v->traffic_exit = 5.0f + wrand_frand() * 5.0f;
+    }
     float at[MONSTERS + 2][3];                       /* the camera's points: every monster's root (2 more: cam_interest) */
     DirObject me[MONSTERS];                          /* the script camera's objects: the monsters by slot */
     int nat = 0, cam_held = 0;
@@ -6853,14 +6900,6 @@ static void play_step(Viewer *v, float dt, float aspect)
     nat = cam_interest(at, nat, (const float (*)[3])interest, v->army ? army_interest(v->army, interest) : 0);
     cam_update(&v->cam, (const float (*)[3])at, nat, cam_held, dt, aspect);
     dircam_update(&v->cd, dt, me, v->nmon, &v->view);   /* the modes (the script camera) and their blend */
-    /* [R Traffic.scr onEndFrame] the world's tick (WorldBase +0x28, 0x284DA0) ends in WorldScript +0x38 (0x284E20:
-     * slot 4), after its objects' update (+0x24): fNextExitTime less the step, and a new 5 + 5 frand when it is out,
-     * which nothing uses (createRunners is never called) but the world's stream */
-    for (v->traffic_acc += v->have_scene ? dt : 0; v->traffic_acc >= TIMESTEP; v->traffic_acc -= TIMESTEP) {
-        v->traffic_exit -= TIMESTEP;
-        if (v->traffic_exit < 0)
-            v->traffic_exit = 5.0f + wrand_frand() * 5.0f;
-    }
 }
 
 /* the hands each frame (0x323130, 0x3230F0): let go off a building (unmountBuilding's 0x322EC0, 0.1 s), the timers and
