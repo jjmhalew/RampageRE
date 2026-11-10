@@ -111,6 +111,9 @@ typedef struct {
      * column's edge on the ground (0x3101C0 with key 0x38, the point {4: the ground, along 5 x 1, 3, ..} on the
      * front) and Building_Pre_Collapse.edf 5 before its place (0x30FD40); the host plays them and clears it */
     int pre_collapse;
+    /* the host's, before each update: a building of its BuildingGroup (+0x108, 0x304FB0: the ones of the same name,
+     * up to 4) still shakes, so the shaking one shakes on only once they have all stopped (0x2BE0C8 .. 0x2BE138) */
+    int group_shaking;
     /* each storey the destroyed building drops (0x2BD610, its sink too): Floor_Large at every other column's edge on
      * the ground, as pre_collapse's (0x2BD740 .. 0x2BD798); a floor whose FloorHP runs out makes none (0x2BB950 ->
      * 0x2BAE70) [R]. The host plays them and clears it */

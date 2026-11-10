@@ -636,7 +636,8 @@ void building_update(Building *b, float dt)
         break;
     case BUILDING_SHAKING:
         b->timer += dt;
-        if (b->shake_time <= 0)
+        if (b->shake_time <= 0 && !b->group_shaking)   /* [R 0x2BE0C8 .. 0x2BE138] (not yet seen in a trace: no
+                                                      * building of LasVegas 1 has a group) */
             shake_more(b);
         if (b->timer > 0) {
             b->state = BUILDING_FALLING;

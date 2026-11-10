@@ -2722,6 +2722,11 @@ static void building(City *c, Scene *s, Group inst, float row_offset, float y0, 
         sb->nspawn = 0;
         sb->b.collapse_time = group_num(t, "CollapseTime", sb->b.collapse_time);
         sb->b.crack_time = group_num(t, "CrackSpreadTime", sb->b.crack_time);
+        sb->bgroup = group_str(inst, "BuildingGroup");   /* [R 0x2BCCDC .. 0x2BCD30] */
+        if (!sb->bgroup)
+            sb->bgroup = group_str(t, "BuildingGroup");
+        if (sb->bgroup && !sb->bgroup[0])
+            sb->bgroup = NULL;
         sb->b.hesitation = group_num(t, "HesitationTime", sb->b.hesitation);
         sb->b.min_crack = (int)group_num(t, "MinCollapseCrackLevel", (float)sb->b.min_crack);
         sheet_columns(c, sb, sheet);
@@ -4424,6 +4429,10 @@ void scene_buildings_update(Scene *s, float dt)
                         fb->skeleton_hp[st] = -1;
             }
         }
+        sb->b.group_shaking = 0;                     /* (0x2BE0C8: its group's buildings' shakes as they are now) */
+        for (uint32_t g = 0; sb->bgroup && g < s->nbuildings && !sb->b.group_shaking; g++)
+            sb->b.group_shaking = g != i && s->buildings[g].bgroup && !_stricmp(s->buildings[g].bgroup, sb->bgroup) &&
+                                  s->buildings[g].b.shake_time > 0;
         building_update(&sb->b, dt);
         building_flags_update(s, sb, flag_steps);
         int moving = sb->b.collapse >= 0 || sb->b.shake_time > 0 || building_sink(&sb->b) > 0 ||
