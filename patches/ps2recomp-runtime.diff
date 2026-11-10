@@ -2202,7 +2202,7 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..0939539 100644
+index 8590f14..fa55757 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
 @@ -1,6 +1,12 @@
@@ -2218,7 +2218,7 @@ index 8590f14..0939539 100644
  
  namespace
  {
-@@ -23,9 +29,240 @@ namespace
+@@ -23,9 +29,264 @@ namespace
      constexpr uint16_t PAD_L1 = 0x0400u;
      constexpr uint16_t PAD_R2 = 0x0200u;
      constexpr uint16_t PAD_L2 = 0x0100u;
@@ -2454,13 +2454,37 @@ index 8590f14..0939539 100644
 +    std::fflush(log);
 +}
 +
++// RAMPAGE-DEBUG: where a monster's move takes it (PS2X_POSLOG=file, PS2X_POSLOG_FROM / _TO the frames): one line per
++// call of a hooked step of the monster's update, with the move log's frame, the tag, the monster's player (+0xFC),
++// its own place (+0x2C ..), the matrix the step was handed (a1: its place +0x24 ..; 0 none) and the caller
++void rampage_poslog(const uint8_t *rdram, char tag, uint32_t a0, uint32_t a1, uint32_t ra)
++{
++    static FILE *log = []() -> FILE * {
++        const char *path = std::getenv("PS2X_POSLOG");
++        return path ? std::fopen(path, "w") : nullptr;
++    }();
++    static const uint32_t from = std::getenv("PS2X_POSLOG_FROM") ? std::strtoul(std::getenv("PS2X_POSLOG_FROM"), nullptr, 10) : 0;
++    static const uint32_t to = std::getenv("PS2X_POSLOG_TO") ? std::strtoul(std::getenv("PS2X_POSLOG_TO"), nullptr, 10) : ~0u;
++    if (!log || g_rampageFrame < from || g_rampageFrame > to)
++        return;
++    const uint32_t monster = tag == 'F' ? 0u : a0;
++    std::fprintf(log, "%u %c p %d own %.4f %.4f %.4f", g_rampageFrame, tag,
++                 monster ? static_cast<int>(rd32(rdram, monster + 0xFC)) : -1,
++                 monster ? rdf(rdram, monster + 0x2C) : 0.0f, monster ? rdf(rdram, monster + 0x30) : 0.0f,
++                 monster ? rdf(rdram, monster + 0x34) : 0.0f);
++    if (a1)
++        std::fprintf(log, " mat %.4f %.4f %.4f", rdf(rdram, a1 + 0x24), rdf(rdram, a1 + 0x28), rdf(rdram, a1 + 0x2C));
++    std::fprintf(log, " a0 %06x %06x\n", a0, ra);
++    std::fflush(log);
++}
++
 +extern uint32_t g_rampageFrame;   // RAMPAGE-DEBUG: below
 +
 +bool PSPadBackend::readState(int port, int /*slot*/, uint8_t *data, size_t size)
  {
      if (!data || size < 32)
          return false;
-@@ -37,6 +274,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -37,6 +298,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
      data[3] = 0xFF;
      data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
  
@@ -2473,7 +2497,7 @@ index 8590f14..0939539 100644
      uint16_t btns = 0xFFFFu;
      constexpr int kGamepad = 0;
      const bool useGamepad = IsGamepadAvailable(kGamepad);
-@@ -119,6 +362,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -119,6 +386,111 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
              clearBit(PAD_SELECT);
      }
  
@@ -2547,6 +2571,29 @@ index 8590f14..0939539 100644
 +    for (const RampagePlayPress &press : s_play)
 +        if (g_rampageFrame >= press.at && g_rampageFrame < press.at + press.frames)
 +            clearBit(press.mask);
++
++    // RAMPAGE-DEBUG: PS2X_UNSTICK=1: once play has begun, when player 1's runner frame has not moved for 3 s (a popup
++    // waiting for Cross while the clock-timed presses of test.ps1 -ToGameplay are long over), Cross for 0.2 s, then
++    // 3 s more before the next; between runner frames, so play itself gets no press
++    static const bool s_unstick = std::getenv("PS2X_UNSTICK") != nullptr;
++    if (s_unstick && g_rampageFrame > 0)
++    {
++        static uint32_t s_lastFrame = 0;
++        static double s_since = 0;
++        const double now = GetTime();
++        if (g_rampageFrame != s_lastFrame)
++        {
++            s_lastFrame = g_rampageFrame;
++            s_since = now;
++        }
++        else if (now - s_since >= 3.0)
++        {
++            if (now - s_since < 3.2)
++                clearBit(PAD_CROSS);
++            else
++                s_since = now;
++        }
++    }
 +
 +    // PS2X_AUTOPRESS=1 holds Start and then Cross for a second every six seconds.
 +    static const bool s_autoPress = std::getenv("PS2X_AUTOPRESS") != nullptr;

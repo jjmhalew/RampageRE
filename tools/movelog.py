@@ -70,6 +70,23 @@ HOOKS = [
     ('sub_00106950_0x106950', 0x106950,
      'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp, uint32_t sp);',
      "rampage_rnglog(rdram, 'L', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28), GPR_U32(ctx, 29));"),
+    # where a monster's move takes it (PS2X_POSLOG): the update's start, the foot lock, the push apart, the box test and
+    # the matrix set, each with the matrix copy it is handed
+    ('sub_002DE530_0x2de530', 0x2de530,
+     'void rampage_poslog(const uint8_t *rdram, char tag, uint32_t a0, uint32_t a1, uint32_t ra);',
+     "rampage_poslog(rdram, 'U', GPR_U32(ctx, 4), 0, GPR_U32(ctx, 31));"),
+    ('sub_0033BF10_0x33bf10', 0x33bf10,
+     'void rampage_poslog(const uint8_t *rdram, char tag, uint32_t a0, uint32_t a1, uint32_t ra);',
+     "rampage_poslog(rdram, 'F', GPR_U32(ctx, 4), GPR_U32(ctx, 5), GPR_U32(ctx, 31));"),
+    ('sub_002E4660_0x2e4660', 0x2e4660,
+     'void rampage_poslog(const uint8_t *rdram, char tag, uint32_t a0, uint32_t a1, uint32_t ra);',
+     "rampage_poslog(rdram, 'P', GPR_U32(ctx, 4), GPR_U32(ctx, 5), GPR_U32(ctx, 31));"),
+    ('sub_002E2C50_0x2e2c50', 0x2e2c50,
+     'void rampage_poslog(const uint8_t *rdram, char tag, uint32_t a0, uint32_t a1, uint32_t ra);',
+     "rampage_poslog(rdram, 'B', GPR_U32(ctx, 4), GPR_U32(ctx, 5), GPR_U32(ctx, 31));"),
+    ('sub_002DCCE0_0x2dcce0', 0x2dcce0,
+     'void rampage_poslog(const uint8_t *rdram, char tag, uint32_t a0, uint32_t a1, uint32_t ra);',
+     "rampage_poslog(rdram, 'S', GPR_U32(ctx, 4), GPR_U32(ctx, 5), GPR_U32(ctx, 31));"),
     # who sets a runner's pick (PS2X_PICKLOG: pickByAction's, pickByState's, the pad pick's)
     ('sub_002EBF40_0x2ebf40', 0x2ebf40,
      'void rampage_picklog(const uint8_t *rdram, uint32_t runner, uint32_t pick, uint32_t ra, uint32_t sp);',
