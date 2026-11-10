@@ -6330,14 +6330,19 @@ static void mon_step(Mon *mo, float dt)
                 reveal_walk_arrived(&v->rwalk, &v->reveal);
             else if (v->game)
                 game_move_done(v->game, mo->slot);
-        /* the old clip's step this frame: none on a transition taken (its clip's request goes out at once, 0x2ECBE0, and
-         * the new clip's start drops the step) [R by the game's trace, tools/movelog.py: a bot's walk into its punch
-         * stood still that frame, where the port went on 0.1 along the front]; up to its end when it ran out */
-        float t1 = switched ? (ev == 0 || mo->run.via >= 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length)) : mo->run.time;
+        /* the old clip's step this frame: none when the new clip blends in (0x2FFA00 swaps the pose buffers, and the root's
+         * step comes out of the new clip's pose), a transition taken or the clip run out [R by the game's trace,
+         * tools/movelog.py: a bot's walk into its punch stood still that frame, where the port went on 0.1 along the
+         * front; a punch run out into its idle took none of its last 0.02]; up to its end on a cut (a walk's loop:
+         * 0.12 of its 0.70) */
+        int blends_in = switched && ev != 0 &&
+                        (mo->run.via >= 0 ? st->trans[mo->run.via].blend : st->end_blend) == BLEND_IN;
+        float t_end = ev == 0 ? t0 : (t0 + cdt < length ? t0 + cdt : length);   /* where the old clip is drawn */
+        float t1 = switched ? (ev == 0 || blends_in ? t0 : t_end) : mo->run.time;
         if (posted >= 0 && ev != 0 && !(mo->is_ai && mo->ai.forced)) {   /* the posted state, after the runner */
             moves_force(&mo->run, posted);
             if (!switched)
-                t1 = t0 + cdt < length ? t0 + cdt : length;   /* (the clip played on to here first) */
+                t1 = t_end;                          /* (the clip played on to here first) */
             switched = 1;
             ev = 0;                                  /* a forced start: no transition (below) */
         }
@@ -6354,13 +6359,13 @@ static void mon_step(Mon *mo, float dt)
         if (switched) {
             /* a clip that bakes: its root, as drawn where it ended (the axes it handed over were held at its start, a
              * turn it handed over taken out), in the monster's frame as seen (mirrored if it was) */
-            int bake = (st->flags & NODE_BAKE_ROOT) && root_at(mo, clip_at(mo, st, t1), b, q) == 0;
+            int bake = (st->flags & NODE_BAKE_ROOT) && root_at(mo, clip_at(mo, st, t_end), b, q) == 0;
             float bake_p[3], bake_r[3][3];
             if (bake) {
                 for (int k = 0; k < 3; k++)
                     bake_p[k] = st->flags & (k == 0 ? NODE_ROOT_X : k == 1 ? NODE_ROOT_Y : NODE_ROOT_Z) ?
                                 mo->entry_root[k] : b[k];
-                float zero[3] = { 0, 0, 0 }, tw = st->flags & NODE_ROOT_TURN ? root_turn(mo, mo->entry_t, clip_at(mo, st, t1)) : 0;
+                float zero[3] = { 0, 0, 0 }, tw = st->flags & NODE_ROOT_TURN ? root_turn(mo, mo->entry_t, clip_at(mo, st, t_end)) : 0;
                 Mat4 r = mat_mul(mat_trs_z(0, 0, 0, -tw), mat_tq(zero, q));
                 seen_root(mo->mirror, bake_p, &r, bake_r);
             }
