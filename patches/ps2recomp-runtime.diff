@@ -2202,7 +2202,7 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..a63eb58 100644
+index 8590f14..0939539 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
 @@ -1,6 +1,12 @@
@@ -2361,9 +2361,9 @@ index 8590f14..a63eb58 100644
 +                     world ? rd32(rdram, world + 0x82Cu) : 0u, world ? rd32(rdram, world + 0x830u) : 0u, lf_sum,
 +                     rd32(rdram, 0x4D7B90u), rd32(rdram, 0x4D7B94u));
 +        std::fprintf(log,
-+                     "F %u dt %.6f sp %.4f st %d t %.6f pick %d wait %u btn %x lx %.3f ly %.3f hp %.3f en %.3f mode %u "
++                     "F %u dt %.6f sp %.4f st %d t %.6f pick %d wait %u btn %x lx %.6f ly %.6f hp %.3f en %.3f mode %u "
 +                     "mir %u pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %u nb %u ai %u "
-+                     "frm %.3f %.3f %.3f %.3f\n",
++                     "frm %.6f %.6f %.6f %.6f\n",
 +                     frame, world ? rdf(rdram, world + 4) : 0.0f, rdf(rdram, monster + 0xA8C),
 +                     state ? static_cast<int>(rd32(rdram, state)) : -1, rdf(rdram, runner + 0x10),
 +                     static_cast<int16_t>(rd32(rdram, runner + 0x1C) >> 16), (rd32(rdram, runner + 0x1C) >> 8) & 0xFFu,
@@ -2563,24 +2563,27 @@ index 8590f14..a63eb58 100644
      data[3] = static_cast<uint8_t>(btns >> 8);
      return true;
 diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
-index 45cb9d2..29e2018 100644
+index 45cb9d2..c4c2b6f 100644
 --- a/ps2xRuntime/src/lib/ps2_runtime.cpp
 +++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
-@@ -27,6 +27,13 @@
+@@ -26,6 +26,16 @@
+ #include <thread>
  #include <unordered_map>
  #include <sstream>
- 
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++
 +// Set while generated code unwinds to the EE scheduler (dispatchGuestBranch returned false);
 +// cleared by the scheduler before it enters guest code.
 +bool g_ps2GuestUnwinding = false;
 +uint32_t g_rampagePeRing[512][4] = {}; // RAMPAGE-DEBUG: recent probe entries (see trace scripts)
 +uint32_t g_rampagePeRingPos = 0;
 +
-+
+ 
  namespace ps2_stubs
  {
-     void resetSifState();
-@@ -1275,6 +1282,15 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
+@@ -1275,6 +1285,15 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
  
      if (firstReport)
      {
@@ -2596,7 +2599,7 @@ index 45cb9d2..29e2018 100644
          std::ostringstream oss;
          oss << "[guest-branch:missing-target] kind=" << describeGuestBranchKind(kind)
              << " op=" << (debugName ? debugName : "<unknown>")
-@@ -1352,13 +1368,16 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1352,13 +1371,16 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
  {
      ctx->pc = targetPc;
      const bool isCall = (kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall);
@@ -2614,7 +2617,7 @@ index 45cb9d2..29e2018 100644
      }
  
      if (!isCall)
-@@ -1369,7 +1388,7 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1369,7 +1391,7 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
          }
  
          ctx->pc = targetPc;
@@ -2623,7 +2626,7 @@ index 45cb9d2..29e2018 100644
      }
  
      if (!hasFunction(targetPc))
-@@ -1388,10 +1407,10 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1388,10 +1410,10 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
          {
              ctx->pc = targetPc;
              // if you need the app to keep open to open debug pannel change this to false
@@ -2636,7 +2639,7 @@ index 45cb9d2..29e2018 100644
      }
  
      RecompiledFunction targetFn = lookupFunction(targetPc);
-@@ -1399,6 +1418,15 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1399,6 +1421,15 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
      targetFn(rdram, ctx, this);
  
      if (isStopRequested() || ctx->pc == 0u)
@@ -2652,7 +2655,7 @@ index 45cb9d2..29e2018 100644
      {
          return false;
      }
-@@ -1408,7 +1436,11 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1408,7 +1439,11 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
          ctx->pc = fallthroughPc;
      }
  
@@ -2665,7 +2668,36 @@ index 45cb9d2..29e2018 100644
  }
  
  void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
-@@ -2446,6 +2478,134 @@ void PS2Runtime::run()
+@@ -1437,6 +1472,28 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
+         return;
+     }
+ 
++    // RAMPAGE-DEBUG: PS2X_VU0DUMP=prefix writes VU0's code and data memory (prefix.code, prefix.data) at the first
++    // microprogram call, for tools/vudis.py
++    static bool s_vu0Dumped = false;
++    if (!s_vu0Dumped)
++    {
++        s_vu0Dumped = true;
++        if (const char *dump = std::getenv("PS2X_VU0DUMP"))
++        {
++            const std::string base(dump);
++            if (FILE *f = std::fopen((base + ".code").c_str(), "wb"))
++            {
++                std::fwrite(vu0Code, 1, PS2_VU0_CODE_SIZE, f);
++                std::fclose(f);
++            }
++            if (FILE *f = std::fopen((base + ".data").c_str(), "wb"))
++            {
++                std::fwrite(vu0Data, 1, PS2_VU0_DATA_SIZE, f);
++                std::fclose(f);
++            }
++        }
++    }
++
+     m_vu0.reset();
+     copyVu0ContextToState(ctx, m_vu0.state());
+     m_vu0.execute(vu0Code, PS2_VU0_CODE_SIZE,
+@@ -2446,6 +2503,134 @@ void PS2Runtime::run()
          }
          EndDrawing();
  

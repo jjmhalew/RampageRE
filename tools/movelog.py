@@ -11,7 +11,8 @@ A run: `.\test.ps1 -ToGameplay -Play "100:left/30;170:circle/50" -PlayEnd 300 -M
 pad: PS2X_ONE_PAD; about 0.4 s a game frame, 25 game frames a second of play), then `RampageRE-dev.exe
 build\disc\RAMPAGE.VOL LasVegas 1 --monster George --players NP --bots NB --do "replay build\movelog_game.txt"
 --movelog build\movelog_port.txt --shot s.png` with the log's np / nb, then `diff`. The replay hands the port the
-game's stick frame (+0xA18, +0xA24) too.
+game's stick frame (+0xA18, +0xA24) too. The stick and the frame are logged to 6 decimals since s3p (2026-11-10); the
+older logs' 3 can flip a turn's start by a frame where it sits on the steer's threshold.
 
 -ToGameplay's menu presses go by the clock, so a run may start with a bot partner (np 2 nb 1): replay it with
 --players 2 --bots 1, or the world's random numbers part at the bot's first draw. The other monsters have B lines

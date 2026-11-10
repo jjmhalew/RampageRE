@@ -6301,9 +6301,9 @@ static void mon_step(Mon *mo, float dt)
             wrand_lf_peek(&li, &lj, &ls);
             fprintf(v->movelog, "R %d pm %08x lf %u %u %08x\n", v->movelog_frame + 1, *wrand_pm_state(), li, lj, ls);
             wrand_log_frame(v->movelog_frame + 1);
-            fprintf(v->movelog, "F %d dt %.6f sp %.4f st %d t %.6f pick %d wait %d btn %x lx %.3f ly %.3f hp %.3f en %.3f "
+            fprintf(v->movelog, "F %d dt %.6f sp %.4f st %d t %.6f pick %d wait %d btn %x lx %.6f ly %.6f hp %.3f en %.3f "
                     "mode %d mir %d pos %.4f %.4f %.4f rot %.4f %.4f %.4f %.4f vel %.3f %.3f %.3f np %d nb %d ai %d "
-                    "frm %.3f %.3f %.3f %.3f\n", ++v->movelog_frame, dt, mo->power.speed, moves_own_state(&mo->run),
+                    "frm %.6f %.6f %.6f %.6f\n", ++v->movelog_frame, dt, mo->power.speed, moves_own_state(&mo->run),
                     moves_own_time(&mo->run), moves_own_pick(&mo->run), mo->run.wait > 0, btn, lx, ly, mo->hp, mo->energy, mo->mode, mo->mirror, mo->mx, mo->my, mo->mz,
                     cosf(h), sinf(h), -sinf(h), cosf(h), mo->vel[0], mo->vel[1], mo->vel[2], v->nmon, v->num_bots,
                     mo->is_ai, mo->frame[0][0], mo->frame[0][1], mo->frame[1][0], mo->frame[1][1]);
