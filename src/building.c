@@ -555,8 +555,11 @@ static void collapse_step(Building *b, float dt)
 static int crack_step(Building *b)
 {
     int cols = b->width + 1;
+    /* [R 0x2BD84C .. 0x2BD9F4] one draw a step, the column every row starts at: a row already all cracked takes none
+     * [R by the game's trace, tools/movelog.py: a front all cracked by the punches drew once and shook] */
+    uint32_t start0 = rnd(b);
     for (int j = 0; j <= b->n; j++) {
-        int start = (int)(rnd(b) % (uint32_t)cols);
+        int start = (int)(start0 % (uint32_t)cols);
         for (int i = 0; i < cols; i++) {
             int v = (start + i) % cols;
             if (b->vert[j][FACE_FRONT][v].level)
