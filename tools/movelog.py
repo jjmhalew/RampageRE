@@ -40,6 +40,10 @@ block made in another order (the buildings' objects, the edibles, the attack obj
 traffic, the crowds, then the objects' onInit), a building's actor (VegasCowboySign) the game never makes, a clip's
 end told the frame after, and in the recompiler CVT.W.S to the nearest (the EE truncates).
 
+Who picks for the AI: PS2X_PICKLOG=file (the game: frame, player, the runner's state, time and wait, the pick before
+and the new one, then the callers as PS2X_RNGLOG's) logs every call of 0x2EBF40, which pickByAction and pickByState
+end in. Found with it: pickByAction's last matching transition wins whatever its priority.
+
 Usage: python tools/movelog.py hook             put the calls into the generated sub_002EBFE0, sub_00106BD0 and
                                                  sub_00106950 (then build.ps1 -Quick)
        python tools/movelog.py diff GAME PORT    compare two logs: the first frames where state, pick, the wait, time,
@@ -65,6 +69,10 @@ HOOKS = [
     ('sub_00106950_0x106950', 0x106950,
      'void rampage_rnglog(const uint8_t *rdram, char kind, uint32_t a0, uint32_t ra, uint32_t gp, uint32_t sp);',
      "rampage_rnglog(rdram, 'L', GPR_U32(ctx, 4), GPR_U32(ctx, 31), GPR_U32(ctx, 28), GPR_U32(ctx, 29));"),
+    # who sets a runner's pick (PS2X_PICKLOG: pickByAction's, pickByState's, the pad pick's)
+    ('sub_002EBF40_0x2ebf40', 0x2ebf40,
+     'void rampage_picklog(const uint8_t *rdram, uint32_t runner, uint32_t pick, uint32_t ra, uint32_t sp);',
+     'rampage_picklog(rdram, GPR_U32(ctx, 4), GPR_U32(ctx, 5), GPR_U32(ctx, 31), GPR_U32(ctx, 29));'),
 ]
 
 

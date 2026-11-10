@@ -2202,7 +2202,7 @@ index 37b6a4d..350e3a5 100644
          raiseDStatChannel(1u); // VIF1 channel
          queueCompletedDmacCause(1u);
 diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
-index 8590f14..ed3a0b6 100644
+index 8590f14..a63eb58 100644
 --- a/ps2xRuntime/src/lib/ps2_pad.cpp
 +++ b/ps2xRuntime/src/lib/ps2_pad.cpp
 @@ -1,6 +1,12 @@
@@ -2218,7 +2218,7 @@ index 8590f14..ed3a0b6 100644
  
  namespace
  {
-@@ -23,9 +29,207 @@ namespace
+@@ -23,9 +29,240 @@ namespace
      constexpr uint16_t PAD_L1 = 0x0400u;
      constexpr uint16_t PAD_R2 = 0x0200u;
      constexpr uint16_t PAD_L2 = 0x0100u;
@@ -2421,13 +2421,46 @@ index 8590f14..ed3a0b6 100644
 +    std::fputc('\n', log);
 +}
 +
++// RAMPAGE-DEBUG: who sets a runner's pick (PS2X_PICKLOG=file): one line per call of 0x2EBF40 (pad +0x1E = a1), with
++// the move log's frame, the monster's player (+0xFC), the runner's state, time and wait (+0x1D), the pick before and
++// the new one, the caller and the return addresses on its stack (as rampage_rnglog)
++void rampage_picklog(const uint8_t *rdram, uint32_t runner, uint32_t pick, uint32_t ra, uint32_t sp)
++{
++    static FILE *log = []() -> FILE * {
++        const char *path = std::getenv("PS2X_PICKLOG");
++        return path ? std::fopen(path, "w") : nullptr;
++    }();
++    if (!log)
++        return;
++    const uint32_t monster = rd32(rdram, runner + 0x18);
++    const uint32_t state = rd32(rdram, runner);
++    std::fprintf(log, "%u p %d st %d t %.6f wait %u was %d pick %d %06x", g_rampageFrame,
++                 monster ? static_cast<int>(rd32(rdram, monster + 0xFC)) : -1,
++                 state ? static_cast<int>(rd32(rdram, state)) : -1, rdf(rdram, runner + 0x10),
++                 (rd32(rdram, runner + 0x1C) >> 8) & 0xFFu, static_cast<int16_t>(rd32(rdram, runner + 0x1C) >> 16),
++                 static_cast<int16_t>(pick & 0xFFFFu), ra);
++    int found = 0;
++    for (uint32_t at = sp; at < sp + 0x800u && found < 16; at += 4) {
++        const uint32_t w = rd32(rdram, at);
++        if (w < 0x100008u || w >= 0x500000u || (w & 3) || w == ra)
++            continue;
++        const uint32_t op = rd32(rdram, w - 8);
++        if ((op >> 26) == 3 || (op & 0xFC1F07FFu) == 0x00000009u) {
++            std::fprintf(log, " %06x", w);
++            found++;
++        }
++    }
++    std::fputc('\n', log);
++    std::fflush(log);
++}
++
 +extern uint32_t g_rampageFrame;   // RAMPAGE-DEBUG: below
 +
 +bool PSPadBackend::readState(int port, int /*slot*/, uint8_t *data, size_t size)
  {
      if (!data || size < 32)
          return false;
-@@ -37,6 +241,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -37,6 +274,12 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
      data[3] = 0xFF;
      data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
  
@@ -2440,7 +2473,7 @@ index 8590f14..ed3a0b6 100644
      uint16_t btns = 0xFFFFu;
      constexpr int kGamepad = 0;
      const bool useGamepad = IsGamepadAvailable(kGamepad);
-@@ -119,6 +329,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+@@ -119,6 +362,88 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
              clearBit(PAD_SELECT);
      }
  
