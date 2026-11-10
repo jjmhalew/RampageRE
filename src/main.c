@@ -178,6 +178,7 @@ typedef struct Mon {
     int under, under_tested;                         /* 0x2D6150's answer this frame (+0xC6F8), asked (+0xC6FC) */
     float steer_turn;                                /* +0xA14: the turn the state command worked out (steer), taken
                                                       * in the next frame's update */
+    struct { int st, ev, posted; float t0, length, cdt; } mh;   /* mon_step's update half, for its runner half */
     int landed; float landed_z;                      /* it landed this frame from the air at landed_z: the box test
                                                       * (0x2E2C50, in its update) came before the landing (0x2E2770,
                                                       * the world's pass after, 0x2B6D20) and saw it in the air */
@@ -3218,12 +3219,19 @@ static int mon_shape_spheres(const Mon *mo, float out[64][4])
         return 0;
     const MoveGraph *g = &mo->graph;
     int n = g->nshapes < 64 ? g->nshapes : 64;
+    /* the pose through the monster's matrix as the frame's update left it (the fight runs before the runners and the
+     * drawing; as foot_pose), x the dynamic scale */
+    Mat4 base = mat_trs_z(mo->mx, mo->my, mo->mz, mo->heading);
+    if (mo->scale != 1)
+        for (int k = 0; k < 11; k++)
+            if ((k & 3) != 3)
+                base.m[k] *= mo->scale;
     for (int i = 0; i < n; i++) {
         const MoveShape *sh = &g->shapes[i];
         out[i][3] = -1;
         if (sh->bone < 0 || (uint32_t)sh->bone >= in->tree.n)
             continue;
-        const float *m = in->node[sh->bone].m, *bm = in->base.m;
+        const float *m = in->node[sh->bone].m, *bm = base.m;
         float l[3];
         for (int r = 0; r < 3; r++)
             l[r] = m[r] * sh->off[0] + m[4 + r] * sh->off[1] + m[8 + r] * sh->off[2] + m[12 + r];
@@ -3251,7 +3259,7 @@ static void monsters_fight(Viewer *v)
     int ni = game_ni_on(v->game);                    /* [R 0x2E3620] no blows while an NI runs (the places kept) */
     for (int a = 0; a < v->nmon && !ni; a++) {
         Mon *at = &v->mon[a];
-        if (!at->nsph || at->defeated)
+        if (!at->have_graph || !at->armed || !mon_in(at) || at->defeated)   /* (armed by this frame's events) */
             continue;
         float h = at->heading / 57.2957795f, fwd[2] = { -sinf(h), cosf(h) };
         for (int j = 0; j < v->nmon; j++) {
@@ -3454,8 +3462,6 @@ static void hit_spheres_all(Viewer *v)
         hit_spheres(mo);
         mo->nsph = v->scene.nspheres - mo->sph0;
     }
-    if (v->nmon > 1)
-        monsters_fight(v);
     if (!v->show_hits)
         v->scene.nspheres = 0;
 }
@@ -6020,20 +6026,27 @@ static void mon_travel(Mon *mo)
  * monster (its travel added to where it stands, its turn when a NODE_BAKE_ROOT state ends), the stick turns it
  * (NODE_STEER) or drives it (NODE_AIR_*) in the camera's frame, the clip's events set its movement mode and velocity,
  * and in the air it falls by MOVES_GRAVITY until it meets the ground, which fires the landing slot. Then its place,
- * head, scale, hands and feet for the posing */
-static void mon_step(Mon *mo, float dt)
+ * head, scale, hands and feet for the posing. In two halves (play_step): 0 the monster's update (the clip's events,
+ * the move, the box test), 1 its controller's runner and what follows it; every monster's update comes before any
+ * runner, the fight between them in between */
+static void mon_step(Mon *mo, float dt, int half)
 {
     Viewer *v = mo->v;
     static const uint8_t none[MV_COUNT];
     float lx = mo->pad.lx, ly = mo->pad.ly;
     const uint8_t *pressed = mo->pad.pressed, *held = mo->pad.held;
-    if (mo->thrown_t > 0)                            /* 0x2E1E88 .. 0x2E1EAC */
-        mo->thrown_t = mo->thrown_t > dt ? mo->thrown_t - dt : 0;
     if (mo->is_ai) {                                  /* the game drives the monster: no pad */
         lx = mo->ai.stick[0];
         ly = mo->ai.stick[1];
         pressed = held = none;
     }
+    if (half) {
+        if (mo->have_graph)
+            goto runner;
+        goto drawn;
+    }
+    if (mo->thrown_t > 0)                            /* 0x2E1E88 .. 0x2E1EAC */
+        mo->thrown_t = mo->thrown_t > dt ? mo->thrown_t - dt : 0;
     if (mo->have_graph) {
         MoveInput *in = &mo->input;
         face_step(mo, dt);
@@ -6296,6 +6309,30 @@ static void mon_step(Mon *mo, float dt)
         }
         push_apart(mo, dt);
         push_out(mo);                                 /* on a face (mode 5) only the triggers: it is held by the face */
+        mo->mh.st = (int)(st - mo->graph.states);    /* the update's end: what the runner half goes on with */
+        mo->mh.ev = ev;
+        mo->mh.posted = posted;
+        mo->mh.t0 = t0;
+        mo->mh.length = length;
+        mo->mh.cdt = cdt;
+        return;
+    runner:
+        in = &mo->input;
+        st = &mo->graph.states[mo->mh.st];
+        ev = mo->mh.ev;
+        posted = mo->mh.posted;
+        t0 = mo->mh.t0;
+        length = mo->mh.length;
+        cdt = mo->mh.cdt;
+        if (posted < 0 && ev != 0 && mo->pending_slot >= 0) {
+            /* a blow between the update and the runner (the fight): its start record (+0x110, setReaction) is taken
+             * after the runner, as a posted state (0x2C0DC4) [R by the game's trace, tools/movelog.py: a bot kicked
+             * in its walk logged its HP lost as its runner started, its reaction the frame after] */
+            posted = moves_slot(&mo->graph, mo->pending_slot, mo->column);
+            mo->pending_slot = -1;
+            if (posted >= 0 && mo->vel[2] > 0)
+                mo->mode = MODE_AIRBORNE;
+        }
         float root[3] = { mo->mx, mo->my, mo->mz };
         int nai = 0;                                 /* the AI monsters in play, who share the graph search's
                                                       * states a frame (0x2F30C0: +0x108 set, +0x109 clear) */
@@ -6353,8 +6390,9 @@ static void mon_step(Mon *mo, float dt)
         float t1 = switched ? (ev == 0 || blends_in ? t0 : t_end) : mo->run.time;
         if (posted >= 0 && ev != 0 && !(mo->is_ai && mo->ai.forced)) {   /* the posted state, after the runner */
             moves_force(&mo->run, posted);
-            if (!switched)
-                t1 = t_end;                          /* (the clip played on to here first) */
+            if (!switched)                           /* (the clip played on to here first; a start that blends in,
+                                                      * blend time over 0.001, drops its step as a switch does) */
+                t1 = mo->graph.states[posted].blend > 0.001f ? t0 : t_end;
             switched = 1;
             ev = 0;                                  /* a forced start: no transition (below) */
         }
@@ -6462,6 +6500,9 @@ static void mon_step(Mon *mo, float dt)
             printf("  %s %.2f at %.1f %.1f %.1f heading %.0f mode %d vz %.1f\n", mo->graph.states[mo->run.state].name,
                    mo->run.time, mo->mx, mo->my, mo->mz, mo->heading, mo->mode, mo->vel[2]);
     }
+    if (!half)
+        return;
+drawn:
     scene_monster_place(&v->scene, mo->slot, mo->mx, mo->my, mo->mz, mo->heading);
     {                                                /* the head (0x2E70C0, 0x2FBE30, 0x2FBC90): in a look state the
                                                         right stick's deflection is the target, 81 degrees of yaw and
@@ -6547,8 +6588,15 @@ static void play_step(Viewer *v, float dt, float aspect)
         reveal_walk_update(&v->rwalk, dt, v->mon[v->extra].mx, v->view.pos[0]);
         reveal_events(v);
     }
+    /* every monster's update, then the fight between them (0x2E2770's pass: 0x2E35D0 for each attacker), then every
+     * controller's runner [R by the game's trace, tools/movelog.py: a bot's clip events draw their random numbers, and
+     * player 1's kick takes the bot's HP, before player 1's and the bot's runners log their frame] */
     for (int k = 0; k < mon_world(v); k++)
-        mon_step(&v->mon[k], dt);
+        mon_step(&v->mon[k], dt, 0);
+    if (v->nmon > 1)
+        monsters_fight(v);
+    for (int k = 0; k < mon_world(v); k++)
+        mon_step(&v->mon[k], dt, 1);
     if (v->extra >= 0)                               /* (it arrived: hidden) */
         reveal_events(v);
     if (v->scene.folk) {                             /* the people, the ones in their hands, what they make happen */
