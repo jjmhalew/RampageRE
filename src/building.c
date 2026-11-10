@@ -620,10 +620,6 @@ void building_update(Building *b, float dt)
 {
     if (dt <= 0)
         return;
-    if (b->shake_time > 0) {
-        b->shake_time -= dt;
-        b->shake_t += dt;
-    }
     collapse_step(b, dt);
     switch (b->state) {
     case BUILDING_CRACKING:
@@ -676,6 +672,14 @@ void building_update(Building *b, float dt)
                 b->cell[w->o][i].flags &= (uint16_t)~(CELL_WINDOW_OPEN << w->lr);
             window_drop(b, k--);
         }
+    }
+    /* the shake's clock last: the game's shaker is on while the world's clock less its start is within its length
+     * (0x2CC5B0), the clock moving on at the tick's end, so one started this frame is on through this frame's
+     * update [R by the game's trace, tools/movelog.py: counted down first, the pre-collapse shake ran out and drew
+     * its next a frame early] */
+    if (b->shake_time > 0) {
+        b->shake_time -= dt;
+        b->shake_t += dt;
     }
 }
 
