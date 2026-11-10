@@ -176,6 +176,8 @@ typedef struct Mon {
                                                       * 0 none */
     const Water *water_in; int water_tested;         /* 0x2D5F00's answer this frame (+0xC700), asked (+0xC704) */
     int under, under_tested;                         /* 0x2D6150's answer this frame (+0xC6F8), asked (+0xC6FC) */
+    float steer_turn;                                /* +0xA14: the turn the state command worked out (steer), taken
+                                                      * in the next frame's update */
     int landed; float landed_z;                      /* it landed this frame from the air at landed_z: the box test
                                                       * (0x2E2C50, in its update) came before the landing (0x2E2770,
                                                       * the world's pass after, 0x2B6D20) and saw it in the air */
@@ -2985,13 +2987,23 @@ static void push_out(Mon *mo)
     }
 }
 
-/* NODE_STEER (0x2E8190): the turn towards the stick this frame, in degrees. The stick in the monster's own frame
- * against the state's forward axis; beyond one frame's worth of turning it turns by the angle Ã— `turn` Ã— dt, so it
- * swings round fast and settles gently. */
+/* NODE_STEER (0x2E8190): the turn towards the stick, in degrees. The stick in the monster's own frame against the
+ * state's forward axis; beyond one frame's worth of turning it turns by the angle x `turn` x dt, so it swings round
+ * fast and settles gently. The state command (0x2E6580, after the runner) works it out with the node now playing
+ * and keeps it (+0xA14, 0 without NODE_STEER); the next frame's update turns the monster by it (0x2E0260) [R by the
+ * game's trace, tools/movelog.py: a turn follows the camera frame logged the frame before]. An AI's stick reaches the
+ * command as the controller writes it into the request, int(255 x it + 0.5) (0x2C0EA4 .. 0x2C0F28, cvt.w.s) */
+static float stick_q(float v) { return (float)(int)(255.0f * v + 0.5f); }
+
 static float steer(Mon *mo, const MoveState *st, float lx, float ly, float dt)
 {
     float w[3], h = mo->heading / 57.2957795f, c = cosf(h), s = sinf(h);
-    stick_world(mo, lx, ly, w);
+    if (mo->is_ai) {
+        w[0] = stick_q(mo->ai.stick[0]);
+        w[1] = stick_q(mo->ai.stick[1]);
+        w[2] = 0;
+    } else
+        stick_world(mo, lx, ly, w);
     float l[2] = { c * w[0] + s * w[1], -s * w[0] + c * w[1] };   /* by the monster's matrix: right, forward */
     float n = l[0] * l[0] + l[1] * l[1];
     if (n <= 1e-6f)
@@ -6180,8 +6192,8 @@ static void mon_step(Mon *mo, float dt)
             mo->mx += mo->air[0] * dt;                 /* 0x2E0C50: in modes 0, 1, 2 and 4 */
             mo->my += mo->air[1] * dt;
         }
-        if (st->flags & NODE_STEER)
-            mo->heading += steer(mo, st, lx, ly, dt);
+        mo->heading += mo->steer_turn;               /* 0x2E0260: the turn the last command worked out (steer) */
+        mo->steer_turn = 0;
         scene_monster_blend_step(&v->scene, mo->slot, dt);
         if (ev != 0 && mo->pending_slot >= 0) {       /* the army's hit: the reaction slot (0x2D6A50), its column's;
                                                       * the mount stays (0x2D6A50 does not unmount: a face's reaction
@@ -6425,6 +6437,11 @@ static void mon_step(Mon *mo, float dt)
                 set_reaction(mo, 67);
                 mo->defeated = 1;
             }
+        }
+        {                                            /* the state command's turn (0x2E6AD0 .. 0x2E6B04), for the next
+                                                      * frame's update: the node now playing, this frame's stick */
+            const MoveState *now = &mo->graph.states[mo->run.state];
+            mo->steer_turn = now->flags & NODE_STEER ? steer(mo, now, lx, ly, dt) : 0;
         }
         if (mo->turn_left > 0) {                     /* a hit's turn (hit_turn) over what else turned it */
             mo->turn_left -= dt;
